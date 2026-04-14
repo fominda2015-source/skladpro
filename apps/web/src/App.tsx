@@ -48,6 +48,7 @@ type ToolEvent = {
   comment?: string | null;
   createdAt: string;
 };
+type ToolActionKind = "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF";
 type WaybillStatus = "DRAFT" | "FORMED" | "SHIPPED" | "RECEIVED" | "CLOSED";
 type Waybill = {
   id: string;
@@ -181,6 +182,10 @@ function App() {
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [selectedToolForEvents, setSelectedToolForEvents] = useState<string>("");
+  const [toolAction, setToolAction] = useState<{ toolId: string; action: ToolActionKind } | null>(null);
+  const [toolActionResponsible, setToolActionResponsible] = useState("");
+  const [toolActionComment, setToolActionComment] = useState("");
+  const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
@@ -399,29 +404,59 @@ function App() {
     setWaybillsMessage("Открываю PDF...");
   }
 
-  async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
+  async function doToolAction(
+    toolId: string,
+    action: ToolActionKind,
+    opts?: { responsible?: string; comment?: string; photo?: File | null }
+  ) {
     if (!token) return;
-    let responsible: string | undefined;
-    if (action === "ISSUE") {
-      const entered = window.prompt("Укажи ответственное лицо (обязательно):", toolResponsible || "");
-      if (!entered || !entered.trim()) {
-        setToolsMessage("Выдача отменена: ответственное лицо обязательно");
-        return;
-      }
-      responsible = entered.trim();
-      setToolResponsible(responsible);
+    const responsible = opts?.responsible?.trim() || undefined;
+    const comment = opts?.comment?.trim() || undefined;
+    if (action === "ISSUE" && !responsible) {
+      setToolsMessage("Выдача отменена: ответственное лицо обязательно");
+      return;
     }
     const res = await fetch(`${API_URL}/api/tools/${toolId}/action`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ action, responsible })
+      body: JSON.stringify({ action, responsible, comment })
     });
     if (!res.ok) {
       setToolsMessage("Не удалось изменить статус инструмента");
       return;
     }
+    if (opts?.photo) {
+      const formData = new FormData();
+      formData.append("entityType", "tool");
+      formData.append("entityId", toolId);
+      formData.append("type", "photo");
+      formData.append("file", opts.photo);
+      await fetch(`${API_URL}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+    }
     await loadTools();
     await loadToolEvents(toolId);
+  }
+
+  function openToolActionDialog(toolId: string, action: ToolActionKind) {
+    const selected = tools.find((t) => t.id === toolId);
+    setToolAction({ toolId, action });
+    setToolActionResponsible(selected?.responsible || "");
+    setToolActionComment("");
+    setToolActionPhoto(null);
+  }
+
+  async function submitToolActionDialog() {
+    if (!toolAction) return;
+    await doToolAction(toolAction.toolId, toolAction.action, {
+      responsible: toolActionResponsible,
+      comment: toolActionComment,
+      photo: toolActionPhoto
+    });
+    setToolAction(null);
   }
 
   async function loadDocuments() {
@@ -1525,10 +1560,10 @@ function App() {
               <p className="muted">Статус: {qrResult.tool.status}</p>
               <div className="toolbar">
                 <button onClick={() => { setActiveTab("tools"); }}>Открыть модуль инструмента</button>
-                <button onClick={() => void doToolAction(qrResult.tool.id, "ISSUE")}>Выдать</button>
-                <button onClick={() => void doToolAction(qrResult.tool.id, "RETURN")}>Вернуть</button>
-                <button onClick={() => void doToolAction(qrResult.tool.id, "SEND_TO_REPAIR")}>В ремонт</button>
-                <button onClick={() => void doToolAction(qrResult.tool.id, "MARK_DISPUTED")}>Спор</button>
+                <button onClick={() => openToolActionDialog(qrResult.tool.id, "ISSUE")}>Выдать</button>
+                <button onClick={() => openToolActionDialog(qrResult.tool.id, "RETURN")}>Вернуть</button>
+                <button onClick={() => openToolActionDialog(qrResult.tool.id, "SEND_TO_REPAIR")}>В ремонт</button>
+                <button onClick={() => openToolActionDialog(qrResult.tool.id, "MARK_DISPUTED")}>Спор</button>
                 <button
                   onClick={async () => {
                     if (!token) return;
@@ -1673,10 +1708,10 @@ function App() {
                   <td>{t.status}</td>
                   <td>
                     <div className="toolbar">
-                      <button onClick={() => void doToolAction(t.id, "ISSUE")}>Выдать</button>
-                      <button onClick={() => void doToolAction(t.id, "RETURN")}>Вернуть</button>
-                      <button onClick={() => void doToolAction(t.id, "SEND_TO_REPAIR")}>Ремонт</button>
-                      <button onClick={() => void doToolAction(t.id, "WRITE_OFF")}>Списать</button>
+                      <button onClick={() => openToolActionDialog(t.id, "ISSUE")}>Выдать</button>
+                      <button onClick={() => openToolActionDialog(t.id, "RETURN")}>Вернуть</button>
+                      <button onClick={() => openToolActionDialog(t.id, "SEND_TO_REPAIR")}>Ремонт</button>
+                      <button onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>Списать</button>
                       <button
                         onClick={async () => {
                           if (!token) return;
@@ -1733,6 +1768,29 @@ function App() {
               ))}
             </tbody>
           </table>
+          {toolAction && (
+            <div className="card">
+              <h3>Подтверждение действия: {toolAction.action}</h3>
+              <div className="form">
+                <label>
+                  Ответственное лицо {toolAction.action === "ISSUE" ? "(обязательно)" : ""}
+                  <input value={toolActionResponsible} onChange={(e) => setToolActionResponsible(e.target.value)} />
+                </label>
+                <label>
+                  Комментарий
+                  <input value={toolActionComment} onChange={(e) => setToolActionComment(e.target.value)} />
+                </label>
+                <label>
+                  Фотофиксация (опционально)
+                  <input type="file" accept="image/*" onChange={(e) => setToolActionPhoto(e.target.files?.[0] || null)} />
+                </label>
+              </div>
+              <div className="toolbar">
+                <button onClick={() => void submitToolActionDialog()}>Подтвердить</button>
+                <button onClick={() => setToolAction(null)}>Отмена</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
