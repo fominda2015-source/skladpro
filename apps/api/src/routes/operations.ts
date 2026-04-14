@@ -1,4 +1,4 @@
-import { OperationType } from "@prisma/client";
+import { OperationType, StockMovementDirection } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -126,6 +126,19 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
             data: { quantity: { decrement: item.quantity } }
           });
         }
+
+        await tx.stockMovement.create({
+          data: {
+            warehouseId: data.warehouseId,
+            materialId: item.materialId,
+            quantity: item.quantity,
+            direction: data.type === "INCOME" ? StockMovementDirection.IN : StockMovementDirection.OUT,
+            sourceDocumentType: "OPERATION",
+            sourceDocumentId: operation.id,
+            operationId: operation.id,
+            createdById: req.user!.userId
+          }
+        });
       }
 
       return operation;

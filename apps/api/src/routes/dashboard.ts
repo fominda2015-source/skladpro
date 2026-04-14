@@ -78,7 +78,9 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   });
   const pendingApprovalsWhere = mergeIssueWhere(scope, { status: IssueRequestStatus.ON_APPROVAL });
   const staleIssuesWhere = mergeIssueWhere(scope, {
-    status: { notIn: [IssueRequestStatus.ISSUED, IssueRequestStatus.REJECTED] },
+    status: {
+      notIn: [IssueRequestStatus.ISSUED, IssueRequestStatus.REJECTED, IssueRequestStatus.CANCELLED]
+    },
     createdAt: { lt: weekAgo }
   });
 

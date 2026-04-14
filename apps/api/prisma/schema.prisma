@@ -18,12 +18,25 @@ enum OperationType {
   TRANSFER
 }
 
+enum StockMovementDirection {
+  IN
+  OUT
+}
+
 enum IssueRequestStatus {
   DRAFT
   ON_APPROVAL
   APPROVED
   REJECTED
   ISSUED
+  CANCELLED
+}
+
+enum IssueBasisType {
+  PROJECT_WORK
+  INTERNAL_NEED
+  EMERGENCY
+  OTHER
 }
 
 enum ToolStatus {
@@ -105,6 +118,7 @@ model Warehouse {
   address     String?
   isActive    Boolean      @default(true)
   stocks      Stock[]
+  stockMovements StockMovement[]
   operations  Operation[]
   issues      IssueRequest[]
   tools       Tool[]
@@ -128,8 +142,33 @@ model Material {
   limitItems      ProjectLimitItem[]
   issueItems      IssueRequestItem[]
   waybillItems    TransportWaybillItem[]
+  stockMovements  StockMovement[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+}
+
+model StockMovement {
+  id                   String                 @id @default(cuid())
+  warehouseId          String
+  materialId           String
+  quantity             Decimal                @db.Decimal(14, 3)
+  direction            StockMovementDirection
+  sourceDocumentType   String
+  sourceDocumentId     String?
+  operationId          String?
+  issueRequestId       String?
+  note                 String?
+  createdById          String?
+  createdAt            DateTime               @default(now())
+  warehouse            Warehouse              @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  material             Material               @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  operation            Operation?             @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  issueRequest         IssueRequest?          @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
+
+  @@index([warehouseId, materialId, createdAt])
+  @@index([operationId])
+  @@index([issueRequestId])
+  @@index([sourceDocumentType, sourceDocumentId])
 }
 
 model MaterialSynonym {
@@ -207,6 +246,7 @@ model Operation {
   issueRequestId  String?
   issueRequest    IssueRequest?   @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
   waybills        TransportWaybill[]
+  stockMovements  StockMovement[]
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 }
@@ -336,6 +376,8 @@ model IssueRequest {
   id            String             @id @default(cuid())
   number        String             @unique
   status        IssueRequestStatus @default(DRAFT)
+  basisType     IssueBasisType     @default(OTHER)
+  basisRef      String?
   warehouseId   String
   projectId     String?
   requestedById String
@@ -348,6 +390,7 @@ model IssueRequest {
   items         IssueRequestItem[]
   operations    Operation[]
   waybills      TransportWaybill[]
+  stockMovements StockMovement[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 }

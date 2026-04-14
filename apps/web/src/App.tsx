@@ -4,6 +4,22 @@ import "./App.css";
 
 type LoginResponse = { token: string; user: { id: string; email: string; fullName: string; role: string; permissions: string[] } };
 type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
+type StockMovementRow = {
+  id: string;
+  warehouseId: string;
+  materialId: string;
+  quantity: string;
+  direction: "IN" | "OUT";
+  sourceDocumentType: string;
+  sourceDocumentId: string | null;
+  operationId: string | null;
+  issueRequestId: string | null;
+  createdAt: string;
+  warehouse?: { id: string; name: string };
+  material?: { id: string; name: string; unit: string };
+  operation?: { id: string; type: string; documentNumber: string | null };
+  issueRequest?: { id: string; number: string };
+};
 type MeResponse = { id: string; email: string; fullName: string; role: string; permissions: string[] };
 type AdminUser = {
   id: string;
@@ -18,17 +34,30 @@ type AdminUser = {
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = { id: string; name: string; sku?: string | null; unit: string; category?: string | null };
+type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
 type IssueRequest = {
   id: string;
   number: string;
   status: string;
   warehouseId: string;
+  projectId?: string | null;
   requestedById: string;
+  note?: string | null;
+  basisType?: string;
+  basisRef?: string | null;
   createdAt: string;
+  items?: Array<{
+    id: string;
+    materialId: string;
+    quantity: string | number;
+    material?: { name: string; sku?: string | null };
+  }>;
   warehouse?: { name: string };
+  project?: { id: string; name: string; code?: string | null } | null;
   requestedBy?: { fullName: string };
+  approvedBy?: { fullName: string } | null;
 };
-type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED";
+type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
@@ -170,6 +199,9 @@ function App() {
   const [q, setQ] = useState("");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
+  const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
+  const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
+  const [stockMovementsError, setStockMovementsError] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
     | "stocks"
@@ -222,6 +254,11 @@ function App() {
     return (saved as "" | IssueStatus) || "";
   });
   const [issueSearch, setIssueSearch] = useState("");
+  const [issueBasisFilter, setIssueBasisFilter] = useState<"" | IssueBasisType>("");
+  const [issueProjectId, setIssueProjectId] = useState("");
+  const [issueNote, setIssueNote] = useState("");
+  const [issueBasisType, setIssueBasisType] = useState<IssueBasisType>("OTHER");
+  const [issueBasisRef, setIssueBasisRef] = useState("");
   const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
@@ -338,6 +375,28 @@ function App() {
       ),
     [me]
   );
+
+  async function loadStockMovements() {
+    if (!token) {
+      return;
+    }
+    setStockMovementsLoading(true);
+    setStockMovementsError("");
+    try {
+      const res = await fetch(`${API_URL}/api/stock-movements?take=150`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setStockMovements((await res.json()) as StockMovementRow[]);
+    } catch (e) {
+      setStockMovements([]);
+      setStockMovementsError(String(e));
+    } finally {
+      setStockMovementsLoading(false);
+    }
+  }
 
   async function loadStocks(search = "") {
     if (!token) {
@@ -553,7 +612,11 @@ function App() {
 
   async function loadIssues() {
     if (!token) return;
-    const query = issueStatusFilter ? `?status=${encodeURIComponent(issueStatusFilter)}` : "";
+    const params = new URLSearchParams();
+    if (issueStatusFilter) params.set("status", issueStatusFilter);
+    if (issueBasisFilter) params.set("basisType", issueBasisFilter);
+    const qs = params.toString();
+    const query = qs ? `?${qs}` : "";
     const res = await fetch(`${API_URL}/api/issues${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -809,7 +872,12 @@ function App() {
   const filteredIssues = issues.filter((i) => {
     if (!issueSearch.trim()) return true;
     const q = issueSearch.toLowerCase();
-    return i.number.toLowerCase().includes(q) || i.status.toLowerCase().includes(q);
+    const basis = `${i.basisType || ""} ${i.basisRef || ""}`.toLowerCase();
+    return (
+      i.number.toLowerCase().includes(q) ||
+      i.status.toLowerCase().includes(q) ||
+      basis.includes(q)
+    );
   });
 
   async function resolveQrCode() {
@@ -906,9 +974,10 @@ function App() {
   useEffect(() => {
     if (token && activeTab === "issues") {
       void loadCatalogData();
+      void loadProjects();
       void loadIssues();
     }
-  }, [token, activeTab, issueStatusFilter]);
+  }, [token, activeTab, issueStatusFilter, issueBasisFilter]);
 
   useEffect(() => {
     localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
@@ -1013,6 +1082,7 @@ function App() {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setStocks([]);
+    setStockMovements([]);
     setUsers([]);
     setRoles([]);
     setMe(null);
@@ -1161,6 +1231,9 @@ function App() {
             <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
             <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
             <button onClick={() => void loadStocks(q)}>Найти</button>
+            <button type="button" onClick={() => void loadStockMovements()}>
+              Журнал движений
+            </button>
           </div>
 
           {loadingStocks && <p>Загрузка остатков...</p>}
@@ -1192,6 +1265,42 @@ function App() {
                 ))}
               </tbody>
             </table>
+          )}
+          {stockMovementsLoading && <p>Загрузка движений...</p>}
+          {stockMovementsError && <p className="error">{stockMovementsError}</p>}
+          {!stockMovementsLoading && stockMovements.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 16 }}>Журнал движений (последние записи)</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Склад</th>
+                    <th>Материал</th>
+                    <th>Напр.</th>
+                    <th>Кол-во</th>
+                    <th>Источник</th>
+                    <th>Операция / заявка</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockMovements.map((m) => (
+                    <tr key={m.id}>
+                      <td>{new Date(m.createdAt).toLocaleString()}</td>
+                      <td>{m.warehouse?.name ?? m.warehouseId}</td>
+                      <td>{m.material?.name ?? m.materialId}</td>
+                      <td>{m.direction}</td>
+                      <td>{m.quantity}</td>
+                      <td>{m.sourceDocumentType}</td>
+                      <td>
+                        {m.operation?.documentNumber || m.operation?.id || "—"}
+                        {m.issueRequest?.number ? ` · заявка ${m.issueRequest.number}` : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}
@@ -1539,6 +1648,35 @@ function App() {
               </select>
             </label>
             <label>
+              Проект (необязательно)
+              <select value={issueProjectId} onChange={(e) => setIssueProjectId(e.target.value)}>
+                <option value="">— без проекта —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Тип основания
+              <select
+                value={issueBasisType}
+                onChange={(e) => setIssueBasisType(e.target.value as IssueBasisType)}
+              >
+                <option value="OTHER">Прочее</option>
+                <option value="PROJECT_WORK">Работы по проекту</option>
+                <option value="INTERNAL_NEED">Внутренняя потребность</option>
+                <option value="EMERGENCY">Срочно / аварийно</option>
+              </select>
+            </label>
+            <label>
+              Ссылка на основание (номер договора, наряд…)
+              <input value={issueBasisRef} onChange={(e) => setIssueBasisRef(e.target.value)} placeholder="Необязательно" />
+            </label>
+            <label>
+              Примечание
+              <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder="Необязательно" />
+            </label>
+            <label>
               Материал
               <select value={issueMaterialId} onChange={(e) => setIssueMaterialId(e.target.value)}>
                 {materials.map((m) => (
@@ -1560,6 +1698,17 @@ function App() {
               <option value="APPROVED">APPROVED</option>
               <option value="REJECTED">REJECTED</option>
               <option value="ISSUED">ISSUED</option>
+              <option value="CANCELLED">CANCELLED</option>
+            </select>
+            <select
+              value={issueBasisFilter}
+              onChange={(e) => setIssueBasisFilter((e.target.value || "") as "" | IssueBasisType)}
+            >
+              <option value="">Все типы основания</option>
+              <option value="PROJECT_WORK">PROJECT_WORK</option>
+              <option value="INTERNAL_NEED">INTERNAL_NEED</option>
+              <option value="EMERGENCY">EMERGENCY</option>
+              <option value="OTHER">OTHER</option>
             </select>
             <button onClick={() => void loadIssues()}>Обновить список</button>
             <button
@@ -1582,6 +1731,10 @@ function App() {
                   headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                   body: JSON.stringify({
                     warehouseId: issueWarehouseId,
+                    projectId: issueProjectId || undefined,
+                    note: issueNote.trim() || undefined,
+                    basisType: issueBasisType,
+                    basisRef: issueBasisRef.trim() || undefined,
                     items: [{ materialId: issueMaterialId, quantity: issueQuantity }]
                   })
                 });
@@ -1599,7 +1752,13 @@ function App() {
           {issuesMessage && <p className="muted">{issuesMessage}</p>}
           <table>
             <thead>
-              <tr><th>Номер</th><th>Статус</th><th>Действия</th></tr>
+              <tr>
+                <th>Номер</th>
+                <th>Проект</th>
+                <th>Основание</th>
+                <th>Статус</th>
+                <th>Действия</th>
+              </tr>
             </thead>
             <tbody>
               {filteredIssues.map((i) => (
@@ -1616,13 +1775,30 @@ function App() {
                     {" "}
                     {i.number}
                   </td>
+                  <td>{i.project?.name || "—"}</td>
+                  <td className="muted">
+                    {i.basisType || "OTHER"}
+                    {i.basisRef ? ` · ${i.basisRef}` : ""}
+                  </td>
                   <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>На согласование</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Одобрить</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); await loadStocks(q); }}>Выдать</button>
+                      {i.status === "DRAFT" && (
+                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>На согласование</button>
+                      )}
+                      {i.status === "ON_APPROVAL" && (
+                        <>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Одобрить</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/reject`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Отклонить</button>
+                        </>
+                      )}
+                      {(i.status === "DRAFT" || i.status === "ON_APPROVAL") && (
+                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/cancel`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Отменить</button>
+                      )}
+                      {(i.status === "DRAFT" || i.status === "APPROVED") && (
+                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); await loadStocks(q); }}>Выдать</button>
+                      )}
                       <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                     </div>
                   </td>
@@ -1813,7 +1989,6 @@ function App() {
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Одобрить</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/reject`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Отклонить</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); await loadStocks(q); }}>Выдать</button>
                       <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                     </div>
                   </td>
@@ -2143,11 +2318,49 @@ function App() {
           </div>
           <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{selectedIssue.status}</span></p>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
+          <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
+          <p><strong>Основание:</strong> {selectedIssue.basisType || "OTHER"}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
+          {selectedIssue.note ? <p><strong>Примечание:</strong> {selectedIssue.note}</p> : null}
           <p><strong>Инициатор:</strong> {selectedIssue.requestedBy?.fullName || selectedIssue.requestedById}</p>
+          {selectedIssue.approvedBy ? (
+            <p><strong>Согласовал:</strong> {selectedIssue.approvedBy.fullName}</p>
+          ) : null}
           <p><strong>Создана:</strong> {new Date(selectedIssue.createdAt).toLocaleString()}</p>
+          {selectedIssue.items && selectedIssue.items.length > 0 ? (
+            <div>
+              <h4>Позиции</h4>
+              <table>
+                <thead>
+                  <tr><th>Материал</th><th>Кол-во</th></tr>
+                </thead>
+                <tbody>
+                  {selectedIssue.items.map((line) => (
+                    <tr key={line.id}>
+                      <td>{line.material?.name || line.materialId}</td>
+                      <td>{String(line.quantity)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           <div className="toolbar">
             <button onClick={() => openDocumentsForEntity("issue", selectedIssue.id)}>Файлы</button>
             <button onClick={() => setActiveTab("issues")}>Открыть список</button>
+            {(selectedIssue.status === "DRAFT" || selectedIssue.status === "ON_APPROVAL") && token ? (
+              <button
+                onClick={async () => {
+                  await fetch(`${API_URL}/api/issues/${selectedIssue.id}/cancel`, {
+                    method: "PATCH",
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  setDrawerMode("");
+                  await loadIssues();
+                }}
+              >
+                Отменить заявку
+              </button>
+            ) : null}
           </div>
         </aside>
       )}

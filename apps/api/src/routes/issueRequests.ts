@@ -1,4 +1,9 @@
-import { IssueRequestStatus, OperationType } from "@prisma/client";
+import {
+  IssueBasisType,
+  IssueRequestStatus,
+  OperationType,
+  StockMovementDirection
+} from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -15,6 +20,8 @@ const createIssueSchema = z.object({
   warehouseId: z.string().min(1),
   projectId: z.string().optional(),
   note: z.string().optional(),
+  basisType: z.nativeEnum(IssueBasisType).optional(),
+  basisRef: z.string().max(500).optional().nullable(),
   items: z
     .array(
       z.object({
@@ -44,12 +51,18 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     statusParam && Object.values(IssueRequestStatus).includes(statusParam as IssueRequestStatus)
       ? { status: statusParam as IssueRequestStatus }
       : {};
-  const where = mergeIssueWhere(scope, statusFilter);
+  const basisParam = typeof req.query.basisType === "string" ? req.query.basisType : undefined;
+  const basisFilter =
+    basisParam && Object.values(IssueBasisType).includes(basisParam as IssueBasisType)
+      ? { basisType: basisParam as IssueBasisType }
+      : {};
+  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter });
   const rows = await prisma.issueRequest.findMany({
     where,
     include: {
       items: { include: { material: true } },
       warehouse: true,
+      project: true,
       requestedBy: true,
       approvedBy: true
     },
@@ -99,12 +112,18 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
     }
   }
 
+  const basisType =
+    parsed.data.basisType ??
+    (parsed.data.projectId ? IssueBasisType.PROJECT_WORK : IssueBasisType.OTHER);
+
   const created = await prisma.issueRequest.create({
     data: {
       number,
       warehouseId: parsed.data.warehouseId,
       projectId: parsed.data.projectId,
       note: parsed.data.note,
+      basisType,
+      basisRef: parsed.data.basisRef ?? undefined,
       requestedById: req.user!.userId,
       status: initialStatus,
       items: {
@@ -120,6 +139,41 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   return res.status(201).json(created);
 });
 
+const updateDraftIssueSchema = z.object({
+  note: z.string().optional().nullable(),
+  basisType: z.nativeEnum(IssueBasisType).optional(),
+  basisRef: z.string().max(500).optional().nullable()
+});
+
+issueRequestsRouter.patch(
+  "/:id",
+  requirePermission("issues.write"),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    const parsed = updateDraftIssueSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const scope = await getRequestDataScope(req);
+    const existing = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
+    if (!existing) {
+      return res.status(404).json({ error: "Issue request not found" });
+    }
+    if (existing.status !== IssueRequestStatus.DRAFT) {
+      return res.status(409).json({ error: "Only DRAFT requests can be edited" });
+    }
+    const updated = await prisma.issueRequest.update({
+      where: { id },
+      data: {
+        ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+        ...(parsed.data.basisType !== undefined ? { basisType: parsed.data.basisType } : {}),
+        ...(parsed.data.basisRef !== undefined ? { basisRef: parsed.data.basisRef } : {})
+      }
+    });
+    return res.json(updated);
+  }
+);
+
 issueRequestsRouter.patch(
   "/:id/send-for-approval",
   requirePermission("issues.write"),
@@ -129,6 +183,12 @@ issueRequestsRouter.patch(
     const existing = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
     if (!existing) {
       return res.status(404).json({ error: "Issue request not found" });
+    }
+    if (existing.status === IssueRequestStatus.ON_APPROVAL) {
+      return res.json(existing);
+    }
+    if (existing.status !== IssueRequestStatus.DRAFT) {
+      return res.status(409).json({ error: `Cannot send for approval from status ${existing.status}` });
     }
     const updated = await prisma.issueRequest.update({
       where: { id },
@@ -144,6 +204,12 @@ issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), a
   const prev = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
   if (!prev) {
     return res.status(404).json({ error: "Issue request not found" });
+  }
+  if (prev.status === IssueRequestStatus.APPROVED) {
+    return res.json(prev);
+  }
+  if (prev.status !== IssueRequestStatus.ON_APPROVAL) {
+    return res.status(409).json({ error: `Approve allowed only from ON_APPROVAL, got ${prev.status}` });
   }
   const updated = await prisma.issueRequest.update({
     where: { id },
@@ -167,6 +233,9 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
   if (!prev) {
     return res.status(404).json({ error: "Issue request not found" });
   }
+  if (prev.status !== IssueRequestStatus.ON_APPROVAL) {
+    return res.status(409).json({ error: `Reject allowed only from ON_APPROVAL, got ${prev.status}` });
+  }
   const updated = await prisma.issueRequest.update({
     where: { id },
     data: { status: IssueRequestStatus.REJECTED, approvedById: req.user!.userId }
@@ -174,6 +243,34 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
   await recordAudit({
     userId: req.user!.userId,
     action: "ISSUE_REQUEST_REJECT",
+    entityType: "IssueRequest",
+    entityId: id,
+    before: { status: prev.status },
+    after: { status: updated.status }
+  });
+  return res.json(updated);
+});
+
+issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const scope = await getRequestDataScope(req);
+  const prev = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
+  if (!prev) {
+    return res.status(404).json({ error: "Issue request not found" });
+  }
+  if (prev.status === IssueRequestStatus.CANCELLED) {
+    return res.json(prev);
+  }
+  if (prev.status !== IssueRequestStatus.DRAFT && prev.status !== IssueRequestStatus.ON_APPROVAL) {
+    return res.status(409).json({ error: `Cancel allowed only from DRAFT or ON_APPROVAL, got ${prev.status}` });
+  }
+  const updated = await prisma.issueRequest.update({
+    where: { id },
+    data: { status: IssueRequestStatus.CANCELLED }
+  });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "ISSUE_REQUEST_CANCEL",
     entityType: "IssueRequest",
     entityId: id,
     before: { status: prev.status },
@@ -192,7 +289,13 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
   if (!issueRow) {
     return res.status(404).json({ error: "Issue request not found" });
   }
-  if (issueRow.status !== IssueRequestStatus.APPROVED && issueRow.status !== IssueRequestStatus.DRAFT) {
+  if (issueRow.status === IssueRequestStatus.ON_APPROVAL) {
+    return res.status(409).json({ error: "Issue request is pending approval" });
+  }
+  if (
+    issueRow.status !== IssueRequestStatus.APPROVED &&
+    issueRow.status !== IssueRequestStatus.DRAFT
+  ) {
     return res.status(409).json({ error: `Wrong status: ${issueRow.status}` });
   }
 
@@ -259,6 +362,20 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
             }
           },
           data: { quantity: { decrement: item.quantity } }
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            warehouseId: issueRow.warehouseId,
+            materialId: item.materialId,
+            quantity: item.quantity,
+            direction: StockMovementDirection.OUT,
+            sourceDocumentType: "OPERATION",
+            sourceDocumentId: operation.id,
+            operationId: operation.id,
+            issueRequestId: issueRow.id,
+            createdById: req.user!.userId
+          }
         });
 
         if (issueRow.projectId) {
