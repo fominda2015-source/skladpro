@@ -188,6 +188,34 @@ button {
   width: auto;
 }
 
+.docCenterForm {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.docCenterSplit {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 12px;
+}
+
+.dropZone {
+  border: 2px dashed #b7c6df;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  color: #51617f;
+  background: #f8fbff;
+}
+
+.dropZone.over {
+  border-color: #1f4ae0;
+  background: #ecf1ff;
+}
+
+.selectedRow {
+  background: #eef3ff;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

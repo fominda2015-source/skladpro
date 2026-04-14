@@ -172,6 +172,8 @@ function App() {
   const [docTypeFilter, setDocTypeFilter] = useState("");
   const [docPreviewUrl, setDocPreviewUrl] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [docDragOver, setDocDragOver] = useState(false);
   const [showStockSku, setShowStockSku] = useState(true);
   const [showStockReserve, setShowStockReserve] = useState(true);
   const [qrCode, setQrCode] = useState("");
@@ -485,7 +487,37 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
-    setDocuments((await res.json()) as DocumentFile[]);
+    const data = (await res.json()) as DocumentFile[];
+    setDocuments(data);
+    if (data.length && !selectedDocumentId) {
+      setSelectedDocumentId(data[0].id);
+      setDocPreviewUrl(`${API_URL}/${data[0].filePath}`);
+    }
+  }
+
+  async function uploadDocumentFile(file: File) {
+    if (!token || !docEntityId) {
+      setDocumentsMessage("Сначала выбери сущность");
+      return;
+    }
+    setDocumentsMessage("");
+    const formData = new FormData();
+    formData.append("entityType", docEntityType);
+    formData.append("entityId", docEntityId);
+    formData.append("type", docType);
+    formData.append("file", file);
+    const res = await fetch(`${API_URL}/api/documents/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    });
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось загрузить документ");
+      return;
+    }
+    setDocumentsMessage("Документ загружен");
+    setDocFile(null);
+    await loadDocuments();
   }
 
   async function replaceDocument(documentId: string) {
@@ -544,6 +576,7 @@ function App() {
 
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
+  const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
   const filteredIssues = issues.filter((i) => {
     if (!issueSearch.trim()) return true;
     const q = issueSearch.toLowerCase();
@@ -1332,8 +1365,22 @@ function App() {
 
       {activeTab === "documents" && (
         <div className="card">
-          <h2>УПД / ТН / Фото</h2>
-          <div className="form">
+          <h2>Документный центр</h2>
+          <div className="tabs">
+            {[
+              { id: "", label: "Все" },
+              { id: "upd", label: "УПД" },
+              { id: "tn", label: "ТН" },
+              { id: "photo", label: "Фото" },
+              { id: "act", label: "Акты" },
+              { id: "other", label: "Прочее" }
+            ].map((tab) => (
+              <button key={tab.id || "all"} onClick={() => setDocTypeFilter(tab.id)}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="form docCenterForm">
             <label>
               Тип сущности
               <select
@@ -1385,83 +1432,85 @@ function App() {
             </label>
           </div>
           <div className="toolbar">
-            <select value={docTypeFilter} onChange={(e) => setDocTypeFilter(e.target.value)}>
-              <option value="">Все типы</option>
-              <option value="upd">УПД</option>
-              <option value="tn">ТН</option>
-              <option value="photo">Фото</option>
-              <option value="act">Акт</option>
-              <option value="other">Прочее</option>
-            </select>
             <button
               onClick={async () => {
-                if (!token || !docEntityId || !docFile) {
+                if (!docFile) {
                   setDocumentsMessage("Выбери сущность и файл");
                   return;
                 }
-                setDocumentsMessage("");
-                const formData = new FormData();
-                formData.append("entityType", docEntityType);
-                formData.append("entityId", docEntityId);
-                formData.append("type", docType);
-                formData.append("file", docFile);
-                const res = await fetch(`${API_URL}/api/documents/upload`, {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${token}` },
-                  body: formData
-                });
-                if (!res.ok) {
-                  setDocumentsMessage("Не удалось загрузить документ");
-                  return;
-                }
-                setDocumentsMessage("Документ загружен");
-                setDocFile(null);
-                await loadDocuments();
+                await uploadDocumentFile(docFile);
               }}
             >
               Загрузить
             </button>
             <button onClick={() => void loadDocuments()}>Обновить список</button>
           </div>
+          <div
+            className={`dropZone ${docDragOver ? "over" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDocDragOver(true);
+            }}
+            onDragLeave={() => setDocDragOver(false)}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setDocDragOver(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) {
+                await uploadDocumentFile(file);
+              }
+            }}
+          >
+            Перетащи файл сюда для быстрой загрузки
+          </div>
           {documentsMessage && <p className="muted">{documentsMessage}</p>}
-          {docPreviewUrl && (
+          <div className="docCenterSplit">
             <div className="card">
-              <h3>Предпросмотр</h3>
-              <iframe src={docPreviewUrl} title="document-preview" style={{ width: "100%", minHeight: 360, border: "1px solid #d8dee9", borderRadius: 8 }} />
+              <table>
+                <thead>
+                  <tr>
+                    <th>Дата</th>
+                    <th>Версия</th>
+                    <th>Сущность</th>
+                    <th>Вид</th>
+                    <th>Файл</th>
+                    <th>Размер</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documents.map((d) => (
+                    <tr key={d.id} className={selectedDocumentId === d.id ? "selectedRow" : ""}>
+                      <td>{new Date(d.createdAt).toLocaleString()}</td>
+                      <td>v{d.version}</td>
+                      <td>{d.entityType}:{d.entityId}</td>
+                      <td>{d.type}</td>
+                      <td><a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">{d.fileName}</a></td>
+                      <td>{d.size || 0}</td>
+                      <td>
+                        <div className="toolbar">
+                          <button onClick={() => { setSelectedDocumentId(d.id); setDocPreviewUrl(`${API_URL}/${d.filePath}`); }}>Превью</button>
+                          <button onClick={() => void replaceDocument(d.id)}>Новая версия</button>
+                          <button onClick={() => void deleteDocument(d.id)}>Удалить</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Версия</th>
-                <th>Сущность</th>
-                <th>Вид</th>
-                <th>Файл</th>
-                <th>Размер</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((d) => (
-                <tr key={d.id}>
-                  <td>{new Date(d.createdAt).toLocaleString()}</td>
-                  <td>v{d.version}</td>
-                  <td>{d.entityType}:{d.entityId}</td>
-                  <td>{d.type}</td>
-                  <td><a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">{d.fileName}</a></td>
-                  <td>{d.size || 0}</td>
-                  <td>
-                    <div className="toolbar">
-                      <button onClick={() => setDocPreviewUrl(`${API_URL}/${d.filePath}`)}>Превью</button>
-                      <button onClick={() => void replaceDocument(d.id)}>Новая версия</button>
-                      <button onClick={() => void deleteDocument(d.id)}>Удалить</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <div className="card">
+              <h3>Preview panel</h3>
+              {selectedDocument ? (
+                <>
+                  <p className="muted">{selectedDocument.fileName} • v{selectedDocument.version}</p>
+                  <iframe src={docPreviewUrl || `${API_URL}/${selectedDocument.filePath}`} title="document-preview" style={{ width: "100%", minHeight: 420, border: "1px solid #d8dee9", borderRadius: 8 }} />
+                </>
+              ) : (
+                <p className="muted">Выбери документ из списка слева.</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
