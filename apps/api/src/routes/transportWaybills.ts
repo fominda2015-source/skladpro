@@ -1,18 +1,11 @@
 import { TransportWaybillStatus } from "@prisma/client";
+import path from "node:path";
 import { Router } from "express";
-import pdfMake from "pdfmake/build/pdfmake.js";
-import pdfFonts from "pdfmake/build/vfs_fonts.js";
+import PDFDocument from "pdfkit";
 import { z } from "zod";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission } from "../middleware/auth.js";
-
-const pdfMakeAny = pdfMake as unknown as {
-  vfs?: Record<string, string>;
-  createPdf: (docDefinition: unknown) => { getBuffer: (cb: (data: Uint8Array) => void) => void };
-};
-const pdfFontsAny = pdfFonts as unknown as { pdfMake?: { vfs?: Record<string, string> }; vfs?: Record<string, string> };
-pdfMakeAny.vfs = pdfFontsAny.pdfMake?.vfs || pdfFontsAny.vfs || {};
 
 const createWaybillSchema = z.object({
   fromWarehouseId: z.string().optional(),
@@ -165,47 +158,35 @@ transportWaybillsRouter.get("/:id/pdf", async (req, res) => {
     ]);
   });
 
-  const docDefinition: unknown = {
-    pageSize: "A4",
-    pageMargins: [28, 28, 28, 28] as [number, number, number, number],
-    defaultStyle: { font: "Roboto", fontSize: 10 },
-    content: [
-      { text: `Транспортная накладная ${waybill.number}`, style: "title" },
-      { text: `Статус: ${waybill.status}`, margin: [0, 0, 0, 10] },
-      { text: `Склад отправитель: ${waybill.fromWarehouse?.name || "-"}` },
-      { text: `Точка назначения: ${waybill.toLocation}` },
-      { text: `Отправитель: ${waybill.sender || "-"}` },
-      { text: `Получатель: ${waybill.recipient || "-"}` },
-      { text: `Транспорт: ${waybill.vehicle || "-"}` },
-      { text: `Водитель: ${waybill.driverName || "-"}` },
-      { text: `Маршрут: ${waybill.route || "-"}`, margin: [0, 0, 0, 10] },
-      {
-        table: {
-          headerRows: 1,
-          widths: [24, "*", 50, 70],
-          body: tableBody
-        }
-      },
-      { text: `Создано: ${waybill.createdAt.toISOString()}`, margin: [0, 14, 0, 14] },
-      { text: "Подпись отправителя: ____________________", margin: [0, 8, 0, 0] },
-      { text: "Подпись получателя: ____________________", margin: [0, 8, 0, 0] }
-    ],
-    styles: {
-      title: { fontSize: 18, bold: true, alignment: "center" as const, margin: [0, 0, 0, 6] }
-    }
-  };
-
-  const buffer = await new Promise<Buffer>((resolve, reject) => {
-    pdfMakeAny.createPdf(docDefinition).getBuffer((data: Uint8Array) => {
-      try {
-        resolve(Buffer.from(data));
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename=${waybill.number}.pdf`);
-  return res.send(buffer);
+  const fontPath = path.resolve(process.cwd(), "node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
+  const doc = new PDFDocument({ size: "A4", margin: 28 });
+  doc.pipe(res);
+  doc.font(fontPath);
+  doc.fontSize(18).text(`Транспортная накладная ${waybill.number}`, { align: "center" });
+  doc.moveDown(0.4);
+  doc.fontSize(11).text(`Статус: ${waybill.status}`, { align: "center" });
+  doc.moveDown(0.6);
+  doc.fontSize(10).text(`Склад отправитель: ${waybill.fromWarehouse?.name || "-"}`);
+  doc.text(`Точка назначения: ${waybill.toLocation}`);
+  doc.text(`Отправитель: ${waybill.sender || "-"}`);
+  doc.text(`Получатель: ${waybill.recipient || "-"}`);
+  doc.text(`Транспорт: ${waybill.vehicle || "-"}`);
+  doc.text(`Водитель: ${waybill.driverName || "-"}`);
+  doc.text(`Маршрут: ${waybill.route || "-"}`);
+  doc.moveDown(1);
+  doc.fontSize(12).text("Позиции");
+  doc.moveDown(0.2);
+  tableBody.forEach((row) => {
+    doc.fontSize(10).text(row.join(" | "));
+  });
+  doc.moveDown(1.2);
+  doc.text(`Создано: ${waybill.createdAt.toISOString()}`);
+  doc.moveDown(2);
+  doc.text("Подпись отправителя: ____________________");
+  doc.moveDown(1);
+  doc.text("Подпись получателя: ____________________");
+  doc.end();
+  return;
 });
