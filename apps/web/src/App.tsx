@@ -380,6 +380,24 @@ function App() {
     setWaybillEvents((await res.json()) as WaybillEvent[]);
   }
 
+  async function openWaybillPdf(waybillId: string, waybillNumber: string) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setWaybillsMessage("Не удалось загрузить PDF (проверь авторизацию)");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${waybillNumber}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
     if (!token) return;
     let responsible: string | undefined;
@@ -1388,7 +1406,7 @@ function App() {
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Shipped to destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Received by destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED", comment: "Closed" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Закрыть</button>
-                          <button onClick={async () => { if (!token) return; window.open(`${API_URL}/api/waybills/${w.id}/pdf`, "_blank"); }}>PDF</button>
+                          <button onClick={async () => { await openWaybillPdf(w.id, w.number); }}>PDF</button>
                         </div>
                       </td>
                     </tr>
