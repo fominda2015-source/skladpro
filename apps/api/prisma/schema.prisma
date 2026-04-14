@@ -36,6 +36,14 @@ enum ToolStatus {
   DISPUTED
 }
 
+enum TransportWaybillStatus {
+  DRAFT
+  FORMED
+  SHIPPED
+  RECEIVED
+  CLOSED
+}
+
 model User {
   id             String      @id @default(cuid())
   email          String      @unique
@@ -69,6 +77,7 @@ model Warehouse {
   operations  Operation[]
   issues      IssueRequest[]
   tools       Tool[]
+  waybillsFrom TransportWaybill[] @relation("WaybillFromWarehouse")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -84,6 +93,7 @@ model Material {
   operationItems  OperationItem[]
   limitItems      ProjectLimitItem[]
   issueItems      IssueRequestItem[]
+  waybillItems    TransportWaybillItem[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 }
@@ -161,6 +171,7 @@ model Operation {
   documents       OperationDocument[]
   issueRequestId  String?
   issueRequest    IssueRequest?   @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
+  waybills        TransportWaybill[]
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 }
@@ -253,6 +264,7 @@ model IssueRequest {
   approvedBy    User?              @relation("IssueApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   items         IssueRequestItem[]
   operations    Operation[]
+  waybills      TransportWaybill[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 }
@@ -264,4 +276,37 @@ model IssueRequestItem {
   quantity       Decimal      @db.Decimal(14, 3)
   issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
   material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
+}
+
+model TransportWaybill {
+  id                 String                @id @default(cuid())
+  number             String                @unique
+  status             TransportWaybillStatus @default(DRAFT)
+  fromWarehouseId    String?
+  toLocation         String
+  sender             String?
+  recipient          String?
+  vehicle            String?
+  driverName         String?
+  route              String?
+  operationId        String?
+  issueRequestId     String?
+  shippedAt          DateTime?
+  receivedAt         DateTime?
+  closedAt           DateTime?
+  fromWarehouse      Warehouse?            @relation("WaybillFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: SetNull)
+  operation          Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  issueRequest       IssueRequest?         @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
+  items              TransportWaybillItem[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+}
+
+model TransportWaybillItem {
+  id                 String            @id @default(cuid())
+  transportWaybillId String
+  materialId         String
+  quantity           Decimal           @db.Decimal(14, 3)
+  transportWaybill   TransportWaybill  @relation(fields: [transportWaybillId], references: [id], onDelete: Cascade)
+  material           Material          @relation(fields: [materialId], references: [id], onDelete: Restrict)
 }

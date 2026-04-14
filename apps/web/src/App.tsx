@@ -48,6 +48,20 @@ type ToolEvent = {
   comment?: string | null;
   createdAt: string;
 };
+type WaybillStatus = "DRAFT" | "FORMED" | "SHIPPED" | "RECEIVED" | "CLOSED";
+type Waybill = {
+  id: string;
+  number: string;
+  status: WaybillStatus;
+  fromWarehouseId?: string | null;
+  toLocation: string;
+  sender?: string | null;
+  recipient?: string | null;
+  vehicle?: string | null;
+  driverName?: string | null;
+  route?: string | null;
+  createdAt: string;
+};
 type Project = { id: string; name: string; code?: string | null };
 type ProjectLimitSummaryItem = {
   materialId: string;
@@ -90,7 +104,7 @@ function App() {
   const [q, setQ] = useState("");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
-  const [activeTab, setActiveTab] = useState<"stocks" | "admin" | "password" | "catalog" | "operations" | "issues" | "limits" | "approvals" | "documents" | "qr" | "tools">("stocks");
+  const [activeTab, setActiveTab] = useState<"stocks" | "admin" | "password" | "catalog" | "operations" | "issues" | "limits" | "approvals" | "documents" | "qr" | "tools" | "waybills">("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
@@ -155,6 +169,17 @@ function App() {
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [selectedToolForEvents, setSelectedToolForEvents] = useState<string>("");
+  const [waybills, setWaybills] = useState<Waybill[]>([]);
+  const [waybillsMessage, setWaybillsMessage] = useState("");
+  const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
+  const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
+  const [waybillToLocation, setWaybillToLocation] = useState("Объект 1");
+  const [waybillSender, setWaybillSender] = useState("СкладПро");
+  const [waybillRecipient, setWaybillRecipient] = useState("ООО Подрядчик");
+  const [waybillVehicle, setWaybillVehicle] = useState("ГАЗель");
+  const [waybillDriver, setWaybillDriver] = useState("Иванов И.И.");
+  const [waybillMaterialId, setWaybillMaterialId] = useState("");
+  const [waybillQty, setWaybillQty] = useState(1);
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
@@ -324,6 +349,16 @@ function App() {
     setToolEvents((await res.json()) as ToolEvent[]);
   }
 
+  async function loadWaybills() {
+    if (!token) return;
+    const query = waybillStatusFilter ? `?status=${encodeURIComponent(waybillStatusFilter)}` : "";
+    const res = await fetch(`${API_URL}/api/waybills${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setWaybills((await res.json()) as Waybill[]);
+  }
+
   async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
     if (!token) return;
     let responsible: string | undefined;
@@ -463,7 +498,14 @@ function App() {
       void loadCatalogData();
       void loadTools();
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, toolSearch, toolStatusFilter]);
+
+  useEffect(() => {
+    if (token && activeTab === "waybills") {
+      void loadCatalogData();
+      void loadWaybills();
+    }
+  }, [token, activeTab, waybillStatusFilter]);
 
   useEffect(() => {
     if (token && activeTab === "tools" && selectedToolForEvents) {
@@ -478,7 +520,13 @@ function App() {
     if (docEntityType === "operation" && operations.length > 0 && !docEntityId) {
       setDocEntityId(operations[0].id);
     }
-  }, [docEntityType, issues, operations, docEntityId]);
+    if (warehouses.length > 0 && !waybillFromWarehouseId) {
+      setWaybillFromWarehouseId(warehouses[0].id);
+    }
+    if (materials.length > 0 && !waybillMaterialId) {
+      setWaybillMaterialId(materials[0].id);
+    }
+  }, [docEntityType, issues, operations, docEntityId, warehouses, materials, waybillFromWarehouseId, waybillMaterialId]);
 
   async function onLoginSubmit(e: FormEvent) {
     e.preventDefault();
@@ -547,6 +595,7 @@ function App() {
         <button className="navBtn" onClick={() => setActiveTab("limits")}>Лимиты</button>
         <button className="navBtn" onClick={() => setActiveTab("approvals")}>Согласования</button>
         <button className="navBtn" onClick={() => setActiveTab("documents")}>Документы</button>
+        <button className="navBtn" onClick={() => setActiveTab("waybills")}>Транспортные ТН</button>
         <button className="navBtn" onClick={() => setActiveTab("qr")}>QR</button>
         <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструмент</button>
         {canManageUsers && <button className="navBtn" onClick={() => setActiveTab("admin")}>Доступы</button>}
@@ -556,7 +605,7 @@ function App() {
       <section className="canvas">
         <header className="pageHeader">
           <div>
-            <h1>{activeTab === "stocks" ? "Остатки" : activeTab === "catalog" ? "Справочники" : activeTab === "operations" ? "Операции прихода/расхода" : activeTab === "issues" ? "Заявки на выдачу" : activeTab === "limits" ? "Лимиты проекта" : activeTab === "approvals" ? "Очередь согласований" : activeTab === "documents" ? "Документы" : activeTab === "qr" ? "QR-сканирование" : activeTab === "tools" ? "Инструмент и QR" : activeTab === "admin" ? "Управление доступами" : "Смена пароля"}</h1>
+            <h1>{activeTab === "stocks" ? "Остатки" : activeTab === "catalog" ? "Справочники" : activeTab === "operations" ? "Операции прихода/расхода" : activeTab === "issues" ? "Заявки на выдачу" : activeTab === "limits" ? "Лимиты проекта" : activeTab === "approvals" ? "Очередь согласований" : activeTab === "documents" ? "Документы" : activeTab === "waybills" ? "Транспортные накладные" : activeTab === "qr" ? "QR-сканирование" : activeTab === "tools" ? "Инструмент и QR" : activeTab === "admin" ? "Управление доступами" : "Смена пароля"}</h1>
             {me && <p className="muted">{me.fullName} ({me.role})</p>}
           </div>
         </header>
@@ -1187,6 +1236,129 @@ function App() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {activeTab === "waybills" && (
+        <div className="card">
+          <h2>Транспортные накладные</h2>
+          <div className="kpiRow">
+            <div className="kpi"><span>Всего</span><strong>{waybills.length}</strong></div>
+            <div className="kpi"><span>В пути</span><strong>{waybills.filter((x) => x.status === "SHIPPED").length}</strong></div>
+            <div className="kpi"><span>Черновики</span><strong>{waybills.filter((x) => x.status === "DRAFT").length}</strong></div>
+          </div>
+          <div className="toolbar">
+            <select value={waybillStatusFilter} onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}>
+              <option value="">Все статусы</option>
+              <option value="DRAFT">DRAFT</option>
+              <option value="FORMED">FORMED</option>
+              <option value="SHIPPED">SHIPPED</option>
+              <option value="RECEIVED">RECEIVED</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+            <button onClick={() => void loadWaybills()}>Обновить</button>
+          </div>
+
+          <div className="grid2">
+            <div className="card">
+              <h3>Новая ТН</h3>
+              <div className="form">
+                <label>
+                  Склад отправитель
+                  <select value={waybillFromWarehouseId} onChange={(e) => setWaybillFromWarehouseId(e.target.value)}>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Точка назначения
+                  <input value={waybillToLocation} onChange={(e) => setWaybillToLocation(e.target.value)} />
+                </label>
+                <label>
+                  Отправитель
+                  <input value={waybillSender} onChange={(e) => setWaybillSender(e.target.value)} />
+                </label>
+                <label>
+                  Получатель
+                  <input value={waybillRecipient} onChange={(e) => setWaybillRecipient(e.target.value)} />
+                </label>
+                <label>
+                  Транспорт / водитель
+                  <input value={waybillVehicle} onChange={(e) => setWaybillVehicle(e.target.value)} placeholder="Транспорт" />
+                  <input value={waybillDriver} onChange={(e) => setWaybillDriver(e.target.value)} placeholder="Водитель" />
+                </label>
+                <label>
+                  Материал и количество
+                  <select value={waybillMaterialId} onChange={(e) => setWaybillMaterialId(e.target.value)}>
+                    {materials.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  <input type="number" min={0.001} step={0.001} value={waybillQty} onChange={(e) => setWaybillQty(Number(e.target.value))} />
+                </label>
+                <button
+                  onClick={async () => {
+                    if (!token || !waybillFromWarehouseId || !waybillMaterialId || !waybillToLocation) return;
+                    setWaybillsMessage("");
+                    const res = await fetch(`${API_URL}/api/waybills`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        fromWarehouseId: waybillFromWarehouseId,
+                        toLocation: waybillToLocation,
+                        sender: waybillSender,
+                        recipient: waybillRecipient,
+                        vehicle: waybillVehicle,
+                        driverName: waybillDriver,
+                        items: [{ materialId: waybillMaterialId, quantity: waybillQty }]
+                      })
+                    });
+                    if (!res.ok) {
+                      setWaybillsMessage("Ошибка создания ТН");
+                      return;
+                    }
+                    setWaybillsMessage("ТН создана");
+                    await loadWaybills();
+                  }}
+                >
+                  Создать ТН
+                </button>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3>Список ТН</h3>
+              {waybillsMessage && <p className="muted">{waybillsMessage}</p>}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Номер</th>
+                    <th>Статус</th>
+                    <th>Маршрут</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {waybills.map((w) => (
+                    <tr key={w.id}>
+                      <td>{w.number}</td>
+                      <td>{w.status}</td>
+                      <td>{w.toLocation}</td>
+                      <td>
+                        <div className="toolbar">
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED" }) }); await loadWaybills(); }}>Сформировать</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED" }) }); await loadWaybills(); }}>Отгружено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED" }) }); await loadWaybills(); }}>Получено</button>
+                          <button onClick={async () => { if (!token) return; window.open(`${API_URL}/api/waybills/${w.id}/pdf`, "_blank"); }}>PDF</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

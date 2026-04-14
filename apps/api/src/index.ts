@@ -13,6 +13,7 @@ import { operationsRouter } from "./routes/operations.js";
 import { projectsRouter } from "./routes/projects.js";
 import { projectLimitsRouter } from "./routes/projectLimits.js";
 import { stocksRouter } from "./routes/stocks.js";
+import { transportWaybillsRouter } from "./routes/transportWaybills.js";
 import { toolsRouter } from "./routes/tools.js";
 import { warehousesRouter } from "./routes/warehouses.js";
 import { seedBaseData } from "./seed.js";
@@ -62,6 +63,7 @@ app.use("/api/operations", operationsRouter);
 app.use("/api/stocks", stocksRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/tools", toolsRouter);
+app.use("/api/waybills", transportWaybillsRouter);
 
 async function start() {
   await seedBaseData();

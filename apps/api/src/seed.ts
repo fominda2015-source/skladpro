@@ -22,12 +22,14 @@ const defaultRoles = [
       "documents.read",
       "documents.write",
       "tools.read",
-      "tools.write"
+      "tools.write",
+      "waybills.read",
+      "waybills.write"
     ]
   },
   {
     name: "VIEWER",
-    permissions: ["warehouses.read", "materials.read", "operations.read", "stocks.read", "issues.read", "limits.read", "documents.read", "tools.read"]
+    permissions: ["warehouses.read", "materials.read", "operations.read", "stocks.read", "issues.read", "limits.read", "documents.read", "tools.read", "waybills.read"]
   }
 ];
 
