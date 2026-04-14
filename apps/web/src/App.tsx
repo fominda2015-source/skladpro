@@ -19,6 +19,7 @@ type IssueRequest = {
   warehouse?: { name: string };
   requestedBy?: { fullName: string };
 };
+type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED";
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
@@ -115,6 +116,7 @@ function App() {
   const [q, setQ] = useState("");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
   const [activeTab, setActiveTab] = useState<"stocks" | "admin" | "password" | "catalog" | "operations" | "issues" | "limits" | "approvals" | "documents" | "qr" | "tools" | "waybills">("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -144,6 +146,7 @@ function App() {
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
+  const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
   const [issueQuantity, setIssueQuantity] = useState(1);
@@ -313,7 +316,8 @@ function App() {
 
   async function loadIssues() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/issues`, {
+    const query = issueStatusFilter ? `?status=${encodeURIComponent(issueStatusFilter)}` : "";
+    const res = await fetch(`${API_URL}/api/issues${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -520,6 +524,14 @@ function App() {
     setActiveTab("documents");
   }
 
+  function statusClass(status: string) {
+    const s = status.toUpperCase();
+    if (["APPROVED", "ISSUED", "FORMED", "RECEIVED", "CLOSED", "IN_STOCK"].includes(s)) return "ok";
+    if (["ON_APPROVAL", "SHIPPED", "ISSUED", "IN_REPAIR"].includes(s)) return "warn";
+    if (["REJECTED", "LOST", "DAMAGED", "WRITTEN_OFF", "DISPUTED"].includes(s)) return "bad";
+    return "neutral";
+  }
+
   async function resolveQrCode() {
     const value = qrCode.trim();
     if (!value) {
@@ -582,7 +594,7 @@ function App() {
       void loadCatalogData();
       void loadIssues();
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, issueStatusFilter]);
 
   useEffect(() => {
     if (token && activeTab === "approvals") {
@@ -728,9 +740,14 @@ function App() {
       </aside>
       <section className="canvas">
         <header className="pageHeader">
-          <div>
+          <div className="pageTitleBlock">
             <h1>{activeTab === "stocks" ? "Остатки" : activeTab === "catalog" ? "Справочники" : activeTab === "operations" ? "Операции прихода/расхода" : activeTab === "issues" ? "Заявки на выдачу" : activeTab === "limits" ? "Лимиты проекта" : activeTab === "approvals" ? "Очередь согласований" : activeTab === "documents" ? "Документы" : activeTab === "waybills" ? "Транспортные накладные" : activeTab === "qr" ? "QR-сканирование" : activeTab === "tools" ? "Инструмент и QR" : activeTab === "admin" ? "Управление доступами" : "Смена пароля"}</h1>
             {me && <p className="muted">{me.fullName} ({me.role})</p>}
+          </div>
+          <div className="toolbar">
+            <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
+            <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("stocks"); }}>Найти</button>
+            <button onClick={() => setActiveTab("qr")}>QR</button>
           </div>
         </header>
         {activeTab === "stocks" && (
@@ -1003,24 +1020,15 @@ function App() {
             </label>
           </div>
           <div className="toolbar">
-            <input
-              placeholder="Поиск инструмента (название, инв. номер, QR)"
-              value={toolSearch}
-              onChange={(e) => setToolSearch(e.target.value)}
-            />
-            <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
-              <option value="">Все статусы</option>
-              <option value="IN_STOCK">IN_STOCK</option>
+            <select value={issueStatusFilter} onChange={(e) => setIssueStatusFilter((e.target.value || "") as "" | IssueStatus)}>
+              <option value="">Все статусы заявок</option>
+              <option value="DRAFT">DRAFT</option>
+              <option value="ON_APPROVAL">ON_APPROVAL</option>
+              <option value="APPROVED">APPROVED</option>
+              <option value="REJECTED">REJECTED</option>
               <option value="ISSUED">ISSUED</option>
-              <option value="IN_REPAIR">IN_REPAIR</option>
-              <option value="DAMAGED">DAMAGED</option>
-              <option value="LOST">LOST</option>
-              <option value="WRITTEN_OFF">WRITTEN_OFF</option>
-              <option value="DISPUTED">DISPUTED</option>
             </select>
-            <button onClick={() => void loadTools()}>Обновить список</button>
-          </div>
-          <div className="toolbar">
+            <button onClick={() => void loadIssues()}>Обновить список</button>
             <button
               onClick={async () => {
                 if (!token || !issueWarehouseId || !issueMaterialId) return;
@@ -1052,7 +1060,7 @@ function App() {
               {issues.map((i) => (
                 <tr key={i.id}>
                   <td>{i.number}</td>
-                  <td>{i.status}</td>
+                  <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>На согласование</button>
@@ -1236,7 +1244,7 @@ function App() {
                   <td>{i.number}</td>
                   <td>{i.warehouse?.name || i.warehouseId}</td>
                   <td>{i.requestedBy?.fullName || i.requestedById}</td>
-                  <td>{i.status}</td>
+                  <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Одобрить</button>
@@ -1501,7 +1509,7 @@ function App() {
                   {waybills.map((w) => (
                     <tr key={w.id}>
                       <td>{w.number}</td>
-                      <td>{w.status}</td>
+                      <td><span className={`badge ${statusClass(w.status)}`}>{w.status}</span></td>
                       <td>{w.toLocation}</td>
                       <td>
                         <div className="toolbar">
@@ -1587,6 +1595,24 @@ function App() {
       {activeTab === "tools" && (
         <div className="card">
           <h2>Инструмент: карточка, QR и печать</h2>
+          <div className="toolbar">
+            <input
+              placeholder="Поиск инструмента (название, инв. номер, QR)"
+              value={toolSearch}
+              onChange={(e) => setToolSearch(e.target.value)}
+            />
+            <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
+              <option value="">Все статусы</option>
+              <option value="IN_STOCK">IN_STOCK</option>
+              <option value="ISSUED">ISSUED</option>
+              <option value="IN_REPAIR">IN_REPAIR</option>
+              <option value="DAMAGED">DAMAGED</option>
+              <option value="LOST">LOST</option>
+              <option value="WRITTEN_OFF">WRITTEN_OFF</option>
+              <option value="DISPUTED">DISPUTED</option>
+            </select>
+            <button onClick={() => void loadTools()}>Обновить список</button>
+          </div>
           <div className="form">
             <label>
               Название
@@ -1705,7 +1731,7 @@ function App() {
                   <td>{t.inventoryNumber}</td>
                   <td>{t.name}</td>
                   <td>{t.serialNumber || "-"}</td>
-                  <td>{t.status}</td>
+                  <td><span className={`badge ${statusClass(t.status)}`}>{t.status}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={() => openToolActionDialog(t.id, "ISSUE")}>Выдать</button>

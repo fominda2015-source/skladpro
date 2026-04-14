@@ -34,6 +34,7 @@
 
 .canvas {
   padding: 20px;
+  background: #f4f7fc;
 }
 
 .app {
@@ -50,10 +51,19 @@
 
 .pageHeader {
   display: flex;
-  justify-content: flex-start;
-  align-items: center;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 16px;
   gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f4f7fc;
+  padding: 8px 0 12px;
+}
+
+.pageTitleBlock h1 {
+  margin: 0;
 }
 
 .form {
@@ -89,6 +99,7 @@ button {
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .toolbar input {
@@ -110,6 +121,34 @@ button {
 .tabs button,
 .toolbar button {
   width: auto;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.ok {
+  background: #e7f8ee;
+  color: #1e7a3f;
+}
+
+.badge.warn {
+  background: #fff6df;
+  color: #8b6400;
+}
+
+.badge.bad {
+  background: #ffe8e8;
+  color: #ac1f1f;
+}
+
+.badge.neutral {
+  background: #eef2f8;
+  color: #4c5b78;
 }
 
 table {
