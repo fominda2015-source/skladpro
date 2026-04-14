@@ -99,14 +99,15 @@ documentsRouter.post(
       return res.status(404).json({ error: "Document not found" });
     }
     const maxVersion = await prisma.documentFile.findFirst({
-      where: { groupId: base.groupId },
+      where: { groupId: base.groupId || undefined },
       orderBy: { version: "desc" }
     });
+    const groupId = base.groupId || crypto.randomUUID();
 
     const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
     const created = await prisma.documentFile.create({
       data: {
-        groupId: base.groupId,
+        groupId,
         version: (maxVersion?.version || 1) + 1,
         entityType: base.entityType,
         entityId: base.entityId,
