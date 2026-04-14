@@ -391,11 +391,21 @@ function App() {
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
+    const filenameFromHeader = res.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/)?.[1];
+    const filename = filenameFromHeader || `${waybillNumber}.pdf`;
+
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${waybillNumber}.pdf`;
+    a.download = filename;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    // Fallback: some browsers block direct download from async handlers.
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
   async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
