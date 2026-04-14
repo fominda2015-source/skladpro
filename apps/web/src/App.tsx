@@ -381,31 +381,46 @@ function App() {
   }
 
   async function openWaybillPdf(waybillId: string, waybillNumber: string) {
-    if (!token) return;
-    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/pdf`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      setWaybillsMessage("Не удалось загрузить PDF (проверь авторизацию)");
+    if (!token) {
+      setWaybillsMessage("Нет токена авторизации. Перелогинься.");
       return;
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const filenameFromHeader = res.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/)?.[1];
-    const filename = filenameFromHeader || `${waybillNumber}.pdf`;
+    try {
+      setWaybillsMessage("");
+      const res = await fetch(`${API_URL}/api/waybills/${waybillId}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        setWaybillsMessage(`Не удалось загрузить PDF (${res.status}): ${text.slice(0, 120)}`);
+        return;
+      }
+      const blob = await res.blob();
+      if (!blob.size) {
+        setWaybillsMessage("PDF пустой (0 байт)");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const filenameFromHeader = res.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/)?.[1];
+      const filename = filenameFromHeader || `${waybillNumber}.pdf`;
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.target = "_blank";
-    a.rel = "noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noreferrer";
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      document.body.removeChild(a);
 
-    // Fallback: some browsers block direct download from async handlers.
-    window.open(url, "_blank", "noopener,noreferrer");
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) {
+        window.location.assign(url);
+      }
+      setWaybillsMessage("PDF сформирован: если не скачался автоматически, открой новую вкладку браузера.");
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch (error) {
+      setWaybillsMessage(`Ошибка открытия PDF: ${String(error)}`);
+    }
   }
 
   async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
