@@ -106,6 +106,8 @@ type DocumentFile = {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://194.156.117.250";
 const TOKEN_KEY = "skladpro_token";
+const STOCK_VIEW_KEY = "skladpro_stock_view";
+const ISSUE_FILTER_KEY = "skladpro_issue_filter";
 
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
@@ -146,7 +148,10 @@ function App() {
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
-  const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>("");
+  const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
+    const saved = localStorage.getItem(ISSUE_FILTER_KEY);
+    return (saved as "" | IssueStatus) || "";
+  });
   const [issueSearch, setIssueSearch] = useState("");
   const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState("");
@@ -174,8 +179,24 @@ function App() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [docDragOver, setDocDragOver] = useState(false);
-  const [showStockSku, setShowStockSku] = useState(true);
-  const [showStockReserve, setShowStockReserve] = useState(true);
+  const [showStockSku, setShowStockSku] = useState(() => {
+    const saved = localStorage.getItem(STOCK_VIEW_KEY);
+    if (!saved) return true;
+    try {
+      return Boolean(JSON.parse(saved).showStockSku);
+    } catch {
+      return true;
+    }
+  });
+  const [showStockReserve, setShowStockReserve] = useState(() => {
+    const saved = localStorage.getItem(STOCK_VIEW_KEY);
+    if (!saved) return true;
+    try {
+      return Boolean(JSON.parse(saved).showStockReserve);
+    } catch {
+      return true;
+    }
+  });
   const [qrCode, setQrCode] = useState("");
   const [qrResult, setQrResult] = useState<QrResult | null>(null);
   const [qrMessage, setQrMessage] = useState("");
@@ -650,6 +671,17 @@ function App() {
   }, [token, activeTab, issueStatusFilter]);
 
   useEffect(() => {
+    localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
+  }, [issueStatusFilter]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      STOCK_VIEW_KEY,
+      JSON.stringify({ showStockSku, showStockReserve })
+    );
+  }, [showStockSku, showStockReserve]);
+
+  useEffect(() => {
     if (token && activeTab === "approvals") {
       void loadApprovalQueue();
     }
@@ -805,8 +837,10 @@ function App() {
         </header>
         {activeTab === "stocks" && (
           <div className="kpiRow">
-            <div className="kpi"><span>Позиций</span><strong>{stocks.length}</strong></div>
-            <div className="kpi"><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></div>
+            <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Позиций</span><strong>{stocks.length}</strong></button>
+            <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("stocks"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
+            <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{approvalQueue.length}</strong></button>
+            <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Транспортные ТН</span><strong>{waybills.length}</strong></button>
           </div>
         )}
         <p className="muted">Если в названиях видишь `????`, это старые тестовые данные с поврежденной кодировкой.</p>
@@ -1175,6 +1209,12 @@ function App() {
               ))}
             </tbody>
           </table>
+          <div className="actionBar">
+            <button onClick={() => setActiveTab("approvals")}>Открыть согласования</button>
+            <button onClick={() => setIssueStatusFilter("DRAFT")}>Показать черновики</button>
+            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать ON_APPROVAL</button>
+            <button onClick={() => setIssueStatusFilter("")}>Сбросить фильтр</button>
+          </div>
         </div>
       )}
 
@@ -1664,6 +1704,12 @@ function App() {
                 </tbody>
               </table>
             </div>
+          </div>
+          <div className="actionBar">
+            <button onClick={() => setWaybillStatusFilter("DRAFT")}>Черновики</button>
+            <button onClick={() => setWaybillStatusFilter("SHIPPED")}>В пути</button>
+            <button onClick={() => setWaybillStatusFilter("RECEIVED")}>Полученные</button>
+            <button onClick={() => setWaybillStatusFilter("")}>Все ТН</button>
           </div>
         </div>
       )}
