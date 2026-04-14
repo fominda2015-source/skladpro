@@ -4,6 +4,12 @@ import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import {
+  assertProjectInScope,
+  assertWarehouseInScope,
+  getRequestDataScope,
+  toolWhereFromScope
+} from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -51,7 +57,8 @@ export const toolsRouter = Router();
 toolsRouter.use(requireAuth);
 toolsRouter.use(requirePermission("tools.read"));
 
-toolsRouter.get("/", async (req, res) => {
+toolsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
   const q = typeof req.query.q === "string" ? req.query.q : "";
   const status =
     typeof req.query.status === "string" && Object.values(ToolStatus).includes(req.query.status as ToolStatus)
@@ -59,7 +66,10 @@ toolsRouter.get("/", async (req, res) => {
       : undefined;
   const rows = await prisma.tool.findMany({
     where: {
-      ...(status ? { status } : {}),
+      AND: [
+        toolWhereFromScope(scope),
+        {
+          ...(status ? { status } : {}),
       ...(q
         ? {
             OR: [
@@ -70,6 +80,8 @@ toolsRouter.get("/", async (req, res) => {
             ]
           }
         : {})
+        }
+      ]
     },
     include: {
       warehouse: true,
@@ -81,12 +93,17 @@ toolsRouter.get("/", async (req, res) => {
   return res.json(rows);
 });
 
-toolsRouter.post("/", requirePermission("tools.write"), async (req, res) => {
+toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = createToolSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
   try {
+    const scope = await getRequestDataScope(req);
+    if (parsed.data.warehouseId) {
+      assertWarehouseInScope(scope, parsed.data.warehouseId);
+    }
+    assertProjectInScope(scope, parsed.data.projectId);
     const qrCode = buildQrCode(parsed.data.inventoryNumber);
     const created = await prisma.tool.create({
       data: {
@@ -104,23 +121,44 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req, res) => {
     });
     return res.status(201).json(created);
   } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
     const mapped = handlePrismaError(error);
     return res.status(mapped.status).json(mapped.body);
   }
 });
 
-toolsRouter.patch("/:id", requirePermission("tools.write"), async (req, res) => {
+toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = updateToolSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
   try {
+    const scope = await getRequestDataScope(req);
+    if (typeof parsed.data.warehouseId === "string") {
+      assertWarehouseInScope(scope, parsed.data.warehouseId);
+    }
+    if (typeof parsed.data.projectId === "string") {
+      assertProjectInScope(scope, parsed.data.projectId);
+    }
+    const existing = await prisma.tool.findFirst({
+      where: { AND: [toolWhereFromScope(scope), { id: String(req.params.id) }] }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Tool not found" });
+    }
     const updated = await prisma.tool.update({
       where: { id: String(req.params.id) },
       data: parsed.data
     });
     return res.json(updated);
   } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
     const mapped = handlePrismaError(error);
     return res.status(mapped.status).json(mapped.body);
   }
@@ -136,7 +174,10 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
   }
   const id = String(req.params.id);
   const nextStatus = nextStatusByAction[parsed.data.action];
-  const beforeTool = await prisma.tool.findUnique({ where: { id } });
+  const scope = await getRequestDataScope(req);
+  const beforeTool = await prisma.tool.findFirst({
+    where: { AND: [toolWhereFromScope(scope), { id }] }
+  });
   if (!beforeTool) {
     return res.status(404).json({ error: "Tool not found" });
   }
@@ -179,8 +220,13 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
   }
 });
 
-toolsRouter.get("/:id/events", async (req, res) => {
+toolsRouter.get("/:id/events", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  const scope = await getRequestDataScope(req);
+  const toolOk = await prisma.tool.findFirst({ where: { AND: [toolWhereFromScope(scope), { id }] } });
+  if (!toolOk) {
+    return res.status(404).json({ error: "Tool not found" });
+  }
   const events = await prisma.toolEvent.findMany({
     where: { toolId: id },
     orderBy: { createdAt: "desc" },
@@ -189,8 +235,11 @@ toolsRouter.get("/:id/events", async (req, res) => {
   return res.json(events);
 });
 
-toolsRouter.get("/:id/qr", async (req, res) => {
-  const tool = await prisma.tool.findUnique({ where: { id: String(req.params.id) } });
+toolsRouter.get("/:id/qr", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const tool = await prisma.tool.findFirst({
+    where: { AND: [toolWhereFromScope(scope), { id: String(req.params.id) }] }
+  });
   if (!tool) {
     return res.status(404).json({ error: "Tool not found" });
   }
@@ -198,7 +247,7 @@ toolsRouter.get("/:id/qr", async (req, res) => {
   return res.json({ id: tool.id, qrCode: tool.qrCode, dataUrl });
 });
 
-toolsRouter.get("/labels/pdf", async (req, res) => {
+toolsRouter.get("/labels/pdf", async (req: AuthedRequest, res) => {
   const idsRaw = typeof req.query.ids === "string" ? req.query.ids : "";
   const ids = idsRaw
     .split(",")
@@ -208,8 +257,9 @@ toolsRouter.get("/labels/pdf", async (req, res) => {
     return res.status(400).json({ error: "ids query param is required" });
   }
 
+  const scope = await getRequestDataScope(req);
   const tools = await prisma.tool.findMany({
-    where: { id: { in: ids } },
+    where: { AND: [toolWhereFromScope(scope), { id: { in: ids } }] },
     orderBy: { createdAt: "desc" }
   });
   if (!tools.length) {

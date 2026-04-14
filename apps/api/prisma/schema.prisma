@@ -51,19 +51,43 @@ enum MaterialMatchQueueStatus {
 }
 
 model User {
-  id             String      @id @default(cuid())
-  email          String      @unique
-  passwordHash   String
-  fullName       String
-  status         UserStatus  @default(ACTIVE)
-  roleId         String
-  role           Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  actionLogs     ActionLog[]
-  auditLogs      AuditLog[]
-  createdIssues  IssueRequest[] @relation("IssueCreatedBy")
-  approvedIssues IssueRequest[] @relation("IssueApprovedBy")
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id               String               @id @default(cuid())
+  email            String               @unique
+  passwordHash     String
+  fullName         String
+  status           UserStatus           @default(ACTIVE)
+  roleId           String
+  role             Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  actionLogs       ActionLog[]
+  auditLogs        AuditLog[]
+  warehouseScopes  UserWarehouseScope[]
+  projectScopes    UserProjectScope[]
+  createdIssues    IssueRequest[]       @relation("IssueCreatedBy")
+  approvedIssues   IssueRequest[]       @relation("IssueApprovedBy")
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model UserWarehouseScope {
+  id          String    @id @default(cuid())
+  userId      String
+  warehouseId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, warehouseId])
+}
+
+model UserProjectScope {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projectId])
 }
 
 model Role {
@@ -85,6 +109,7 @@ model Warehouse {
   issues      IssueRequest[]
   tools       Tool[]
   waybillsFrom TransportWaybill[] @relation("WaybillFromWarehouse")
+  userScopes  UserWarehouseScope[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -138,6 +163,7 @@ model Project {
   operations  Operation[]
   issues      IssueRequest[]
   tools       Tool[]
+  userScopes  UserProjectScope[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 }

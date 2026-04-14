@@ -1,7 +1,13 @@
+import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
+import {
+  assertProjectInScope,
+  getRequestDataScope,
+  projectLimitWhereFromScope
+} from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createProjectLimitSchema = z.object({
   projectId: z.string().min(1),
@@ -21,10 +27,32 @@ export const projectLimitsRouter = Router();
 projectLimitsRouter.use(requireAuth);
 projectLimitsRouter.use(requirePermission("limits.read"));
 
-projectLimitsRouter.get("/", async (req, res) => {
+projectLimitsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
   const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+  if (projectId) {
+    try {
+      assertProjectInScope(scope, projectId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) {
+        return res.status(403).json({ error: err.message });
+      }
+      throw e;
+    }
+  }
+  const scopeParts: Prisma.ProjectLimitWhereInput[] = [];
+  const base = projectLimitWhereFromScope(scope);
+  if (Object.keys(base).length) {
+    scopeParts.push(base);
+  }
+  if (projectId) {
+    scopeParts.push({ projectId });
+  }
+  const where: Prisma.ProjectLimitWhereInput = scopeParts.length ? { AND: scopeParts } : {};
+
   const rows = await prisma.projectLimit.findMany({
-    where: projectId ? { projectId } : {},
+    where,
     include: {
       project: true,
       items: { include: { material: true } }
@@ -35,12 +63,22 @@ projectLimitsRouter.get("/", async (req, res) => {
   return res.json(rows);
 });
 
-projectLimitsRouter.post("/", requirePermission("limits.write"), async (req, res) => {
+projectLimitsRouter.post("/", requirePermission("limits.write"), async (req: AuthedRequest, res) => {
   const parsed = createProjectLimitSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
   const data = parsed.data;
+  try {
+    const scope = await getRequestDataScope(req);
+    assertProjectInScope(scope, data.projectId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    throw e;
+  }
 
   let version = data.version;
   if (!version) {
@@ -68,10 +106,12 @@ projectLimitsRouter.post("/", requirePermission("limits.write"), async (req, res
   return res.status(201).json(created);
 });
 
-projectLimitsRouter.get("/:id/summary", async (req, res) => {
+projectLimitsRouter.get("/:id/summary", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const row = await prisma.projectLimit.findUnique({
-    where: { id },
+  const scope = await getRequestDataScope(req);
+  const limScope = projectLimitWhereFromScope(scope);
+  const row = await prisma.projectLimit.findFirst({
+    where: Object.keys(limScope).length ? { AND: [{ id }, limScope] } : { id },
     include: { items: { include: { material: true } }, project: true }
   });
   if (!row) {

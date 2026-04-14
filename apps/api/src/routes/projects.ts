@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
+import { getRequestDataScope, projectWhereFromScope } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createProjectSchema = z.object({
   name: z.string().min(2),
@@ -12,8 +13,10 @@ export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
 projectsRouter.use(requirePermission("limits.read"));
 
-projectsRouter.get("/", async (_req, res) => {
+projectsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
   const rows = await prisma.project.findMany({
+    where: projectWhereFromScope(scope),
     orderBy: { createdAt: "desc" },
     take: 200
   });

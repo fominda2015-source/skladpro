@@ -5,7 +5,16 @@ import "./App.css";
 type LoginResponse = { token: string; user: { id: string; email: string; fullName: string; role: string; permissions: string[] } };
 type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
 type MeResponse = { id: string; email: string; fullName: string; role: string; permissions: string[] };
-type AdminUser = { id: string; email: string; fullName: string; role: string; status: "ACTIVE" | "BLOCKED"; permissions: string[] };
+type AdminUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  status: "ACTIVE" | "BLOCKED";
+  permissions: string[];
+  warehouseScopeIds?: string[];
+  projectScopeIds?: string[];
+};
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = { id: string; name: string; sku?: string | null; unit: string; category?: string | null };
@@ -186,6 +195,8 @@ function App() {
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
   const [newPassword, setNewPassword] = useState("1111");
   const [adminMessage, setAdminMessage] = useState("");
+  const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
+  const [selectedProjectScopes, setSelectedProjectScopes] = useState<string[]>([]);
   const [passCurrent, setPassCurrent] = useState("1111");
   const [passNext, setPassNext] = useState("1111");
   const [passMessage, setPassMessage] = useState("");
@@ -871,8 +882,17 @@ function App() {
   useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
+      void loadCatalogData().catch(() => undefined);
     }
   }, [token, canManageUsers, activeTab]);
+
+  useEffect(() => {
+    const u = users.find((x) => x.id === selectedUserId);
+    if (u) {
+      setSelectedWarehouseScopes(u.warehouseScopeIds ?? []);
+      setSelectedProjectScopes(u.projectScopeIds ?? []);
+    }
+  }, [users, selectedUserId]);
 
   useEffect(() => {
     if (token && (activeTab === "catalog" || activeTab === "operations")) {
@@ -2472,6 +2492,76 @@ function App() {
               Новый пароль (сброс)
               <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
             </label>
+          </div>
+          <div className="grid2" style={{ marginTop: 16 }}>
+              <div>
+                <h3>Склады (scope)</h3>
+                <p className="muted">Пусто = без ограничения по складу. Иначе пользователь видит только отмеченные.</p>
+                <div className="plainList">
+                  {warehouses.map((w) => (
+                    <label key={w.id} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedWarehouseScopes.includes(w.id)}
+                        onChange={(e) => {
+                          setSelectedWarehouseScopes((prev) =>
+                            e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
+                          );
+                        }}
+                      />{" "}
+                      {w.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h3>Проекты (scope)</h3>
+                <p className="muted">Пусто = без ограничения по проекту.</p>
+                <div className="plainList">
+                  {projects.map((p) => (
+                    <label key={p.id} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedProjectScopes.includes(p.id)}
+                        onChange={(e) => {
+                          setSelectedProjectScopes((prev) =>
+                            e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                          );
+                        }}
+                      />{" "}
+                      {p.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!token || !selectedUserId) return;
+                setAdminMessage("");
+                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/scopes`, {
+                  method: "PUT",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    warehouseIds: selectedWarehouseScopes,
+                    projectIds: selectedProjectScopes
+                  })
+                });
+                if (!res.ok) {
+                  setAdminMessage("Ошибка сохранения scope");
+                  return;
+                }
+                setAdminMessage("Области (склады/проекты) сохранены");
+                await loadAdminData();
+              }}
+            >
+              Сохранить склады/проекты (scope)
+            </button>
           </div>
           <div className="toolbar">
             <button

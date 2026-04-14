@@ -1,9 +1,10 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizePermissions } from "../lib/permissions.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { UserStatus } from "@prisma/client";
 
 const updateUserAccessSchema = z.object({
@@ -26,13 +27,22 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(4)
 });
 
+const setUserScopesSchema = z.object({
+  warehouseIds: z.array(z.string().min(1)).default([]),
+  projectIds: z.array(z.string().min(1)).default([])
+});
+
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
 adminRouter.use(requirePermission("admin.users.manage"));
 
 adminRouter.get("/users", async (_req, res) => {
   const users = await prisma.user.findMany({
-    include: { role: true },
+    include: {
+      role: true,
+      warehouseScopes: { select: { warehouseId: true } },
+      projectScopes: { select: { projectId: true } }
+    },
     orderBy: { createdAt: "desc" }
   });
   return res.json(
@@ -43,9 +53,63 @@ adminRouter.get("/users", async (_req, res) => {
       status: u.status,
       role: u.role.name,
       permissions: normalizePermissions(u.role.permissions),
+      warehouseScopeIds: u.warehouseScopes.map((s) => s.warehouseId),
+      projectScopeIds: u.projectScopes.map((s) => s.projectId),
       createdAt: u.createdAt
     }))
   );
+});
+
+adminRouter.get("/users/:id/scopes", async (req, res) => {
+  const userId = String(req.params.id);
+  const [wh, pj] = await Promise.all([
+    prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
+    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } })
+  ]);
+  return res.json({
+    warehouseIds: wh.map((x) => x.warehouseId),
+    projectIds: pj.map((x) => x.projectId)
+  });
+});
+
+adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
+  const parsed = setUserScopesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const userId = String(req.params.id);
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.userWarehouseScope.deleteMany({ where: { userId } });
+    await tx.userProjectScope.deleteMany({ where: { userId } });
+    if (parsed.data.warehouseIds.length) {
+      await tx.userWarehouseScope.createMany({
+        data: parsed.data.warehouseIds.map((warehouseId) => ({ userId, warehouseId }))
+      });
+    }
+    if (parsed.data.projectIds.length) {
+      await tx.userProjectScope.createMany({
+        data: parsed.data.projectIds.map((projectId) => ({ userId, projectId }))
+      });
+    }
+  });
+
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "USER_SCOPES_SET",
+    entityType: "User",
+    entityId: userId,
+    after: { warehouseIds: parsed.data.warehouseIds, projectIds: parsed.data.projectIds }
+  });
+
+  return res.json({
+    warehouseIds: parsed.data.warehouseIds,
+    projectIds: parsed.data.projectIds
+  });
 });
 
 adminRouter.post("/users", async (req, res) => {

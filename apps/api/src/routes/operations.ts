@@ -2,6 +2,12 @@ import { OperationType } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import {
+  assertProjectInScope,
+  assertWarehouseInScope,
+  getRequestDataScope,
+  operationWhereFromScope
+} from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -26,14 +32,24 @@ export const operationsRouter = Router();
 operationsRouter.use(requireAuth);
 operationsRouter.use(requirePermission("operations.read"));
 
-operationsRouter.get("/", async (req, res) => {
+operationsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
 
+  if (warehouseId && !scope.unrestricted && scope.warehouseIds?.length && !scope.warehouseIds.includes(warehouseId)) {
+    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+  }
+
   const rows = await prisma.operation.findMany({
     where: {
-      ...(type ? { type: type as OperationType } : {}),
-      ...(warehouseId ? { warehouseId } : {})
+      AND: [
+        operationWhereFromScope(scope),
+        {
+          ...(type ? { type: type as OperationType } : {}),
+          ...(warehouseId ? { warehouseId } : {})
+        }
+      ]
     },
     include: {
       items: true,
@@ -55,6 +71,9 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
   const data = parsed.data;
 
   try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, data.warehouseId);
+    assertProjectInScope(scope, data.projectId);
     const created = await prisma.$transaction(async (tx) => {
       const operation = await tx.operation.create({
         data: {
@@ -127,6 +146,10 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
 
     return res.status(201).json(created);
   } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
     if (error instanceof Error && error.message.startsWith("INSUFFICIENT_STOCK:")) {
       return res.status(409).json({
         error: "Insufficient stock",

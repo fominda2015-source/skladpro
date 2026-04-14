@@ -3,9 +3,14 @@ import path from "node:path";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
+import {
+  assertWarehouseInScope,
+  getRequestDataScope,
+  waybillWhereFromScope
+} from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createWaybillSchema = z.object({
   fromWarehouseId: z.string().optional(),
@@ -38,14 +43,26 @@ export const transportWaybillsRouter = Router();
 transportWaybillsRouter.use(requireAuth);
 transportWaybillsRouter.use(requirePermission("waybills.read"));
 
-transportWaybillsRouter.get("/", async (req, res) => {
+transportWaybillsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
   const status =
     typeof req.query.status === "string" && Object.values(TransportWaybillStatus).includes(req.query.status as TransportWaybillStatus)
       ? (req.query.status as TransportWaybillStatus)
       : undefined;
 
+  const statusPart = status ? { status } : {};
+  const scopePart = waybillWhereFromScope(scope);
+  const where =
+    Object.keys(scopePart).length && Object.keys(statusPart).length
+      ? { AND: [scopePart, statusPart] }
+      : Object.keys(scopePart).length
+        ? scopePart
+        : Object.keys(statusPart).length
+          ? statusPart
+          : undefined;
+
   const rows = await prisma.transportWaybill.findMany({
-    where: status ? { status } : undefined,
+    where,
     include: {
       fromWarehouse: true,
       operation: true,
@@ -59,10 +76,22 @@ transportWaybillsRouter.get("/", async (req, res) => {
   return res.json(rows);
 });
 
-transportWaybillsRouter.post("/", requirePermission("waybills.write"), async (req, res) => {
+transportWaybillsRouter.post("/", requirePermission("waybills.write"), async (req: AuthedRequest, res) => {
   const parsed = createWaybillSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    if (parsed.data.fromWarehouseId) {
+      assertWarehouseInScope(scope, parsed.data.fromWarehouseId);
+    }
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    throw e;
   }
   try {
     const count = await prisma.transportWaybill.count();
@@ -96,12 +125,19 @@ transportWaybillsRouter.post("/", requirePermission("waybills.write"), async (re
   }
 });
 
-transportWaybillsRouter.patch("/:id/status", requirePermission("waybills.write"), async (req, res) => {
+transportWaybillsRouter.patch("/:id/status", requirePermission("waybills.write"), async (req: AuthedRequest, res) => {
   const parsed = setStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
   const id = String(req.params.id);
+  const scope = await getRequestDataScope(req);
+  const visible = await prisma.transportWaybill.findFirst({
+    where: { AND: [waybillWhereFromScope(scope), { id }] }
+  });
+  if (!visible) {
+    return res.status(404).json({ error: "Waybill not found" });
+  }
   try {
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.transportWaybill.update({
@@ -123,8 +159,15 @@ transportWaybillsRouter.patch("/:id/status", requirePermission("waybills.write")
   }
 });
 
-transportWaybillsRouter.get("/:id/events", async (req, res) => {
+transportWaybillsRouter.get("/:id/events", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  const scope = await getRequestDataScope(req);
+  const wb = await prisma.transportWaybill.findFirst({
+    where: { AND: [waybillWhereFromScope(scope), { id }] }
+  });
+  if (!wb) {
+    return res.status(404).json({ error: "Waybill not found" });
+  }
   const events = await prisma.transportWaybillEvent.findMany({
     where: { transportWaybillId: id },
     orderBy: { createdAt: "desc" },
@@ -133,10 +176,11 @@ transportWaybillsRouter.get("/:id/events", async (req, res) => {
   return res.json(events);
 });
 
-transportWaybillsRouter.get("/:id/pdf", async (req, res) => {
+transportWaybillsRouter.get("/:id/pdf", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const waybill = await prisma.transportWaybill.findUnique({
-    where: { id },
+  const scope = await getRequestDataScope(req);
+  const waybill = await prisma.transportWaybill.findFirst({
+    where: { AND: [waybillWhereFromScope(scope), { id }] },
     include: {
       fromWarehouse: true,
       items: { include: { material: true } }

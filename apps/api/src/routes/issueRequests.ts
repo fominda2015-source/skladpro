@@ -2,6 +2,12 @@ import { IssueRequestStatus, OperationType } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import {
+  assertProjectInScope,
+  assertWarehouseInScope,
+  getRequestDataScope,
+  mergeIssueWhere
+} from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -31,12 +37,14 @@ export const issueRequestsRouter = Router();
 issueRequestsRouter.use(requireAuth);
 issueRequestsRouter.use(requirePermission("issues.read"));
 
-issueRequestsRouter.get("/", async (_req, res) => {
-  const statusParam = typeof _req.query.status === "string" ? _req.query.status : undefined;
-  const where =
+issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const statusParam = typeof req.query.status === "string" ? req.query.status : undefined;
+  const statusFilter =
     statusParam && Object.values(IssueRequestStatus).includes(statusParam as IssueRequestStatus)
       ? { status: statusParam as IssueRequestStatus }
       : {};
+  const where = mergeIssueWhere(scope, statusFilter);
   const rows = await prisma.issueRequest.findMany({
     where,
     include: {
@@ -55,6 +63,18 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   const parsed = createIssueSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+
+  try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, parsed.data.warehouseId);
+    assertProjectInScope(scope, parsed.data.projectId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    throw e;
   }
 
   const count = await prisma.issueRequest.count();
@@ -103,8 +123,13 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
 issueRequestsRouter.patch(
   "/:id/send-for-approval",
   requirePermission("issues.write"),
-  async (req, res) => {
+  async (req: AuthedRequest, res) => {
     const id = String(req.params.id);
+    const scope = await getRequestDataScope(req);
+    const existing = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
+    if (!existing) {
+      return res.status(404).json({ error: "Issue request not found" });
+    }
     const updated = await prisma.issueRequest.update({
       where: { id },
       data: { status: IssueRequestStatus.ON_APPROVAL }
@@ -115,7 +140,8 @@ issueRequestsRouter.patch(
 
 issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const prev = await prisma.issueRequest.findUnique({ where: { id } });
+  const scope = await getRequestDataScope(req);
+  const prev = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
   if (!prev) {
     return res.status(404).json({ error: "Issue request not found" });
   }
@@ -136,7 +162,8 @@ issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), a
 
 issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const prev = await prisma.issueRequest.findUnique({ where: { id } });
+  const scope = await getRequestDataScope(req);
+  const prev = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
   if (!prev) {
     return res.status(404).json({ error: "Issue request not found" });
   }
@@ -157,8 +184,9 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
 
 issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const issueRow = await prisma.issueRequest.findUnique({
-    where: { id },
+  const scope = await getRequestDataScope(req);
+  const issueRow = await prisma.issueRequest.findFirst({
+    where: mergeIssueWhere(scope, { id }),
     include: { items: true }
   });
   if (!issueRow) {
