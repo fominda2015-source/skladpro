@@ -209,7 +209,7 @@ model ActionLog {
 
 model DocumentFile {
   id         String   @id @default(cuid())
-  groupId    String
+  groupId    String   @default(cuid())
   version    Int      @default(1)
   entityType String
   entityId   String
