@@ -147,6 +147,7 @@ function App() {
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>("");
+  const [selectedIssueId, setSelectedIssueId] = useState("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
   const [issueQuantity, setIssueQuantity] = useState(1);
@@ -202,6 +203,7 @@ function App() {
   const [waybillQty, setWaybillQty] = useState(1);
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
+  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill">("");
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
@@ -321,7 +323,11 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
-    setIssues((await res.json()) as IssueRequest[]);
+    const data = (await res.json()) as IssueRequest[];
+    setIssues(data);
+    if (data.length && !selectedIssueId) {
+      setSelectedIssueId(data[0].id);
+    }
   }
 
   async function loadApprovalQueue() {
@@ -532,6 +538,9 @@ function App() {
     return "neutral";
   }
 
+  const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
+  const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
+
   async function resolveQrCode() {
     const value = qrCode.trim();
     if (!value) {
@@ -571,6 +580,8 @@ function App() {
     if (token) {
       void loadMe();
       void loadStocks(q);
+      void loadIssues();
+      void loadApprovalQueue();
     }
   }, [token]);
 
@@ -799,6 +810,28 @@ function App() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {activeTab === "stocks" && (
+        <div className="grid2">
+          <div className="card">
+            <h3>Проблемы сегодня</h3>
+            <ul className="plainList">
+              <li>Критичных остатков: <strong>{stocks.filter((x) => x.isLow).length}</strong></li>
+              <li>На согласовании: <strong>{approvalQueue.length}</strong></li>
+              <li>Заявки в работе: <strong>{issues.filter((x) => x.status !== "ISSUED" && x.status !== "REJECTED").length}</strong></li>
+            </ul>
+          </div>
+          <div className="card">
+            <h3>Быстрые действия</h3>
+            <div className="toolbar">
+              <button onClick={() => setActiveTab("operations")}>Новое поступление</button>
+              <button onClick={() => setActiveTab("issues")}>Новая выдача</button>
+              <button onClick={() => setActiveTab("waybills")}>Новая ТН</button>
+              <button onClick={() => setActiveTab("tools")}>Инструмент / QR</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1063,6 +1096,7 @@ function App() {
                   <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
+                      <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>На согласование</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Одобрить</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); await loadStocks(q); }}>Выдать</button>
@@ -1247,6 +1281,7 @@ function App() {
                   <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
+                      <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Одобрить</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/reject`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Отклонить</button>
                       <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); await loadStocks(q); }}>Выдать</button>
@@ -1513,6 +1548,7 @@ function App() {
                       <td>{w.toLocation}</td>
                       <td>
                         <div className="toolbar">
+                          <button onClick={() => { setSelectedWaybillId(w.id); setDrawerMode("waybill"); }}>Детали</button>
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED", comment: "Formed in UI" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Сформировать</button>
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Shipped to destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
                           <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Received by destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
@@ -1546,6 +1582,42 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {drawerMode === "issue" && selectedIssue && (
+        <aside className="detailDrawer">
+          <div className="detailDrawerHeader">
+            <h3>Карточка заявки {selectedIssue.number}</h3>
+            <button onClick={() => setDrawerMode("")}>Закрыть</button>
+          </div>
+          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{selectedIssue.status}</span></p>
+          <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
+          <p><strong>Инициатор:</strong> {selectedIssue.requestedBy?.fullName || selectedIssue.requestedById}</p>
+          <p><strong>Создана:</strong> {new Date(selectedIssue.createdAt).toLocaleString()}</p>
+          <div className="toolbar">
+            <button onClick={() => openDocumentsForEntity("issue", selectedIssue.id)}>Файлы</button>
+            <button onClick={() => setActiveTab("issues")}>Открыть список</button>
+          </div>
+        </aside>
+      )}
+
+      {drawerMode === "waybill" && selectedWaybill && (
+        <aside className="detailDrawer">
+          <div className="detailDrawerHeader">
+            <h3>Карточка ТН {selectedWaybill.number}</h3>
+            <button onClick={() => setDrawerMode("")}>Закрыть</button>
+          </div>
+          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedWaybill.status)}`}>{selectedWaybill.status}</span></p>
+          <p><strong>Маршрут:</strong> {selectedWaybill.toLocation}</p>
+          <p><strong>Отправитель:</strong> {selectedWaybill.sender || "-"}</p>
+          <p><strong>Получатель:</strong> {selectedWaybill.recipient || "-"}</p>
+          <p><strong>Транспорт:</strong> {selectedWaybill.vehicle || "-"}</p>
+          <p><strong>Водитель:</strong> {selectedWaybill.driverName || "-"}</p>
+          <div className="toolbar">
+            <button onClick={() => void openWaybillPdf(selectedWaybill.id, selectedWaybill.number)}>PDF</button>
+            <button onClick={() => setActiveTab("waybills")}>Открыть список</button>
+          </div>
+        </aside>
       )}
 
       {activeTab === "qr" && (

@@ -151,6 +151,43 @@ button {
   color: #4c5b78;
 }
 
+.plainList {
+  margin: 0;
+  padding-left: 18px;
+  color: #2a364f;
+}
+
+.plainList li {
+  margin-bottom: 8px;
+}
+
+.detailDrawer {
+  position: fixed;
+  right: 16px;
+  top: 72px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid #d8dee9;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 10px 25px rgba(14, 26, 54, 0.2);
+  z-index: 20;
+}
+
+.detailDrawerHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.detailDrawerHeader button {
+  width: auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
