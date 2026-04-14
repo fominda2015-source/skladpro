@@ -77,6 +77,7 @@ model User {
   projectScopes    UserProjectScope[]
   createdIssues    IssueRequest[]       @relation("IssueCreatedBy")
   approvedIssues   IssueRequest[]       @relation("IssueApprovedBy")
+  documentLinks    DocumentLink[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -298,10 +299,25 @@ model DocumentFile {
   replacedById String?
   isDeleted  Boolean  @default(false)
   createdAt  DateTime @default(now())
+  links      DocumentLink[]
 
   @@index([groupId, version])
   @@index([entityType, entityId])
   @@index([checksumSha256])
+}
+
+model DocumentLink {
+  id             String       @id @default(cuid())
+  documentFileId String
+  entityType     String
+  entityId       String
+  createdAt      DateTime     @default(now())
+  createdById    String
+  documentFile   DocumentFile @relation(fields: [documentFileId], references: [id], onDelete: Cascade)
+  createdBy      User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([documentFileId, entityType, entityId])
+  @@index([entityType, entityId])
 }
 
 model MaterialMatchQueue {

@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { Router, type Request } from "express";
 import multer from "multer";
+import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { config } from "../config.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
@@ -23,6 +25,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+const createLinkSchema = z.object({
+  entityType: z.string().min(1),
+  entityId: z.string().min(1)
+});
+
 export const documentsRouter = Router();
 documentsRouter.use(requireAuth);
 documentsRouter.use(requirePermission("documents.read"));
@@ -32,18 +39,58 @@ documentsRouter.get("/", async (req, res) => {
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
   const includeDeleted = req.query.includeDeleted === "1";
+  const hasEntityPair = Boolean(entityType && entityId);
+
+  const base: Prisma.DocumentFileWhereInput = {
+    ...(type ? { type } : {}),
+    ...(includeDeleted ? {} : { isDeleted: false })
+  };
+
+  const where: Prisma.DocumentFileWhereInput =
+    hasEntityPair && entityType && entityId
+      ? {
+          AND: [
+            base,
+            {
+              OR: [
+                { entityType, entityId },
+                { links: { some: { entityType, entityId } } }
+              ]
+            }
+          ]
+        }
+      : {
+          ...base,
+          ...(entityType ? { entityType } : {}),
+          ...(entityId ? { entityId } : {})
+        };
 
   const rows = await prisma.documentFile.findMany({
-    where: {
-      ...(entityType ? { entityType } : {}),
-      ...(entityId ? { entityId } : {}),
-      ...(type ? { type } : {}),
-      ...(includeDeleted ? {} : { isDeleted: false })
-    },
+    where,
+    ...(hasEntityPair && entityType && entityId
+      ? {
+          include: {
+            links: { where: { entityType, entityId }, take: 1 }
+          }
+        }
+      : {}),
     orderBy: [{ groupId: "desc" }, { version: "desc" }],
     take: 200
   });
-  return res.json(rows);
+
+  if (!hasEntityPair || !entityType || !entityId) {
+    return res.json(rows);
+  }
+
+  type RowWithLinks = (typeof rows)[number] & { links?: { id: string }[] };
+  const withLinks = rows as RowWithLinks[];
+  const payload = withLinks.map(({ links, ...f }) => {
+    const primaryMatch = f.entityType === entityType && f.entityId === entityId;
+    const matchedLinkId =
+      !primaryMatch && links && links.length > 0 ? links[0]!.id : null;
+    return { ...f, matchedLinkId };
+  });
+  return res.json(payload);
 });
 
 documentsRouter.post(
@@ -101,6 +148,50 @@ documentsRouter.post(
   }
 );
 
+documentsRouter.post("/:id/links", requirePermission("documents.write"), async (req: AuthedRequest, res) => {
+  const documentFileId = String(req.params.id);
+  const parsed = createLinkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+
+  const file = await prisma.documentFile.findUnique({ where: { id: documentFileId } });
+  if (!file || file.isDeleted) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+  if (file.entityType === parsed.data.entityType && file.entityId === parsed.data.entityId) {
+    return res.status(400).json({ error: "File is already attached to this entity as primary" });
+  }
+
+  try {
+    const link = await prisma.documentLink.create({
+      data: {
+        documentFileId,
+        entityType: parsed.data.entityType,
+        entityId: parsed.data.entityId,
+        createdById: req.user!.userId
+      }
+    });
+    return res.status(201).json(link);
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === "P2002") {
+      return res.status(409).json({ error: "Link already exists" });
+    }
+    throw e;
+  }
+});
+
+documentsRouter.delete("/links/:linkId", requirePermission("documents.write"), async (req, res) => {
+  const linkId = String(req.params.linkId);
+  const existing = await prisma.documentLink.findUnique({ where: { id: linkId } });
+  if (!existing) {
+    return res.status(404).json({ error: "Link not found" });
+  }
+  await prisma.documentLink.delete({ where: { id: linkId } });
+  return res.json({ ok: true });
+});
+
 documentsRouter.post(
   "/:id/replace",
   requirePermission("documents.write"),
@@ -140,10 +231,16 @@ documentsRouter.post(
         createdBy: req.user!.userId
       }
     });
-    await prisma.documentFile.update({
-      where: { id: base.id },
-      data: { replacedById: created.id }
-    });
+    await prisma.$transaction([
+      prisma.documentFile.update({
+        where: { id: base.id },
+        data: { replacedById: created.id }
+      }),
+      prisma.documentLink.updateMany({
+        where: { documentFileId: base.id },
+        data: { documentFileId: created.id }
+      })
+    ]);
     return res.status(201).json(created);
   }
 );
@@ -154,9 +251,12 @@ documentsRouter.delete("/:id", requirePermission("documents.write"), async (req,
   if (!row) {
     return res.status(404).json({ error: "Document not found" });
   }
-  const updated = await prisma.documentFile.update({
-    where: { id },
-    data: { isDeleted: true }
-  });
+  const [, updated] = await prisma.$transaction([
+    prisma.documentLink.deleteMany({ where: { documentFileId: id } }),
+    prisma.documentFile.update({
+      where: { id },
+      data: { isDeleted: true }
+    })
+  ]);
   return res.json(updated);
 });

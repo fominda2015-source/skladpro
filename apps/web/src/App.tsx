@@ -141,6 +141,8 @@ type DocumentFile = {
   replacedById?: string | null;
   isDeleted?: boolean;
   createdAt: string;
+  /** Если список открыт по сущности и файл попал сюда только через DocumentLink */
+  matchedLinkId?: string | null;
 };
 
 type DashboardSummary = {
@@ -285,6 +287,8 @@ function App() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [docDragOver, setDocDragOver] = useState(false);
+  const [docLinkTargetType, setDocLinkTargetType] = useState<"operation" | "issue">("issue");
+  const [docLinkTargetId, setDocLinkTargetId] = useState("");
   const [showStockSku, setShowStockSku] = useState(() => {
     const saved = localStorage.getItem(STOCK_VIEW_KEY);
     if (!saved) return true;
@@ -849,6 +853,46 @@ function App() {
       return;
     }
     setDocumentsMessage("Документ удален");
+    await loadDocuments();
+  }
+
+  async function unlinkDocumentLink(linkId: string) {
+    if (!token) return;
+    const ok = window.confirm("Отвязать файл только от этой карточки? Сам файл останется у владельца.");
+    if (!ok) return;
+    const res = await fetch(`${API_URL}/api/documents/links/${encodeURIComponent(linkId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось отвязать документ");
+      return;
+    }
+    setDocumentsMessage("Связь удалена");
+    await loadDocuments();
+  }
+
+  async function createDocumentLink() {
+    if (!token || !selectedDocumentId) {
+      setDocumentsMessage("Выбери строку в списке (Превью) и цель привязки");
+      return;
+    }
+    if (!docLinkTargetId) {
+      setDocumentsMessage("Выбери заявку или операцию для доп. привязки");
+      return;
+    }
+    setDocumentsMessage("");
+    const res = await fetch(`${API_URL}/api/documents/${encodeURIComponent(selectedDocumentId)}/links`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ entityType: docLinkTargetType, entityId: docLinkTargetId })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setDocumentsMessage(typeof err.error === "string" ? err.error : "Не удалось создать ссылку");
+      return;
+    }
+    setDocumentsMessage("Файл привязан к дополнительной сущности");
     await loadDocuments();
   }
 
@@ -2081,6 +2125,47 @@ function App() {
             </button>
             <button onClick={() => void loadDocuments()}>Обновить список</button>
           </div>
+          <div className="form docCenterForm">
+            <p className="muted">Доп. привязка: один файл в списке можно связать с другой заявкой/операцией без повторной загрузки.</p>
+            <label>
+              Тип цели привязки
+              <select
+                value={docLinkTargetType}
+                onChange={(e) => {
+                  setDocLinkTargetType(e.target.value as "issue" | "operation");
+                  setDocLinkTargetId("");
+                }}
+              >
+                <option value="issue">Заявка</option>
+                <option value="operation">Операция</option>
+              </select>
+            </label>
+            <label>
+              Цель привязки
+              {docLinkTargetType === "issue" ? (
+                <select value={docLinkTargetId} onChange={(e) => setDocLinkTargetId(e.target.value)}>
+                  <option value="">Выбери заявку</option>
+                  {issues.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.number} ({i.status})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select value={docLinkTargetId} onChange={(e) => setDocLinkTargetId(e.target.value)}>
+                  <option value="">Выбери операцию</option>
+                  {operations.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {(o.documentNumber || o.id.slice(0, 8))} [{o.type}]
+                    </option>
+                  ))}
+                </select>
+              )}
+            </label>
+            <button type="button" onClick={() => void createDocumentLink()}>
+              Привязать выбранный в списке файл
+            </button>
+          </div>
           <div
             className={`dropZone ${docDragOver ? "over" : ""}`}
             onDragOver={(e) => {
@@ -2107,7 +2192,8 @@ function App() {
                   <tr>
                     <th>Дата</th>
                     <th>Версия</th>
-                    <th>Сущность</th>
+                    <th>Владелец файла</th>
+                    <th>Как открыто</th>
                     <th>Вид</th>
                     <th>Файл</th>
                     <th>Размер</th>
@@ -2119,7 +2205,10 @@ function App() {
                     <tr key={d.id} className={selectedDocumentId === d.id ? "selectedRow" : ""}>
                       <td>{new Date(d.createdAt).toLocaleString()}</td>
                       <td>v{d.version}</td>
-                      <td>{d.entityType}:{d.entityId}</td>
+                      <td title={`${d.entityType}:${d.entityId}`}>{d.entityType}:{d.entityId.slice(0, 8)}…</td>
+                      <td className="muted">
+                        {!docEntityId ? "—" : d.matchedLinkId ? "по ссылке" : "основная"}
+                      </td>
                       <td>{d.type}</td>
                       <td><a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">{d.fileName}</a></td>
                       <td>{d.size || 0}</td>
@@ -2127,7 +2216,11 @@ function App() {
                         <div className="toolbar">
                           <button onClick={() => { setSelectedDocumentId(d.id); setDocPreviewUrl(`${API_URL}/${d.filePath}`); }}>Превью</button>
                           <button onClick={() => void replaceDocument(d.id)}>Новая версия</button>
-                          <button onClick={() => void deleteDocument(d.id)}>Удалить</button>
+                          {d.matchedLinkId ? (
+                            <button onClick={() => void unlinkDocumentLink(d.matchedLinkId!)}>Отвязать</button>
+                          ) : (
+                            <button onClick={() => void deleteDocument(d.id)}>Удалить</button>
+                          )}
                         </div>
                       </td>
                     </tr>
