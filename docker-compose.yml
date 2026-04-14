@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: skladpro-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - skladpro-net
+
+  api:
+    build:
+      context: ./apps/api
+    container_name: skladpro-api
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      - db
+    command: sh -c "npm run prisma:db:push && node dist/index.js"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - skladpro-net
+
+  web:
+    build:
+      context: ./apps/web
+    container_name: skladpro-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - skladpro-net
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: skladpro-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - updates_data:/var/www/updates
+    depends_on:
+      - web
+      - api
+    networks:
+      - skladpro-net
+
+volumes:
+  db_data:
+  updates_data:
+  uploads_data:
+
+networks:
+  skladpro-net:
+    driver: bridge

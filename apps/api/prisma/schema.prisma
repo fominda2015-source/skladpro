@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum OperationType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum IssueRequestStatus {
+  DRAFT
+  ON_APPROVAL
+  APPROVED
+  REJECTED
+  ISSUED
+}
+
+enum ToolStatus {
+  IN_STOCK
+  ISSUED
+  IN_REPAIR
+  DAMAGED
+  LOST
+  WRITTEN_OFF
+  DISPUTED
+}
+
+model User {
+  id             String      @id @default(cuid())
+  email          String      @unique
+  passwordHash   String
+  fullName       String
+  status         UserStatus  @default(ACTIVE)
+  roleId         String
+  role           Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  actionLogs     ActionLog[]
+  createdIssues  IssueRequest[] @relation("IssueCreatedBy")
+  approvedIssues IssueRequest[] @relation("IssueApprovedBy")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  permissions Json
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Warehouse {
+  id          String       @id @default(cuid())
+  name        String
+  address     String?
+  isActive    Boolean      @default(true)
+  stocks      Stock[]
+  operations  Operation[]
+  issues      IssueRequest[]
+  tools       Tool[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Material {
+  id              String              @id @default(cuid())
+  sku             String?             @unique
+  name            String
+  unit            String
+  category        String?
+  synonyms        MaterialSynonym[]
+  stocks          Stock[]
+  operationItems  OperationItem[]
+  limitItems      ProjectLimitItem[]
+  issueItems      IssueRequestItem[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model MaterialSynonym {
+  id          String   @id @default(cuid())
+  materialId  String
+  value       String
+  material    Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([materialId, value])
+}
+
+model Stock {
+  id            String     @id @default(cuid())
+  warehouseId   String
+  materialId    String
+  quantity      Decimal    @db.Decimal(14, 3)
+  reserved      Decimal    @default(0) @db.Decimal(14, 3)
+  warehouse     Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  material      Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([warehouseId, materialId])
+}
+
+model Project {
+  id          String          @id @default(cuid())
+  name        String
+  code        String?         @unique
+  limits      ProjectLimit[]
+  operations  Operation[]
+  issues      IssueRequest[]
+  tools       Tool[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model ProjectLimit {
+  id          String             @id @default(cuid())
+  projectId   String
+  name        String
+  version     Int                @default(1)
+  items       ProjectLimitItem[]
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model ProjectLimitItem {
+  id              String       @id @default(cuid())
+  projectLimitId  String
+  materialId      String
+  plannedQty      Decimal      @db.Decimal(14, 3)
+  issuedQty       Decimal      @default(0) @db.Decimal(14, 3)
+  reservedQty     Decimal      @default(0) @db.Decimal(14, 3)
+  projectLimit    ProjectLimit @relation(fields: [projectLimitId], references: [id], onDelete: Cascade)
+  material        Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@unique([projectLimitId, materialId])
+}
+
+model Operation {
+  id              String          @id @default(cuid())
+  type            OperationType
+  warehouseId     String
+  projectId       String?
+  documentNumber  String?
+  status          String          @default("DRAFT")
+  operationDate   DateTime        @default(now())
+  warehouse       Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  project         Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  items           OperationItem[]
+  documents       OperationDocument[]
+  issueRequestId  String?
+  issueRequest    IssueRequest?   @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model OperationItem {
+  id            String      @id @default(cuid())
+  operationId   String
+  materialId    String
+  quantity      Decimal     @db.Decimal(14, 3)
+  price         Decimal?    @db.Decimal(14, 2)
+  operation     Operation   @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  material      Material    @relation(fields: [materialId], references: [id], onDelete: Restrict)
+}
+
+model OperationDocument {
+  id            String      @id @default(cuid())
+  operationId   String
+  type          String
+  fileName      String
+  filePath      String
+  operation     Operation   @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+}
+
+model ActionLog {
+  id            String      @id @default(cuid())
+  userId        String
+  action        String
+  entityType    String
+  entityId      String
+  payload       Json?
+  createdAt     DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DocumentFile {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  type       String
+  fileName   String
+  filePath   String
+  mimeType   String?
+  size       Int?
+  createdBy  String
+  createdAt  DateTime @default(now())
+}
+
+model Tool {
+  id              String     @id @default(cuid())
+  name            String
+  inventoryNumber String     @unique
+  serialNumber    String?
+  qrCode          String     @unique
+  status          ToolStatus @default(IN_STOCK)
+  warehouseId     String?
+  projectId       String?
+  responsible     String?
+  note            String?
+  warehouse       Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  events          ToolEvent[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model ToolEvent {
+  id        String   @id @default(cuid())
+  toolId    String
+  action    String
+  status    ToolStatus
+  comment   String?
+  actorId   String?
+  createdAt DateTime @default(now())
+  tool      Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model IssueRequest {
+  id            String             @id @default(cuid())
+  number        String             @unique
+  status        IssueRequestStatus @default(DRAFT)
+  warehouseId   String
+  projectId     String?
+  requestedById String
+  approvedById  String?
+  note          String?
+  warehouse     Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  project       Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  requestedBy   User               @relation("IssueCreatedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy    User?              @relation("IssueApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  items         IssueRequestItem[]
+  operations    Operation[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+model IssueRequestItem {
+  id             String       @id @default(cuid())
+  issueRequestId String
+  materialId     String
+  quantity       Decimal      @db.Decimal(14, 3)
+  issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
+  material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
+}

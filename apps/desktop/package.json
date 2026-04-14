@@ -1,0 +1,42 @@
+{
+  "name": "@skladpro/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "npm run build && electron dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "pack:win": "npm run build && electron-builder --win nsis --publish never",
+    "publish:win": "npm run build && electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "electron": "^38.7.0",
+    "electron-builder": "^26.0.12",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "ru.skladpro.desktop",
+    "productName": "SkladPro",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://194.156.117.250/updates/win/x64"
+      }
+    ]
+  }
+}

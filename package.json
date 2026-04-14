@@ -1,0 +1,18 @@
+{
+  "name": "skladpro",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "install:all": "npm install --workspaces",
+    "dev:web": "npm run dev --workspace @skladpro/web",
+    "dev:api": "npm run dev --workspace @skladpro/api",
+    "dev:desktop": "npm run dev --workspace @skladpro/desktop",
+    "build": "npm run build --workspaces",
+    "build:web": "npm run build --workspace @skladpro/web",
+    "build:api": "npm run build --workspace @skladpro/api",
+    "build:desktop": "npm run build --workspace @skladpro/desktop"
+  }
+}
