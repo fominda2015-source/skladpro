@@ -147,6 +147,8 @@ function App() {
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>("");
+  const [issueSearch, setIssueSearch] = useState("");
+  const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
@@ -170,6 +172,8 @@ function App() {
   const [docTypeFilter, setDocTypeFilter] = useState("");
   const [docPreviewUrl, setDocPreviewUrl] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
+  const [showStockSku, setShowStockSku] = useState(true);
+  const [showStockReserve, setShowStockReserve] = useState(true);
   const [qrCode, setQrCode] = useState("");
   const [qrResult, setQrResult] = useState<QrResult | null>(null);
   const [qrMessage, setQrMessage] = useState("");
@@ -540,6 +544,11 @@ function App() {
 
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
+  const filteredIssues = issues.filter((i) => {
+    if (!issueSearch.trim()) return true;
+    const q = issueSearch.toLowerCase();
+    return i.number.toLowerCase().includes(q) || i.status.toLowerCase().includes(q);
+  });
 
   async function resolveQrCode() {
     const value = qrCode.trim();
@@ -777,6 +786,8 @@ function App() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
+            <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
+            <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
             <button onClick={() => void loadStocks(q)}>Найти</button>
           </div>
 
@@ -788,10 +799,10 @@ function App() {
                 <tr>
                   <th>Склад</th>
                   <th>Материал</th>
-                  <th>SKU</th>
+                  {showStockSku && <th>SKU</th>}
                   <th>Ед.</th>
                   <th>Остаток</th>
-                  <th>Резерв</th>
+                  {showStockReserve && <th>Резерв</th>}
                   <th>Доступно</th>
                 </tr>
               </thead>
@@ -800,10 +811,10 @@ function App() {
                   <tr key={row.id} className={row.isLow ? "low" : ""}>
                     <td>{row.warehouseName}</td>
                     <td>{row.materialName}</td>
-                    <td>{row.materialSku || "-"}</td>
+                    {showStockSku && <td>{row.materialSku || "-"}</td>}
                     <td>{row.materialUnit}</td>
                     <td>{row.quantity}</td>
-                    <td>{row.reserved}</td>
+                    {showStockReserve && <td>{row.reserved}</td>}
                     <td>{row.available}</td>
                   </tr>
                 ))}
@@ -1053,6 +1064,7 @@ function App() {
             </label>
           </div>
           <div className="toolbar">
+            <input placeholder="Поиск заявки (номер/статус)" value={issueSearch} onChange={(e) => setIssueSearch(e.target.value)} />
             <select value={issueStatusFilter} onChange={(e) => setIssueStatusFilter((e.target.value || "") as "" | IssueStatus)}>
               <option value="">Все статусы заявок</option>
               <option value="DRAFT">DRAFT</option>
@@ -1062,6 +1074,18 @@ function App() {
               <option value="ISSUED">ISSUED</option>
             </select>
             <button onClick={() => void loadIssues()}>Обновить список</button>
+            <button
+              onClick={async () => {
+                if (!token || !selectedIssueIds.length) return;
+                for (const id of selectedIssueIds) {
+                  await fetch(`${API_URL}/api/issues/${id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } });
+                }
+                setSelectedIssueIds([]);
+                await loadIssues();
+              }}
+            >
+              Массово: на согласование
+            </button>
             <button
               onClick={async () => {
                 if (!token || !issueWarehouseId || !issueMaterialId) return;
@@ -1090,9 +1114,20 @@ function App() {
               <tr><th>Номер</th><th>Статус</th><th>Действия</th></tr>
             </thead>
             <tbody>
-              {issues.map((i) => (
+              {filteredIssues.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.number}</td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedIssueIds.includes(i.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedIssueIds((prev) => [...prev, i.id]);
+                        else setSelectedIssueIds((prev) => prev.filter((x) => x !== i.id));
+                      }}
+                    />
+                    {" "}
+                    {i.number}
+                  </td>
                   <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
                   <td>
                     <div className="toolbar">
