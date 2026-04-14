@@ -20,7 +20,8 @@ const createWaybillSchema = z.object({
 });
 
 const setStatusSchema = z.object({
-  status: z.nativeEnum(TransportWaybillStatus)
+  status: z.nativeEnum(TransportWaybillStatus),
+  comment: z.string().optional()
 });
 
 function deriveDates(status: TransportWaybillStatus) {
@@ -48,7 +49,8 @@ transportWaybillsRouter.get("/", async (req, res) => {
       fromWarehouse: true,
       operation: true,
       issueRequest: true,
-      items: { include: { material: true } }
+      items: { include: { material: true } },
+      events: { orderBy: { createdAt: "desc" }, take: 5 }
     },
     orderBy: { createdAt: "desc" },
     take: 200
@@ -79,6 +81,9 @@ transportWaybillsRouter.post("/", requirePermission("waybills.write"), async (re
         issueRequestId: parsed.data.issueRequestId,
         items: {
           create: parsed.data.items.map((x) => ({ materialId: x.materialId, quantity: x.quantity }))
+        },
+        events: {
+          create: [{ status: TransportWaybillStatus.DRAFT, comment: "Created" }]
         }
       },
       include: { items: true }
@@ -97,18 +102,34 @@ transportWaybillsRouter.patch("/:id/status", requirePermission("waybills.write")
   }
   const id = String(req.params.id);
   try {
-    const updated = await prisma.transportWaybill.update({
-      where: { id },
-      data: {
-        status: parsed.data.status,
-        ...deriveDates(parsed.data.status)
-      }
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.transportWaybill.update({
+        where: { id },
+        data: {
+          status: parsed.data.status,
+          ...deriveDates(parsed.data.status),
+          events: {
+            create: [{ status: parsed.data.status, comment: parsed.data.comment }]
+          }
+        }
+      });
+      return row;
     });
     return res.json(updated);
   } catch (error) {
     const mapped = handlePrismaError(error);
     return res.status(mapped.status).json(mapped.body);
   }
+});
+
+transportWaybillsRouter.get("/:id/events", async (req, res) => {
+  const id = String(req.params.id);
+  const events = await prisma.transportWaybillEvent.findMany({
+    where: { transportWaybillId: id },
+    orderBy: { createdAt: "desc" },
+    take: 200
+  });
+  return res.json(events);
 });
 
 transportWaybillsRouter.get("/:id/pdf", async (req, res) => {
@@ -129,9 +150,10 @@ transportWaybillsRouter.get("/:id/pdf", async (req, res) => {
   const doc = new PDFDocument({ size: "A4", margin: 28 });
   doc.pipe(res);
 
-  doc.fontSize(18).text(`Transport waybill ${waybill.number}`);
+  doc.fontSize(18).text(`Transport waybill ${waybill.number}`, { align: "center" });
+  doc.moveDown(0.4);
+  doc.fontSize(11).text(`Status: ${waybill.status}`, { align: "center" });
   doc.moveDown(0.6);
-  doc.fontSize(11).text(`Status: ${waybill.status}`);
   doc.text(`From warehouse: ${waybill.fromWarehouse?.name || "-"}`);
   doc.text(`To location: ${waybill.toLocation}`);
   doc.text(`Sender: ${waybill.sender || "-"}`);
@@ -141,13 +163,18 @@ transportWaybillsRouter.get("/:id/pdf", async (req, res) => {
   doc.text(`Route: ${waybill.route || "-"}`);
   doc.moveDown(1);
   doc.fontSize(12).text("Items");
-  doc.moveDown(0.4);
-
+  doc.moveDown(0.2);
+  doc.fontSize(10).text("No | Material | Unit | Qty");
+  doc.moveDown(0.2);
   waybill.items.forEach((item: (typeof waybill.items)[number], idx: number) => {
-    doc.fontSize(10).text(`${idx + 1}. ${item.material.name} (${item.material.unit}) - ${item.quantity}`);
+    doc.text(`${idx + 1} | ${item.material.name} | ${item.material.unit} | ${item.quantity}`);
   });
 
   doc.moveDown(2);
   doc.text(`Created at: ${waybill.createdAt.toISOString()}`);
+  doc.moveDown(2);
+  doc.text("Sender signature: ____________________");
+  doc.moveDown(1);
+  doc.text("Recipient signature: ____________________");
   doc.end();
 });

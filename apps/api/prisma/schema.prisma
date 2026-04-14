@@ -298,6 +298,7 @@ model TransportWaybill {
   operation          Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
   issueRequest       IssueRequest?         @relation(fields: [issueRequestId], references: [id], onDelete: SetNull)
   items              TransportWaybillItem[]
+  events             TransportWaybillEvent[]
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 }
@@ -309,4 +310,13 @@ model TransportWaybillItem {
   quantity           Decimal           @db.Decimal(14, 3)
   transportWaybill   TransportWaybill  @relation(fields: [transportWaybillId], references: [id], onDelete: Cascade)
   material           Material          @relation(fields: [materialId], references: [id], onDelete: Restrict)
+}
+
+model TransportWaybillEvent {
+  id                 String            @id @default(cuid())
+  transportWaybillId String
+  status             TransportWaybillStatus
+  comment            String?
+  createdAt          DateTime          @default(now())
+  transportWaybill   TransportWaybill  @relation(fields: [transportWaybillId], references: [id], onDelete: Cascade)
 }

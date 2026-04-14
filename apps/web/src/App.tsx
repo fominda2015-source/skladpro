@@ -62,6 +62,12 @@ type Waybill = {
   route?: string | null;
   createdAt: string;
 };
+type WaybillEvent = {
+  id: string;
+  status: WaybillStatus;
+  comment?: string | null;
+  createdAt: string;
+};
 type Project = { id: string; name: string; code?: string | null };
 type ProjectLimitSummaryItem = {
   materialId: string;
@@ -180,6 +186,8 @@ function App() {
   const [waybillDriver, setWaybillDriver] = useState("Иванов И.И.");
   const [waybillMaterialId, setWaybillMaterialId] = useState("");
   const [waybillQty, setWaybillQty] = useState(1);
+  const [selectedWaybillId, setSelectedWaybillId] = useState("");
+  const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
@@ -356,7 +364,20 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
-    setWaybills((await res.json()) as Waybill[]);
+    const data = (await res.json()) as Waybill[];
+    setWaybills(data);
+    if (data.length && !selectedWaybillId) {
+      setSelectedWaybillId(data[0].id);
+    }
+  }
+
+  async function loadWaybillEvents(waybillId: string) {
+    if (!token || !waybillId) return;
+    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/events`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setWaybillEvents((await res.json()) as WaybillEvent[]);
   }
 
   async function doToolAction(toolId: string, action: "ISSUE" | "RETURN" | "SEND_TO_REPAIR" | "MARK_DAMAGED" | "MARK_LOST" | "MARK_DISPUTED" | "WRITE_OFF") {
@@ -506,6 +527,12 @@ function App() {
       void loadWaybills();
     }
   }, [token, activeTab, waybillStatusFilter]);
+
+  useEffect(() => {
+    if (token && activeTab === "waybills" && selectedWaybillId) {
+      void loadWaybillEvents(selectedWaybillId);
+    }
+  }, [token, activeTab, selectedWaybillId]);
 
   useEffect(() => {
     if (token && activeTab === "tools" && selectedToolForEvents) {
@@ -1330,6 +1357,16 @@ function App() {
             <div className="card">
               <h3>Список ТН</h3>
               {waybillsMessage && <p className="muted">{waybillsMessage}</p>}
+              <div className="toolbar">
+                <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
+                  {waybills.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.number} ({w.status})
+                    </option>
+                  ))}
+                </select>
+                <button onClick={() => void loadWaybillEvents(selectedWaybillId)}>История статусов</button>
+              </div>
               <table>
                 <thead>
                   <tr>
@@ -1347,12 +1384,32 @@ function App() {
                       <td>{w.toLocation}</td>
                       <td>
                         <div className="toolbar">
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED" }) }); await loadWaybills(); }}>Сформировать</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED" }) }); await loadWaybills(); }}>Отгружено</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED" }) }); await loadWaybills(); }}>Получено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED", comment: "Formed in UI" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Сформировать</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Shipped to destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Received by destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED", comment: "Closed" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Закрыть</button>
                           <button onClick={async () => { if (!token) return; window.open(`${API_URL}/api/waybills/${w.id}/pdf`, "_blank"); }}>PDF</button>
                         </div>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <h3>История статусов</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th>Комментарий</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {waybillEvents.map((e) => (
+                    <tr key={e.id}>
+                      <td>{new Date(e.createdAt).toLocaleString()}</td>
+                      <td>{e.status}</td>
+                      <td>{e.comment || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
