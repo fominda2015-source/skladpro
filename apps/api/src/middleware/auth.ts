@@ -8,11 +8,11 @@ export type AuthedRequest = Request & { user?: JwtPayload };
 
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  const queryToken = typeof req.query.access_token === "string" ? req.query.access_token : undefined;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : queryToken;
+  if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
-
-  const token = authHeader.replace("Bearer ", "");
   try {
     const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
     req.user = payload;
