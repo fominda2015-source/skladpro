@@ -6,8 +6,11 @@ import { prisma } from "./lib/prisma.js";
 import { config } from "./config.js";
 import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
+import { auditRouter } from "./routes/audit.js";
+import { dashboardRouter } from "./routes/dashboard.js";
 import { documentsRouter } from "./routes/documents.js";
 import { issueRequestsRouter } from "./routes/issueRequests.js";
+import { materialMatchRouter } from "./routes/materialMatch.js";
 import { materialsRouter } from "./routes/materials.js";
 import { operationsRouter } from "./routes/operations.js";
 import { projectsRouter } from "./routes/projects.js";
@@ -64,6 +67,9 @@ app.use("/api/stocks", stocksRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/tools", toolsRouter);
 app.use("/api/waybills", transportWaybillsRouter);
+app.use("/api/material-match", materialMatchRouter);
+app.use("/api/audit", auditRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 async function start() {
   await seedBaseData();

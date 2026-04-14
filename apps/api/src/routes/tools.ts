@@ -3,9 +3,10 @@ import { Router } from "express";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createToolSchema = z.object({
   name: z.string().min(1),
@@ -125,7 +126,7 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req, res) => 
   }
 });
 
-toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req, res) => {
+toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = toolActionSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
@@ -135,6 +136,10 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req, re
   }
   const id = String(req.params.id);
   const nextStatus = nextStatusByAction[parsed.data.action];
+  const beforeTool = await prisma.tool.findUnique({ where: { id } });
+  if (!beforeTool) {
+    return res.status(404).json({ error: "Tool not found" });
+  }
   try {
     const updated = await prisma.$transaction(async (tx) => {
       const tool = await tx.tool.update({
@@ -150,6 +155,7 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req, re
           toolId: id,
           action: parsed.data.action,
           status: nextStatus,
+          actorId: req.user!.userId,
           comment:
             parsed.data.action === "ISSUE"
               ? `Responsible: ${parsed.data.responsible?.trim()}${parsed.data.comment ? `; ${parsed.data.comment}` : ""}`
@@ -157,6 +163,14 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req, re
         }
       });
       return tool;
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: `TOOL_${parsed.data.action}`,
+      entityType: "Tool",
+      entityId: id,
+      before: { status: beforeTool.status, responsible: beforeTool.responsible },
+      after: { status: updated.status, responsible: updated.responsible }
     });
     return res.json(updated);
   } catch (error) {

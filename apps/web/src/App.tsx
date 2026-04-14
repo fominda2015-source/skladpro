@@ -99,9 +99,52 @@ type DocumentFile = {
   filePath: string;
   mimeType?: string | null;
   size?: number | null;
+  checksumSha256?: string | null;
   replacedById?: string | null;
   isDeleted?: boolean;
   createdAt: string;
+};
+
+type DashboardSummary = {
+  role: string;
+  generatedAt: string;
+  warehouse: {
+    receiptsToday: number;
+    issuesOperationsToday: number;
+    issuesRequestsIssuedToday: number;
+    transfersToday: number;
+    pendingApprovals: number;
+    lowStockLines: number;
+    staleOpenIssues: number;
+    toolsInRepair: number;
+    waybillsOpen: number;
+    matchQueuePending: number;
+  };
+  project: { projectsCount: number; overspendLimitLines: number };
+  admin?: { activeUsers: number; auditEvents24h: number };
+};
+
+type MatchQueueRow = {
+  id: string;
+  rawName: string;
+  normalizedName: string;
+  status: string;
+  confidence: number | null;
+  suggestedMaterialId: string | null;
+  suggestedMaterial?: { id: string; name: string } | null;
+  resolvedMaterial?: { id: string; name: string } | null;
+};
+
+type AuditLogRow = {
+  id: string;
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  beforeData: unknown;
+  afterData: unknown;
+  createdAt: string;
+  user?: { email: string; fullName: string };
 };
 
 const API_URL = import.meta.env.VITE_API_URL || "http://194.156.117.250";
@@ -119,7 +162,22 @@ function App() {
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"stocks" | "admin" | "password" | "catalog" | "operations" | "issues" | "limits" | "approvals" | "documents" | "qr" | "tools" | "waybills">("stocks");
+  const [activeTab, setActiveTab] = useState<
+    | "stocks"
+    | "admin"
+    | "password"
+    | "catalog"
+    | "operations"
+    | "issues"
+    | "limits"
+    | "approvals"
+    | "documents"
+    | "qr"
+    | "tools"
+    | "waybills"
+    | "matching"
+    | "audit"
+  >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
@@ -231,12 +289,44 @@ function App() {
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill">("");
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [dashboardError, setDashboardError] = useState("");
+  const [matchQueue, setMatchQueue] = useState<MatchQueueRow[]>([]);
+  const [matchRaw, setMatchRaw] = useState("Арматура d12");
+  const [matchArticle, setMatchArticle] = useState("");
+  const [matchTryResult, setMatchTryResult] = useState<Record<string, unknown> | null>(null);
+  const [matchMessage, setMatchMessage] = useState("");
+  const [resolveMaterialId, setResolveMaterialId] = useState("");
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [auditMessage, setAuditMessage] = useState("");
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
   const canWriteCatalog = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("warehouses.write") || me?.permissions?.includes("materials.write")), [me]);
   const canWriteOperations = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("operations.write")), [me]);
   const canWriteLimits = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("limits.write")), [me]);
+  const canReadAudit = useMemo(
+    () => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("audit.read")),
+    [me]
+  );
+  const canDashboard = useMemo(
+    () =>
+      Boolean(
+        me?.permissions?.includes("*") ||
+          me?.permissions?.includes("dashboard.read") ||
+          me?.permissions?.includes("stocks.read")
+      ),
+    [me]
+  );
+  const canMaterialMatch = useMemo(
+    () =>
+      Boolean(
+        me?.permissions?.includes("*") ||
+          me?.permissions?.includes("materials.match") ||
+          me?.permissions?.includes("materials.write")
+      ),
+    [me]
+  );
 
   async function loadStocks(search = "") {
     if (!token) {
@@ -274,6 +364,113 @@ function App() {
     }
     const data = (await res.json()) as MeResponse;
     setMe(data);
+  }
+
+  async function loadDashboardSummary() {
+    if (!token || !canDashboard) {
+      return;
+    }
+    setDashboardError("");
+    try {
+      const r = await fetch(`${API_URL}/api/dashboard/summary`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}`);
+      }
+      setDashboard((await r.json()) as DashboardSummary);
+    } catch (e) {
+      setDashboard(null);
+      setDashboardError(String(e));
+    }
+  }
+
+  async function loadMatchQueue() {
+    if (!token) {
+      return;
+    }
+    const r = await fetch(`${API_URL}/api/material-match/queue`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.ok) {
+      setMatchQueue((await r.json()) as MatchQueueRow[]);
+    }
+  }
+
+  async function loadAuditLogs() {
+    if (!token || !canReadAudit) {
+      return;
+    }
+    setAuditMessage("");
+    const r = await fetch(`${API_URL}/api/audit?take=150`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.ok) {
+      setAuditLogs((await r.json()) as AuditLogRow[]);
+    } else {
+      setAuditMessage(`Не удалось загрузить аудит: HTTP ${r.status}`);
+    }
+  }
+
+  async function runMaterialMatch(enqueue: boolean) {
+    if (!token) {
+      return;
+    }
+    setMatchMessage("");
+    setMatchTryResult(null);
+    try {
+      const r = await fetch(`${API_URL}/api/material-match/try`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rawName: matchRaw.trim(),
+          article: matchArticle.trim() || undefined,
+          enqueue
+        })
+      });
+      const data = (await r.json()) as Record<string, unknown> & { error?: string };
+      if (!r.ok) {
+        throw new Error(data.error || `HTTP ${r.status}`);
+      }
+      setMatchTryResult(data);
+      if (enqueue) {
+        await loadMatchQueue();
+      }
+    } catch (e) {
+      setMatchMessage(String(e));
+    }
+  }
+
+  async function resolveMatchQueue(id: string) {
+    if (!token || !resolveMaterialId) {
+      setMatchMessage("Выберите материал для привязки");
+      return;
+    }
+    const r = await fetch(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/resolve`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ materialId: resolveMaterialId })
+    });
+    if (!r.ok) {
+      setMatchMessage(await r.text());
+    } else {
+      await loadMatchQueue();
+    }
+  }
+
+  async function rejectMatchQueue(id: string) {
+    if (!token) {
+      return;
+    }
+    const r = await fetch(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/reject`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      setMatchMessage(await r.text());
+    } else {
+      await loadMatchQueue();
+    }
   }
 
   async function loadAdminData() {
@@ -649,6 +846,29 @@ function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token || !canDashboard) {
+      setDashboard(null);
+      return;
+    }
+    void loadDashboardSummary();
+  }, [token, canDashboard, me]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "matching") {
+      return;
+    }
+    void loadCatalogData().catch(() => undefined);
+    void loadMatchQueue();
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "audit" || !canReadAudit) {
+      return;
+    }
+    void loadAuditLogs();
+  }, [token, activeTab, canReadAudit]);
+
+  useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
     }
@@ -811,6 +1031,7 @@ function App() {
         <h2 className="brand">SkladPro</h2>
         <button className="navBtn" onClick={() => setActiveTab("stocks")}>Остатки</button>
         <button className="navBtn" onClick={() => setActiveTab("catalog")}>Справочники</button>
+        <button className="navBtn" onClick={() => setActiveTab("matching")}>Сопоставление</button>
         <button className="navBtn" onClick={() => setActiveTab("operations")}>Операции</button>
         <button className="navBtn" onClick={() => setActiveTab("issues")}>Заявки</button>
         <button className="navBtn" onClick={() => setActiveTab("limits")}>Лимиты</button>
@@ -819,6 +1040,7 @@ function App() {
         <button className="navBtn" onClick={() => setActiveTab("waybills")}>Транспортные ТН</button>
         <button className="navBtn" onClick={() => setActiveTab("qr")}>QR</button>
         <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструмент</button>
+        {canReadAudit && <button className="navBtn" onClick={() => setActiveTab("audit")}>Аудит</button>}
         {canManageUsers && <button className="navBtn" onClick={() => setActiveTab("admin")}>Доступы</button>}
         <button className="navBtn" onClick={() => setActiveTab("password")}>Сменить пароль</button>
         <button className="navBtn danger" onClick={onLogout}>Выйти</button>
@@ -826,7 +1048,35 @@ function App() {
       <section className="canvas">
         <header className="pageHeader">
           <div className="pageTitleBlock">
-            <h1>{activeTab === "stocks" ? "Остатки" : activeTab === "catalog" ? "Справочники" : activeTab === "operations" ? "Операции прихода/расхода" : activeTab === "issues" ? "Заявки на выдачу" : activeTab === "limits" ? "Лимиты проекта" : activeTab === "approvals" ? "Очередь согласований" : activeTab === "documents" ? "Документы" : activeTab === "waybills" ? "Транспортные накладные" : activeTab === "qr" ? "QR-сканирование" : activeTab === "tools" ? "Инструмент и QR" : activeTab === "admin" ? "Управление доступами" : "Смена пароля"}</h1>
+            <h1>
+              {activeTab === "stocks"
+                ? "Остатки"
+                : activeTab === "catalog"
+                  ? "Справочники"
+                  : activeTab === "matching"
+                    ? "Сопоставление номенклатуры"
+                    : activeTab === "audit"
+                      ? "Аудит действий"
+                      : activeTab === "operations"
+                        ? "Операции прихода/расхода"
+                        : activeTab === "issues"
+                          ? "Заявки на выдачу"
+                          : activeTab === "limits"
+                            ? "Лимиты проекта"
+                            : activeTab === "approvals"
+                              ? "Очередь согласований"
+                              : activeTab === "documents"
+                                ? "Документы"
+                                : activeTab === "waybills"
+                                  ? "Транспортные накладные"
+                                  : activeTab === "qr"
+                                    ? "QR-сканирование"
+                                    : activeTab === "tools"
+                                      ? "Инструмент и QR"
+                                      : activeTab === "admin"
+                                        ? "Управление доступами"
+                                        : "Смена пароля"}
+            </h1>
             {me && <p className="muted">{me.fullName} ({me.role})</p>}
           </div>
           <div className="toolbar">
@@ -835,12 +1085,47 @@ function App() {
             <button onClick={() => setActiveTab("qr")}>QR</button>
           </div>
         </header>
+        {dashboard && (
+          <div className="card dashboardStrip">
+            <div className="toolbar" style={{ flexWrap: "wrap", gap: 12 }}>
+              <span>
+                Приходов сегодня: <strong>{dashboard.warehouse.receiptsToday}</strong>
+              </span>
+              <span>
+                Расходов (операций) сегодня: <strong>{dashboard.warehouse.issuesOperationsToday}</strong>
+              </span>
+              <span>
+                Выдано заявок сегодня: <strong>{dashboard.warehouse.issuesRequestsIssuedToday}</strong>
+              </span>
+              <span>
+                На согласовании: <strong>{dashboard.warehouse.pendingApprovals}</strong>
+              </span>
+              <span>
+                Низкий остаток (&lt;5): <strong>{dashboard.warehouse.lowStockLines}</strong>
+              </span>
+              <span>
+                Инструмент в ремонте: <strong>{dashboard.warehouse.toolsInRepair}</strong>
+              </span>
+              <span>
+                Очередь сопоставления: <strong>{dashboard.warehouse.matchQueuePending}</strong>
+              </span>
+              {dashboard.admin && (
+                <span>
+                  Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
+                  <strong>{dashboard.admin.auditEvents24h}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        {dashboardError && <p className="error">{dashboardError}</p>}
         {activeTab === "stocks" && (
           <div className="kpiRow">
             <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Позиций</span><strong>{stocks.length}</strong></button>
             <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("stocks"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
-            <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{approvalQueue.length}</strong></button>
+            <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
             <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Транспортные ТН</span><strong>{waybills.length}</strong></button>
+            <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
           </div>
         )}
         <p className="muted">Если в названиях видишь `????`, это старые тестовые данные с поврежденной кодировкой.</p>
@@ -910,6 +1195,122 @@ function App() {
               <button onClick={() => setActiveTab("tools")}>Инструмент / QR</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === "matching" && (
+        <div className="card">
+          <h2>Сопоставление с канонической номенклатурой</h2>
+          <p className="muted">
+            Проверка строки из УПД/накладной: точное имя, SKU, синонимы и нечёткое совпадение. При низкой уверенности
+            запись попадает в очередь (ТЗ: material_match_queue).
+          </p>
+          <div className="form grid2">
+            <label>
+              Сырое название
+              <input value={matchRaw} onChange={(e) => setMatchRaw(e.target.value)} />
+            </label>
+            <label>
+              Артикул / SKU (необязательно)
+              <input value={matchArticle} onChange={(e) => setMatchArticle(e.target.value)} />
+            </label>
+          </div>
+          <div className="toolbar">
+            <button type="button" onClick={() => void runMaterialMatch(false)}>
+              Проверить совпадение
+            </button>
+            <button type="button" onClick={() => void runMaterialMatch(true)}>
+              В очередь сопоставления
+            </button>
+          </div>
+          {matchMessage && <p className="error">{matchMessage}</p>}
+          {matchTryResult && (
+            <pre className="plainList" style={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(matchTryResult, null, 2)}
+            </pre>
+          )}
+
+          <h3>Очередь (ожидают решения)</h3>
+          <div className="toolbar">
+            <label>
+              Материал для привязки
+              <select value={resolveMaterialId} onChange={(e) => setResolveMaterialId(e.target.value)}>
+                <option value="">— выберите —</option>
+                {materials.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>Уверенность</th>
+                <th>Подсказка</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {matchQueue.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.rawName}</td>
+                  <td>{row.confidence != null ? row.confidence.toFixed(2) : "—"}</td>
+                  <td>{row.suggestedMaterial?.name || "—"}</td>
+                  <td>
+                    <button type="button" disabled={!canMaterialMatch} onClick={() => void resolveMatchQueue(row.id)}>
+                      Привязать
+                    </button>{" "}
+                    <button type="button" disabled={!canMaterialMatch} onClick={() => void rejectMatchQueue(row.id)}>
+                      Отклонить
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!matchQueue.length && <p className="muted">Очередь пуста.</p>}
+        </div>
+      )}
+
+      {activeTab === "audit" && canReadAudit && (
+        <div className="card">
+          <h2>Журнал аудита</h2>
+          {auditMessage && <p className="error">{auditMessage}</p>}
+          <table>
+            <thead>
+              <tr>
+                <th>Время</th>
+                <th>Пользователь</th>
+                <th>Действие</th>
+                <th>Сущность</th>
+                <th>До / После</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditLogs.map((row) => (
+                <tr key={row.id}>
+                  <td>{new Date(row.createdAt).toLocaleString()}</td>
+                  <td>{row.user?.fullName || row.userId}</td>
+                  <td>{row.action}</td>
+                  <td>
+                    {row.entityType} / {row.entityId}
+                  </td>
+                  <td>
+                    <details>
+                      <summary>JSON</summary>
+                      <pre className="plainList" style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
+                        {JSON.stringify({ before: row.beforeData, after: row.afterData }, null, 2)}
+                      </pre>
+                    </details>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!auditLogs.length && <p className="muted">Записей пока нет.</p>}
         </div>
       )}
 

@@ -273,6 +273,10 @@ tr.low {
   font-size: 24px;
 }
 
+.dashboardStrip {
+  margin: 0 0 12px;
+}
+
 .actionBar {
   position: sticky;
   bottom: 8px;

@@ -11,5 +11,10 @@ export function normalizePermissions(value: unknown): string[] {
 }
 
 export function hasPermission(permissions: string[], needed: string) {
-  return permissions.includes("*") || permissions.includes(needed);
+  if (permissions.includes("*")) return true;
+  if (permissions.includes(needed)) return true;
+  if (needed === "documents.upload" && permissions.includes("documents.write")) return true;
+  if (needed === "dashboard.read" && permissions.includes("stocks.read")) return true;
+  if (needed === "materials.match" && permissions.includes("materials.write")) return true;
+  return false;
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { config } from "../config.js";
+import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -63,6 +64,22 @@ documentsRouter.post(
       return res.status(400).json({ error: "entityType and entityId are required" });
     }
 
+    const absPath = path.join(uploadDirAbs, file.filename);
+    const checksumSha256 = await sha256File(absPath);
+    const dup = await prisma.documentFile.findFirst({
+      where: {
+        entityType,
+        entityId,
+        checksumSha256,
+        isDeleted: false
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (dup) {
+      fs.unlink(absPath, () => undefined);
+      return res.status(200).json({ ...dup, deduplicated: true });
+    }
+
     const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
     const created = await prisma.documentFile.create({
       data: {
@@ -75,6 +92,7 @@ documentsRouter.post(
         filePath,
         mimeType: file.mimetype,
         size: file.size,
+        checksumSha256,
         createdBy: req.user!.userId
       }
     });
@@ -104,6 +122,8 @@ documentsRouter.post(
     });
     const groupId = base.groupId || crypto.randomUUID();
 
+    const absPath = path.join(uploadDirAbs, file.filename);
+    const checksumSha256 = await sha256File(absPath);
     const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
     const created = await prisma.documentFile.create({
       data: {
@@ -116,6 +136,7 @@ documentsRouter.post(
         filePath,
         mimeType: file.mimetype,
         size: file.size,
+        checksumSha256,
         createdBy: req.user!.userId
       }
     });

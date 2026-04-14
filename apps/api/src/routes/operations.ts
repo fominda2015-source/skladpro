@@ -1,8 +1,9 @@
 import { OperationType } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createOperationSchema = z.object({
   type: z.enum(["INCOME", "EXPENSE"]),
@@ -45,7 +46,7 @@ operationsRouter.get("/", async (req, res) => {
   return res.json(rows);
 });
 
-operationsRouter.post("/", requirePermission("operations.write"), async (req, res) => {
+operationsRouter.post("/", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
   const parsed = createOperationSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
@@ -109,6 +110,19 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req, re
       }
 
       return operation;
+    });
+
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "OPERATION_CREATE",
+      entityType: "Operation",
+      entityId: created.id,
+      after: {
+        type: created.type,
+        warehouseId: created.warehouseId,
+        projectId: created.projectId,
+        items: created.items?.map((i) => ({ materialId: i.materialId, quantity: i.quantity }))
+      }
     });
 
     return res.status(201).json(created);

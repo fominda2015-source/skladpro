@@ -1,6 +1,7 @@
 import { IssueRequestStatus, OperationType } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
+import { recordAudit } from "../lib/audit.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -114,42 +115,67 @@ issueRequestsRouter.patch(
 
 issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  const prev = await prisma.issueRequest.findUnique({ where: { id } });
+  if (!prev) {
+    return res.status(404).json({ error: "Issue request not found" });
+  }
   const updated = await prisma.issueRequest.update({
     where: { id },
     data: { status: IssueRequestStatus.APPROVED, approvedById: req.user!.userId }
+  });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "ISSUE_REQUEST_APPROVE",
+    entityType: "IssueRequest",
+    entityId: id,
+    before: { status: prev.status, approvedById: prev.approvedById },
+    after: { status: updated.status, approvedById: updated.approvedById }
   });
   return res.json(updated);
 });
 
 issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  const prev = await prisma.issueRequest.findUnique({ where: { id } });
+  if (!prev) {
+    return res.status(404).json({ error: "Issue request not found" });
+  }
   const updated = await prisma.issueRequest.update({
     where: { id },
     data: { status: IssueRequestStatus.REJECTED, approvedById: req.user!.userId }
   });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "ISSUE_REQUEST_REJECT",
+    entityType: "IssueRequest",
+    entityId: id,
+    before: { status: prev.status },
+    after: { status: updated.status }
+  });
   return res.json(updated);
 });
 
-issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), async (req, res) => {
+issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
-  const issue = await prisma.issueRequest.findUnique({
+  const issueRow = await prisma.issueRequest.findUnique({
     where: { id },
     include: { items: true }
   });
-  if (!issue) {
+  if (!issueRow) {
     return res.status(404).json({ error: "Issue request not found" });
   }
-  if (issue.status !== IssueRequestStatus.APPROVED && issue.status !== IssueRequestStatus.DRAFT) {
-    return res.status(409).json({ error: `Wrong status: ${issue.status}` });
+  if (issueRow.status !== IssueRequestStatus.APPROVED && issueRow.status !== IssueRequestStatus.DRAFT) {
+    return res.status(409).json({ error: `Wrong status: ${issueRow.status}` });
   }
 
   try {
+    const prevStatus = issueRow.status;
     const result = await prisma.$transaction(async (tx) => {
-      for (const item of issue.items) {
+      for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
           where: {
             warehouseId_materialId: {
-              warehouseId: issue.warehouseId,
+              warehouseId: issueRow.warehouseId,
               materialId: item.materialId
             }
           }
@@ -159,21 +185,21 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         }
       }
 
-      if (issue.projectId) {
+      if (issueRow.projectId) {
         const latestLimit = await tx.projectLimit.findFirst({
-          where: { projectId: issue.projectId },
+          where: { projectId: issueRow.projectId },
           include: { items: true },
           orderBy: { version: "desc" }
         });
 
         if (latestLimit) {
           const map = new Map(latestLimit.items.map((x) => [x.materialId, x]));
-          const exceededNow = issue.items.some((item) => {
+          const exceededNow = issueRow.items.some((item) => {
             const lim = map.get(item.materialId);
             if (!lim) return false;
             return Number(lim.issuedQty) + Number(lim.reservedQty) + Number(item.quantity) > Number(lim.plannedQty);
           });
-          if (exceededNow && issue.status !== IssueRequestStatus.APPROVED) {
+          if (exceededNow && issueRow.status !== IssueRequestStatus.APPROVED) {
             throw new Error("LIMIT_EXCEEDED_NEEDS_APPROVAL");
           }
         }
@@ -182,13 +208,13 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       const operation = await tx.operation.create({
         data: {
           type: OperationType.EXPENSE,
-          warehouseId: issue.warehouseId,
-          projectId: issue.projectId ?? undefined,
-          documentNumber: issue.number,
+          warehouseId: issueRow.warehouseId,
+          projectId: issueRow.projectId ?? undefined,
+          documentNumber: issueRow.number,
           status: "POSTED",
-          issueRequestId: issue.id,
+          issueRequestId: issueRow.id,
           items: {
-            create: issue.items.map((item) => ({
+            create: issueRow.items.map((item) => ({
               materialId: item.materialId,
               quantity: item.quantity
             }))
@@ -196,20 +222,20 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         }
       });
 
-      for (const item of issue.items) {
+      for (const item of issueRow.items) {
         await tx.stock.update({
           where: {
             warehouseId_materialId: {
-              warehouseId: issue.warehouseId,
+              warehouseId: issueRow.warehouseId,
               materialId: item.materialId
             }
           },
           data: { quantity: { decrement: item.quantity } }
         });
 
-        if (issue.projectId) {
+        if (issueRow.projectId) {
           const latestLimit = await tx.projectLimit.findFirst({
-            where: { projectId: issue.projectId },
+            where: { projectId: issueRow.projectId },
             orderBy: { version: "desc" }
           });
           if (latestLimit) {
@@ -222,14 +248,24 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       }
 
       const updatedIssue = await tx.issueRequest.update({
-        where: { id: issue.id },
+        where: { id: issueRow.id },
         data: { status: IssueRequestStatus.ISSUED }
       });
 
       return { operation, issue: updatedIssue };
     });
 
-    return res.json(result);
+    const { operation, issue } = result;
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "ISSUE_REQUEST_ISSUE",
+      entityType: "IssueRequest",
+      entityId: id,
+      before: { status: prevStatus as IssueRequestStatus },
+      after: { status: issue.status, operationId: operation.id }
+    });
+
+    return res.json({ operation, issue });
   } catch (error) {
     if (error instanceof Error && error.message === "LIMIT_EXCEEDED_NEEDS_APPROVAL") {
       return res.status(409).json({ error: "Limit exceeded. Send request for approval." });

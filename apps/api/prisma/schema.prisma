@@ -44,6 +44,12 @@ enum TransportWaybillStatus {
   CLOSED
 }
 
+enum MaterialMatchQueueStatus {
+  PENDING
+  RESOLVED
+  REJECTED
+}
+
 model User {
   id             String      @id @default(cuid())
   email          String      @unique
@@ -53,6 +59,7 @@ model User {
   roleId         String
   role           Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
   actionLogs     ActionLog[]
+  auditLogs      AuditLog[]
   createdIssues  IssueRequest[] @relation("IssueCreatedBy")
   approvedIssues IssueRequest[] @relation("IssueApprovedBy")
   createdAt      DateTime    @default(now())
@@ -89,6 +96,8 @@ model Material {
   unit            String
   category        String?
   synonyms        MaterialSynonym[]
+  matchSuggestions MaterialMatchQueue[] @relation("MatchSuggestion")
+  matchResolved    MaterialMatchQueue[] @relation("MatchResolved")
   stocks          Stock[]
   operationItems  OperationItem[]
   limitItems      ProjectLimitItem[]
@@ -218,12 +227,54 @@ model DocumentFile {
   filePath   String
   mimeType   String?
   size       Int?
+  checksumSha256 String?
   createdBy  String
   replacedById String?
   isDeleted  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
   @@index([groupId, version])
+  @@index([entityType, entityId])
+  @@index([checksumSha256])
+}
+
+model MaterialMatchQueue {
+  id                  String                   @id @default(cuid())
+  rawName             String
+  normalizedName      String
+  unit                String?
+  article             String?
+  status              MaterialMatchQueueStatus @default(PENDING)
+  confidence          Float?
+  suggestedMaterialId String?
+  resolvedMaterialId  String?
+  source              String?
+  createdById         String?
+  suggestedMaterial   Material?                @relation("MatchSuggestion", fields: [suggestedMaterialId], references: [id], onDelete: SetNull)
+  resolvedMaterial    Material?                @relation("MatchResolved", fields: [resolvedMaterialId], references: [id], onDelete: SetNull)
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  @@index([status])
+  @@index([normalizedName])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String
+  beforeData Json?
+  afterData  Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Tool {
