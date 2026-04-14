@@ -209,6 +209,8 @@ model ActionLog {
 
 model DocumentFile {
   id         String   @id @default(cuid())
+  groupId    String
+  version    Int      @default(1)
   entityType String
   entityId   String
   type       String
@@ -217,7 +219,11 @@ model DocumentFile {
   mimeType   String?
   size       Int?
   createdBy  String
+  replacedById String?
+  isDeleted  Boolean  @default(false)
   createdAt  DateTime @default(now())
+
+  @@index([groupId, version])
 }
 
 model Tool {

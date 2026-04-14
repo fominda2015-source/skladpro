@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { Router, type Request } from "express";
 import multer from "multer";
@@ -28,13 +29,17 @@ documentsRouter.use(requirePermission("documents.read"));
 documentsRouter.get("/", async (req, res) => {
   const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
+  const type = typeof req.query.type === "string" ? req.query.type : undefined;
+  const includeDeleted = req.query.includeDeleted === "1";
 
   const rows = await prisma.documentFile.findMany({
     where: {
       ...(entityType ? { entityType } : {}),
-      ...(entityId ? { entityId } : {})
+      ...(entityId ? { entityId } : {}),
+      ...(type ? { type } : {}),
+      ...(includeDeleted ? {} : { isDeleted: false })
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ groupId: "desc" }, { version: "desc" }],
     take: 200
   });
   return res.json(rows);
@@ -61,6 +66,8 @@ documentsRouter.post(
     const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
     const created = await prisma.documentFile.create({
       data: {
+        groupId: crypto.randomUUID(),
+        version: 1,
         entityType,
         entityId,
         type,
@@ -75,3 +82,59 @@ documentsRouter.post(
     return res.status(201).json(created);
   }
 );
+
+documentsRouter.post(
+  "/:id/replace",
+  requirePermission("documents.write"),
+  upload.single("file"),
+  async (req: AuthedRequest, res) => {
+    const baseId = String(req.params.id);
+    const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+    if (!file) {
+      return res.status(400).json({ error: "file is required" });
+    }
+
+    const base = await prisma.documentFile.findUnique({ where: { id: baseId } });
+    if (!base || base.isDeleted) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+    const maxVersion = await prisma.documentFile.findFirst({
+      where: { groupId: base.groupId },
+      orderBy: { version: "desc" }
+    });
+
+    const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
+    const created = await prisma.documentFile.create({
+      data: {
+        groupId: base.groupId,
+        version: (maxVersion?.version || 1) + 1,
+        entityType: base.entityType,
+        entityId: base.entityId,
+        type: base.type,
+        fileName: file.originalname,
+        filePath,
+        mimeType: file.mimetype,
+        size: file.size,
+        createdBy: req.user!.userId
+      }
+    });
+    await prisma.documentFile.update({
+      where: { id: base.id },
+      data: { replacedById: created.id }
+    });
+    return res.status(201).json(created);
+  }
+);
+
+documentsRouter.delete("/:id", requirePermission("documents.write"), async (req, res) => {
+  const id = String(req.params.id);
+  const row = await prisma.documentFile.findUnique({ where: { id } });
+  if (!row) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+  const updated = await prisma.documentFile.update({
+    where: { id },
+    data: { isDeleted: true }
+  });
+  return res.json(updated);
+});

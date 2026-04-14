@@ -88,6 +88,8 @@ type ProjectLimitSummary = {
 };
 type DocumentFile = {
   id: string;
+  groupId: string;
+  version: number;
   entityType: string;
   entityId: string;
   type: string;
@@ -95,6 +97,8 @@ type DocumentFile = {
   filePath: string;
   mimeType?: string | null;
   size?: number | null;
+  replacedById?: string | null;
+  isDeleted?: boolean;
   createdAt: string;
 };
 
@@ -158,6 +162,8 @@ function App() {
   const [docEntityType, setDocEntityType] = useState<"operation" | "issue">("issue");
   const [docEntityId, setDocEntityId] = useState("");
   const [docType, setDocType] = useState("photo");
+  const [docTypeFilter, setDocTypeFilter] = useState("");
+  const [docPreviewUrl, setDocPreviewUrl] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [qrCode, setQrCode] = useState("");
   const [qrResult, setQrResult] = useState<QrResult | null>(null);
@@ -420,14 +426,57 @@ function App() {
 
   async function loadDocuments() {
     if (!token) return;
-    const query = docEntityId
-      ? `?entityType=${encodeURIComponent(docEntityType)}&entityId=${encodeURIComponent(docEntityId)}`
-      : "";
+    const parts = [
+      docEntityId ? `entityType=${encodeURIComponent(docEntityType)}` : "",
+      docEntityId ? `entityId=${encodeURIComponent(docEntityId)}` : "",
+      docTypeFilter ? `type=${encodeURIComponent(docTypeFilter)}` : ""
+    ].filter(Boolean);
+    const query = parts.length ? `?${parts.join("&")}` : "";
     const res = await fetch(`${API_URL}/api/documents${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
     setDocuments((await res.json()) as DocumentFile[]);
+  }
+
+  async function replaceDocument(documentId: string) {
+    if (!token) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/api/documents/${documentId}/replace`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      if (!res.ok) {
+        setDocumentsMessage("Не удалось заменить файл");
+        return;
+      }
+      setDocumentsMessage("Новая версия документа загружена");
+      await loadDocuments();
+    };
+    input.click();
+  }
+
+  async function deleteDocument(documentId: string) {
+    if (!token) return;
+    const ok = window.confirm("Удалить документ? Он пропадет из активного списка.");
+    if (!ok) return;
+    const res = await fetch(`${API_URL}/api/documents/${documentId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось удалить документ");
+      return;
+    }
+    setDocumentsMessage("Документ удален");
+    await loadDocuments();
   }
 
   function openDocumentsForEntity(entityType: "issue" | "operation", entityId: string) {
@@ -519,7 +568,7 @@ function App() {
       void loadOperations();
       void loadDocuments();
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, docTypeFilter]);
 
   useEffect(() => {
     if (token && activeTab === "qr") {
@@ -1223,6 +1272,14 @@ function App() {
             </label>
           </div>
           <div className="toolbar">
+            <select value={docTypeFilter} onChange={(e) => setDocTypeFilter(e.target.value)}>
+              <option value="">Все типы</option>
+              <option value="upd">УПД</option>
+              <option value="tn">ТН</option>
+              <option value="photo">Фото</option>
+              <option value="act">Акт</option>
+              <option value="other">Прочее</option>
+            </select>
             <button
               onClick={async () => {
                 if (!token || !docEntityId || !docFile) {
@@ -1254,24 +1311,40 @@ function App() {
             <button onClick={() => void loadDocuments()}>Обновить список</button>
           </div>
           {documentsMessage && <p className="muted">{documentsMessage}</p>}
+          {docPreviewUrl && (
+            <div className="card">
+              <h3>Предпросмотр</h3>
+              <iframe src={docPreviewUrl} title="document-preview" style={{ width: "100%", minHeight: 360, border: "1px solid #d8dee9", borderRadius: 8 }} />
+            </div>
+          )}
           <table>
             <thead>
               <tr>
                 <th>Дата</th>
+                <th>Версия</th>
                 <th>Сущность</th>
                 <th>Вид</th>
                 <th>Файл</th>
                 <th>Размер</th>
+                <th>Действия</th>
               </tr>
             </thead>
             <tbody>
               {documents.map((d) => (
                 <tr key={d.id}>
                   <td>{new Date(d.createdAt).toLocaleString()}</td>
+                  <td>v{d.version}</td>
                   <td>{d.entityType}:{d.entityId}</td>
                   <td>{d.type}</td>
                   <td><a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">{d.fileName}</a></td>
                   <td>{d.size || 0}</td>
+                  <td>
+                    <div className="toolbar">
+                      <button onClick={() => setDocPreviewUrl(`${API_URL}/${d.filePath}`)}>Превью</button>
+                      <button onClick={() => void replaceDocument(d.id)}>Новая версия</button>
+                      <button onClick={() => void deleteDocument(d.id)}>Удалить</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
