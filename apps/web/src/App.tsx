@@ -279,6 +279,7 @@ function App() {
     | "settings"
     | "profile"
     | "team"
+    | "inbox"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -438,6 +439,8 @@ function App() {
   const [teamTaskProjectId, setTeamTaskProjectId] = useState("");
   const [teamTaskWarehouseId, setTeamTaskWarehouseId] = useState("");
   const [teamTaskDueAt, setTeamTaskDueAt] = useState("");
+  const [myTasks, setMyTasks] = useState<TeamTask[]>([]);
+  const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue">("all");
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -537,6 +540,7 @@ function App() {
       DONE: ["VERIFIED"],
       VERIFIED: []
     })[status] ?? [];
+  const isTaskClosed = (status: string) => status === "DONE" || status === "VERIFIED";
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -555,6 +559,7 @@ function App() {
     qr: "QR-сканирование",
     tools: "Инструменты",
     integrations: "Интеграции и уведомления",
+    inbox: "Центр входящих",
     team: "Команда и задачи",
     profile: "Мой профиль",
     settings: "Настройки интерфейса",
@@ -576,6 +581,7 @@ function App() {
     tools: "Сервис",
     qr: "Сервис",
     integrations: "Сервис",
+    inbox: "Контроль",
     admin: "Администрирование",
     profile: "Аккаунт",
     settings: "Аккаунт",
@@ -813,6 +819,15 @@ function App() {
     });
     if (!r.ok) return;
     setNotifications((await r.json()) as NotificationRow[]);
+  }
+
+  async function loadMyTasks() {
+    if (!token || !canReadTeam) return;
+    const r = await fetch(`${API_URL}/api/team/tasks?mineOnly=1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) return;
+    setMyTasks((await r.json()) as TeamTask[]);
   }
 
   async function markNotificationsRead(ids: string[]) {
@@ -1512,6 +1527,12 @@ function App() {
   }, [token, activeTab, canReadTeam]);
 
   useEffect(() => {
+    if (!token || activeTab !== "inbox") return;
+    if (canReadIntegrations) void loadNotifications();
+    if (canReadTeam) void loadMyTasks();
+  }, [token, activeTab, canReadIntegrations, canReadTeam]);
+
+  useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
@@ -1537,6 +1558,7 @@ function App() {
     if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
     if (canReadIntegrations) visibleTabs.add("integrations");
+    if (canReadIntegrations || canReadTeam) visibleTabs.add("inbox");
     if (canReadTeam) visibleTabs.add("team");
     if (canReadAudit) visibleTabs.add("audit");
     if (canManageUsers) visibleTabs.add("admin");
@@ -1695,6 +1717,7 @@ function App() {
     setStockMovements([]);
     setIntegrationJobs([]);
     setNotifications([]);
+    setMyTasks([]);
     setUsers([]);
     setRoles([]);
     setMe(null);
@@ -1748,6 +1771,7 @@ function App() {
         {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
         {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
+        {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
 
@@ -1777,7 +1801,7 @@ function App() {
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("stocks"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
-            {canReadIntegrations && <button className="topIconBtn" onClick={() => setActiveTab("integrations")}>Уведомления</button>}
+            {(canReadIntegrations || canReadTeam) && <button className="topIconBtn" onClick={() => setActiveTab("inbox")}>Входящие</button>}
             <button className="topIconBtn" onClick={() => setActiveTab("profile")}>Профиль</button>
             <button className="topIconBtn" onClick={() => setActiveTab("settings")}>Настройки</button>
             {me ? (
@@ -2204,6 +2228,120 @@ function App() {
             </tbody>
           </table>
           {!auditLogs.length && <p className="muted">Записей пока нет.</p>}
+        </div>
+      )}
+
+      {activeTab === "inbox" && (canReadIntegrations || canReadTeam) && (
+        <div className="card">
+          <h2>Центр входящих</h2>
+          <div className="toolbar">
+            <select value={inboxFilter} onChange={(e) => setInboxFilter(e.target.value as typeof inboxFilter)}>
+              <option value="all">Все входящие</option>
+              <option value="new">Новые</option>
+              <option value="critical">Критичные</option>
+              <option value="overdue">Просроченные</option>
+              <option value="mine">Мои задачи</option>
+            </select>
+            {canReadIntegrations && <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>}
+            {canReadTeam && <button type="button" onClick={() => void loadMyTasks()}>Обновить задачи</button>}
+            {canReadIntegrations && (
+              <button
+                type="button"
+                onClick={() => void markNotificationsRead(notifications.filter((n) => !n.isRead).map((n) => n.id))}
+              >
+                Прочитать все уведомления
+              </button>
+            )}
+          </div>
+
+          {canReadIntegrations && inboxFilter !== "mine" && (
+            <>
+              <h3>Уведомления</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Уровень</th>
+                    <th>Тема</th>
+                    <th>Статус</th>
+                    <th>Действие</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notifications
+                    .filter((n) => {
+                      if (inboxFilter === "new") return !n.isRead;
+                      if (inboxFilter === "critical") return n.level === "ERROR" || n.level === "WARNING";
+                      return true;
+                    })
+                    .map((n) => (
+                      <tr key={n.id}>
+                        <td>{new Date(n.createdAt).toLocaleString()}</td>
+                        <td>{n.level === "ERROR" ? "Ошибка" : n.level === "WARNING" ? "Предупреждение" : "Инфо"}</td>
+                        <td>{n.title}</td>
+                        <td>{n.isRead ? "Прочитано" : "Новое"}</td>
+                        <td>
+                          {!n.isRead ? (
+                            <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {canReadTeam && (
+            <>
+              <h3 style={{ marginTop: 14 }}>Мои задачи</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Задача</th>
+                    <th>Срок</th>
+                    <th>Статус</th>
+                    <th>Следующий шаг</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myTasks
+                    .filter((t) => {
+                      const overdue = Boolean(t.dueAt && new Date(t.dueAt) < new Date() && !isTaskClosed(t.status));
+                      if (inboxFilter === "new") return t.status === "OPEN";
+                      if (inboxFilter === "critical") return overdue;
+                      if (inboxFilter === "overdue") return overdue;
+                      return true;
+                    })
+                    .map((t) => (
+                      <tr key={t.id}>
+                        <td>
+                          {t.title}
+                          {t.description ? <p className="muted">{t.description}</p> : null}
+                        </td>
+                        <td>{t.dueAt ? new Date(t.dueAt).toLocaleString() : "—"}</td>
+                        <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
+                        <td>
+                          <div className="toolbar">
+                            {teamTaskNextStatuses(t.status).map((next) => (
+                              <button
+                                key={`${t.id}-inbox-${next}`}
+                                type="button"
+                                onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
+                              >
+                                {teamTaskStatusLabel(next)}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
 
