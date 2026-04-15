@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
@@ -16,7 +16,9 @@ type LoginResponse = {
 };
 type StockRow = {
   id: string;
+  warehouseId: string;
   warehouseName: string;
+  materialId: string;
   materialName: string;
   materialSku: string | null;
   materialUnit: string;
@@ -107,6 +109,23 @@ type OperationRow = {
   type: "INCOME" | "EXPENSE";
   documentNumber?: string | null;
   operationDate?: string;
+};
+type ReceiptLine = {
+  id: string;
+  mode: "existing" | "new";
+  materialId: string;
+  quantity: number;
+  name: string;
+  sku: string;
+  unit: string;
+  category: string;
+};
+type ToolReceiptLine = {
+  id: string;
+  name: string;
+  inventoryNumber: string;
+  serialNumber: string;
+  note: string;
 };
 type QrResult =
   | { kind: "tool"; tool: ToolItem };
@@ -304,6 +323,7 @@ function App() {
   const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
+  const [expandedStockRowId, setExpandedStockRowId] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
     | "stocks"
@@ -370,17 +390,17 @@ function App() {
   const [opsMessage, setOpsMessage] = useState("");
   const [warehouseName, setWarehouseName] = useState("Главный склад");
   const [warehouseAddress, setWarehouseAddress] = useState("Москва");
-  const [materialName, setMaterialName] = useState("Арматура 10 мм");
-  const [materialSku, setMaterialSku] = useState("");
-  const [materialUnit, setMaterialUnit] = useState("м");
-  const [materialCategory, setMaterialCategory] = useState("Металл");
-  const [opType, setOpType] = useState<"INCOME" | "EXPENSE">("INCOME");
   const [opWarehouseId, setOpWarehouseId] = useState("");
   const [dashboardWarehouseId, setDashboardWarehouseId] = useState("");
-  const [opMaterialId, setOpMaterialId] = useState("");
-  const [opQuantity, setOpQuantity] = useState(1);
   const [opStorageRoom, setOpStorageRoom] = useState("");
   const [opStorageCell, setOpStorageCell] = useState("");
+  const [receiptDocumentNumber, setReceiptDocumentNumber] = useState("");
+  const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
+  const [receiptTools, setReceiptTools] = useState<ToolReceiptLine[]>([]);
+  const [receiptDocs, setReceiptDocs] = useState<File[]>([]);
+  const [returnMaterialId, setReturnMaterialId] = useState("");
+  const [returnQuantity, setReturnQuantity] = useState(1);
+  const [returnDefect, setReturnDefect] = useState(false);
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
@@ -581,8 +601,8 @@ function App() {
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
   const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
-    { id: "stocks", label: "Главная", permissions: ["dashboard.read", "stocks.read"] },
-    { id: "operations", label: "Приходы и расходы", permissions: ["operations.read", "operations.write"] },
+    { id: "stocks", label: "Склад", permissions: ["dashboard.read", "stocks.read"] },
+    { id: "operations", label: "Приходы", permissions: ["operations.read", "operations.write"] },
     { id: "issues", label: "Выдачи", permissions: ["issues.read", "issues.write"] },
     { id: "approvals", label: "Согласования", permissions: ["issues.approve"] },
     { id: "waybills", label: "Перемещения", permissions: ["waybills.read", "waybills.write"] },
@@ -851,6 +871,16 @@ function App() {
     }
     return rows;
   }, [feedbackMessages]);
+  const movementSlicesByStockKey = useMemo(() => {
+    const map = new Map<string, StockMovementRow[]>();
+    for (const m of stockMovements) {
+      const key = `${m.warehouseId}::${m.materialId}`;
+      const arr = map.get(key) || [];
+      arr.push(m);
+      map.set(key, arr);
+    }
+    return map;
+  }, [stockMovements]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -865,11 +895,11 @@ function App() {
     return date.toLocaleDateString();
   };
   const tabTitleMap: Record<string, string> = {
-    stocks: "Главная и остатки",
+    stocks: "Склад",
     catalog: "Справочники",
     matching: "Сопоставление номенклатуры",
     audit: "Аудит действий",
-    operations: "Приходы и расходы",
+    operations: "Приходы",
     issues: "Заявки на выдачу",
     limits: "Лимиты проекта",
     approvals: "Очередь согласований",
@@ -1584,8 +1614,8 @@ function App() {
     if (warehousesData.length && !opWarehouseId) {
       setOpWarehouseId(warehousesData[0].id);
     }
-    if (materialsData.length && !opMaterialId) {
-      setOpMaterialId(materialsData[0].id);
+    if (materialsData.length && !returnMaterialId) {
+      setReturnMaterialId(materialsData[0].id);
     }
     if (warehousesData.length && !issueWarehouseId) {
       setIssueWarehouseId(warehousesData[0].id);
@@ -1722,6 +1752,124 @@ function App() {
     });
     if (!res.ok) return;
     setOperations((await res.json()) as OperationRow[]);
+  }
+
+  async function ensureMaterialForReceipt(line: ReceiptLine) {
+    if (!token) return line.materialId;
+    if (line.mode === "existing") return line.materialId;
+    const res = await fetch(`${API_URL}/api/materials`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: line.name.trim(),
+        sku: line.sku.trim() || undefined,
+        unit: line.unit.trim() || "шт",
+        category: line.category.trim() || undefined
+      })
+    });
+    if (!res.ok) {
+      throw new Error(`Не удалось создать материал "${line.name}"`);
+    }
+    const row = (await res.json()) as Material;
+    return row.id;
+  }
+
+  async function uploadOperationDocuments(operationId: string) {
+    if (!token || !receiptDocs.length) return;
+    for (const file of receiptDocs) {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("entityType", "operation");
+      form.append("entityId", operationId);
+      form.append("type", "invoice");
+      await fetch(`${API_URL}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+    }
+  }
+
+  async function submitReceiptOperation() {
+    if (!token || !opWarehouseId) return;
+    const validLines = receiptLines.filter((l) =>
+      l.quantity > 0 && (l.mode === "existing" ? Boolean(l.materialId) : Boolean(l.name.trim()))
+    );
+    if (!validLines.length) {
+      setOpsMessage("Добавь хотя бы одну позицию прихода");
+      return;
+    }
+    setOpsMessage("");
+    try {
+      const materialIds = await Promise.all(validLines.map((line) => ensureMaterialForReceipt(line)));
+      const opRes = await fetch(`${API_URL}/api/operations`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "INCOME",
+          warehouseId: opWarehouseId,
+          documentNumber: receiptDocumentNumber.trim() || `IN-${Date.now()}`,
+          storageRoom: opStorageRoom || undefined,
+          storageCell: opStorageCell || undefined,
+          items: validLines.map((line, idx) => ({ materialId: materialIds[idx], quantity: line.quantity }))
+        })
+      });
+      if (!opRes.ok) {
+        const errText = await opRes.text();
+        setOpsMessage(`Ошибка прихода: ${errText}`);
+        return;
+      }
+      const created = (await opRes.json()) as { id: string };
+      await uploadOperationDocuments(created.id);
+      for (const tool of receiptTools.filter((t) => t.name.trim() && t.inventoryNumber.trim())) {
+        await fetch(`${API_URL}/api/tools`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: tool.name.trim(),
+            inventoryNumber: tool.inventoryNumber.trim(),
+            serialNumber: tool.serialNumber.trim() || undefined,
+            warehouseId: opWarehouseId,
+            note: tool.note.trim() || undefined
+          })
+        });
+      }
+      setOpsMessage("Приход проведен");
+      setReceiptDocumentNumber("");
+      setReceiptDocs([]);
+      setReceiptTools([]);
+      await loadCatalogData();
+      await loadStocks(q);
+      await loadOperations();
+    } catch (e) {
+      setOpsMessage(String(e));
+    }
+  }
+
+  async function submitMaterialReturn() {
+    if (!token || !opWarehouseId || !returnMaterialId || returnQuantity <= 0) return;
+    setOpsMessage("");
+    const res = await fetch(`${API_URL}/api/operations`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "INCOME",
+        warehouseId: opWarehouseId,
+        documentNumber: `${returnDefect ? "RETURN-DEFECT" : "RETURN"}-${Date.now()}`,
+        storageRoom: opStorageRoom || undefined,
+        storageCell: opStorageCell || undefined,
+        items: [{ materialId: returnMaterialId, quantity: returnQuantity }]
+      })
+    });
+    if (!res.ok) {
+      setOpsMessage("Ошибка возврата материала");
+      return;
+    }
+    setOpsMessage("Возврат на склад проведен");
+    setReturnQuantity(1);
+    await loadStocks(q);
+    await loadOperations();
+    await loadStockMovements();
   }
 
   async function loadTools() {
@@ -2121,6 +2269,23 @@ function App() {
   }, [dashboardWarehouseId, warehouses]);
 
   useEffect(() => {
+    if (!materials.length || receiptLines.length) return;
+    const first = materials[0];
+    setReceiptLines([
+      {
+        id: `line-${Date.now()}`,
+        mode: "existing",
+        materialId: first.id,
+        quantity: 1,
+        name: "",
+        sku: "",
+        unit: first.unit || "шт",
+        category: ""
+      }
+    ]);
+  }, [materials, receiptLines.length]);
+
+  useEffect(() => {
     if (!token || !chatWidgetOpen) return;
     void loadChatUsers();
     void loadConversations();
@@ -2437,8 +2602,8 @@ function App() {
           <p className="brandSub">Warehouse ERP</p>
         </div>
         <p className="navSectionTitle">Операции</p>
-        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
-        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы и расходы</button>}
+        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Склад</button>}
+        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Согласования</button>}
         {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
@@ -2597,9 +2762,22 @@ function App() {
                     </thead>
                     <tbody>
                       {stocks.map((row) => (
-                        <tr key={row.id} className={row.isLow ? "low" : ""}>
+                        <Fragment key={row.id}>
+                        <tr className={row.isLow ? "low" : ""}>
                           <td>{safeName(row.warehouseName)}</td>
-                          <td>{safeName(row.materialName)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() => {
+                                void loadStockMovements();
+                                setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
+                              }}
+                            >
+                              {expandedStockRowId === row.id ? "−" : "+"}
+                            </button>{" "}
+                            {safeName(row.materialName)}
+                          </td>
                           {showStockSku && <td>{row.materialSku || "-"}</td>}
                           <td>{row.materialUnit}</td>
                           <td>{row.storageRoom || "—"}</td>
@@ -2608,6 +2786,36 @@ function App() {
                           {showStockReserve && <td>{row.reserved}</td>}
                           <td>{row.available}</td>
                         </tr>
+                        {expandedStockRowId === row.id && (
+                          <tr>
+                            <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
+                              <div className="card">
+                                <h4>Движения по позиции (куски, возвраты, приходы)</h4>
+                                <table>
+                                  <thead>
+                                    <tr>
+                                      <th>Время</th>
+                                      <th>Тип</th>
+                                      <th>Кол-во</th>
+                                      <th>Источник</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
+                                      <tr key={`slice-${m.id}`}>
+                                        <td>{new Date(m.createdAt).toLocaleString()}</td>
+                                        <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
+                                        <td>{m.quantity}</td>
+                                        <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -2663,8 +2871,8 @@ function App() {
                   <div className="toolbar">
                     <button onClick={() => setActiveTab("operations")}>Новое поступление</button>
                     <button onClick={() => setActiveTab("issues")}>Новая выдача</button>
-                    <button onClick={() => setActiveTab("waybills")}>Новая ТН</button>
-                    <button onClick={() => setActiveTab("tools")}>Инструмент / QR</button>
+                    <button onClick={() => setActiveTab("operations")}>Возврат материала</button>
+                    <button onClick={() => setActiveTab("tools")}>Приход инструмента</button>
                   </div>
                 </div>
               </div>
@@ -3335,55 +3543,11 @@ function App() {
               </div>
             </div>
 
-            <div>
-              <h3>Создать материал</h3>
-              <div className="form">
-                <label>
-                  Название
-                  <input value={materialName} onChange={(e) => setMaterialName(e.target.value)} />
-                </label>
-                <label>
-                  SKU
-                  <input value={materialSku} onChange={(e) => setMaterialSku(e.target.value)} />
-                </label>
-                <label>
-                  Ед. изм.
-                  <input value={materialUnit} onChange={(e) => setMaterialUnit(e.target.value)} />
-                </label>
-                <label>
-                  Категория
-                  <input value={materialCategory} onChange={(e) => setMaterialCategory(e.target.value)} />
-                </label>
-                <button
-                  disabled={!canWriteCatalog}
-                  onClick={async () => {
-                    if (!token) return;
-                    setCatalogMessage("");
-                    const res = await fetch(`${API_URL}/api/materials`, {
-                      method: "POST",
-                      headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": "application/json"
-                      },
-                      body: JSON.stringify({
-                        name: materialName,
-                        sku: materialSku || undefined,
-                        unit: materialUnit,
-                        category: materialCategory
-                      })
-                    });
-                    if (!res.ok) {
-                      setCatalogMessage("Ошибка создания материала (возможно дубль SKU)");
-                      return;
-                    }
-                    setCatalogMessage("Материал создан");
-                    setMaterialSku("");
-                    await loadCatalogData();
-                  }}
-                >
-                  Создать материал
-                </button>
-              </div>
+            <div className="card">
+              <h3>Материалы</h3>
+              <p className="muted">
+                Добавление новых материалов перенесено в раздел `Приходы`, чтобы кладовщик работал в одном сценарии.
+              </p>
             </div>
           </div>
           {catalogMessage && <p className="muted">{catalogMessage}</p>}
@@ -3392,44 +3556,20 @@ function App() {
 
       {activeTab === "operations" && (
         <div className="card">
-          <h2>Операции прихода / расхода</h2>
+          <h2>Приходы (упрощенно)</h2>
+          <p className="muted">Один экран: добавляй материалы/инструменты, документы и проводи приход.</p>
           <div className="form">
-            <label>
-              Тип операции
-              <select value={opType} onChange={(e) => setOpType(e.target.value as "INCOME" | "EXPENSE")}>
-                <option value="INCOME">INCOME (приход)</option>
-                <option value="EXPENSE">EXPENSE (расход)</option>
-              </select>
-            </label>
             <label>
               Склад
               <select value={opWarehouseId} onChange={(e) => setOpWarehouseId(e.target.value)}>
                 {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {safeName(w.name)}
-                  </option>
+                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
                 ))}
               </select>
             </label>
             <label>
-              Материал
-              <select value={opMaterialId} onChange={(e) => setOpMaterialId(e.target.value)}>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} {m.sku ? `(${m.sku})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Количество
-              <input
-                type="number"
-                min={0.001}
-                step={0.001}
-                value={opQuantity}
-                onChange={(e) => setOpQuantity(Number(e.target.value))}
-              />
+              Номер документа прихода
+              <input value={receiptDocumentNumber} onChange={(e) => setReceiptDocumentNumber(e.target.value)} placeholder="Напр. ПР-124/26" />
             </label>
             <label>
               Помещение
@@ -3440,49 +3580,193 @@ function App() {
               <input value={opStorageCell} onChange={(e) => setOpStorageCell(e.target.value)} placeholder="Напр. A-12" />
             </label>
           </div>
+          <h3>Материалы в приходе</h3>
+          <div className="plainList">
+            {receiptLines.map((line, idx) => (
+              <div key={line.id} className="receiptLine">
+                <label>
+                  Режим
+                  <select
+                    value={line.mode}
+                    onChange={(e) => {
+                      const mode = e.target.value as "existing" | "new";
+                      setReceiptLines((prev) =>
+                        prev.map((x, i) =>
+                          i === idx
+                            ? {
+                                ...x,
+                                mode,
+                                materialId: mode === "existing" ? (materials[0]?.id || "") : ""
+                              }
+                            : x
+                        )
+                      );
+                    }}
+                  >
+                    <option value="existing">Из справочника</option>
+                    <option value="new">Новый материал</option>
+                  </select>
+                </label>
+                {line.mode === "existing" ? (
+                  <label>
+                    Материал
+                    <select
+                      value={line.materialId}
+                      onChange={(e) =>
+                        setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, materialId: e.target.value } : x)))
+                      }
+                    >
+                      {materials.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name} {m.sku ? `(${m.sku})` : ""}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <>
+                    <label>
+                      Название
+                      <input value={line.name} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} />
+                    </label>
+                    <label>
+                      SKU
+                      <input value={line.sku} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, sku: e.target.value } : x)))} />
+                    </label>
+                    <label>
+                      Ед. изм.
+                      <input value={line.unit} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, unit: e.target.value } : x)))} />
+                    </label>
+                    <label>
+                      Категория
+                      <input value={line.category} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, category: e.target.value } : x)))} />
+                    </label>
+                  </>
+                )}
+                <label>
+                  Количество
+                  <input
+                    type="number"
+                    min={0.001}
+                    step={0.001}
+                    value={line.quantity}
+                    onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, quantity: Number(e.target.value) } : x)))}
+                  />
+                </label>
+                <button type="button" className="ghostBtn" onClick={() => setReceiptLines((prev) => prev.filter((x) => x.id !== line.id))}>
+                  Убрать позицию
+                </button>
+              </div>
+            ))}
+          </div>
           <div className="toolbar">
             <button
-              disabled={!canWriteOperations}
-              onClick={async () => {
-                if (!token || !opWarehouseId || !opMaterialId) return;
-                setOpsMessage("");
-                const res = await fetch(`${API_URL}/api/operations`, {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    type: opType,
-                    warehouseId: opWarehouseId,
-                    documentNumber: `${opType}-${Date.now()}`,
-                    storageRoom: opStorageRoom || undefined,
-                    storageCell: opStorageCell || undefined,
-                    items: [{ materialId: opMaterialId, quantity: opQuantity }]
-                  })
-                });
-                if (!res.ok) {
-                  const errText = await res.text();
-                  setOpsMessage(`Ошибка операции: ${errText}`);
-                  return;
-                }
-                setOpsMessage("Операция проведена");
-                setOpStorageRoom("");
-                setOpStorageCell("");
-                await loadStocks(q);
-              }}
+              type="button"
+              className="ghostBtn"
+              onClick={() =>
+                setReceiptLines((prev) => [
+                  ...prev,
+                  {
+                    id: `line-${Date.now()}-${Math.random()}`,
+                    mode: "existing",
+                    materialId: materials[0]?.id || "",
+                    quantity: 1,
+                    name: "",
+                    sku: "",
+                    unit: "шт",
+                    category: ""
+                  }
+                ])
+              }
             >
-              Провести операцию
+              + Материал
+            </button>
+          </div>
+          <h3>Инструменты в приходе</h3>
+          <div className="plainList">
+            {receiptTools.map((tool, idx) => (
+              <div key={tool.id} className="receiptLine">
+                <label>
+                  Название инструмента
+                  <input value={tool.name} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} />
+                </label>
+                <label>
+                  Инвентарный номер
+                  <input value={tool.inventoryNumber} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, inventoryNumber: e.target.value } : x)))} />
+                </label>
+                <label>
+                  Серийный номер
+                  <input value={tool.serialNumber} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, serialNumber: e.target.value } : x)))} />
+                </label>
+                <label>
+                  Примечание
+                  <input value={tool.note} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, note: e.target.value } : x)))} />
+                </label>
+                <button type="button" className="ghostBtn" onClick={() => setReceiptTools((prev) => prev.filter((x) => x.id !== tool.id))}>
+                  Убрать инструмент
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              className="ghostBtn"
+              onClick={() =>
+                setReceiptTools((prev) => [
+                  ...prev,
+                  { id: `tool-${Date.now()}-${Math.random()}`, name: "", inventoryNumber: "", serialNumber: "", note: "" }
+                ])
+              }
+            >
+              + Инструмент
+            </button>
+          </div>
+          <label>
+            Документы к приходу
+            <input
+              type="file"
+              multiple
+              onChange={(e) => setReceiptDocs(Array.from(e.target.files || []))}
+            />
+          </label>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3>Возврат материала на склад</h3>
+            <div className="form">
+              <label>
+                Материал
+                <select value={returnMaterialId} onChange={(e) => setReturnMaterialId(e.target.value)}>
+                  {materials.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Возврат, кол-во
+                <input type="number" min={0.001} step={0.001} value={returnQuantity} onChange={(e) => setReturnQuantity(Number(e.target.value))} />
+              </label>
+              <label>
+                <span>Возврат брака</span>
+                <input type="checkbox" checked={returnDefect} onChange={(e) => setReturnDefect(e.target.checked)} />
+              </label>
+            </div>
+            <div className="toolbar">
+              <button type="button" onClick={() => void submitMaterialReturn()} disabled={!canWriteOperations}>
+                Провести возврат
+              </button>
+            </div>
+          </div>
+          <div className="toolbar">
+            <button disabled={!canWriteOperations} onClick={() => void submitReceiptOperation()}>
+              Провести приход
             </button>
           </div>
           {opsMessage && <p className="muted">{opsMessage}</p>}
-          <h3>Последние операции</h3>
+          <h3>Последние приходы</h3>
           <table>
             <thead>
               <tr><th>Документ</th><th>Тип</th><th>Дата</th><th>Файлы</th></tr>
             </thead>
             <tbody>
-              {operations.map((o) => (
+              {operations.filter((o) => o.type === "INCOME").map((o) => (
                 <tr key={o.id}>
                   <td>{o.documentNumber || o.id.slice(0, 8)}</td>
                   <td>{o.type}</td>
@@ -3516,25 +3800,29 @@ function App() {
                 ))}
               </select>
             </label>
-            <label>
-              Тип основания
-              <select
-                value={issueBasisType}
-                onChange={(e) => setIssueBasisType(e.target.value as IssueBasisType)}
-              >
-                <option value="OTHER">Прочее</option>
-                <option value="PROJECT_WORK">Работы по проекту</option>
-                <option value="INTERNAL_NEED">Внутренняя потребность</option>
-                <option value="EMERGENCY">Срочно / аварийно</option>
-              </select>
-            </label>
-            <label>
-              Ссылка на основание (номер договора, наряд…)
-              <input value={issueBasisRef} onChange={(e) => setIssueBasisRef(e.target.value)} placeholder="Необязательно" />
-            </label>
+            {!isStorekeeperMode && (
+              <>
+                <label>
+                  Тип основания
+                  <select
+                    value={issueBasisType}
+                    onChange={(e) => setIssueBasisType(e.target.value as IssueBasisType)}
+                  >
+                    <option value="OTHER">Прочее</option>
+                    <option value="PROJECT_WORK">Работы по проекту</option>
+                    <option value="INTERNAL_NEED">Внутренняя потребность</option>
+                    <option value="EMERGENCY">Срочно / аварийно</option>
+                  </select>
+                </label>
+                <label>
+                  Ссылка на основание (номер договора, наряд…)
+                  <input value={issueBasisRef} onChange={(e) => setIssueBasisRef(e.target.value)} placeholder="Необязательно" />
+                </label>
+              </>
+            )}
             <label>
               Примечание
-              <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder="Необязательно" />
+              <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder={isStorekeeperMode ? "Кратко: кому/куда" : "Необязательно"} />
             </label>
             <label>
               Материал
@@ -3576,18 +3864,20 @@ function App() {
               <option value="number">По номеру</option>
             </select>
             <button onClick={() => void loadIssues()}>Обновить список</button>
-            <button
-              onClick={async () => {
-                if (!token || !selectedIssueIds.length) return;
-                for (const id of selectedIssueIds) {
-                  await executeIssueAction(id, "send-for-approval");
-                }
-                setSelectedIssueIds([]);
-                await loadIssues();
-              }}
-            >
-              Массово: на согласование
-            </button>
+            {!isStorekeeperMode && (
+              <button
+                onClick={async () => {
+                  if (!token || !selectedIssueIds.length) return;
+                  for (const id of selectedIssueIds) {
+                    await executeIssueAction(id, "send-for-approval");
+                  }
+                  setSelectedIssueIds([]);
+                  await loadIssues();
+                }}
+              >
+                Массово: на согласование
+              </button>
+            )}
             <button
               onClick={async () => {
                 if (!token || !issueWarehouseId || !issueMaterialId) return;

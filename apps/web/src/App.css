@@ -20,9 +20,24 @@
   background: linear-gradient(180deg, #7c2d12 0%, #9a3412 100%);
 }
 
+.warehouseMode .canvas,
+.warehouseMode.shell {
+  background: #fff7ed;
+}
+
+.warehouseMode .card {
+  border-color: #fed7aa;
+  background: #fffaf4;
+}
+
 .warehouseMode .navBtn.active {
   background: #f97316;
   border-color: #fb923c;
+}
+
+.warehouseMode .navBtn:hover {
+  background: rgba(251, 146, 60, 0.24);
+  border-color: rgba(251, 146, 60, 0.7);
 }
 
 .warehouseMode button {
@@ -36,6 +51,12 @@
 .warehouseMode .topIconBtn,
 .warehouseMode .userChip {
   border-color: #fdba74;
+}
+
+.warehouseMode .ghostBtn {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #9a3412;
 }
 
 .navSectionTitle {
@@ -407,6 +428,17 @@ button:hover {
   border: 1px solid #e7edf8;
   border-radius: 10px;
   padding: 6px 8px;
+  background: #fff;
+}
+
+.receiptLine {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+  border: 1px solid #e6edf8;
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 10px;
   background: #fff;
 }
 
@@ -1027,6 +1059,9 @@ tr.low {
 }
 
 @media (max-width: 900px) {
+  .receiptLine {
+    grid-template-columns: 1fr;
+  }
   .grid2,
   .docCenterSplit,
   .docCenterForm {
