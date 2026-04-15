@@ -81,6 +81,32 @@
   margin: 0 auto;
 }
 
+.loginShell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.15), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(11, 31, 68, 0.12), transparent 30%),
+    #f3f6fa;
+}
+
+.loginCard {
+  width: min(430px, 100%);
+  padding: 22px;
+}
+
+.loginBrand h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+
+.loginBrand .muted {
+  margin: 4px 0 12px;
+}
+
 .card {
   border: 1px solid #e5e7eb;
   border-radius: 16px;
@@ -290,6 +316,7 @@ button:hover {
   padding: 16px;
   box-shadow: 0 18px 38px rgba(11, 31, 68, 0.24);
   z-index: 20;
+  backdrop-filter: blur(3px);
 }
 
 .detailDrawerHeader {

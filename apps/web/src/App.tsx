@@ -1302,9 +1302,12 @@ function App() {
 
   if (!isAuthed) {
     return (
-      <main className="app">
-        <h1>SkladPro</h1>
-        <div className="card">
+      <main className="loginShell">
+        <div className="loginCard card">
+          <div className="loginBrand">
+            <h1>СкладПро</h1>
+            <p className="muted">Warehouse ERP platform</p>
+          </div>
           <h2>Вход в систему</h2>
           <form className="form" onSubmit={onLoginSubmit}>
             <label>
