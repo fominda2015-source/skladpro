@@ -39,6 +39,14 @@ const setUserScopesSchema = z.object({
   warehouseIds: z.array(z.string().min(1)).default([]),
   projectIds: z.array(z.string().min(1)).default([])
 });
+const createObjectSchema = z.object({
+  name: z.string().min(2),
+  address: z.string().optional(),
+  userIds: z.array(z.string().min(1)).default([])
+});
+const bindObjectUsersSchema = z.object({
+  userIds: z.array(z.string().min(1)).default([])
+});
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -302,4 +310,81 @@ adminRouter.patch("/roles/:name/permissions", async (req, res) => {
     name: role.name,
     permissions: normalizePermissions(role.permissions)
   });
+});
+
+adminRouter.get("/objects", async (_req, res) => {
+  const [warehouses, links] = await Promise.all([
+    prisma.warehouse.findMany({ orderBy: { createdAt: "desc" } }),
+    prisma.userWarehouseScope.findMany({ select: { userId: true, warehouseId: true } })
+  ]);
+  const userIdsByWarehouse = new Map<string, string[]>();
+  for (const l of links) {
+    const arr = userIdsByWarehouse.get(l.warehouseId) || [];
+    arr.push(l.userId);
+    userIdsByWarehouse.set(l.warehouseId, arr);
+  }
+  return res.json(
+    warehouses.map((w) => ({
+      id: w.id,
+      name: w.name,
+      address: w.address,
+      isActive: w.isActive,
+      userIds: Array.from(new Set(userIdsByWarehouse.get(w.id) || []))
+    }))
+  );
+});
+
+adminRouter.post("/objects", async (req: AuthedRequest, res) => {
+  const parsed = createObjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const created = await prisma.$transaction(async (tx) => {
+    const warehouse = await tx.warehouse.create({
+      data: {
+        name: parsed.data.name.trim(),
+        address: parsed.data.address?.trim() || null,
+        isActive: true
+      }
+    });
+    if (parsed.data.userIds.length) {
+      await tx.userWarehouseScope.createMany({
+        data: parsed.data.userIds.map((userId) => ({ userId, warehouseId: warehouse.id })),
+        skipDuplicates: true
+      });
+    }
+    return warehouse;
+  });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_CREATE",
+    entityType: "Warehouse",
+    entityId: created.id,
+    after: { name: created.name, address: created.address, userIds: parsed.data.userIds }
+  });
+  return res.status(201).json(created);
+});
+
+adminRouter.post("/objects/:id/users", async (req: AuthedRequest, res) => {
+  const parsed = bindObjectUsersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const warehouseId = String(req.params.id);
+  const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!object) return res.status(404).json({ error: "Object not found" });
+  if (parsed.data.userIds.length) {
+    await prisma.userWarehouseScope.createMany({
+      data: parsed.data.userIds.map((userId) => ({ userId, warehouseId })),
+      skipDuplicates: true
+    });
+  }
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_USERS_BIND",
+    entityType: "Warehouse",
+    entityId: warehouseId,
+    after: { userIds: parsed.data.userIds }
+  });
+  return res.json({ ok: true });
 });

@@ -68,6 +68,7 @@ type AdminUser = {
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Position = { id: string; name: string };
+type AdminObject = { id: string; name: string; address?: string | null; userIds: string[] };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = {
   id: string;
@@ -331,6 +332,12 @@ function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [adminObjects, setAdminObjects] = useState<AdminObject[]>([]);
+  const [newObjectName, setNewObjectName] = useState("");
+  const [newObjectAddress, setNewObjectAddress] = useState("");
+  const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
+  const [selectedObjectId, setSelectedObjectId] = useState("");
+  const [bindObjectUserIds, setBindObjectUserIds] = useState<string[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [newPositionName, setNewPositionName] = useState("");
   const [newUserPositionId, setNewUserPositionId] = useState("");
@@ -1385,20 +1392,27 @@ function App() {
     if (!token || !canManageUsers) {
       return;
     }
-    const [usersRes, rolesRes, positionsRes] = await Promise.all([
+    const [usersRes, rolesRes, positionsRes, objectsRes] = await Promise.all([
       fetch(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
       fetch(`${API_URL}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/admin/positions`, { headers: { Authorization: `Bearer ${token}` } })
+      fetch(`${API_URL}/api/admin/positions`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_URL}/api/admin/objects`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
-    if (!usersRes.ok || !rolesRes.ok || !positionsRes.ok) {
+    if (!usersRes.ok || !rolesRes.ok || !positionsRes.ok || !objectsRes.ok) {
       throw new Error("Не удалось загрузить админ-данные");
     }
     const usersData = (await usersRes.json()) as AdminUser[];
     const rolesData = (await rolesRes.json()) as AdminRole[];
     const positionsData = (await positionsRes.json()) as Position[];
+    const objectsData = (await objectsRes.json()) as AdminObject[];
     setUsers(usersData);
     setRoles(rolesData);
     setPositions(positionsData);
+    setAdminObjects(objectsData);
+    if (objectsData.length && !selectedObjectId) {
+      setSelectedObjectId(objectsData[0].id);
+      setBindObjectUserIds(objectsData[0].userIds || []);
+    }
     if (usersData.length && !selectedUserId) {
       setSelectedUserId(usersData[0].id);
       setSelectedRoleName(usersData[0].role);
@@ -4707,6 +4721,125 @@ function App() {
       {activeTab === "admin" && canManageUsers && (
         <div className="card">
           <h2>Управление доступами</h2>
+          <h3>Объекты (дом/площадка)</h3>
+          <div className="grid2">
+            <div className="card">
+              <h4>Создать объект</h4>
+              <div className="form">
+                <label>
+                  Название объекта
+                  <input value={newObjectName} onChange={(e) => setNewObjectName(e.target.value)} />
+                </label>
+                <label>
+                  Адрес
+                  <input value={newObjectAddress} onChange={(e) => setNewObjectAddress(e.target.value)} />
+                </label>
+                <p className="muted">Привязать пользователей сразу:</p>
+                <div className="plainList">
+                  {users.map((u) => (
+                    <label key={`obj-new-user-${u.id}`} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        checked={newObjectUserIds.includes(u.id)}
+                        onChange={(e) => {
+                          setNewObjectUserIds((prev) =>
+                            e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                          );
+                        }}
+                      />{" "}
+                      {u.fullName}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!token || !newObjectName.trim()) return;
+                    const res = await fetch(`${API_URL}/api/admin/objects`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        name: newObjectName.trim(),
+                        address: newObjectAddress.trim() || undefined,
+                        userIds: newObjectUserIds
+                      })
+                    });
+                    if (!res.ok) {
+                      setAdminMessage("Не удалось создать объект");
+                      return;
+                    }
+                    setAdminMessage("Объект создан");
+                    setNewObjectName("");
+                    setNewObjectAddress("");
+                    setNewObjectUserIds([]);
+                    await loadAdminData();
+                    await loadCatalogData();
+                  }}
+                >
+                  Создать объект
+                </button>
+              </div>
+            </div>
+            <div className="card">
+              <h4>Привязать пользователей к объекту</h4>
+              <div className="form">
+                <label>
+                  Объект
+                  <select
+                    value={selectedObjectId}
+                    onChange={(e) => {
+                      setSelectedObjectId(e.target.value);
+                      const obj = adminObjects.find((x) => x.id === e.target.value);
+                      setBindObjectUserIds(obj?.userIds || []);
+                    }}
+                  >
+                    {adminObjects.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="plainList">
+                  {users.map((u) => (
+                    <label key={`obj-bind-user-${u.id}`} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        checked={bindObjectUserIds.includes(u.id)}
+                        onChange={(e) => {
+                          setBindObjectUserIds((prev) =>
+                            e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                          );
+                        }}
+                      />{" "}
+                      {u.fullName}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!token || !selectedObjectId) return;
+                    const res = await fetch(`${API_URL}/api/admin/objects/${selectedObjectId}/users`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ userIds: bindObjectUserIds })
+                    });
+                    if (!res.ok) {
+                      setAdminMessage("Не удалось привязать пользователей к объекту");
+                      return;
+                    }
+                    setAdminMessage("Пользователи привязаны к объекту");
+                    await loadAdminData();
+                  }}
+                >
+                  Привязать пользователей
+                </button>
+              </div>
+            </div>
+          </div>
           <h3>Создание пользователя</h3>
           <div className="form">
             <label>
