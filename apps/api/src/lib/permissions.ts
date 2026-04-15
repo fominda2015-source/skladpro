@@ -18,5 +18,6 @@ export function hasPermission(permissions: string[], needed: string) {
   if (needed === "materials.match" && permissions.includes("materials.write")) return true;
   if (needed === "integrations.read" && permissions.includes("integrations.write")) return true;
   if (needed === "notifications.read" && permissions.includes("notifications.write")) return true;
+  if (needed === "team.read" && permissions.includes("team.tasks.write")) return true;
   return false;
 }

@@ -225,6 +225,28 @@ type AuditLogRow = {
   createdAt: string;
   user?: { email: string; fullName: string };
 };
+type TeamEmployee = {
+  id: string;
+  fullName: string;
+  email: string;
+  avatarUrl?: string | null;
+  role: string;
+  status: "ACTIVE" | "BLOCKED";
+  warehouses: Array<{ id: string; name: string }>;
+  projects: Array<{ id: string; name: string }>;
+};
+type TeamTask = {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  dueAt?: string | null;
+  assignee?: { id: string; fullName: string; role?: { name: string } };
+  createdBy?: { id: string; fullName: string; role?: { name: string } };
+  project?: { id: string; name: string } | null;
+  warehouse?: { id: string; name: string } | null;
+  createdAt: string;
+};
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
   const [password, setPassword] = useState("1111");
@@ -256,6 +278,7 @@ function App() {
     | "integrations"
     | "settings"
     | "profile"
+    | "team"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -406,6 +429,15 @@ function App() {
   const [integrationMessage, setIntegrationMessage] = useState("");
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
+  const [teamEmployees, setTeamEmployees] = useState<TeamEmployee[]>([]);
+  const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
+  const [teamMessage, setTeamMessage] = useState("");
+  const [teamAssigneeId, setTeamAssigneeId] = useState("");
+  const [teamTaskTitle, setTeamTaskTitle] = useState("");
+  const [teamTaskDescription, setTeamTaskDescription] = useState("");
+  const [teamTaskProjectId, setTeamTaskProjectId] = useState("");
+  const [teamTaskWarehouseId, setTeamTaskWarehouseId] = useState("");
+  const [teamTaskDueAt, setTeamTaskDueAt] = useState("");
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -417,6 +449,19 @@ function App() {
       VIEWER: "Наблюдатель"
     })[role] ?? role;
   const statusLabel = (status: "ACTIVE" | "BLOCKED") => (status === "ACTIVE" ? "Активен" : "Заблокирован");
+  const issueStatusLabel = (status: string) =>
+    ({
+      DRAFT: "Черновик",
+      ON_APPROVAL: "На согласовании",
+      APPROVED: "Согласовано",
+      REJECTED: "Отклонено",
+      ISSUED: "Выдано",
+      CANCELLED: "Отменено"
+    })[status] ?? status;
+  const safeName = (value?: string | null) => {
+    if (!value) return "Без названия";
+    return /\?{3,}/.test(value) ? "Без названия" : value;
+  };
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
@@ -451,6 +496,8 @@ function App() {
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
+  const canReadTeam = useMemo(() => hasPermission("team.read"), [me]);
+  const canWriteTeamTasks = useMemo(() => hasPermission("team.tasks.write"), [me]);
 
   async function loadStockMovements() {
     if (!token) {
@@ -667,6 +714,52 @@ function App() {
       return;
     }
     setReadiness((await r.json()) as ReadinessResponse);
+  }
+
+  async function loadTeamData() {
+    if (!token || !canReadTeam) return;
+    const [employeesRes, tasksRes] = await Promise.all([
+      fetch(`${API_URL}/api/team/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_URL}/api/team/tasks`, { headers: { Authorization: `Bearer ${token}` } })
+    ]);
+    if (!employeesRes.ok || !tasksRes.ok) {
+      setTeamMessage("Не удалось загрузить сотрудников/задачи");
+      return;
+    }
+    const employees = (await employeesRes.json()) as TeamEmployee[];
+    const tasks = (await tasksRes.json()) as TeamTask[];
+    setTeamEmployees(employees);
+    setTeamTasks(tasks);
+    if (employees.length && !teamAssigneeId) setTeamAssigneeId(employees[0].id);
+  }
+
+  async function createTeamTask() {
+    if (!token || !canWriteTeamTasks) return;
+    setTeamMessage("");
+    const res = await fetch(`${API_URL}/api/team/tasks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        assigneeId: teamAssigneeId,
+        title: teamTaskTitle,
+        description: teamTaskDescription || undefined,
+        projectId: teamTaskProjectId || undefined,
+        warehouseId: teamTaskWarehouseId || undefined,
+        dueAt: teamTaskDueAt ? new Date(teamTaskDueAt).toISOString() : undefined
+      })
+    });
+    if (!res.ok) {
+      setTeamMessage("Не удалось поставить задачу");
+      return;
+    }
+    setTeamMessage("Задача поставлена");
+    setTeamTaskTitle("");
+    setTeamTaskDescription("");
+    setTeamTaskDueAt("");
+    await loadTeamData();
   }
 
   async function runMaterialMatch(enqueue: boolean) {
@@ -1218,6 +1311,13 @@ function App() {
   }, [token, activeTab]);
 
   useEffect(() => {
+    if (!token || activeTab !== "team" || !canReadTeam) return;
+    void loadCatalogData();
+    void loadProjects();
+    void loadTeamData();
+  }, [token, activeTab, canReadTeam]);
+
+  useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
@@ -1243,6 +1343,7 @@ function App() {
     if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
     if (canReadIntegrations) visibleTabs.add("integrations");
+    if (canReadTeam) visibleTabs.add("team");
     if (canReadAudit) visibleTabs.add("audit");
     if (canManageUsers) visibleTabs.add("admin");
     visibleTabs.add("password");
@@ -1264,6 +1365,7 @@ function App() {
     canMaterialMatch,
     canReadLimits,
     canReadIntegrations,
+    canReadTeam,
     canReadAudit,
     canManageUsers
   ]);
@@ -1456,6 +1558,7 @@ function App() {
         {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
         {canReadIntegrations && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>}
+        {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Сотрудники и задачи</button>}
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
         {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
 
@@ -1495,6 +1598,8 @@ function App() {
                                       ? "Инструмент и QR"
                                       : activeTab === "integrations"
                                         ? "Интеграции и уведомления"
+                                      : activeTab === "team"
+                                        ? "Команда и задачи"
                                       : activeTab === "profile"
                                         ? "Мой профиль"
                                       : activeTab === "settings"
@@ -1609,8 +1714,8 @@ function App() {
                     <tbody>
                       {stocks.map((row) => (
                         <tr key={row.id} className={row.isLow ? "low" : ""}>
-                          <td>{row.warehouseName}</td>
-                          <td>{row.materialName}</td>
+                          <td>{safeName(row.warehouseName)}</td>
+                          <td>{safeName(row.materialName)}</td>
                           {showStockSku && <td>{row.materialSku || "-"}</td>}
                           <td>{row.materialUnit}</td>
                           <td>{row.quantity}</td>
@@ -1692,7 +1797,7 @@ function App() {
                         <p className="muted">{i.requestedBy?.fullName || i.requestedById}</p>
                       </div>
                       <div className="queueActions">
-                        <span className={`badge ${statusClass(i.status)}`}>{i.status}</span>
+                        <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
                         <button className="miniActionBtn" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       </div>
                     </div>
@@ -1762,7 +1867,7 @@ function App() {
                   {issues.slice(0, 4).map((i) => (
                     <div key={i.id} className="queueItem">
                       <span>{i.number}</span>
-                      <strong className={statusClass(i.status)}>{i.status}</strong>
+                      <strong className={statusClass(i.status)}>{issueStatusLabel(i.status)}</strong>
                     </div>
                   ))}
                 </div>
@@ -1780,8 +1885,6 @@ function App() {
             </aside>
           </div>
         )}
-        <p className="muted">Если в названиях видишь `????`, это старые тестовые данные с поврежденной кодировкой.</p>
-
       {activeTab === "matching" && (
         <div className="card">
           <h2>Сопоставление с канонической номенклатурой</h2>
@@ -2020,6 +2123,115 @@ function App() {
         </div>
       )}
 
+      {activeTab === "team" && canReadTeam && (
+        <div className="card">
+          <h2>Сотрудники и задачи</h2>
+          {canWriteTeamTasks && (
+            <>
+              <h3>Поставить задачу сотруднику</h3>
+              <div className="form grid2">
+                <label>
+                  Сотрудник
+                  <select value={teamAssigneeId} onChange={(e) => setTeamAssigneeId(e.target.value)}>
+                    {teamEmployees.map((u) => (
+                      <option key={u.id} value={u.id}>{u.fullName} ({roleLabel(u.role)})</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Срок (опционально)
+                  <input type="datetime-local" value={teamTaskDueAt} onChange={(e) => setTeamTaskDueAt(e.target.value)} />
+                </label>
+                <label>
+                  Объект (проект)
+                  <select value={teamTaskProjectId} onChange={(e) => setTeamTaskProjectId(e.target.value)}>
+                    <option value="">Без проекта</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{safeName(p.name)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Склад (опционально)
+                  <select value={teamTaskWarehouseId} onChange={(e) => setTeamTaskWarehouseId(e.target.value)}>
+                    <option value="">Без склада</option>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="form">
+                <label>
+                  Заголовок задачи
+                  <input value={teamTaskTitle} onChange={(e) => setTeamTaskTitle(e.target.value)} />
+                </label>
+                <label>
+                  Описание
+                  <textarea value={teamTaskDescription} onChange={(e) => setTeamTaskDescription(e.target.value)} />
+                </label>
+              </div>
+              <div className="toolbar">
+                <button type="button" onClick={() => void createTeamTask()}>Поставить задачу</button>
+                <button type="button" onClick={() => void loadTeamData()}>Обновить</button>
+              </div>
+            </>
+          )}
+
+          <h3>Все сотрудники</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ФИО</th>
+                <th>Роль</th>
+                <th>Статус</th>
+                <th>Склады</th>
+                <th>Проекты</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teamEmployees.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.fullName} <span className="muted">({u.email})</span></td>
+                  <td>{roleLabel(u.role)}</td>
+                  <td>{statusLabel(u.status)}</td>
+                  <td>{u.warehouses.length ? u.warehouses.map((w) => safeName(w.name)).join(", ") : "Без ограничений"}</td>
+                  <td>{u.projects.length ? u.projects.map((p) => safeName(p.name)).join(", ") : "Без ограничений"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 style={{ marginTop: 14 }}>Задачи команды</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Задача</th>
+                <th>Кому</th>
+                <th>От кого</th>
+                <th>Объект</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teamTasks.map((t) => (
+                <tr key={t.id}>
+                  <td>
+                    {t.title}
+                    {t.description ? <p className="muted">{t.description}</p> : null}
+                  </td>
+                  <td>{t.assignee?.fullName || "-"}</td>
+                  <td>{t.createdBy?.fullName || "-"}</td>
+                  <td>{t.project?.name || t.warehouse?.name || "-"}</td>
+                  <td>{t.status === "DONE" ? "Выполнена" : "Открыта"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {teamMessage && <p className="muted">{teamMessage}</p>}
+        </div>
+      )}
+
       {activeTab === "catalog" && (
         <div className="card">
           <h2>Справочники</h2>
@@ -2135,7 +2347,7 @@ function App() {
               <select value={opWarehouseId} onChange={(e) => setOpWarehouseId(e.target.value)}>
                 {warehouses.map((w) => (
                   <option key={w.id} value={w.id}>
-                    {w.name}
+                    {safeName(w.name)}
                   </option>
                 ))}
               </select>
@@ -2220,7 +2432,7 @@ function App() {
               Склад
               <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)}>
                 {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
+                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
                 ))}
               </select>
             </label>
@@ -2229,7 +2441,7 @@ function App() {
               <select value={issueProjectId} onChange={(e) => setIssueProjectId(e.target.value)}>
                 <option value="">— без проекта —</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
+                  <option key={p.id} value={p.id}>{safeName(p.name)}{p.code ? ` (${p.code})` : ""}</option>
                 ))}
               </select>
             </label>
@@ -2357,7 +2569,7 @@ function App() {
                     {i.basisType || "OTHER"}
                     {i.basisRef ? ` · ${i.basisRef}` : ""}
                   </td>
-                  <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
+                  <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
@@ -2436,7 +2648,7 @@ function App() {
                   Проект
                   <select value={limitProjectId} onChange={(e) => setLimitProjectId(e.target.value)}>
                     {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                      <option key={p.id} value={p.id}>{safeName(p.name)}</option>
                     ))}
                   </select>
                 </label>
@@ -2560,7 +2772,7 @@ function App() {
                   <td>{i.number}</td>
                   <td>{i.warehouse?.name || i.warehouseId}</td>
                   <td>{i.requestedBy?.fullName || i.requestedById}</td>
-                  <td><span className={`badge ${statusClass(i.status)}`}>{i.status}</span></td>
+                  <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
@@ -2615,7 +2827,7 @@ function App() {
                   <option value="">Выбери заявку</option>
                   {issues.map((i) => (
                     <option key={i.id} value={i.id}>
-                      {i.number} ({i.status})
+                      {i.number} ({issueStatusLabel(i.status)})
                     </option>
                   ))}
                 </select>
@@ -2680,7 +2892,7 @@ function App() {
                   <option value="">Выбери заявку</option>
                   {issues.map((i) => (
                     <option key={i.id} value={i.id}>
-                      {i.number} ({i.status})
+                      {i.number} ({issueStatusLabel(i.status)})
                     </option>
                   ))}
                 </select>
@@ -2804,7 +3016,7 @@ function App() {
                   Склад отправитель
                   <select value={waybillFromWarehouseId} onChange={(e) => setWaybillFromWarehouseId(e.target.value)}>
                     {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>{w.name}</option>
+                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
                     ))}
                   </select>
                 </label>
@@ -2942,7 +3154,7 @@ function App() {
             <h3>Карточка заявки {selectedIssue.number}</h3>
             <button onClick={() => setDrawerMode("")}>Закрыть</button>
           </div>
-          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{selectedIssue.status}</span></p>
+          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{issueStatusLabel(selectedIssue.status)}</span></p>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
           <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
           <p><strong>Основание:</strong> {selectedIssue.basisType || "OTHER"}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
@@ -3093,7 +3305,7 @@ function App() {
               <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
                 <option value="">Не указан</option>
                 {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
+                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
                 ))}
               </select>
             </label>
@@ -3325,7 +3537,7 @@ function App() {
                         );
                       }}
                     />{" "}
-                    {w.name}
+                    {safeName(w.name)}
                   </label>
                 ))}
               </div>
@@ -3344,7 +3556,7 @@ function App() {
                         );
                       }}
                     />{" "}
-                    {p.name}
+                    {safeName(p.name)}
                   </label>
                 ))}
               </div>
@@ -3451,7 +3663,7 @@ function App() {
                           );
                         }}
                       />{" "}
-                      {w.name}
+                      {safeName(w.name)}
                     </label>
                   ))}
                 </div>
@@ -3471,7 +3683,7 @@ function App() {
                           );
                         }}
                       />{" "}
-                      {p.name}
+                      {safeName(p.name)}
                     </label>
                   ))}
                 </div>

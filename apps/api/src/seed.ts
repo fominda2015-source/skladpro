@@ -28,7 +28,9 @@ const baseWarehouseOps = [
   "integrations.read",
   "integrations.write",
   "notifications.read",
-  "notifications.write"
+  "notifications.write",
+  "team.read",
+  "team.tasks.write"
 ] as const;
 
 const defaultRoles = [
@@ -61,7 +63,8 @@ const defaultRoles = [
       "waybills.read",
       "waybills.write",
       "integrations.read",
-      "notifications.read"
+      "notifications.read",
+      "team.read"
     ]
   },
   {
@@ -77,7 +80,9 @@ const defaultRoles = [
       "documents.read",
       "tools.read",
       "waybills.read",
-      "notifications.read"
+      "notifications.read",
+      "team.read",
+      "team.tasks.write"
     ]
   },
   {
@@ -93,7 +98,9 @@ const defaultRoles = [
       "issues.approve",
       "documents.read",
       "tools.read",
-      "waybills.read"
+      "waybills.read",
+      "team.read",
+      "team.tasks.write"
     ]
   },
   {

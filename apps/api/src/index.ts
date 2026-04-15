@@ -22,6 +22,7 @@ import { stocksRouter } from "./routes/stocks.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { transportWaybillsRouter } from "./routes/transportWaybills.js";
 import { toolsRouter } from "./routes/tools.js";
+import { teamRouter } from "./routes/team.js";
 import { warehousesRouter } from "./routes/warehouses.js";
 import { seedBaseData } from "./seed.js";
 
@@ -77,6 +78,7 @@ app.use("/api/audit", auditRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/integrations", integrationsRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/team", teamRouter);
 app.use("/api/contracts", contractsRouter);
 
 async function start() {

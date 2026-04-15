@@ -167,7 +167,8 @@ label {
 
 input,
 button,
-select {
+select,
+textarea {
   height: 40px;
   border: 1px solid #dbe1ec;
   border-radius: 12px;
@@ -177,9 +178,24 @@ select {
 }
 
 input,
-select {
+select,
+textarea {
   background: #fff;
   color: #1f2937;
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+  padding: 10px 12px;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 4px;
+  padding: 0;
 }
 
 button {
@@ -560,6 +576,8 @@ tr.low {
   border-radius: 14px;
   padding: 12px 14px;
   display: grid;
+  align-content: center;
+  min-height: 82px;
 }
 
 .kpiBtn {
@@ -595,6 +613,11 @@ tr.low {
   padding: 6px 10px;
   color: #53617e;
   white-space: nowrap;
+}
+
+.dashboardFacts strong {
+  font-size: 16px;
+  line-height: 1.1;
 }
 
 .actionBar {
