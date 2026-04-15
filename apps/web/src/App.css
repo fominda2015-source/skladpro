@@ -968,6 +968,37 @@ tr.low {
   padding-top: 8px;
 }
 
+.chatQuickReplies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chatQuickReplies .ghostBtn {
+  height: 28px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.chatComposerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatAttachBtn {
+  width: 40px;
+  min-width: 40px;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatHiddenFile {
+  display: none;
+}
+
 .chatAttachmentBar {
   display: flex;
   align-items: center;

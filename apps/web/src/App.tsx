@@ -573,6 +573,7 @@ function App() {
   const [feedbackError, setFeedbackError] = useState("");
   const [reportProjectId, setReportProjectId] = useState("");
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -798,6 +799,10 @@ function App() {
         return acc + (isUnread ? 1 : 0);
       }, 0),
     [chatRecent, me?.id, chatViewedAt]
+  );
+  const chatQuickReplies = useMemo(
+    () => ["Принято", "Проверю и отпишусь", "Готово", "Нужны уточнения", "Сделаю сегодня"],
+    []
   );
   const groupedChatMessages = useMemo(() => {
     const rows: Array<{ type: "date"; label: string } | { type: "message"; item: ChatMessage }> = [];
@@ -5625,6 +5630,18 @@ function App() {
                     )}
                   </div>
                   <div className="chatComposer">
+                    <div className="chatQuickReplies">
+                      {chatQuickReplies.map((text) => (
+                        <button
+                          key={`quick-${text}`}
+                          type="button"
+                          className="ghostBtn"
+                          onClick={() => setChatText(text)}
+                        >
+                          {text}
+                        </button>
+                      ))}
+                    </div>
                     <input
                       value={chatText}
                       onChange={(e) => setChatText(e.target.value)}
@@ -5636,7 +5653,26 @@ function App() {
                         }
                       }}
                     />
-                    <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
+                    <div className="chatComposerActions">
+                      <button
+                        type="button"
+                        className="ghostBtn chatAttachBtn"
+                        onClick={() => chatFileInputRef.current?.click()}
+                        title="Добавить вложение"
+                      >
+                        📎
+                      </button>
+                      <input
+                        ref={chatFileInputRef}
+                        className="chatHiddenFile"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setChatAttachment(e.target.files?.[0] || null)}
+                      />
+                      <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
+                        Отправить
+                      </button>
+                    </div>
                     {chatAttachment ? (
                       <div className="chatAttachmentBar">
                         <small>{chatAttachment.name}</small>
@@ -5645,9 +5681,6 @@ function App() {
                         </button>
                       </div>
                     ) : null}
-                    <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
-                      Отправить
-                    </button>
                   </div>
                   {chatError ? <p className="error">{chatError}</p> : null}
                 </>
