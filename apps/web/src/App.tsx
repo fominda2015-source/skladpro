@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
-import { API_URL, ISSUE_FILTER_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
+import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
   IntegrationJobsTable,
@@ -140,6 +140,7 @@ type PagedResponse<T> = {
   page: number;
   pageSize: number;
 };
+type ListPageSize = 20 | 50 | 100;
 type Project = { id: string; name: string; code?: string | null };
 type ProjectLimitSummaryItem = {
   materialId: string;
@@ -332,6 +333,14 @@ function App() {
   const [issuesError, setIssuesError] = useState("");
   const [issuesSort, setIssuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
   const [issuesPage, setIssuesPage] = useState(1);
+  const [issuesPageSize, setIssuesPageSize] = useState<ListPageSize>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIST_VIEW_KEY) || "{}") as { issuesPageSize?: ListPageSize };
+      return saved.issuesPageSize && [20, 50, 100].includes(saved.issuesPageSize) ? saved.issuesPageSize : 20;
+    } catch {
+      return 20;
+    }
+  });
   const [issuesTotal, setIssuesTotal] = useState(0);
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
     const saved = localStorage.getItem(ISSUE_FILTER_KEY);
@@ -399,6 +408,14 @@ function App() {
   const [toolsError, setToolsError] = useState("");
   const [toolsSort, setToolsSort] = useState<"created_desc" | "inventory" | "status">("created_desc");
   const [toolsPage, setToolsPage] = useState(1);
+  const [toolsPageSize, setToolsPageSize] = useState<ListPageSize>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIST_VIEW_KEY) || "{}") as { toolsPageSize?: ListPageSize };
+      return saved.toolsPageSize && [20, 50, 100].includes(saved.toolsPageSize) ? saved.toolsPageSize : 20;
+    } catch {
+      return 20;
+    }
+  });
   const [toolsTotal, setToolsTotal] = useState(0);
   const [toolName, setToolName] = useState("Перфоратор Bosch");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
@@ -422,6 +439,14 @@ function App() {
   const [waybillsError, setWaybillsError] = useState("");
   const [waybillsSort, setWaybillsSort] = useState<"created_desc" | "number" | "status">("created_desc");
   const [waybillsPage, setWaybillsPage] = useState(1);
+  const [waybillsPageSize, setWaybillsPageSize] = useState<ListPageSize>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIST_VIEW_KEY) || "{}") as { waybillsPageSize?: ListPageSize };
+      return saved.waybillsPageSize && [20, 50, 100].includes(saved.waybillsPageSize) ? saved.waybillsPageSize : 20;
+    } catch {
+      return 20;
+    }
+  });
   const [waybillsTotal, setWaybillsTotal] = useState(0);
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
   const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
@@ -1245,7 +1270,7 @@ function App() {
       if (issueSearch.trim()) params.set("q", issueSearch.trim());
       params.set("sort", issuesSort);
       params.set("page", String(issuesPage));
-      params.set("pageSize", "20");
+      params.set("pageSize", String(issuesPageSize));
       const qs = params.toString();
       const query = qs ? `?${qs}` : "";
       const res = await fetch(`${API_URL}/api/issues${query}`, {
@@ -1351,7 +1376,7 @@ function App() {
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
-        "pageSize=20"
+        `pageSize=${encodeURIComponent(String(toolsPageSize))}`
       ].filter(Boolean);
       const query = queryParts.length ? `?${queryParts.join("&")}` : "";
       const res = await fetch(`${API_URL}/api/tools${query}`, {
@@ -1393,7 +1418,7 @@ function App() {
       if (waybillStatusFilter) params.set("status", waybillStatusFilter);
       params.set("sort", waybillsSort);
       params.set("page", String(waybillsPage));
-      params.set("pageSize", "20");
+      params.set("pageSize", String(waybillsPageSize));
       const qs = params.toString();
       const query = qs ? `?${qs}` : "";
       const res = await fetch(`${API_URL}/api/waybills${query}`, {
@@ -1639,9 +1664,9 @@ function App() {
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
   const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
   const selectedTool = tools.find((x) => x.id === selectedToolForEvents) || tools[0] || null;
-  const issuesTotalPages = Math.max(1, Math.ceil(issuesTotal / 20));
-  const waybillsTotalPages = Math.max(1, Math.ceil(waybillsTotal / 20));
-  const toolsTotalPages = Math.max(1, Math.ceil(toolsTotal / 20));
+  const issuesTotalPages = Math.max(1, Math.ceil(issuesTotal / issuesPageSize));
+  const waybillsTotalPages = Math.max(1, Math.ceil(waybillsTotal / waybillsPageSize));
+  const toolsTotalPages = Math.max(1, Math.ceil(toolsTotal / toolsPageSize));
 
   async function resolveQrCode() {
     const value = qrCode.trim();
@@ -1819,7 +1844,7 @@ function App() {
       void loadProjects();
       void loadIssues();
     }
-  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueSearch, issuesSort, issuesPage]);
+  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
 
   useEffect(() => {
     localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
@@ -1827,7 +1852,7 @@ function App() {
 
   useEffect(() => {
     setIssuesPage(1);
-  }, [issueSearch, issueStatusFilter, issueBasisFilter, issuesSort]);
+  }, [issueSearch, issueStatusFilter, issueBasisFilter, issuesSort, issuesPageSize]);
 
   useEffect(() => {
     if (issuesPage > issuesTotalPages) setIssuesPage(issuesTotalPages);
@@ -1835,7 +1860,7 @@ function App() {
 
   useEffect(() => {
     setWaybillsPage(1);
-  }, [waybillStatusFilter, waybillsSort]);
+  }, [waybillStatusFilter, waybillsSort, waybillsPageSize]);
 
   useEffect(() => {
     if (waybillsPage > waybillsTotalPages) setWaybillsPage(waybillsTotalPages);
@@ -1843,7 +1868,18 @@ function App() {
 
   useEffect(() => {
     setToolsPage(1);
-  }, [toolSearch, toolStatusFilter, toolsSort]);
+  }, [toolSearch, toolStatusFilter, toolsSort, toolsPageSize]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      LIST_VIEW_KEY,
+      JSON.stringify({
+        issuesPageSize,
+        waybillsPageSize,
+        toolsPageSize
+      })
+    );
+  }, [issuesPageSize, waybillsPageSize, toolsPageSize]);
 
   useEffect(() => {
     if (toolsPage > toolsTotalPages) setToolsPage(toolsTotalPages);
@@ -1888,14 +1924,14 @@ function App() {
       void loadCatalogData();
       void loadTools();
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage]);
+  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage, toolsPageSize]);
 
   useEffect(() => {
     if (token && activeTab === "waybills") {
       void loadCatalogData();
       void loadWaybills();
     }
-  }, [token, activeTab, waybillStatusFilter, waybillsSort, waybillsPage]);
+  }, [token, activeTab, waybillStatusFilter, waybillsSort, waybillsPage, waybillsPageSize]);
 
   useEffect(() => {
     if (token && activeTab === "waybills" && selectedWaybillId) {
@@ -3206,6 +3242,19 @@ function App() {
           )}
           {!issuesLoading && !issuesError && issues.length > 0 && (
             <div className="toolbar">
+              <span className="muted">
+                Показано {Math.min((issuesPage - 1) * issuesPageSize + 1, issuesTotal)}-
+                {Math.min(issuesPage * issuesPageSize, issuesTotal)} из {issuesTotal}
+              </span>
+              <select
+                value={issuesPageSize}
+                onChange={(e) => setIssuesPageSize(Number(e.target.value) as ListPageSize)}
+                aria-label="Размер страницы заявок"
+              >
+                <option value={20}>20 на стр.</option>
+                <option value={50}>50 на стр.</option>
+                <option value={100}>100 на стр.</option>
+              </select>
               <button type="button" onClick={() => setIssuesPage((p) => Math.max(1, p - 1))} disabled={issuesPage <= 1}>
                 Назад
               </button>
@@ -3774,6 +3823,19 @@ function App() {
                 </tbody>
               </table>
               <div className="toolbar">
+                <span className="muted">
+                  Показано {Math.min((waybillsPage - 1) * waybillsPageSize + 1, waybillsTotal)}-
+                  {Math.min(waybillsPage * waybillsPageSize, waybillsTotal)} из {waybillsTotal}
+                </span>
+                <select
+                  value={waybillsPageSize}
+                  onChange={(e) => setWaybillsPageSize(Number(e.target.value) as ListPageSize)}
+                  aria-label="Размер страницы ТН"
+                >
+                  <option value={20}>20 на стр.</option>
+                  <option value={50}>50 на стр.</option>
+                  <option value={100}>100 на стр.</option>
+                </select>
                 <button type="button" onClick={() => setWaybillsPage((p) => Math.max(1, p - 1))} disabled={waybillsPage <= 1}>
                   Назад
                 </button>
@@ -4164,6 +4226,19 @@ function App() {
             </tbody>
           </table>
           <div className="toolbar">
+            <span className="muted">
+              Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
+              {Math.min(toolsPage * toolsPageSize, toolsTotal)} из {toolsTotal}
+            </span>
+            <select
+              value={toolsPageSize}
+              onChange={(e) => setToolsPageSize(Number(e.target.value) as ListPageSize)}
+              aria-label="Размер страницы инструментов"
+            >
+              <option value={20}>20 на стр.</option>
+              <option value={50}>50 на стр.</option>
+              <option value={100}>100 на стр.</option>
+            </select>
             <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
               Назад
             </button>

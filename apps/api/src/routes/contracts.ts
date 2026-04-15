@@ -6,7 +6,7 @@ export const contractsRouter = Router();
 contractsRouter.get("/meta", (_req, res) => {
   res.json({
     name: "SkladPro API contract",
-    version: "2026-04-15.2",
+    version: "2026-04-15.3",
     format: "openapi-3.1",
     endpoints: {
       health: "/api/health",
@@ -30,7 +30,7 @@ contractsRouter.get("/openapi.json", (_req, res) => {
     openapi: "3.1.0",
     info: {
       title: "SkladPro API",
-      version: "2026-04-15.2",
+      version: "2026-04-15.3",
       description:
         "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, documents, integrations and notifications."
     },
@@ -140,6 +140,19 @@ contractsRouter.get("/openapi.json", (_req, res) => {
             createdAt: { type: "string", format: "date-time" }
           },
           required: ["id", "number", "status", "basisType", "warehouseId", "requestedById", "createdAt"]
+        },
+        PagedIssueRequestResponse: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/IssueRequest" }
+            },
+            total: { type: "integer" },
+            page: { type: "integer" },
+            pageSize: { type: "integer" }
+          },
+          required: ["items", "total", "page", "pageSize"]
         },
         DocumentFile: {
           type: "object",
@@ -343,14 +356,22 @@ contractsRouter.get("/openapi.json", (_req, res) => {
               name: "basisType",
               in: "query",
               schema: { type: "string", enum: ["PROJECT_WORK", "INTERNAL_NEED", "EMERGENCY", "OTHER"] }
-            }
+            },
+            { name: "q", in: "query", schema: { type: "string" } },
+            {
+              name: "sort",
+              in: "query",
+              schema: { type: "string", enum: ["created_desc", "status", "number"] }
+            },
+            { name: "page", in: "query", schema: { type: "integer", minimum: 1 } },
+            { name: "pageSize", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } }
           ],
           responses: {
             "200": {
               description: "Issue requests",
               content: {
                 "application/json": {
-                  schema: { type: "array", items: { $ref: "#/components/schemas/IssueRequest" } }
+                  schema: { $ref: "#/components/schemas/PagedIssueRequestResponse" }
                 }
               }
             }
