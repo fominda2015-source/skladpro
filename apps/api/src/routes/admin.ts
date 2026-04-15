@@ -381,7 +381,39 @@ adminRouter.post("/objects/:id/users", async (req: AuthedRequest, res) => {
   }
   await recordAudit({
     userId: req.user!.userId,
-    action: "OBJECT_USERS_BIND",
+    action: "OBJECT_USERS_ADD",
+    entityType: "Warehouse",
+    entityId: warehouseId,
+    after: { userIds: parsed.data.userIds }
+  });
+  return res.json({ ok: true });
+});
+
+adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
+  const parsed = bindObjectUsersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const warehouseId = String(req.params.id);
+  const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!object) return res.status(404).json({ error: "Object not found" });
+  await prisma.$transaction(async (tx) => {
+    await tx.userWarehouseScope.deleteMany({
+      where: {
+        warehouseId,
+        ...(parsed.data.userIds.length ? { userId: { notIn: parsed.data.userIds } } : {})
+      }
+    });
+    if (parsed.data.userIds.length) {
+      await tx.userWarehouseScope.createMany({
+        data: parsed.data.userIds.map((userId) => ({ userId, warehouseId })),
+        skipDuplicates: true
+      });
+    }
+  });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_USERS_SYNC",
     entityType: "Warehouse",
     entityId: warehouseId,
     after: { userIds: parsed.data.userIds }

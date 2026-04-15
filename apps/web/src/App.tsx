@@ -338,6 +338,7 @@ function App() {
   const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
   const [selectedObjectId, setSelectedObjectId] = useState("");
   const [bindObjectUserIds, setBindObjectUserIds] = useState<string[]>([]);
+  const [objectQuickUserIds, setObjectQuickUserIds] = useState<Record<string, string>>({});
   const [positions, setPositions] = useState<Position[]>([]);
   const [newPositionName, setNewPositionName] = useState("");
   const [newUserPositionId, setNewUserPositionId] = useState("");
@@ -1217,7 +1218,7 @@ function App() {
     if (rows.length && !selectedConversationId) setSelectedConversationId(rows[0].id);
   }
 
-  async function startDmConversation(userId: string) {
+  async function startDmConversation(userId: string): Promise<string | undefined> {
     if (!token) return;
     const res = await fetch(`${API_URL}/api/chat/conversations/dm`, {
       method: "POST",
@@ -1230,7 +1231,9 @@ function App() {
     }
     const row = (await res.json()) as { id: string };
     setSelectedConversationId(row.id);
+    await loadConversationMessages(row.id);
     await loadConversations();
+    return row.id;
   }
 
   async function loadConversationMessages(conversationId: string) {
@@ -1289,6 +1292,18 @@ function App() {
     setFeedbackText("");
     setFeedbackAttachment(null);
     await loadFeedbackMessages();
+  }
+
+  async function syncObjectUsers(objectId: string, userIds: string[]) {
+    if (!token) return false;
+    const res = await fetch(`${API_URL}/api/admin/objects/${objectId}/users`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds })
+    });
+    if (!res.ok) return false;
+    await loadAdminData();
+    return true;
   }
 
   async function runMaterialMatch(enqueue: boolean) {
@@ -4840,6 +4855,71 @@ function App() {
               </div>
             </div>
           </div>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h4>Карточки объектов</h4>
+            <div className="objectCards">
+              {adminObjects.map((obj) => {
+                const assigned = users.filter((u) => obj.userIds.includes(u.id));
+                return (
+                  <div key={`obj-card-${obj.id}`} className="objectCard">
+                    <div className="rightCardHeader">
+                      <h4>{obj.name}</h4>
+                      <span className="muted">{obj.address || "Без адреса"}</span>
+                    </div>
+                    <div className="objectUsers">
+                      {assigned.length ? assigned.map((u) => (
+                        <div key={`obj-${obj.id}-user-${u.id}`} className="userMiniChip">
+                          <span className="userAvatar">
+                            {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>{u.fullName}</span>
+                          <button
+                            type="button"
+                            className="ghostBtn"
+                            onClick={async () => {
+                              const next = obj.userIds.filter((id) => id !== u.id);
+                              const ok = await syncObjectUsers(obj.id, next);
+                              if (!ok) setAdminMessage("Не удалось убрать пользователя из объекта");
+                            }}
+                          >
+                            Убрать
+                          </button>
+                        </div>
+                      )) : <p className="muted">Пока нет привязанных пользователей</p>}
+                    </div>
+                    <div className="toolbar">
+                      <select
+                        value={objectQuickUserIds[obj.id] || ""}
+                        onChange={(e) =>
+                          setObjectQuickUserIds((prev) => ({ ...prev, [obj.id]: e.target.value }))
+                        }
+                      >
+                        <option value="">Выбери пользователя</option>
+                        {users
+                          .filter((u) => !obj.userIds.includes(u.id))
+                          .map((u) => (
+                            <option key={`quick-${obj.id}-${u.id}`} value={u.id}>{u.fullName}</option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const pickedUserId = objectQuickUserIds[obj.id];
+                          if (!pickedUserId) return;
+                          const next = Array.from(new Set([...obj.userIds, pickedUserId]));
+                          const ok = await syncObjectUsers(obj.id, next);
+                          if (!ok) setAdminMessage("Не удалось добавить пользователя в объект");
+                          else setObjectQuickUserIds((prev) => ({ ...prev, [obj.id]: "" }));
+                        }}
+                      >
+                        Добавить
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
           <h3>Создание пользователя</h3>
           <div className="form">
             <label>
@@ -5332,7 +5412,10 @@ function App() {
           ) : (
             <div className="chatWidgetPanel card">
               <div className="chatWidgetHeader">
-                <strong>Чат</strong>
+                <div>
+                  <strong>Чат команды</strong>
+                  <p className="muted">Выбери сотрудника и начни диалог</p>
+                </div>
                 <button type="button" onClick={() => setChatWidgetOpen(false)}>×</button>
               </div>
               {!chatWidgetUserId ? (
@@ -5350,23 +5433,32 @@ function App() {
                       <span className="userAvatar">
                         {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
                       </span>
-                      <span>{u.fullName}</span>
+                      <span className="chatUserMeta">
+                        <strong>{u.fullName}</strong>
+                        <small>{u.position || roleLabel(u.role)}</small>
+                      </span>
                     </button>
                   ))}
                 </div>
               ) : (
                 <>
-                  <div className="toolbar">
-                    <button type="button" onClick={() => setChatWidgetUserId("")}>← К списку</button>
+                  <div className="chatThreadHead">
+                    <button type="button" className="ghostBtn" onClick={() => setChatWidgetUserId("")}>← К списку</button>
+                    <strong>{chatUsers.find((u) => u.id === chatWidgetUserId)?.fullName || "Диалог"}</strong>
                   </div>
                   <div className="chatMessages">
                     {chatMessages.map((m) => (
                       <div key={m.id} className={`chatBubble ${m.senderId === me?.id ? "mine" : ""}`}>
                         <p>{m.text}</p>
+                        {m.attachments.map((a) => (
+                          <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
+                            Вложение
+                          </a>
+                        ))}
                       </div>
                     ))}
                   </div>
-                  <div className="form">
+                  <div className="chatComposer">
                     <input value={chatText} onChange={(e) => setChatText(e.target.value)} placeholder="Введите сообщение" />
                     <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
                     <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>

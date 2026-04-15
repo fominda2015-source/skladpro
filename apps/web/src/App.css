@@ -382,6 +382,34 @@ button:hover {
   margin-bottom: 8px;
 }
 
+.objectCards {
+  display: grid;
+  gap: 10px;
+}
+
+.objectCard {
+  border: 1px solid #e7edf8;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fcfdff;
+}
+
+.objectUsers {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.userMiniChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e7edf8;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fff;
+}
+
 .detailDrawer {
   position: fixed;
   right: 18px;
@@ -737,26 +765,33 @@ tr.low {
 }
 
 .chatWidgetFab {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
   font-size: 20px;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
 }
 
 .chatWidgetPanel {
-  width: 340px;
+  width: 380px;
   max-width: calc(100vw - 24px);
-  max-height: 70vh;
+  max-height: 72vh;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
   gap: 8px;
 }
 
 .chatWidgetHeader {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  border-bottom: 1px solid #ecf0f8;
+  padding-bottom: 8px;
+}
+
+.chatWidgetHeader p {
+  margin: 4px 0 0;
 }
 
 .chatUserList {
@@ -770,15 +805,37 @@ tr.low {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   justify-content: flex-start;
+  background: #f8fbff;
+  border: 1px solid #e3eaf8;
+  color: #243656;
+}
+
+.chatUserMeta {
+  display: grid;
+  text-align: left;
+}
+
+.chatUserMeta small {
+  font-size: 11px;
+  color: #60708e;
+}
+
+.chatThreadHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .chatMessages {
-  max-height: 280px;
+  min-height: 220px;
+  max-height: 320px;
   overflow: auto;
   display: grid;
   gap: 8px;
+  align-content: start;
 }
 
 .chatBubble {
@@ -786,10 +843,25 @@ tr.low {
   border-radius: 10px;
   padding: 8px 10px;
   color: #1f2937;
+  max-width: 88%;
 }
 
 .chatBubble.mine {
   background: #dcfce7;
+  justify-self: end;
+}
+
+.chatAttachmentLink {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #2563eb;
+}
+
+.chatComposer {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
 }
 
 @media (max-width: 1200px) {
