@@ -1,6 +1,8 @@
 import {
+  IntegrationJobStatus,
   IssueRequestStatus,
   MaterialMatchQueueStatus,
+  NotificationLevel,
   OperationType,
   ToolStatus,
   TransportWaybillStatus,
@@ -108,6 +110,9 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     toolsInRepair,
     waybillsOpen,
     matchQueuePending,
+    failedIntegrations24h,
+    unreadNotifications,
+    errorNotifications24h,
     activeUsers,
     auditEvents24h,
     projectsCount
@@ -123,6 +128,22 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     prisma.transportWaybill.count({ where: waybillsOpenWhere }),
     prisma.materialMatchQueue.count({
       where: { status: MaterialMatchQueueStatus.PENDING }
+    }),
+    prisma.integrationJob.count({
+      where: {
+        status: IntegrationJobStatus.FAILED,
+        createdAt: { gte: new Date(Date.now() - 86400000) }
+      }
+    }),
+    prisma.notification.count({
+      where: { userId: req.user!.userId, isRead: false }
+    }),
+    prisma.notification.count({
+      where: {
+        userId: req.user!.userId,
+        level: NotificationLevel.ERROR,
+        createdAt: { gte: new Date(Date.now() - 86400000) }
+      }
     }),
     prisma.user.count({ where: { status: UserStatus.ACTIVE } }),
     prisma.auditLog.count({ where: { createdAt: { gte: new Date(Date.now() - 86400000) } } }),
@@ -151,7 +172,10 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
       staleOpenIssues,
       toolsInRepair,
       waybillsOpen,
-      matchQueuePending
+      matchQueuePending,
+      failedIntegrations24h,
+      unreadNotifications,
+      errorNotifications24h
     },
     project: {
       projectsCount,

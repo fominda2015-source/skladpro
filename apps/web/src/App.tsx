@@ -166,6 +166,9 @@ type DashboardSummary = {
     toolsInRepair: number;
     waybillsOpen: number;
     matchQueuePending: number;
+    failedIntegrations24h: number;
+    unreadNotifications: number;
+    errorNotifications24h: number;
   };
   project: { projectsCount: number; overspendLimitLines: number };
   admin?: { activeUsers: number; auditEvents24h: number };
@@ -1416,6 +1419,15 @@ function App() {
               <span>
                 Очередь сопоставления: <strong>{dashboard.warehouse.matchQueuePending}</strong>
               </span>
+              <span>
+                Сбои интеграций (24ч): <strong>{dashboard.warehouse.failedIntegrations24h}</strong>
+              </span>
+              <span>
+                Мои непрочитанные уведомления: <strong>{dashboard.warehouse.unreadNotifications}</strong>
+              </span>
+              <span>
+                ERROR-уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
+              </span>
               {dashboard.admin && (
                 <span>
                   Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
@@ -1433,6 +1445,7 @@ function App() {
             <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
             <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Транспортные ТН</span><strong>{waybills.length}</strong></button>
             <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
+            <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
           </div>
         )}
         <p className="muted">Если в названиях видишь `????`, это старые тестовые данные с поврежденной кодировкой.</p>
