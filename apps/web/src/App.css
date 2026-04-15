@@ -415,6 +415,25 @@ tr.low {
   font-size: 12px;
 }
 
+.approvalCard {
+  border-color: #dbe4ff;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+}
+
+.approvalActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.secondaryBtn {
+  background: #3b82f6;
+}
+
+.dangerBtn {
+  background: #ef4444;
+}
+
 .queueItem p {
   margin: 4px 0 0;
 }

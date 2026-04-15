@@ -1581,6 +1581,62 @@ function App() {
                   {!approvalQueue.length && !issues.length && <p className="muted">Очередь пуста</p>}
                 </div>
               </div>
+              <div className="card approvalCard">
+                <h3>Карточка согласования</h3>
+                {approvalQueue.length ? (
+                  <>
+                    <p className="muted">
+                      {approvalQueue[0]?.number} · {approvalQueue[0]?.requestedBy?.fullName || approvalQueue[0]?.requestedById}
+                    </p>
+                    <div className="approvalActions">
+                      <button
+                        className="dangerBtn"
+                        onClick={async () => {
+                          if (!token || !approvalQueue[0]) return;
+                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/reject`, {
+                            method: "PATCH",
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          await loadApprovalQueue();
+                          await loadIssues();
+                        }}
+                      >
+                        Отклонить
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!token || !approvalQueue[0]) return;
+                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/approve`, {
+                            method: "PATCH",
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          await loadApprovalQueue();
+                          await loadIssues();
+                        }}
+                      >
+                        Подтвердить
+                      </button>
+                      <button
+                        className="secondaryBtn"
+                        onClick={async () => {
+                          if (!token || !approvalQueue[0]) return;
+                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/issue`, {
+                            method: "PATCH",
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          await loadApprovalQueue();
+                          await loadIssues();
+                          await loadStocks(q);
+                        }}
+                      >
+                        Выдать
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">Нет заявок на согласование.</p>
+                )}
+              </div>
               <div className="card">
                 <h3>Последние заявки</h3>
                 <div className="queueList">
