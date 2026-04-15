@@ -24,3 +24,15 @@ export function EmptyState({
 export function ErrorState({ text }: { text: string }) {
   return <p className="error">{text}</p>;
 }
+
+export function ResultBanner({
+  text,
+  tone = "neutral"
+}: {
+  text: string;
+  tone?: "neutral" | "success" | "error" | "conflict";
+}) {
+  const cls =
+    tone === "success" ? "ok" : tone === "error" ? "error" : tone === "conflict" ? "warnText" : "muted";
+  return <p className={cls}>{text}</p>;
+}

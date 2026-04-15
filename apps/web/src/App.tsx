@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
-import { EmptyState, ErrorState, LoadingState } from "./shared/ui/StateViews";
+import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
   IntegrationJobsTable,
   type IntegrationJobRow
@@ -662,13 +662,6 @@ function App() {
   };
   const currentTitle = tabTitleMap[activeTab] ?? "СкладПро";
   const currentSection = tabSectionMap[activeTab] ?? "Раздел";
-  const resultToneClass = (tone: ResultTone) =>
-    ({
-      neutral: "muted",
-      success: "ok",
-      error: "error",
-      conflict: "warnText"
-    })[tone];
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
@@ -2776,7 +2769,7 @@ function App() {
               <button type="button" onClick={() => setFocusedTeamTaskId("")}>Снять фокус с задачи</button>
             </div>
           )}
-          {teamMessage && <p className={resultToneClass(teamTone)}>{teamMessage}</p>}
+          {teamMessage && <ResultBanner text={teamMessage} tone={teamTone} />}
         </div>
       )}
 
@@ -3088,7 +3081,7 @@ function App() {
               Создать заявку
             </button>
           </div>
-          {issuesMessage && <p className={resultToneClass(issuesTone)}>{issuesMessage}</p>}
+          {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           {issuesLoading && <LoadingState text="Загрузка заявок..." />}
           {issuesError && <ErrorState text={issuesError} />}
           {!issuesLoading && !issuesError && !filteredIssues.length && (
@@ -3307,7 +3300,7 @@ function App() {
       {activeTab === "approvals" && (
         <div className="card">
           <h2>Очередь согласований</h2>
-          {issuesMessage && <p className={resultToneClass(issuesTone)}>{issuesMessage}</p>}
+          {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           <div className="kpiRow">
             <div className="kpi">
               <span>На согласовании</span>
@@ -3641,7 +3634,7 @@ function App() {
 
             <div className="card">
               <h3>Список ТН</h3>
-              {waybillsMessage && <p className={resultToneClass(waybillsTone)}>{waybillsMessage}</p>}
+              {waybillsMessage && <ResultBanner text={waybillsMessage} tone={waybillsTone} />}
               {!waybillsLoading && !waybillsError && !waybills.length && <EmptyState title="ТН пока нет" hint="Создай первую транспортную накладную." />}
               <div className="toolbar">
                 <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
@@ -4002,7 +3995,7 @@ function App() {
               Печать QR (PDF)
             </button>
           </div>
-          {toolsMessage && <p className={resultToneClass(toolsTone)}>{toolsMessage}</p>}
+          {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
           {!toolsLoading && !toolsError && !tools.length && <EmptyState title="Инструменты не найдены" hint="Добавь инструмент или проверь фильтры." />}
           {toolQrPreview && (
             <div className="card">
