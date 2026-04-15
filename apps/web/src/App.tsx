@@ -320,6 +320,8 @@ function App() {
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [issuesError, setIssuesError] = useState("");
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
     const saved = localStorage.getItem(ISSUE_FILTER_KEY);
     return (saved as "" | IssueStatus) || "";
@@ -381,6 +383,8 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [toolsMessage, setToolsMessage] = useState("");
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [toolsError, setToolsError] = useState("");
   const [toolName, setToolName] = useState("Перфоратор Bosch");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
   const [toolSerialNumber, setToolSerialNumber] = useState("");
@@ -398,6 +402,8 @@ function App() {
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
+  const [waybillsLoading, setWaybillsLoading] = useState(false);
+  const [waybillsError, setWaybillsError] = useState("");
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
   const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
   const [waybillToLocation, setWaybillToLocation] = useState("Объект 1");
@@ -1204,19 +1210,27 @@ function App() {
 
   async function loadIssues() {
     if (!token) return;
-    const params = new URLSearchParams();
-    if (issueStatusFilter) params.set("status", issueStatusFilter);
-    if (issueBasisFilter) params.set("basisType", issueBasisFilter);
-    const qs = params.toString();
-    const query = qs ? `?${qs}` : "";
-    const res = await fetch(`${API_URL}/api/issues${query}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    const data = (await res.json()) as IssueRequest[];
-    setIssues(data);
-    if (data.length && !selectedIssueId) {
-      setSelectedIssueId(data[0].id);
+    setIssuesError("");
+    setIssuesLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (issueStatusFilter) params.set("status", issueStatusFilter);
+      if (issueBasisFilter) params.set("basisType", issueBasisFilter);
+      const qs = params.toString();
+      const query = qs ? `?${qs}` : "";
+      const res = await fetch(`${API_URL}/api/issues${query}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as IssueRequest[];
+      setIssues(data);
+      if (data.length && !selectedIssueId) {
+        setSelectedIssueId(data[0].id);
+      }
+    } catch (e) {
+      setIssuesError(`Не удалось загрузить заявки: ${String(e)}`);
+    } finally {
+      setIssuesLoading(false);
     }
   }
 
@@ -1292,22 +1306,30 @@ function App() {
 
   async function loadTools() {
     if (!token) return;
-    const queryParts = [
-      toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
-      toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : ""
-    ].filter(Boolean);
-    const query = queryParts.length ? `?${queryParts.join("&")}` : "";
-    const res = await fetch(`${API_URL}/api/tools${query}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    const data = (await res.json()) as ToolItem[];
-    setTools(data);
-    if (data.length && !selectedToolIds.length) {
-      setSelectedToolIds([data[0].id]);
-    }
-    if (data.length && !selectedToolForEvents) {
-      setSelectedToolForEvents(data[0].id);
+    setToolsError("");
+    setToolsLoading(true);
+    try {
+      const queryParts = [
+        toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
+        toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : ""
+      ].filter(Boolean);
+      const query = queryParts.length ? `?${queryParts.join("&")}` : "";
+      const res = await fetch(`${API_URL}/api/tools${query}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as ToolItem[];
+      setTools(data);
+      if (data.length && !selectedToolIds.length) {
+        setSelectedToolIds([data[0].id]);
+      }
+      if (data.length && !selectedToolForEvents) {
+        setSelectedToolForEvents(data[0].id);
+      }
+    } catch (e) {
+      setToolsError(`Не удалось загрузить инструменты: ${String(e)}`);
+    } finally {
+      setToolsLoading(false);
     }
   }
 
@@ -1322,15 +1344,23 @@ function App() {
 
   async function loadWaybills() {
     if (!token) return;
-    const query = waybillStatusFilter ? `?status=${encodeURIComponent(waybillStatusFilter)}` : "";
-    const res = await fetch(`${API_URL}/api/waybills${query}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    const data = (await res.json()) as Waybill[];
-    setWaybills(data);
-    if (data.length && !selectedWaybillId) {
-      setSelectedWaybillId(data[0].id);
+    setWaybillsError("");
+    setWaybillsLoading(true);
+    try {
+      const query = waybillStatusFilter ? `?status=${encodeURIComponent(waybillStatusFilter)}` : "";
+      const res = await fetch(`${API_URL}/api/waybills${query}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as Waybill[];
+      setWaybills(data);
+      if (data.length && !selectedWaybillId) {
+        setSelectedWaybillId(data[0].id);
+      }
+    } catch (e) {
+      setWaybillsError(`Не удалось загрузить ТН: ${String(e)}`);
+    } finally {
+      setWaybillsLoading(false);
     }
   }
 
@@ -3030,6 +3060,12 @@ function App() {
             </button>
           </div>
           {issuesMessage && <p className="muted">{issuesMessage}</p>}
+          {issuesLoading && <LoadingState text="Загрузка заявок..." />}
+          {issuesError && <ErrorState text={issuesError} />}
+          {!issuesLoading && !issuesError && !filteredIssues.length && (
+            <EmptyState title="Заявок не найдено" hint="Смени фильтры или создай новую заявку." />
+          )}
+          {!issuesLoading && !issuesError && filteredIssues.length > 0 && (
           <table>
             <thead>
               <tr>
@@ -3086,6 +3122,7 @@ function App() {
               ))}
             </tbody>
           </table>
+          )}
           <div className="actionBar">
             <button onClick={() => setActiveTab("approvals")}>Открыть согласования</button>
             <button onClick={() => setIssueStatusFilter("DRAFT")}>Показать черновики</button>
@@ -3483,6 +3520,8 @@ function App() {
       {activeTab === "waybills" && (
         <div className="card">
           <h2>Транспортные накладные</h2>
+          {waybillsLoading && <LoadingState text="Загрузка ТН..." />}
+          {waybillsError && <ErrorState text={waybillsError} />}
           <div className="kpiRow">
             <div className="kpi"><span>Всего</span><strong>{waybills.length}</strong></div>
             <div className="kpi"><span>В пути</span><strong>{waybills.filter((x) => x.status === "SHIPPED").length}</strong></div>
@@ -3571,6 +3610,7 @@ function App() {
             <div className="card">
               <h3>Список ТН</h3>
               {waybillsMessage && <p className="muted">{waybillsMessage}</p>}
+              {!waybillsLoading && !waybillsError && !waybills.length && <EmptyState title="ТН пока нет" hint="Создай первую транспортную накладную." />}
               <div className="toolbar">
                 <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
                   {waybills.map((w) => (
@@ -3797,6 +3837,8 @@ function App() {
       {activeTab === "tools" && (
         <div className="card">
           <h2>Инструмент: карточка, QR и печать</h2>
+          {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
+          {toolsError && <ErrorState text={toolsError} />}
           <div className="toolbar">
             <input
               placeholder="Поиск инструмента (название, инв. номер, QR)"
@@ -3924,6 +3966,7 @@ function App() {
             </button>
           </div>
           {toolsMessage && <p className="muted">{toolsMessage}</p>}
+          {!toolsLoading && !toolsError && !tools.length && <EmptyState title="Инструменты не найдены" hint="Добавь инструмент или проверь фильтры." />}
           {toolQrPreview && (
             <div className="card">
               <h3>QR предпросмотр: {toolQrPreview.qrCode}</h3>
