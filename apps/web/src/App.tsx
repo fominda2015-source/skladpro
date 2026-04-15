@@ -81,6 +81,7 @@ type Material = {
   mergedIntoId?: string | null;
 };
 type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
+type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
 type IssueRequest = {
   id: string;
   number: string;
@@ -416,6 +417,7 @@ function App() {
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issuesError, setIssuesError] = useState("");
   const [issuesSort, setIssuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
+  const [issueFlowFilter, setIssueFlowFilter] = useState<IssueFlowType | "">("DIRECT_ISSUE");
   const [issuesPage, setIssuesPage] = useState(1);
   const [issuesPageSize, setIssuesPageSize] = useState<ListPageSize>(() => {
     try {
@@ -1675,6 +1677,7 @@ function App() {
       const params = new URLSearchParams();
       if (issueStatusFilter) params.set("status", issueStatusFilter);
       if (issueBasisFilter) params.set("basisType", issueBasisFilter);
+      if (activeTab === "issues" && issueFlowFilter) params.set("flowType", issueFlowFilter);
       if (issueSearch.trim()) params.set("q", issueSearch.trim());
       params.set("sort", issuesSort);
       params.set("page", String(issuesPage));
@@ -2436,7 +2439,7 @@ function App() {
       void loadIssues();
       void loadStocks(q);
     }
-  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
+  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueFlowFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
 
   useEffect(() => {
     if (!isStorekeeperMode || !stockOptionsForIssue.length || issueLines.length) return;
@@ -2449,7 +2452,7 @@ function App() {
 
   useEffect(() => {
     setIssuesPage(1);
-  }, [issueSearch, issueStatusFilter, issueBasisFilter, issuesSort, issuesPageSize]);
+  }, [issueSearch, issueStatusFilter, issueBasisFilter, issueFlowFilter, issuesSort, issuesPageSize]);
 
   useEffect(() => {
     if (issuesPage > issuesTotalPages) setIssuesPage(issuesTotalPages);
@@ -3930,6 +3933,19 @@ function App() {
                 </button>
               </div>
               {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
+              <div className="toolbar">
+                <label>
+                  Поток
+                  <select
+                    value={issueFlowFilter}
+                    onChange={(e) => setIssueFlowFilter((e.target.value || "") as "" | IssueFlowType)}
+                  >
+                    <option value="">Все потоки</option>
+                    <option value="DIRECT_ISSUE">Прямые выдачи</option>
+                    <option value="REQUEST">Заявки</option>
+                  </select>
+                </label>
+              </div>
               <h3>Последние выдачи</h3>
               <table>
                 <thead>
@@ -4029,6 +4045,14 @@ function App() {
               <option value="INTERNAL_NEED">{basisTypeLabel("INTERNAL_NEED")}</option>
               <option value="EMERGENCY">{basisTypeLabel("EMERGENCY")}</option>
               <option value="OTHER">{basisTypeLabel("OTHER")}</option>
+            </select>
+            <select
+              value={issueFlowFilter}
+              onChange={(e) => setIssueFlowFilter((e.target.value || "") as "" | IssueFlowType)}
+            >
+              <option value="">Все потоки</option>
+              <option value="DIRECT_ISSUE">Прямые выдачи</option>
+              <option value="REQUEST">Заявки</option>
             </select>
             <select value={issuesSort} onChange={(e) => setIssuesSort(e.target.value as typeof issuesSort)}>
               <option value="created_desc">Сначала новые</option>

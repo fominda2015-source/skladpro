@@ -432,6 +432,11 @@ contractsRouter.get("/openapi.json", (_req, res) => {
               in: "query",
               schema: { type: "string", enum: ["PROJECT_WORK", "INTERNAL_NEED", "EMERGENCY", "OTHER"] }
             },
+            {
+              name: "flowType",
+              in: "query",
+              schema: { type: "string", enum: ["REQUEST", "DIRECT_ISSUE"] }
+            },
             { name: "q", in: "query", schema: { type: "string" } },
             {
               name: "sort",

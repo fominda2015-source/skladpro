@@ -77,6 +77,11 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     basisParam && Object.values(IssueBasisType).includes(basisParam as IssueBasisType)
       ? { basisType: basisParam as IssueBasisType }
       : {};
+  const flowParam = typeof req.query.flowType === "string" ? req.query.flowType : undefined;
+  const flowFilter =
+    flowParam === "REQUEST" || flowParam === "DIRECT_ISSUE"
+      ? { flowType: flowParam }
+      : {};
   const searchFilter = q
     ? {
         OR: [
@@ -87,7 +92,7 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
         ]
       }
     : {};
-  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...searchFilter } as any);
+  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...flowFilter, ...searchFilter } as any);
   const [total, rows] = await prisma.$transaction([
     prisma.issueRequest.count({ where }),
     prisma.issueRequest.findMany({
