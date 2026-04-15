@@ -33,7 +33,14 @@ type AdminUser = {
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
-type Material = { id: string; name: string; sku?: string | null; unit: string; category?: string | null };
+type Material = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  unit: string;
+  category?: string | null;
+  mergedIntoId?: string | null;
+};
 type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
 type IssueRequest = {
   id: string;
@@ -173,6 +180,16 @@ type MatchQueueRow = {
   suggestedMaterialId: string | null;
   suggestedMaterial?: { id: string; name: string } | null;
   resolvedMaterial?: { id: string; name: string } | null;
+};
+type MaterialMergeHistoryRow = {
+  id: string;
+  sourceMaterialId: string;
+  targetMaterialId: string;
+  reason?: string | null;
+  createdAt: string;
+  sourceMaterial?: { id: string; name: string; sku?: string | null; unit: string };
+  targetMaterial?: { id: string; name: string; sku?: string | null; unit: string };
+  actor?: { id: string; fullName: string; email: string } | null;
 };
 
 type AuditLogRow = {
@@ -349,6 +366,10 @@ function App() {
   const [matchTryResult, setMatchTryResult] = useState<Record<string, unknown> | null>(null);
   const [matchMessage, setMatchMessage] = useState("");
   const [resolveMaterialId, setResolveMaterialId] = useState("");
+  const [mergeSourceMaterialId, setMergeSourceMaterialId] = useState("");
+  const [mergeTargetMaterialId, setMergeTargetMaterialId] = useState("");
+  const [mergeReason, setMergeReason] = useState("");
+  const [materialMergeHistory, setMaterialMergeHistory] = useState<MaterialMergeHistoryRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
 
@@ -471,6 +492,16 @@ function App() {
     }
   }
 
+  async function loadMaterialMergeHistory() {
+    if (!token) return;
+    const r = await fetch(`${API_URL}/api/materials/merge-history`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.ok) {
+      setMaterialMergeHistory((await r.json()) as MaterialMergeHistoryRow[]);
+    }
+  }
+
   async function loadAuditLogs() {
     if (!token || !canReadAudit) {
       return;
@@ -545,6 +576,39 @@ function App() {
     } else {
       await loadMatchQueue();
     }
+  }
+
+  async function mergeMaterials() {
+    if (!token || !mergeSourceMaterialId || !mergeTargetMaterialId) {
+      setMatchMessage("Выберите исходный и целевой материалы");
+      return;
+    }
+    if (mergeSourceMaterialId === mergeTargetMaterialId) {
+      setMatchMessage("Исходный и целевой материалы должны отличаться");
+      return;
+    }
+    const ok = window.confirm("Объединить материалы? Операция переносит остатки, лимиты и историю на целевой материал.");
+    if (!ok) return;
+    const r = await fetch(`${API_URL}/api/materials/merge`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceMaterialId: mergeSourceMaterialId,
+        targetMaterialId: mergeTargetMaterialId,
+        reason: mergeReason.trim() || undefined
+      })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      setMatchMessage(typeof err.error === "string" ? err.error : "Не удалось объединить материалы");
+      return;
+    }
+    setMatchMessage("Материалы объединены");
+    setMergeSourceMaterialId("");
+    setMergeReason("");
+    await loadCatalogData();
+    await loadMatchQueue();
+    await loadMaterialMergeHistory();
   }
 
   async function loadAdminData() {
@@ -982,6 +1046,7 @@ function App() {
     }
     void loadCatalogData().catch(() => undefined);
     void loadMatchQueue();
+    void loadMaterialMergeHistory();
   }, [token, activeTab]);
 
   useEffect(() => {
@@ -1445,6 +1510,74 @@ function App() {
             </tbody>
           </table>
           {!matchQueue.length && <p className="muted">Очередь пуста.</p>}
+
+          <h3 style={{ marginTop: 18 }}>Объединение дублей материалов</h3>
+          <p className="muted">
+            Переносит ссылки, остатки и лимиты с исходного материала на целевой. Исходный материал помечается как
+            объединенный и скрывается из рабочих списков.
+          </p>
+          <div className="form grid2">
+            <label>
+              Исходный (дубль)
+              <select value={mergeSourceMaterialId} onChange={(e) => setMergeSourceMaterialId(e.target.value)}>
+                <option value="">— выберите —</option>
+                {materials.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} {m.sku ? `(${m.sku})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Целевой (канон)
+              <select value={mergeTargetMaterialId} onChange={(e) => setMergeTargetMaterialId(e.target.value)}>
+                <option value="">— выберите —</option>
+                {materials.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} {m.sku ? `(${m.sku})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Причина (необязательно)
+              <input
+                value={mergeReason}
+                onChange={(e) => setMergeReason(e.target.value)}
+                placeholder="Напр. дубль после импорта УПД"
+              />
+            </label>
+          </div>
+          <div className="toolbar">
+            <button type="button" disabled={!canMaterialMatch} onClick={() => void mergeMaterials()}>
+              Объединить материалы
+            </button>
+          </div>
+
+          <h3 style={{ marginTop: 18 }}>История объединений</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Из</th>
+                <th>В</th>
+                <th>Причина</th>
+                <th>Кто</th>
+              </tr>
+            </thead>
+            <tbody>
+              {materialMergeHistory.map((row) => (
+                <tr key={row.id}>
+                  <td>{new Date(row.createdAt).toLocaleString()}</td>
+                  <td>{row.sourceMaterial?.name || row.sourceMaterialId}</td>
+                  <td>{row.targetMaterial?.name || row.targetMaterialId}</td>
+                  <td>{row.reason || "—"}</td>
+                  <td>{row.actor?.fullName || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!materialMergeHistory.length && <p className="muted">Объединений пока нет.</p>}
         </div>
       )}
 

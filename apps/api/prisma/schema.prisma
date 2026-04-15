@@ -78,6 +78,7 @@ model User {
   createdIssues    IssueRequest[]       @relation("IssueCreatedBy")
   approvedIssues   IssueRequest[]       @relation("IssueApprovedBy")
   documentLinks    DocumentLink[]
+  materialMerges   MaterialMergeHistory[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -135,6 +136,7 @@ model Material {
   name            String
   unit            String
   category        String?
+  mergedIntoId    String?
   synonyms        MaterialSynonym[]
   matchSuggestions MaterialMatchQueue[] @relation("MatchSuggestion")
   matchResolved    MaterialMatchQueue[] @relation("MatchResolved")
@@ -144,8 +146,28 @@ model Material {
   issueItems      IssueRequestItem[]
   waybillItems    TransportWaybillItem[]
   stockMovements  StockMovement[]
+  mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom      Material[]           @relation("MaterialMergedInto")
+  mergeHistoryFrom MaterialMergeHistory[] @relation("MergeSource")
+  mergeHistoryTo  MaterialMergeHistory[] @relation("MergeTarget")
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+}
+
+model MaterialMergeHistory {
+  id               String   @id @default(cuid())
+  sourceMaterialId String
+  targetMaterialId String
+  actorId          String?
+  reason           String?
+  payload          Json?
+  createdAt        DateTime @default(now())
+  sourceMaterial   Material @relation("MergeSource", fields: [sourceMaterialId], references: [id], onDelete: Restrict)
+  targetMaterial   Material @relation("MergeTarget", fields: [targetMaterialId], references: [id], onDelete: Restrict)
+  actor            User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([sourceMaterialId, createdAt])
+  @@index([targetMaterialId, createdAt])
 }
 
 model StockMovement {
