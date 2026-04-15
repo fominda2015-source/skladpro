@@ -443,6 +443,10 @@ function App() {
   const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue" | "read_today">("all");
   const [selectedNotificationIds, setSelectedNotificationIds] = useState<string[]>([]);
   const [focusedTeamTaskId, setFocusedTeamTaskId] = useState("");
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState("");
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState("");
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -875,7 +879,7 @@ function App() {
     const r = await fetch(`${API_URL}/api/notifications`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     setNotifications((await r.json()) as NotificationRow[]);
   }
 
@@ -884,8 +888,24 @@ function App() {
     const r = await fetch(`${API_URL}/api/team/tasks?mineOnly=1`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     setMyTasks((await r.json()) as TeamTask[]);
+  }
+
+  async function loadInboxData() {
+    if (!token) return;
+    setInboxError("");
+    setInboxLoading(true);
+    try {
+      const tasks = [];
+      if (canReadIntegrations) tasks.push(loadNotifications());
+      if (canReadTeam) tasks.push(loadMyTasks());
+      await Promise.all(tasks);
+    } catch (e) {
+      setInboxError(`Не удалось загрузить входящие: ${String(e)}`);
+    } finally {
+      setInboxLoading(false);
+    }
   }
 
   async function markNotificationsRead(ids: string[]) {
@@ -951,19 +971,25 @@ function App() {
 
   async function loadTeamData() {
     if (!token || !canReadTeam) return;
-    const [employeesRes, tasksRes] = await Promise.all([
-      fetch(`${API_URL}/api/team/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/team/tasks`, { headers: { Authorization: `Bearer ${token}` } })
-    ]);
-    if (!employeesRes.ok || !tasksRes.ok) {
-      setTeamMessage("Не удалось загрузить сотрудников/задачи");
-      return;
+    setTeamError("");
+    setTeamLoading(true);
+    try {
+      const [employeesRes, tasksRes] = await Promise.all([
+        fetch(`${API_URL}/api/team/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/team/tasks`, { headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      if (!employeesRes.ok || !tasksRes.ok) {
+        setTeamError("Не удалось загрузить сотрудников/задачи");
+        return;
+      }
+      const employees = (await employeesRes.json()) as TeamEmployee[];
+      const tasks = (await tasksRes.json()) as TeamTask[];
+      setTeamEmployees(employees);
+      setTeamTasks(tasks);
+      if (employees.length && !teamAssigneeId) setTeamAssigneeId(employees[0].id);
+    } finally {
+      setTeamLoading(false);
     }
-    const employees = (await employeesRes.json()) as TeamEmployee[];
-    const tasks = (await tasksRes.json()) as TeamTask[];
-    setTeamEmployees(employees);
-    setTeamTasks(tasks);
-    if (employees.length && !teamAssigneeId) setTeamAssigneeId(employees[0].id);
   }
 
   async function createTeamTask() {
@@ -1633,8 +1659,7 @@ function App() {
 
   useEffect(() => {
     if (!token || activeTab !== "inbox") return;
-    if (canReadIntegrations) void loadNotifications();
-    if (canReadTeam) void loadMyTasks();
+    void loadInboxData();
   }, [token, activeTab, canReadIntegrations, canReadTeam]);
 
   useEffect(() => {
@@ -2340,6 +2365,8 @@ function App() {
       {activeTab === "inbox" && (canReadIntegrations || canReadTeam) && (
         <div className="card">
           <h2>Центр входящих</h2>
+          {inboxLoading && <LoadingState text="Загрузка входящих..." />}
+          {inboxError && <ErrorState text={inboxError} />}
           <div className="toolbar">
             <select value={inboxFilter} onChange={(e) => setInboxFilter(e.target.value as typeof inboxFilter)}>
               <option value="all">Все входящие</option>
@@ -2349,8 +2376,8 @@ function App() {
               <option value="read_today">Прочитанные сегодня</option>
               <option value="mine">Мои задачи</option>
             </select>
-            {canReadIntegrations && <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>}
-            {canReadTeam && <button type="button" onClick={() => void loadMyTasks()}>Обновить задачи</button>}
+            {canReadIntegrations && <button type="button" onClick={() => void loadInboxData()}>Обновить уведомления</button>}
+            {canReadTeam && <button type="button" onClick={() => void loadInboxData()}>Обновить задачи</button>}
             {canReadIntegrations && (
               <button
                 type="button"
@@ -2361,7 +2388,7 @@ function App() {
             )}
           </div>
 
-          {canReadIntegrations && inboxFilter !== "mine" && (
+          {canReadIntegrations && inboxFilter !== "mine" && !inboxLoading && (
             <>
               <h3>Уведомления</h3>
               <div className="toolbar">
@@ -2441,7 +2468,7 @@ function App() {
             </>
           )}
 
-          {canReadTeam && (
+          {canReadTeam && !inboxLoading && (
             <>
               <h3 style={{ marginTop: 14 }}>Мои задачи</h3>
               {[
@@ -2498,6 +2525,12 @@ function App() {
                   )}
                 </div>
               ))}
+              {!groupedInboxTasks.overdue.length &&
+                !groupedInboxTasks.today.length &&
+                !groupedInboxTasks.week.length &&
+                !groupedInboxTasks.later.length && (
+                  <EmptyState title="Входящих задач нет" hint="Новые задачи появятся в этом разделе автоматически." />
+                )}
             </>
           )}
         </div>
@@ -2560,6 +2593,8 @@ function App() {
       {activeTab === "team" && canReadTeam && (
         <div className="card">
           <h2>Сотрудники и задачи</h2>
+          {teamLoading && <LoadingState text="Загрузка команды..." />}
+          {teamError && <ErrorState text={teamError} />}
           {canWriteTeamTasks && (
             <>
               <h3>Поставить задачу сотруднику</h3>
