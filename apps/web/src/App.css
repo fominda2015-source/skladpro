@@ -159,6 +159,30 @@ button:hover {
   border: 1px solid #dbe1ec;
 }
 
+.userChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid #dbe1ec;
+  background: #fff;
+  color: #1f2937;
+  font-size: 12px;
+}
+
+.userAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
 .toolbar input {
   flex: 1;
   min-width: 220px;
@@ -358,6 +382,37 @@ tr.low {
   border-radius: 12px;
   padding: 10px 10px;
   background: #fcfdff;
+}
+
+.queueActions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.miniActionBtn {
+  height: 28px;
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 0 10px;
+  width: auto;
+}
+
+.rightCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ghostBtn {
+  width: auto;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #dbe1ec;
+  background: #f8fbff;
+  color: #3d4d6d;
+  font-size: 12px;
 }
 
 .queueItem p {

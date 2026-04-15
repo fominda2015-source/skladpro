@@ -1395,6 +1395,12 @@ function App() {
             <span className="topIcon">?</span>
             <span className="topIcon">!</span>
             <span className="topIcon">⚙</span>
+            {me ? (
+              <span className="userChip">
+                <span className="userAvatar">{me.fullName.slice(0, 1).toUpperCase()}</span>
+                <span>{me.fullName}</span>
+              </span>
+            ) : null}
           </div>
         </header>
         {dashboard && (
@@ -1555,7 +1561,10 @@ function App() {
             </section>
             <aside className="dashboardRight">
               <div className="card">
-                <h3>Очередь заявок</h3>
+                <div className="rightCardHeader">
+                  <h3>Очередь заявок</h3>
+                  <button className="ghostBtn" onClick={() => setActiveTab("approvals")}>Открыть</button>
+                </div>
                 <div className="queueList">
                   {(approvalQueue.length ? approvalQueue : issues.filter((i) => i.status !== "ISSUED").slice(0, 5)).map((i) => (
                     <div key={i.id} className="queueItem">
@@ -1563,7 +1572,10 @@ function App() {
                         <strong>{i.number}</strong>
                         <p className="muted">{i.requestedBy?.fullName || i.requestedById}</p>
                       </div>
-                      <span className={`badge ${statusClass(i.status)}`}>{i.status}</span>
+                      <div className="queueActions">
+                        <span className={`badge ${statusClass(i.status)}`}>{i.status}</span>
+                        <button className="miniActionBtn" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
+                      </div>
                     </div>
                   ))}
                   {!approvalQueue.length && !issues.length && <p className="muted">Очередь пуста</p>}
@@ -1575,7 +1587,7 @@ function App() {
                   {issues.slice(0, 4).map((i) => (
                     <div key={i.id} className="queueItem">
                       <span>{i.number}</span>
-                      <strong>{i.status}</strong>
+                      <strong className={statusClass(i.status)}>{i.status}</strong>
                     </div>
                   ))}
                 </div>
