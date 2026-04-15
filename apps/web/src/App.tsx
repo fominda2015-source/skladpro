@@ -324,6 +324,8 @@ function App() {
   const [issuesTone, setIssuesTone] = useState<ResultTone>("neutral");
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issuesError, setIssuesError] = useState("");
+  const [issuesSort, setIssuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
+  const [issuesPage, setIssuesPage] = useState(1);
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
     const saved = localStorage.getItem(ISSUE_FILTER_KEY);
     return (saved as "" | IssueStatus) || "";
@@ -388,6 +390,8 @@ function App() {
   const [toolsTone, setToolsTone] = useState<ResultTone>("neutral");
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsError, setToolsError] = useState("");
+  const [toolsSort, setToolsSort] = useState<"created_desc" | "inventory" | "status">("created_desc");
+  const [toolsPage, setToolsPage] = useState(1);
   const [toolName, setToolName] = useState("Перфоратор Bosch");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
   const [toolSerialNumber, setToolSerialNumber] = useState("");
@@ -408,6 +412,8 @@ function App() {
   const [waybillsTone, setWaybillsTone] = useState<ResultTone>("neutral");
   const [waybillsLoading, setWaybillsLoading] = useState(false);
   const [waybillsError, setWaybillsError] = useState("");
+  const [waybillsSort, setWaybillsSort] = useState<"created_desc" | "number" | "status">("created_desc");
+  const [waybillsPage, setWaybillsPage] = useState(1);
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
   const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
   const [waybillToLocation, setWaybillToLocation] = useState("Объект 1");
@@ -1614,6 +1620,50 @@ function App() {
       basis.includes(q)
     );
   });
+  const sortedIssues = useMemo(() => {
+    const rows = [...filteredIssues];
+    if (issuesSort === "status") {
+      rows.sort((a, b) => a.status.localeCompare(b.status));
+    } else if (issuesSort === "number") {
+      rows.sort((a, b) => a.number.localeCompare(b.number));
+    } else {
+      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    }
+    return rows;
+  }, [filteredIssues, issuesSort]);
+  const issuesPageSize = 20;
+  const issuesTotalPages = Math.max(1, Math.ceil(sortedIssues.length / issuesPageSize));
+  const pagedIssues = sortedIssues.slice((issuesPage - 1) * issuesPageSize, issuesPage * issuesPageSize);
+
+  const sortedWaybills = useMemo(() => {
+    const rows = [...waybills];
+    if (waybillsSort === "status") {
+      rows.sort((a, b) => a.status.localeCompare(b.status));
+    } else if (waybillsSort === "number") {
+      rows.sort((a, b) => a.number.localeCompare(b.number));
+    } else {
+      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    }
+    return rows;
+  }, [waybills, waybillsSort]);
+  const waybillsPageSize = 20;
+  const waybillsTotalPages = Math.max(1, Math.ceil(sortedWaybills.length / waybillsPageSize));
+  const pagedWaybills = sortedWaybills.slice((waybillsPage - 1) * waybillsPageSize, waybillsPage * waybillsPageSize);
+
+  const sortedTools = useMemo(() => {
+    const rows = [...tools];
+    if (toolsSort === "status") {
+      rows.sort((a, b) => a.status.localeCompare(b.status));
+    } else if (toolsSort === "inventory") {
+      rows.sort((a, b) => a.inventoryNumber.localeCompare(b.inventoryNumber));
+    } else {
+      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    }
+    return rows;
+  }, [tools, toolsSort]);
+  const toolsPageSize = 20;
+  const toolsTotalPages = Math.max(1, Math.ceil(sortedTools.length / toolsPageSize));
+  const pagedTools = sortedTools.slice((toolsPage - 1) * toolsPageSize, toolsPage * toolsPageSize);
 
   async function resolveQrCode() {
     const value = qrCode.trim();
@@ -1794,6 +1844,30 @@ function App() {
   useEffect(() => {
     localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
   }, [issueStatusFilter]);
+
+  useEffect(() => {
+    setIssuesPage(1);
+  }, [issueSearch, issueStatusFilter, issueBasisFilter, issuesSort]);
+
+  useEffect(() => {
+    if (issuesPage > issuesTotalPages) setIssuesPage(issuesTotalPages);
+  }, [issuesPage, issuesTotalPages]);
+
+  useEffect(() => {
+    setWaybillsPage(1);
+  }, [waybillStatusFilter, waybillsSort]);
+
+  useEffect(() => {
+    if (waybillsPage > waybillsTotalPages) setWaybillsPage(waybillsTotalPages);
+  }, [waybillsPage, waybillsTotalPages]);
+
+  useEffect(() => {
+    setToolsPage(1);
+  }, [toolSearch, toolStatusFilter, toolsSort]);
+
+  useEffect(() => {
+    if (toolsPage > toolsTotalPages) setToolsPage(toolsTotalPages);
+  }, [toolsPage, toolsTotalPages]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -3040,6 +3114,11 @@ function App() {
               <option value="EMERGENCY">{basisTypeLabel("EMERGENCY")}</option>
               <option value="OTHER">{basisTypeLabel("OTHER")}</option>
             </select>
+            <select value={issuesSort} onChange={(e) => setIssuesSort(e.target.value as typeof issuesSort)}>
+              <option value="created_desc">Сначала новые</option>
+              <option value="status">По статусу</option>
+              <option value="number">По номеру</option>
+            </select>
             <button onClick={() => void loadIssues()}>Обновить список</button>
             <button
               onClick={async () => {
@@ -3084,10 +3163,10 @@ function App() {
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           {issuesLoading && <LoadingState text="Загрузка заявок..." />}
           {issuesError && <ErrorState text={issuesError} />}
-          {!issuesLoading && !issuesError && !filteredIssues.length && (
+          {!issuesLoading && !issuesError && !sortedIssues.length && (
             <EmptyState title="Заявок не найдено" hint="Смени фильтры или создай новую заявку." />
           )}
-          {!issuesLoading && !issuesError && filteredIssues.length > 0 && (
+          {!issuesLoading && !issuesError && sortedIssues.length > 0 && (
           <table>
             <thead>
               <tr>
@@ -3099,7 +3178,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {filteredIssues.map((i) => (
+              {pagedIssues.map((i) => (
                 <tr key={i.id}>
                   <td>
                     <input
@@ -3144,6 +3223,17 @@ function App() {
               ))}
             </tbody>
           </table>
+          )}
+          {!issuesLoading && !issuesError && sortedIssues.length > 0 && (
+            <div className="toolbar">
+              <button type="button" onClick={() => setIssuesPage((p) => Math.max(1, p - 1))} disabled={issuesPage <= 1}>
+                Назад
+              </button>
+              <span className="muted">Стр. {issuesPage} / {issuesTotalPages}</span>
+              <button type="button" onClick={() => setIssuesPage((p) => Math.min(issuesTotalPages, p + 1))} disabled={issuesPage >= issuesTotalPages}>
+                Вперед
+              </button>
+            </div>
           )}
           <div className="actionBar">
             <button onClick={() => setActiveTab("approvals")}>Открыть согласования</button>
@@ -3636,7 +3726,16 @@ function App() {
               <h3>Список ТН</h3>
               {waybillsMessage && <ResultBanner text={waybillsMessage} tone={waybillsTone} />}
               {!waybillsLoading && !waybillsError && !waybills.length && <EmptyState title="ТН пока нет" hint="Создай первую транспортную накладную." />}
+              {waybillsLoading && <LoadingState text="Загрузка списка ТН..." />}
+              {waybillsError && <ErrorState text={waybillsError} />}
+              {!waybillsLoading && !waybillsError && waybills.length > 0 && (
+              <>
               <div className="toolbar">
+                <select value={waybillsSort} onChange={(e) => setWaybillsSort(e.target.value as typeof waybillsSort)}>
+                  <option value="created_desc">Сначала новые</option>
+                  <option value="status">По статусу</option>
+                  <option value="number">По номеру</option>
+                </select>
                 <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
                   {waybills.map((w) => (
                     <option key={w.id} value={w.id}>
@@ -3656,7 +3755,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {waybills.map((w) => (
+                  {pagedWaybills.map((w) => (
                     <tr key={w.id}>
                       <td>{w.number}</td>
                       <td><span className={`badge ${statusClass(w.status)}`}>{waybillStatusLabel(w.status)}</span></td>
@@ -3694,6 +3793,17 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              <div className="toolbar">
+                <button type="button" onClick={() => setWaybillsPage((p) => Math.max(1, p - 1))} disabled={waybillsPage <= 1}>
+                  Назад
+                </button>
+                <span className="muted">Стр. {waybillsPage} / {waybillsTotalPages}</span>
+                <button type="button" onClick={() => setWaybillsPage((p) => Math.min(waybillsTotalPages, p + 1))} disabled={waybillsPage >= waybillsTotalPages}>
+                  Вперед
+                </button>
+              </div>
+              </>
+              )}
             </div>
           </div>
           <div className="actionBar">
@@ -3880,6 +3990,11 @@ function App() {
               <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
               <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
             </select>
+            <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)}>
+              <option value="created_desc">Сначала новые</option>
+              <option value="inventory">По инвентарному номеру</option>
+              <option value="status">По статусу</option>
+            </select>
             <button onClick={() => void loadTools()}>Обновить список</button>
           </div>
           {selectedTool && (
@@ -4003,6 +4118,8 @@ function App() {
               <img src={toolQrPreview.dataUrl} alt="Tool QR preview" style={{ maxWidth: 220 }} />
             </div>
           )}
+          {!toolsLoading && !toolsError && tools.length > 0 && (
+          <>
           <table>
             <thead>
               <tr>
@@ -4015,7 +4132,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {tools.map((t) => (
+              {pagedTools.map((t) => (
                 <tr key={t.id}>
                   <td>
                     <input
@@ -4066,6 +4183,15 @@ function App() {
               ))}
             </tbody>
           </table>
+          <div className="toolbar">
+            <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
+              Назад
+            </button>
+            <span className="muted">Стр. {toolsPage} / {toolsTotalPages}</span>
+            <button type="button" onClick={() => setToolsPage((p) => Math.min(toolsTotalPages, p + 1))} disabled={toolsPage >= toolsTotalPages}>
+              Вперед
+            </button>
+          </div>
           <h3>Журнал инструмента</h3>
           <div className="toolbar">
             <select value={selectedToolForEvents} onChange={(e) => setSelectedToolForEvents(e.target.value)}>
@@ -4097,6 +4223,8 @@ function App() {
               ))}
             </tbody>
           </table>
+          </>
+          )}
           {toolAction && (
             <div className="card">
               <h3>Подтверждение действия: {toolActionLabel(toolAction.action)}</h3>
