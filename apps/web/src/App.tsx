@@ -1405,7 +1405,7 @@ function App() {
         </header>
         {dashboard && (
           <div className="card dashboardStrip">
-            <div className="toolbar" style={{ flexWrap: "wrap", gap: 12 }}>
+            <div className="toolbar dashboardFacts" style={{ flexWrap: "wrap", gap: 12 }}>
               <span>
                 Приходов сегодня: <strong>{dashboard.warehouse.receiptsToday}</strong>
               </span>

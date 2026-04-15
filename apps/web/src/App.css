@@ -87,6 +87,13 @@
   padding: 16px;
   background: #fff;
   box-shadow: 0 6px 20px rgba(12, 24, 52, 0.05);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 12px 28px rgba(12, 24, 52, 0.08);
+  border-color: #d8e0ee;
+  transform: translateY(-1px);
 }
 
 .pageHeader {
@@ -161,6 +168,11 @@ button:hover {
 
 .topToolbar {
   align-items: center;
+  background: #fff;
+  border: 1px solid #e6ebf5;
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(12, 24, 52, 0.04);
 }
 
 .topToolbar .topIcon {
@@ -227,26 +239,31 @@ button:hover {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
+  border: 1px solid transparent;
 }
 
 .badge.ok {
   background: #e8f9ef;
   color: #1f8f49;
+  border-color: #c8efd9;
 }
 
 .badge.warn {
   background: #fff7e2;
   color: #9a6d03;
+  border-color: #ffe5a6;
 }
 
 .badge.bad {
   background: #ffebeb;
   color: #bc2e2e;
+  border-color: #ffc7c7;
 }
 
 .badge.neutral {
   background: #eef3ff;
   color: #4e6291;
+  border-color: #d7e2ff;
 }
 
 .plainList {
@@ -326,6 +343,14 @@ td {
   border-bottom: 1px solid #edf1f7;
   padding: 10px 8px;
   font-size: 13px;
+}
+
+tbody tr {
+  transition: background 0.15s ease;
+}
+
+tbody tr:hover {
+  background: #f8fbff;
 }
 
 th {
@@ -504,6 +529,14 @@ tr.low {
 
 .dashboardStrip {
   margin: 0 0 12px;
+}
+
+.dashboardFacts span {
+  background: #f8fbff;
+  border: 1px solid #e6edf8;
+  border-radius: 10px;
+  padding: 6px 10px;
+  color: #53617e;
 }
 
 .actionBar {
