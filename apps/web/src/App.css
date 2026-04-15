@@ -770,6 +770,23 @@ tr.low {
   border-radius: 999px;
   font-size: 20px;
   box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+  position: relative;
+}
+
+.chatFabUnread {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
 }
 
 .chatWidgetPanel {
@@ -799,6 +816,32 @@ tr.low {
   gap: 6px;
   max-height: 360px;
   overflow: auto;
+}
+
+.chatRecentList {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.chatRecentItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e3eaf8;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #2a3d62;
+}
+
+.chatRecentItem.unread {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.chatRecentItem small {
+  font-size: 11px;
+  color: #60708e;
 }
 
 .chatUserItem {
@@ -888,6 +931,17 @@ tr.low {
   gap: 8px;
   border-top: 1px solid #ecf0f8;
   padding-top: 8px;
+}
+
+.chatAttachmentBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #e3eaf8;
+  background: #f8fbff;
+  border-radius: 10px;
+  padding: 6px 8px;
 }
 
 @media (max-width: 1200px) {

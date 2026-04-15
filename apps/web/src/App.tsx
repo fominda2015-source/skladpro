@@ -775,6 +775,29 @@ function App() {
       return bLast.localeCompare(aLast);
     });
   }, [chatUsers, chatSearch, dmByUserId]);
+  const chatRecent = useMemo(
+    () =>
+      chatConversations
+        .filter((c) => c.kind === "DM")
+        .map((c) => {
+          const peer = c.participants.find((p) => p.user.id !== me?.id)?.user;
+          return { conversation: c, peer, last: c.messages?.[0] };
+        })
+        .filter((x) => Boolean(x.peer))
+        .sort((a, b) => (b.last?.createdAt || "").localeCompare(a.last?.createdAt || "")),
+    [chatConversations, me?.id]
+  );
+  const chatUnreadTotal = useMemo(
+    () =>
+      chatRecent.reduce((acc, row) => {
+        if (!row.last || !row.conversation.id) return acc;
+        const isUnread =
+          row.last.senderId !== me?.id &&
+          new Date(row.last.createdAt) > new Date(chatViewedAt[row.conversation.id] || 0);
+        return acc + (isUnread ? 1 : 0);
+      }, 0),
+    [chatRecent, me?.id, chatViewedAt]
+  );
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -1254,6 +1277,7 @@ function App() {
 
   async function startDmConversation(userId: string): Promise<string | undefined> {
     if (!token) return;
+    setChatError("");
     const res = await fetch(`${API_URL}/api/chat/conversations/dm`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -1272,16 +1296,21 @@ function App() {
 
   async function loadConversationMessages(conversationId: string) {
     if (!token || !conversationId) return;
+    setChatError("");
     const res = await fetch(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      setChatError("Не удалось загрузить сообщения");
+      return;
+    }
     setChatMessages((await res.json()) as ChatMessage[]);
     setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
   }
 
   async function sendConversationMessage() {
     if (!token || !selectedConversationId || !chatText.trim()) return;
+    setChatError("");
     const attachments = chatAttachment
       ? [{ fileName: chatAttachment.name, mimeType: chatAttachment.type, dataUrl: await fileToDataUrl(chatAttachment) }]
       : [];
@@ -5454,6 +5483,7 @@ function App() {
           {!chatWidgetOpen ? (
             <button type="button" className="chatWidgetFab" onClick={() => setChatWidgetOpen(true)}>
               💬
+              {chatUnreadTotal > 0 ? <span className="chatFabUnread">{chatUnreadTotal}</span> : null}
             </button>
           ) : (
             <div className="chatWidgetPanel card">
@@ -5471,6 +5501,31 @@ function App() {
                     onChange={(e) => setChatSearch(e.target.value)}
                     placeholder="Поиск сотрудника..."
                   />
+                  {chatRecent.length > 0 ? (
+                    <div className="chatRecentList">
+                      {chatRecent.slice(0, 4).map((row) => {
+                        if (!row.peer) return null;
+                        const isUnread =
+                          row.last &&
+                          row.last.senderId !== me?.id &&
+                          new Date(row.last.createdAt) > new Date(chatViewedAt[row.conversation.id] || 0);
+                        return (
+                          <button
+                            key={`recent-${row.conversation.id}`}
+                            type="button"
+                            className={`chatRecentItem ${isUnread ? "unread" : ""}`}
+                            onClick={async () => {
+                              await startDmConversation(row.peer!.id);
+                              setChatWidgetUserId(row.peer!.id);
+                            }}
+                          >
+                            <span>{row.peer.fullName}</span>
+                            <small>{chatTimeLabel(row.last?.createdAt)}</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   <div className="chatUserList">
                   {filteredChatUsers.map((u) => {
                     const conv = dmByUserId.get(u.id);
@@ -5505,6 +5560,7 @@ function App() {
                       <span className="chatUserTime">{chatTimeLabel(last?.createdAt)}</span>
                     </button>
                   );})}
+                  {!filteredChatUsers.length ? <p className="muted">Сотрудники не найдены</p> : null}
                   </div>
                 </>
               ) : (
@@ -5538,10 +5594,19 @@ function App() {
                       }}
                     />
                     <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
+                    {chatAttachment ? (
+                      <div className="chatAttachmentBar">
+                        <small>{chatAttachment.name}</small>
+                        <button type="button" className="ghostBtn" onClick={() => setChatAttachment(null)}>
+                          Убрать
+                        </button>
+                      </div>
+                    ) : null}
                     <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
                       Отправить
                     </button>
                   </div>
+                  {chatError ? <p className="error">{chatError}</p> : null}
                 </>
               )}
             </div>
