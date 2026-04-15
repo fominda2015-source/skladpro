@@ -97,13 +97,21 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
 
   await prisma.$transaction(async (tx) => {
     const linkedWarehouses = parsed.data.projectIds.length
-      ? await tx.projectWarehouse.findMany({
-          where: { projectId: { in: parsed.data.projectIds } },
-          select: { warehouseId: true }
+      ? await tx.project.findMany({
+          where: { id: { in: parsed.data.projectIds } },
+          select: {
+            warehouseId: true,
+            warehouseLinks: { select: { warehouseId: true }, take: 1 }
+          }
         })
       : [];
     const warehouseIds = Array.from(
-      new Set([...parsed.data.warehouseIds, ...linkedWarehouses.map((x) => x.warehouseId)])
+      new Set([
+        ...parsed.data.warehouseIds,
+        ...linkedWarehouses
+          .map((x) => x.warehouseId || x.warehouseLinks[0]?.warehouseId || null)
+          .filter((x): x is string => Boolean(x))
+      ])
     );
     await tx.userWarehouseScope.deleteMany({ where: { userId } });
     await tx.userProjectScope.deleteMany({ where: { userId } });
@@ -152,13 +160,21 @@ adminRouter.post("/users", async (req, res) => {
     positionId = p.id;
   }
   const linkedWarehouses = parsed.data.projectIds.length
-    ? await prisma.projectWarehouse.findMany({
-        where: { projectId: { in: parsed.data.projectIds } },
-        select: { warehouseId: true }
+    ? await prisma.project.findMany({
+        where: { id: { in: parsed.data.projectIds } },
+        select: {
+          warehouseId: true,
+          warehouseLinks: { select: { warehouseId: true }, take: 1 }
+        }
       })
     : [];
   const warehouseIds = Array.from(
-    new Set([...parsed.data.warehouseIds, ...linkedWarehouses.map((x) => x.warehouseId)])
+    new Set([
+      ...parsed.data.warehouseIds,
+      ...linkedWarehouses
+        .map((x) => x.warehouseId || x.warehouseLinks[0]?.warehouseId || null)
+        .filter((x): x is string => Boolean(x))
+    ])
   );
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
   const created = await prisma.$transaction(async (tx) => {

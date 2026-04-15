@@ -182,6 +182,7 @@ model Warehouse {
   userScopes  UserWarehouseScope[]
   staffTasks  StaffTask[]
   projectLinks ProjectWarehouse[]
+  projects    Project[]      @relation("ProjectWarehouseMain")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -266,6 +267,8 @@ model Stock {
   materialId    String
   quantity      Decimal    @db.Decimal(14, 3)
   reserved      Decimal    @default(0) @db.Decimal(14, 3)
+  storageRoom   String?
+  storageCell   String?
   warehouse     Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   material      Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
   updatedAt     DateTime   @updatedAt
@@ -277,6 +280,8 @@ model Project {
   id          String          @id @default(cuid())
   name        String
   code        String?         @unique
+  warehouseId String?
+  warehouse   Warehouse?      @relation("ProjectWarehouseMain", fields: [warehouseId], references: [id], onDelete: SetNull)
   limits      ProjectLimit[]
   operations  Operation[]
   issues      IssueRequest[]

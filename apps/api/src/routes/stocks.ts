@@ -64,6 +64,8 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       materialUnit: row.material.unit,
       quantity: qty,
       reserved,
+      storageRoom: row.storageRoom,
+      storageCell: row.storageCell,
       available,
       isLow: available <= 0,
       updatedAt: row.updatedAt

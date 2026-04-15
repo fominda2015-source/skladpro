@@ -712,6 +712,86 @@ tr.low {
   background: #f8f9fb;
 }
 
+.progressWrap {
+  width: 140px;
+  height: 10px;
+  border-radius: 999px;
+  background: #e7ecf6;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background: #22c55e;
+}
+
+.progressBar.bad {
+  background: #ef4444;
+}
+
+.chatWidget {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+}
+
+.chatWidgetFab {
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  font-size: 20px;
+}
+
+.chatWidgetPanel {
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: 70vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+}
+
+.chatWidgetHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chatUserList {
+  display: grid;
+  gap: 6px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.chatUserItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.chatMessages {
+  max-height: 280px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.chatBubble {
+  background: #eef2ff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: #1f2937;
+}
+
+.chatBubble.mine {
+  background: #dcfce7;
+}
+
 @media (max-width: 1200px) {
   .kpiRow {
     grid-template-columns: repeat(3, minmax(0, 1fr));

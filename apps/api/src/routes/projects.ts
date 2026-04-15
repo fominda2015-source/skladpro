@@ -7,7 +7,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 const createProjectSchema = z.object({
   name: z.string().min(2),
   code: z.string().min(1).optional(),
-  warehouseIds: z.array(z.string().min(1)).default([])
+  warehouseId: z.string().optional()
 });
 
 export const projectsRouter = Router();
@@ -18,11 +18,19 @@ projectsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const rows = await prisma.project.findMany({
     where: projectWhereFromScope(scope),
-    include: { warehouseLinks: { select: { warehouseId: true } } },
+    include: {
+      warehouse: true,
+      warehouseLinks: { select: { warehouseId: true } }
+    },
     orderBy: { createdAt: "desc" },
     take: 200
   });
-  return res.json(rows.map((p) => ({ ...p, warehouseIds: p.warehouseLinks.map((x) => x.warehouseId) })));
+  return res.json(
+    rows.map((p) => ({
+      ...p,
+      warehouseId: p.warehouseId || p.warehouseLinks[0]?.warehouseId || null
+    }))
+  );
 });
 
 projectsRouter.post("/", requirePermission("limits.write"), async (req, res) => {
@@ -34,11 +42,19 @@ projectsRouter.post("/", requirePermission("limits.write"), async (req, res) => 
     data: {
       name: parsed.data.name,
       code: parsed.data.code,
-      warehouseLinks: parsed.data.warehouseIds.length
-        ? { create: parsed.data.warehouseIds.map((warehouseId) => ({ warehouseId })) }
-        : undefined
+      warehouseId: parsed.data.warehouseId
     },
-    include: { warehouseLinks: { select: { warehouseId: true } } }
+    include: { warehouseLinks: { select: { warehouseId: true } }, warehouse: true }
   });
-  return res.status(201).json({ ...created, warehouseIds: created.warehouseLinks.map((x) => x.warehouseId) });
+  if (parsed.data.warehouseId) {
+    await prisma.projectWarehouse.upsert({
+      where: { projectId_warehouseId: { projectId: created.id, warehouseId: parsed.data.warehouseId } },
+      update: {},
+      create: { projectId: created.id, warehouseId: parsed.data.warehouseId }
+    });
+  }
+  return res.status(201).json({
+    ...created,
+    warehouseId: created.warehouseId || created.warehouseLinks[0]?.warehouseId || null
+  });
 });

@@ -15,6 +15,8 @@ const createOperationSchema = z.object({
   type: z.enum(["INCOME", "EXPENSE"]),
   warehouseId: z.string().min(1),
   projectId: z.string().optional(),
+  storageRoom: z.string().optional(),
+  storageCell: z.string().optional(),
   documentNumber: z.string().optional(),
   operationDate: z.string().datetime().optional(),
   items: z
@@ -103,7 +105,11 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
           if (existing) {
             await tx.stock.update({
               where: { warehouseId_materialId: { warehouseId: data.warehouseId, materialId: item.materialId } },
-              data: { quantity: { increment: item.quantity } }
+              data: {
+                quantity: { increment: item.quantity },
+                ...(data.storageRoom !== undefined ? { storageRoom: data.storageRoom || null } : {}),
+                ...(data.storageCell !== undefined ? { storageCell: data.storageCell || null } : {})
+              }
             });
           } else {
             await tx.stock.create({
@@ -111,7 +117,9 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
                 warehouseId: data.warehouseId,
                 materialId: item.materialId,
                 quantity: item.quantity,
-                reserved: 0
+                reserved: 0,
+                storageRoom: data.storageRoom || null,
+                storageCell: data.storageCell || null
               }
             });
           }

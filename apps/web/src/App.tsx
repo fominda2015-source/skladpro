@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Dispatch, FormEvent, SetStateAction } from "react";
+import type { FormEvent } from "react";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
@@ -14,7 +14,20 @@ type LoginResponse = {
   token: string;
   user: { id: string; email: string; fullName: string; avatarUrl?: string | null; position?: string | null; role: string; permissions: string[] };
 };
-type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
+type StockRow = {
+  id: string;
+  warehouseName: string;
+  materialName: string;
+  materialSku: string | null;
+  materialUnit: string;
+  quantity: number;
+  reserved: number;
+  storageRoom?: string | null;
+  storageCell?: string | null;
+  available: number;
+  isLow: boolean;
+  updatedAt: string;
+};
 type StockMovementRow = {
   id: string;
   warehouseId: string;
@@ -145,7 +158,7 @@ type PagedResponse<T> = {
   pageSize: number;
 };
 type ListPageSize = 20 | 50 | 100;
-type Project = { id: string; name: string; code?: string | null; warehouseIds?: string[] };
+type Project = { id: string; name: string; code?: string | null; warehouseId?: string | null };
 type ChatUser = { id: string; fullName: string; avatarUrl?: string | null; role: string; position?: string | null };
 type ChatAttachment = { id: string; fileName: string; mimeType?: string | null; dataUrl: string };
 type ChatMessage = { id: string; text: string; createdAt: string; senderId: string; sender: { id: string; fullName: string }; attachments: ChatAttachment[] };
@@ -210,6 +223,16 @@ type DashboardSummary = {
     errorNotifications24h: number;
   };
   project: { projectsCount: number; overspendLimitLines: number };
+  object?: {
+    warehouseId: string | null;
+    warehouseName: string | null;
+    projectsCount: number;
+    limitsCount: number;
+    materialsInLimits: number;
+    plannedQty: number;
+    issuedQty: number;
+    usagePercent: number;
+  };
   admin?: { activeUsers: number; auditEvents24h: number };
 };
 
@@ -345,8 +368,11 @@ function App() {
   const [materialCategory, setMaterialCategory] = useState("Металл");
   const [opType, setOpType] = useState<"INCOME" | "EXPENSE">("INCOME");
   const [opWarehouseId, setOpWarehouseId] = useState("");
+  const [dashboardWarehouseId, setDashboardWarehouseId] = useState("");
   const [opMaterialId, setOpMaterialId] = useState("");
   const [opQuantity, setOpQuantity] = useState(1);
+  const [opStorageRoom, setOpStorageRoom] = useState("");
+  const [opStorageCell, setOpStorageCell] = useState("");
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
@@ -384,6 +410,7 @@ function App() {
   const [limitsMessage, setLimitsMessage] = useState("");
   const [projectName, setProjectName] = useState("Проект 1");
   const [projectCode, setProjectCode] = useState("PRJ-001");
+  const [projectWarehouseId, setProjectWarehouseId] = useState("");
   const [limitProjectId, setLimitProjectId] = useState("");
   const [limitName, setLimitName] = useState("Лимит основного этапа");
   const [limitMaterialId, setLimitMaterialId] = useState("");
@@ -527,6 +554,8 @@ function App() {
   const [chatText, setChatText] = useState("");
   const [chatAttachment, setChatAttachment] = useState<File | null>(null);
   const [chatError, setChatError] = useState("");
+  const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
+  const [chatWidgetUserId, setChatWidgetUserId] = useState("");
   const [feedbackMessages, setFeedbackMessages] = useState<ChatMessage[]>([]);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
@@ -535,36 +564,23 @@ function App() {
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
-  const allPermissionOptions = [
-    "dashboard.read",
-    "audit.read",
-    "materials.match",
-    "warehouses.read",
-    "warehouses.write",
-    "materials.read",
-    "materials.write",
-    "operations.read",
-    "operations.write",
-    "stocks.read",
-    "limits.read",
-    "limits.write",
-    "issues.read",
-    "issues.write",
-    "issues.approve",
-    "documents.read",
-    "documents.write",
-    "documents.upload",
-    "tools.read",
-    "tools.write",
-    "waybills.read",
-    "waybills.write",
-    "integrations.read",
-    "integrations.write",
-    "notifications.read",
-    "notifications.write",
-    "team.read",
-    "team.tasks.write",
-    "admin.users.manage"
+  const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
+    { id: "stocks", label: "Главная", permissions: ["dashboard.read", "stocks.read"] },
+    { id: "operations", label: "Приходы и расходы", permissions: ["operations.read", "operations.write"] },
+    { id: "issues", label: "Выдачи", permissions: ["issues.read", "issues.write"] },
+    { id: "approvals", label: "Согласования", permissions: ["issues.approve"] },
+    { id: "waybills", label: "Перемещения", permissions: ["waybills.read", "waybills.write"] },
+    { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
+    { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.write"] },
+    { id: "matching", label: "Сопоставление", permissions: ["materials.match", "materials.read"] },
+    { id: "inbox", label: "Центр входящих", permissions: ["notifications.read", "team.read"] },
+    { id: "team", label: "Команда и задачи", permissions: ["team.read", "team.tasks.write"] },
+    { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read", "materials.write"] },
+    { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
+    { id: "qr", label: "QR", permissions: ["tools.read"] },
+    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write"] },
+    { id: "audit", label: "Аудит", permissions: ["audit.read"] },
+    { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
   ];
   const roleLabel = (role: string) =>
     ({
@@ -578,9 +594,6 @@ function App() {
       MANAGEMENT: "Руководство",
       VIEWER: "Наблюдатель"
     })[role] ?? role;
-  const togglePermission = (setter: Dispatch<SetStateAction<string[]>>, permission: string, checked: boolean) => {
-    setter((prev) => (checked ? (prev.includes(permission) ? prev : [...prev, permission]) : prev.filter((p) => p !== permission)));
-  };
   const fileToDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -908,7 +921,8 @@ function App() {
     }
     setDashboardError("");
     try {
-      const r = await fetch(`${API_URL}/api/dashboard/summary`, {
+      const query = dashboardWarehouseId ? `?warehouseId=${encodeURIComponent(dashboardWarehouseId)}` : "";
+      const r = await fetch(`${API_URL}/api/dashboard/summary${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) {
@@ -1419,6 +1433,9 @@ function App() {
     if (warehousesData.length && !issueWarehouseId) {
       setIssueWarehouseId(warehousesData[0].id);
     }
+    if (warehousesData.length && !projectWarehouseId) {
+      setProjectWarehouseId(warehousesData[0].id);
+    }
     if (materialsData.length && !issueMaterialId) {
       setIssueMaterialId(materialsData[0].id);
     }
@@ -1895,6 +1912,8 @@ function App() {
       void loadStocks(q);
       void loadIssues();
       void loadApprovalQueue();
+      void loadChatUsers();
+      void loadConversations();
     }
   }, [token]);
 
@@ -1904,7 +1923,7 @@ function App() {
       return;
     }
     void loadDashboardSummary();
-  }, [token, canDashboard, me]);
+  }, [token, canDashboard, me, dashboardWarehouseId]);
 
   useEffect(() => {
     if (!token || activeTab !== "matching") {
@@ -1937,6 +1956,12 @@ function App() {
     void loadProjects();
     void loadTeamData();
   }, [token, activeTab, canReadTeam]);
+
+  useEffect(() => {
+    if (!dashboardWarehouseId && warehouses.length) {
+      setDashboardWarehouseId(warehouses[0].id);
+    }
+  }, [dashboardWarehouseId, warehouses]);
 
   useEffect(() => {
     if (!token || activeTab !== "chat") return;
@@ -1995,7 +2020,6 @@ function App() {
     if (canReadIntegrations) visibleTabs.add("integrations");
     if (canReadIntegrations || canReadTeam) visibleTabs.add("inbox");
     if (canReadTeam) visibleTabs.add("team");
-    visibleTabs.add("chat");
     visibleTabs.add("feedback");
     visibleTabs.add("reports");
     if (canReadAudit) visibleTabs.add("audit");
@@ -2250,7 +2274,6 @@ function App() {
         {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
-        <button className={`navBtn ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}><span className="navIcon">💬</span>Чаты</button>
         <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
         <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка PDF</button>
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
@@ -2327,6 +2350,15 @@ function App() {
               <span>
                 Критические уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
               </span>
+              <span>
+                Объект: <strong>{dashboard.object?.warehouseName || "—"}</strong>
+              </span>
+              <span>
+                Проектов: <strong>{dashboard.object?.projectsCount ?? 0}</strong>
+              </span>
+              <span>
+                Выполнение лимитов: <strong>{dashboard.object?.usagePercent ?? 0}%</strong>
+              </span>
               {dashboard.admin && (
                 <span>
                   Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
@@ -2350,6 +2382,14 @@ function App() {
               </div>
               <div className="card">
                 <div className="toolbar">
+                  <label>
+                    Объект
+                    <select value={dashboardWarehouseId} onChange={(e) => setDashboardWarehouseId(e.target.value)}>
+                      {warehouses.map((w) => (
+                        <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                      ))}
+                    </select>
+                  </label>
                   <input
                     placeholder="Поиск по материалу, sku, синониму"
                     value={q}
@@ -2373,6 +2413,8 @@ function App() {
                         <th>Материал</th>
                         {showStockSku && <th>SKU</th>}
                         <th>Ед.</th>
+                        <th>Помещение</th>
+                        <th>Ячейка</th>
                         <th>Остаток</th>
                         {showStockReserve && <th>Резерв</th>}
                         <th>Доступно</th>
@@ -2385,6 +2427,8 @@ function App() {
                           <td>{safeName(row.materialName)}</td>
                           {showStockSku && <td>{row.materialSku || "-"}</td>}
                           <td>{row.materialUnit}</td>
+                          <td>{row.storageRoom || "—"}</td>
+                          <td>{row.storageCell || "—"}</td>
                           <td>{row.quantity}</td>
                           {showStockReserve && <td>{row.reserved}</td>}
                           <td>{row.available}</td>
@@ -3212,6 +3256,14 @@ function App() {
                 onChange={(e) => setOpQuantity(Number(e.target.value))}
               />
             </label>
+            <label>
+              Помещение
+              <input value={opStorageRoom} onChange={(e) => setOpStorageRoom(e.target.value)} placeholder="Напр. Подвал" />
+            </label>
+            <label>
+              Ячейка
+              <input value={opStorageCell} onChange={(e) => setOpStorageCell(e.target.value)} placeholder="Напр. A-12" />
+            </label>
           </div>
           <div className="toolbar">
             <button
@@ -3229,6 +3281,8 @@ function App() {
                     type: opType,
                     warehouseId: opWarehouseId,
                     documentNumber: `${opType}-${Date.now()}`,
+                    storageRoom: opStorageRoom || undefined,
+                    storageCell: opStorageCell || undefined,
                     items: [{ materialId: opMaterialId, quantity: opQuantity }]
                   })
                 });
@@ -3238,6 +3292,8 @@ function App() {
                   return;
                 }
                 setOpsMessage("Операция проведена");
+                setOpStorageRoom("");
+                setOpStorageCell("");
                 await loadStocks(q);
               }}
             >
@@ -3497,6 +3553,14 @@ function App() {
                   Код проекта
                   <input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
                 </label>
+                <label>
+                  Объект (склад)
+                  <select value={projectWarehouseId} onChange={(e) => setProjectWarehouseId(e.target.value)}>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   disabled={!canWriteLimits}
                   onClick={async () => {
@@ -3504,7 +3568,7 @@ function App() {
                     const res = await fetch(`${API_URL}/api/projects`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: projectName, code: projectCode })
+                      body: JSON.stringify({ name: projectName, code: projectCode, warehouseId: projectWarehouseId || undefined })
                     });
                     if (!res.ok) {
                       setLimitsMessage("Ошибка создания проекта");
@@ -3607,6 +3671,7 @@ function App() {
                   <th>Выдано</th>
                   <th>Резерв</th>
                   <th>Остаток</th>
+                  <th>Использование</th>
                 </tr>
               </thead>
               <tbody>
@@ -3617,6 +3682,14 @@ function App() {
                     <td>{item.issuedQty}</td>
                     <td>{item.reservedQty}</td>
                     <td>{item.remainingQty}</td>
+                    <td>
+                      <div className="progressWrap">
+                        <div
+                          className={`progressBar ${item.isOver ? "bad" : ""}`}
+                          style={{ width: `${Math.min(100, Math.round(((item.issuedQty + item.reservedQty) / Math.max(1, item.plannedQty)) * 100))}%` }}
+                        />
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -4704,7 +4777,7 @@ function App() {
                         setNewUserProjectScopes((prev) =>
                           e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
                         );
-                        const linked = p.warehouseIds || [];
+                        const linked = p.warehouseId ? [p.warehouseId] : [];
                         if (e.target.checked) {
                           setNewUserWarehouseScopes((prev) => Array.from(new Set([...prev, ...linked])));
                         }
@@ -4719,14 +4792,20 @@ function App() {
           <div className="card" style={{ marginTop: 12 }}>
             <h3>Доступ к вкладкам и модулям (индивидуально)</h3>
             <div className="plainList">
-              {allPermissionOptions.map((perm) => (
-                <label key={`new-perm-${perm}`} style={{ display: "block" }}>
+              {sidebarAccessOptions.map((opt) => (
+                <label key={`new-perm-${opt.id}`} style={{ display: "block" }}>
                   <input
                     type="checkbox"
-                    checked={newUserPermissions.includes(perm)}
-                    onChange={(e) => togglePermission(setNewUserPermissions, perm, e.target.checked)}
+                    checked={opt.permissions.some((p) => newUserPermissions.includes(p))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewUserPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
+                      } else {
+                        setNewUserPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
+                      }
+                    }}
                   />{" "}
-                  {perm}
+                  {opt.label}
                 </label>
               ))}
             </div>
@@ -4907,14 +4986,20 @@ function App() {
           <div className="card" style={{ marginTop: 12 }}>
             <h3>Индивидуальные доступы (override)</h3>
             <div className="plainList">
-              {allPermissionOptions.map((perm) => (
-                <label key={`selected-perm-${perm}`} style={{ display: "block" }}>
+              {sidebarAccessOptions.map((opt) => (
+                <label key={`selected-perm-${opt.id}`} style={{ display: "block" }}>
                   <input
                     type="checkbox"
-                    checked={selectedPermissions.includes(perm)}
-                    onChange={(e) => togglePermission(setSelectedPermissions, perm, e.target.checked)}
+                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
+                      } else {
+                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
+                      }
+                    }}
                   />{" "}
-                  {perm}
+                  {opt.label}
                 </label>
               ))}
             </div>
@@ -5103,6 +5188,62 @@ function App() {
             </button>
           </div>
           {passMessage && <p className="muted">{passMessage}</p>}
+        </div>
+      )}
+      {isAuthed && (
+        <div className={`chatWidget ${chatWidgetOpen ? "open" : ""}`}>
+          {!chatWidgetOpen ? (
+            <button type="button" className="chatWidgetFab" onClick={() => setChatWidgetOpen(true)}>
+              💬
+            </button>
+          ) : (
+            <div className="chatWidgetPanel card">
+              <div className="chatWidgetHeader">
+                <strong>Чат</strong>
+                <button type="button" onClick={() => setChatWidgetOpen(false)}>×</button>
+              </div>
+              {!chatWidgetUserId ? (
+                <div className="chatUserList">
+                  {chatUsers.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className="chatUserItem"
+                      onClick={async () => {
+                        await startDmConversation(u.id);
+                        setChatWidgetUserId(u.id);
+                      }}
+                    >
+                      <span className="userAvatar">
+                        {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                      </span>
+                      <span>{u.fullName}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="toolbar">
+                    <button type="button" onClick={() => setChatWidgetUserId("")}>← К списку</button>
+                  </div>
+                  <div className="chatMessages">
+                    {chatMessages.map((m) => (
+                      <div key={m.id} className={`chatBubble ${m.senderId === me?.id ? "mine" : ""}`}>
+                        <p>{m.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="form">
+                    <input value={chatText} onChange={(e) => setChatText(e.target.value)} placeholder="Введите сообщение" />
+                    <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
+                    <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
+                      Отправить
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       </section>

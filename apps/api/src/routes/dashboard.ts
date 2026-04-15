@@ -50,6 +50,10 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   const today = startOfUtcDay();
   const weekAgo = new Date(Date.now() - 7 * 86400000);
   const scope = await getRequestDataScope(req);
+  const selectedWarehouseId =
+    typeof req.query.warehouseId === "string" && req.query.warehouseId.trim()
+      ? req.query.warehouseId.trim()
+      : scope.warehouseIds?.[0] || null;
 
   const opScope = operationWhereFromScope(scope);
   const stScope = stockWhereFromScope(scope);
@@ -158,6 +162,56 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     (x) => Number(x.issuedQty) + Number(x.reservedQty) > Number(x.plannedQty)
   ).length;
 
+  let objectSummary: {
+    warehouseId: string | null;
+    warehouseName: string | null;
+    projectsCount: number;
+    limitsCount: number;
+    materialsInLimits: number;
+    plannedQty: number;
+    issuedQty: number;
+    usagePercent: number;
+  } = {
+    warehouseId: selectedWarehouseId,
+    warehouseName: null,
+    projectsCount: 0,
+    limitsCount: 0,
+    materialsInLimits: 0,
+    plannedQty: 0,
+    issuedQty: 0,
+    usagePercent: 0
+  };
+  if (selectedWarehouseId) {
+    const wh = await prisma.warehouse.findUnique({ where: { id: selectedWarehouseId } });
+    if (wh) objectSummary.warehouseName = wh.name;
+    const projectRows = await prisma.project.findMany({
+      where: { warehouseId: selectedWarehouseId },
+      select: { id: true }
+    });
+    const projectIds = projectRows.map((x) => x.id);
+    if (projectIds.length) {
+      const [limitsCount, limItems] = await Promise.all([
+        prisma.projectLimit.count({ where: { projectId: { in: projectIds } } }),
+        prisma.projectLimitItem.findMany({
+          where: { projectLimit: { projectId: { in: projectIds } } },
+          select: { plannedQty: true, issuedQty: true }
+        })
+      ]);
+      const plannedQty = limItems.reduce((acc, x) => acc + Number(x.plannedQty), 0);
+      const issuedQty = limItems.reduce((acc, x) => acc + Number(x.issuedQty), 0);
+      objectSummary = {
+        warehouseId: selectedWarehouseId,
+        warehouseName: wh?.name || null,
+        projectsCount: projectIds.length,
+        limitsCount,
+        materialsInLimits: limItems.length,
+        plannedQty,
+        issuedQty,
+        usagePercent: plannedQty > 0 ? Math.min(100, Math.round((issuedQty / plannedQty) * 100)) : 0
+      };
+    }
+  }
+
   const base = {
     role,
     generatedAt: new Date().toISOString(),
@@ -181,6 +235,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
       projectsCount,
       overspendLimitLines: overspendLines
     },
+    object: objectSummary,
     admin:
       role === "ADMIN"
         ? {
