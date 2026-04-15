@@ -85,9 +85,11 @@ type IssueRequest = {
   id: string;
   number: string;
   status: string;
+  flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   projectId?: string | null;
   requestedById: string;
+  responsibleName?: string | null;
   note?: string | null;
   basisType?: string;
   basisRef?: string | null;
@@ -3896,6 +3898,8 @@ function App() {
                       body: JSON.stringify({
                         warehouseId: issueWarehouseId,
                         note: noteParts.join(" | "),
+                        responsibleName: issueResponsible.trim(),
+                        flowType: "DIRECT_ISSUE",
                         basisType: "OTHER",
                         items: validLines.map((x) => ({ materialId: x.materialId, quantity: x.quantity }))
                       })
@@ -3943,7 +3947,7 @@ function App() {
                     <tr key={i.id}>
                       <td>{i.number}</td>
                       <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                      <td>{(i.note || "").split("|")[0]?.replace("Ответственный:", "").trim() || "—"}</td>
+                      <td>{i.responsibleName || "—"}</td>
                       <td>{new Date(i.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}

@@ -143,13 +143,15 @@ contractsRouter.get("/openapi.json", (_req, res) => {
             },
             basisRef: { type: ["string", "null"] },
             note: { type: ["string", "null"] },
+            responsibleName: { type: ["string", "null"] },
+            flowType: { type: "string", enum: ["REQUEST", "DIRECT_ISSUE"] },
             warehouseId: { type: "string" },
             projectId: { type: ["string", "null"] },
             requestedById: { type: "string" },
             approvedById: { type: ["string", "null"] },
             createdAt: { type: "string", format: "date-time" }
           },
-          required: ["id", "number", "status", "basisType", "warehouseId", "requestedById", "createdAt"]
+          required: ["id", "number", "status", "flowType", "basisType", "warehouseId", "requestedById", "createdAt"]
         },
         PagedIssueRequestResponse: {
           type: "object",
@@ -465,6 +467,8 @@ contractsRouter.get("/openapi.json", (_req, res) => {
                     warehouseId: { type: "string" },
                     projectId: { type: "string" },
                     note: { type: "string" },
+                    responsibleName: { type: "string" },
+                    flowType: { type: "string", enum: ["REQUEST", "DIRECT_ISSUE"] },
                     basisType: {
                       type: "string",
                       enum: ["PROJECT_WORK", "INTERNAL_NEED", "EMERGENCY", "OTHER"]

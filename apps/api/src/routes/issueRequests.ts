@@ -22,6 +22,8 @@ const createIssueSchema = z.object({
   warehouseId: z.string().min(1),
   projectId: z.string().optional(),
   note: z.string().optional(),
+  responsibleName: z.string().max(160).optional().nullable(),
+  flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
   basisType: z.nativeEnum(IssueBasisType).optional(),
   basisRef: z.string().max(500).optional().nullable(),
   items: z
@@ -80,11 +82,12 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
         OR: [
           { number: { contains: q, mode: "insensitive" as const } },
           { basisRef: { contains: q, mode: "insensitive" as const } },
-          { note: { contains: q, mode: "insensitive" as const } }
+          { note: { contains: q, mode: "insensitive" as const } },
+          { responsibleName: { contains: q, mode: "insensitive" as const } }
         ]
       }
     : {};
-  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...searchFilter });
+  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...searchFilter } as any);
   const [total, rows] = await prisma.$transaction([
     prisma.issueRequest.count({ where }),
     prisma.issueRequest.findMany({
@@ -161,9 +164,11 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   const created = await prisma.issueRequest.create({
     data: {
       number,
+      flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
       projectId: parsed.data.projectId,
       note: parsed.data.note,
+      responsibleName: parsed.data.responsibleName ?? undefined,
       basisType,
       basisRef: parsed.data.basisRef ?? undefined,
       requestedById: req.user!.userId,
@@ -174,7 +179,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
           quantity: item.quantity
         }))
       }
-    },
+    } as any,
     include: { items: true }
   });
 

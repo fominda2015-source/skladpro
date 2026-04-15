@@ -39,6 +39,11 @@ enum IssueBasisType {
   OTHER
 }
 
+enum IssueFlowType {
+  REQUEST
+  DIRECT_ISSUE
+}
+
 enum ToolStatus {
   IN_STOCK
   ISSUED
@@ -566,8 +571,10 @@ model IssueRequest {
   id            String             @id @default(cuid())
   number        String             @unique
   status        IssueRequestStatus @default(DRAFT)
+  flowType      IssueFlowType      @default(REQUEST)
   basisType     IssueBasisType     @default(OTHER)
   basisRef      String?
+  responsibleName String?
   warehouseId   String
   projectId     String?
   requestedById String
