@@ -440,7 +440,8 @@ function App() {
   const [teamTaskWarehouseId, setTeamTaskWarehouseId] = useState("");
   const [teamTaskDueAt, setTeamTaskDueAt] = useState("");
   const [myTasks, setMyTasks] = useState<TeamTask[]>([]);
-  const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue">("all");
+  const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue" | "read_today">("all");
+  const [selectedNotificationIds, setSelectedNotificationIds] = useState<string[]>([]);
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -578,6 +579,25 @@ function App() {
       later: source.filter((t) => taskSlaKind(t) === "normal")
     };
   }, [myTasks, inboxFilter]);
+  const groupedInboxNotifications = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const source = notifications.filter((n) => {
+      const isCritical = n.level === "ERROR" || n.level === "WARNING";
+      const readToday = n.isRead && new Date(n.createdAt) >= startOfToday;
+      if (inboxFilter === "new") return !n.isRead;
+      if (inboxFilter === "critical") return isCritical;
+      if (inboxFilter === "read_today") return readToday;
+      if (inboxFilter === "mine") return false;
+      return true;
+    });
+    return {
+      critical: source.filter((n) => n.level === "ERROR" || n.level === "WARNING"),
+      fresh: source.filter((n) => !n.isRead),
+      readToday: source.filter((n) => n.isRead && new Date(n.createdAt) >= startOfToday),
+      other: source.filter((n) => n.isRead && !(new Date(n.createdAt) >= startOfToday) && n.level === "INFO")
+    };
+  }, [notifications, inboxFilter]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -874,6 +894,7 @@ function App() {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ids })
     });
+    setSelectedNotificationIds((prev) => prev.filter((id) => !ids.includes(id)));
     await loadNotifications();
   }
 
@@ -1754,6 +1775,7 @@ function App() {
     setStockMovements([]);
     setIntegrationJobs([]);
     setNotifications([]);
+    setSelectedNotificationIds([]);
     setMyTasks([]);
     setUsers([]);
     setRoles([]);
@@ -2277,6 +2299,7 @@ function App() {
               <option value="new">Новые</option>
               <option value="critical">Критичные</option>
               <option value="overdue">Просроченные</option>
+              <option value="read_today">Прочитанные сегодня</option>
               <option value="mine">Мои задачи</option>
             </select>
             {canReadIntegrations && <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>}
@@ -2294,40 +2317,75 @@ function App() {
           {canReadIntegrations && inboxFilter !== "mine" && (
             <>
               <h3>Уведомления</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Время</th>
-                    <th>Уровень</th>
-                    <th>Тема</th>
-                    <th>Статус</th>
-                    <th>Действие</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {notifications
-                    .filter((n) => {
-                      if (inboxFilter === "new") return !n.isRead;
-                      if (inboxFilter === "critical") return n.level === "ERROR" || n.level === "WARNING";
-                      return true;
-                    })
-                    .map((n) => (
-                      <tr key={n.id}>
-                        <td>{new Date(n.createdAt).toLocaleString()}</td>
-                        <td>{n.level === "ERROR" ? "Ошибка" : n.level === "WARNING" ? "Предупреждение" : "Инфо"}</td>
-                        <td>{n.title}</td>
-                        <td>{n.isRead ? "Прочитано" : "Новое"}</td>
-                        <td>
-                          {!n.isRead ? (
-                            <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  onClick={() => void markNotificationsRead(selectedNotificationIds)}
+                  disabled={!selectedNotificationIds.length}
+                >
+                  Прочитать выбранные ({selectedNotificationIds.length})
+                </button>
+                <button type="button" onClick={() => setSelectedNotificationIds([])} disabled={!selectedNotificationIds.length}>
+                  Сбросить выбор
+                </button>
+              </div>
+              {[
+                { key: "critical", title: "Критичные", rows: groupedInboxNotifications.critical },
+                { key: "fresh", title: "Новые", rows: groupedInboxNotifications.fresh },
+                { key: "readToday", title: "Прочитанные сегодня", rows: groupedInboxNotifications.readToday },
+                { key: "other", title: "Остальные", rows: groupedInboxNotifications.other }
+              ].map((group) => (
+                <div key={group.key} className="card inboxGroupCard">
+                  <div className="rightCardHeader">
+                    <h4>{group.title}</h4>
+                    <span className="muted">{group.rows.length}</span>
+                  </div>
+                  {group.rows.length ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>Время</th>
+                          <th>Уровень</th>
+                          <th>Тема</th>
+                          <th>Статус</th>
+                          <th>Действие</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((n) => (
+                          <tr key={n.id}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={selectedNotificationIds.includes(n.id)}
+                                onChange={(e) => {
+                                  setSelectedNotificationIds((prev) =>
+                                    e.target.checked ? [...prev, n.id] : prev.filter((id) => id !== n.id)
+                                  );
+                                }}
+                              />
+                            </td>
+                            <td>{new Date(n.createdAt).toLocaleString()}</td>
+                            <td>{n.level === "ERROR" ? "Ошибка" : n.level === "WARNING" ? "Предупреждение" : "Инфо"}</td>
+                            <td>{n.title}</td>
+                            <td>{n.isRead ? "Прочитано" : "Новое"}</td>
+                            <td>
+                              {!n.isRead ? (
+                                <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted">Нет уведомлений в этой группе.</p>
+                  )}
+                </div>
+              ))}
             </>
           )}
 
