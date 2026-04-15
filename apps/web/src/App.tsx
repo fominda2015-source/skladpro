@@ -3783,8 +3783,8 @@ function App() {
 
       {activeTab === "issues" && (
         <div className="card">
-          <h2>{isStorekeeperMode ? "Выдача материалов" : "Заявки на выдачу"}</h2>
-          {isStorekeeperMode ? (
+          <h2>Выдача материалов</h2>
+          {true ? (
             <>
               <p className="muted">
                 Выбери материалы со склада, количество и укажи ответственное лицо. Система сразу проводит выдачу.
