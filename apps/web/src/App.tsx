@@ -3890,14 +3890,12 @@ function App() {
                       return;
                     }
                     setIssuesMessage("");
-                    const noteParts = [`Ответственный: ${issueResponsible.trim()}`];
-                    if (issueNote.trim()) noteParts.push(issueNote.trim());
                     const createRes = await fetch(`${API_URL}/api/issues`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                       body: JSON.stringify({
                         warehouseId: issueWarehouseId,
-                        note: noteParts.join(" | "),
+                        note: issueNote.trim() || undefined,
                         responsibleName: issueResponsible.trim(),
                         flowType: "DIRECT_ISSUE",
                         basisType: "OTHER",
@@ -3947,7 +3945,7 @@ function App() {
                     <tr key={i.id}>
                       <td>{i.number}</td>
                       <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                      <td>{i.responsibleName || "—"}</td>
+                      <td>{i.responsibleName || (i.note || "").split("|")[0]?.replace("Ответственный:", "").trim() || "—"}</td>
                       <td>{new Date(i.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}
