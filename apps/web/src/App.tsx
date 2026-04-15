@@ -2189,6 +2189,14 @@ function App() {
     return "neutral";
   }
 
+  function issueFlowLabel(flowType?: string) {
+    return flowType === "REQUEST" ? "Заявка" : "Прямая";
+  }
+
+  function issueFlowBadgeClass(flowType?: string) {
+    return flowType === "REQUEST" ? "neutral" : "warn";
+  }
+
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
   const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
@@ -3952,6 +3960,7 @@ function App() {
                   <tr>
                     <th>Номер</th>
                     <th>Статус</th>
+                    <th>Поток</th>
                     <th>Ответственный</th>
                     <th>Дата</th>
                   </tr>
@@ -3961,6 +3970,7 @@ function App() {
                     <tr key={i.id}>
                       <td>{i.number}</td>
                       <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
+                      <td><span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span></td>
                       <td>{i.responsibleName || "—"}</td>
                       <td>{new Date(i.createdAt).toLocaleString()}</td>
                     </tr>
