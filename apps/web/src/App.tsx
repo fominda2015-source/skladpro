@@ -10,7 +10,10 @@ import {
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
-type LoginResponse = { token: string; user: { id: string; email: string; fullName: string; role: string; permissions: string[] } };
+type LoginResponse = {
+  token: string;
+  user: { id: string; email: string; fullName: string; avatarUrl?: string | null; role: string; permissions: string[] };
+};
 type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
 type StockMovementRow = {
   id: string;
@@ -28,11 +31,19 @@ type StockMovementRow = {
   operation?: { id: string; type: string; documentNumber: string | null };
   issueRequest?: { id: string; number: string };
 };
-type MeResponse = { id: string; email: string; fullName: string; role: string; permissions: string[] };
+type MeResponse = {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl?: string | null;
+  role: string;
+  permissions: string[];
+};
 type AdminUser = {
   id: string;
   email: string;
   fullName: string;
+  avatarUrl?: string | null;
   role: string;
   status: "ACTIVE" | "BLOCKED";
   permissions: string[];
@@ -243,6 +254,8 @@ function App() {
     | "matching"
     | "audit"
     | "integrations"
+    | "settings"
+    | "profile"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -254,9 +267,18 @@ function App() {
   const [adminMessage, setAdminMessage] = useState("");
   const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
   const [selectedProjectScopes, setSelectedProjectScopes] = useState<string[]>([]);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserFullName, setNewUserFullName] = useState("");
+  const [newUserRoleName, setNewUserRoleName] = useState("VIEWER");
+  const [newUserPassword, setNewUserPassword] = useState("1111");
+  const [newUserWarehouseScopes, setNewUserWarehouseScopes] = useState<string[]>([]);
+  const [newUserProjectScopes, setNewUserProjectScopes] = useState<string[]>([]);
   const [passCurrent, setPassCurrent] = useState("1111");
   const [passNext, setPassNext] = useState("1111");
   const [passMessage, setPassMessage] = useState("");
+  const [profileFullName, setProfileFullName] = useState("");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
+  const [profileMessage, setProfileMessage] = useState("");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [catalogMessage, setCatalogMessage] = useState("");
@@ -385,33 +407,50 @@ function App() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
 
+  const hasPermission = (permission: string) =>
+    Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
+  const roleLabel = (role: string) =>
+    ({
+      SYSTEM_ADMIN: "Системный администратор",
+      WAREHOUSE_MANAGER: "Кладовщик",
+      PROJECT_MANAGER: "Руководитель проекта",
+      VIEWER: "Наблюдатель"
+    })[role] ?? role;
+  const statusLabel = (status: "ACTIVE" | "BLOCKED") => (status === "ACTIVE" ? "Активен" : "Заблокирован");
+
   const isAuthed = useMemo(() => Boolean(token), [token]);
-  const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
-  const canWriteCatalog = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("warehouses.write") || me?.permissions?.includes("materials.write")), [me]);
-  const canWriteOperations = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("operations.write")), [me]);
-  const canWriteLimits = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("limits.write")), [me]);
+  const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
+  const canWriteCatalog = useMemo(() => Boolean(hasPermission("warehouses.write") || hasPermission("materials.write")), [me]);
+  const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
+  const canWriteLimits = useMemo(() => hasPermission("limits.write"), [me]);
   const canReadAudit = useMemo(
-    () => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("audit.read")),
+    () => hasPermission("audit.read"),
     [me]
   );
   const canDashboard = useMemo(
     () =>
       Boolean(
-        me?.permissions?.includes("*") ||
-          me?.permissions?.includes("dashboard.read") ||
-          me?.permissions?.includes("stocks.read")
+        hasPermission("dashboard.read") ||
+          hasPermission("stocks.read")
       ),
     [me]
   );
   const canMaterialMatch = useMemo(
     () =>
       Boolean(
-        me?.permissions?.includes("*") ||
-          me?.permissions?.includes("materials.match") ||
-          me?.permissions?.includes("materials.write")
+        hasPermission("materials.match") ||
+          hasPermission("materials.write")
       ),
     [me]
   );
+  const canReadStocks = useMemo(() => hasPermission("stocks.read"), [me]);
+  const canReadIssues = useMemo(() => hasPermission("issues.read"), [me]);
+  const canReadOperations = useMemo(() => hasPermission("operations.read"), [me]);
+  const canReadLimits = useMemo(() => hasPermission("limits.read"), [me]);
+  const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
+  const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
+  const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
+  const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
 
   async function loadStockMovements() {
     if (!token) {
@@ -471,6 +510,27 @@ function App() {
     }
     const data = (await res.json()) as MeResponse;
     setMe(data);
+    setProfileFullName(data.fullName);
+    setProfileAvatarUrl(data.avatarUrl ?? null);
+  }
+
+  async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/auth/me/profile`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(next)
+    });
+    if (!res.ok) {
+      throw new Error("Не удалось обновить профиль");
+    }
+    const data = (await res.json()) as MeResponse;
+    setMe(data);
+    setProfileFullName(data.fullName);
+    setProfileAvatarUrl(data.avatarUrl ?? null);
   }
 
   async function loadDashboardSummary() {
@@ -1161,8 +1221,52 @@ function App() {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
+      void loadProjects().catch(() => undefined);
     }
   }, [token, canManageUsers, activeTab]);
+
+  useEffect(() => {
+    const visibleTabs = new Set<string>();
+    if (canReadStocks || canDashboard) visibleTabs.add("stocks");
+    if (canReadIssues) {
+      visibleTabs.add("issues");
+      visibleTabs.add("approvals");
+    }
+    if (canReadOperations) visibleTabs.add("operations");
+    if (canReadWaybills) visibleTabs.add("waybills");
+    if (canReadStocks || canWriteCatalog) visibleTabs.add("catalog");
+    if (canReadDocuments) visibleTabs.add("documents");
+    if (canReadTools) {
+      visibleTabs.add("tools");
+      visibleTabs.add("qr");
+    }
+    if (canMaterialMatch) visibleTabs.add("matching");
+    if (canReadLimits) visibleTabs.add("limits");
+    if (canReadIntegrations) visibleTabs.add("integrations");
+    if (canReadAudit) visibleTabs.add("audit");
+    if (canManageUsers) visibleTabs.add("admin");
+    visibleTabs.add("password");
+    visibleTabs.add("settings");
+    visibleTabs.add("profile");
+    if (!visibleTabs.has(activeTab)) {
+      setActiveTab("stocks");
+    }
+  }, [
+    activeTab,
+    canDashboard,
+    canReadStocks,
+    canReadIssues,
+    canReadOperations,
+    canReadWaybills,
+    canWriteCatalog,
+    canReadDocuments,
+    canReadTools,
+    canMaterialMatch,
+    canReadLimits,
+    canReadIntegrations,
+    canReadAudit,
+    canManageUsers
+  ]);
 
   useEffect(() => {
     const u = users.find((x) => x.id === selectedUserId);
@@ -1337,22 +1441,28 @@ function App() {
           <h2 className="brand">СкладПро</h2>
           <p className="brandSub">Warehouse ERP</p>
         </div>
-        <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>
-        <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Быстрая выдача</button>
-        <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Очередь заявок</button>
-        <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>
-        <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>
-        <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>
-        <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">◫</span>Остатки</button>
-        <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>
-        <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>
-        <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>
-        <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>
-        <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>
-        <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>
+        <p className="navSectionTitle">Склад</p>
+        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная и остатки</button>}
+        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы/расходы</button>}
+        {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Быстрая выдача</button>}
+        {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Согласования</button>}
+        {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
+        {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
+
+        <p className="navSectionTitle">Справочники и сервис</p>
+        {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
+        {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
+        {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
+        {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
+        {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+        {canReadIntegrations && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>}
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
         {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
-        <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Сменить пароль</button>
+
+        <p className="navSectionTitle">Аккаунт</p>
+        <button className={`navBtn ${activeTab === "profile" ? "active" : ""}`} onClick={() => setActiveTab("profile")}><span className="navIcon">◉</span>Профиль</button>
+        <button className={`navBtn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}><span className="navIcon">⚙</span>Настройки</button>
+        <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Смена пароля</button>
         <button className="navBtn danger" onClick={onLogout}>Выйти</button>
       </aside>
       <section className="canvas">
@@ -1385,22 +1495,28 @@ function App() {
                                       ? "Инструмент и QR"
                                       : activeTab === "integrations"
                                         ? "Интеграции и уведомления"
+                                      : activeTab === "profile"
+                                        ? "Мой профиль"
+                                      : activeTab === "settings"
+                                        ? "Настройки интерфейса"
                                       : activeTab === "admin"
                                         ? "Управление доступами"
                                         : "Смена пароля"}
             </h1>
-            {me && <p className="muted">{me.fullName} ({me.role})</p>}
+            {me && <p className="muted">{me.fullName} ({roleLabel(me.role)})</p>}
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("stocks"); }}>Найти</button>
-            <button onClick={() => setActiveTab("qr")}>QR</button>
-            <span className="topIcon">?</span>
-            <span className="topIcon">!</span>
-            <span className="topIcon">⚙</span>
+            {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
+            {canReadIntegrations && <button className="topIconBtn" onClick={() => setActiveTab("integrations")}>Уведомления</button>}
+            <button className="topIconBtn" onClick={() => setActiveTab("profile")}>Профиль</button>
+            <button className="topIconBtn" onClick={() => setActiveTab("settings")}>Настройки</button>
             {me ? (
               <span className="userChip">
-                <span className="userAvatar">{me.fullName.slice(0, 1).toUpperCase()}</span>
+                <span className="userAvatar">
+                  {me.avatarUrl ? <img src={me.avatarUrl} alt={me.fullName} className="userAvatarImage" /> : me.fullName.slice(0, 1).toUpperCase()}
+                </span>
                 <span>{me.fullName}</span>
               </span>
             ) : null}
@@ -1437,7 +1553,7 @@ function App() {
                 Мои непрочитанные уведомления: <strong>{dashboard.warehouse.unreadNotifications}</strong>
               </span>
               <span>
-                ERROR-уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
+                Критические уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
               </span>
               {dashboard.admin && (
                 <span>
@@ -3169,6 +3285,109 @@ function App() {
       {activeTab === "admin" && canManageUsers && (
         <div className="card">
           <h2>Управление доступами</h2>
+          <h3>Создание пользователя</h3>
+          <div className="form">
+            <label>
+              Email
+              <input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} />
+            </label>
+            <label>
+              ФИО
+              <input value={newUserFullName} onChange={(e) => setNewUserFullName(e.target.value)} />
+            </label>
+            <label>
+              Роль
+              <select value={newUserRoleName} onChange={(e) => setNewUserRoleName(e.target.value)}>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.name}>
+                    {roleLabel(r.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Пароль
+              <input value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} />
+            </label>
+          </div>
+          <div className="grid2" style={{ marginTop: 16 }}>
+            <div>
+              <h3>Склады новому пользователю</h3>
+              <div className="plainList">
+                {warehouses.map((w) => (
+                  <label key={`new-wh-${w.id}`} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      checked={newUserWarehouseScopes.includes(w.id)}
+                      onChange={(e) => {
+                        setNewUserWarehouseScopes((prev) =>
+                          e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
+                        );
+                      }}
+                    />{" "}
+                    {w.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h3>Проекты новому пользователю</h3>
+              <div className="plainList">
+                {projects.map((p) => (
+                  <label key={`new-pr-${p.id}`} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      checked={newUserProjectScopes.includes(p.id)}
+                      onChange={(e) => {
+                        setNewUserProjectScopes((prev) =>
+                          e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                        );
+                      }}
+                    />{" "}
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!token) return;
+                setAdminMessage("");
+                const res = await fetch(`${API_URL}/api/admin/users`, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    email: newUserEmail.trim(),
+                    fullName: newUserFullName.trim(),
+                    roleName: newUserRoleName,
+                    password: newUserPassword,
+                    warehouseIds: newUserWarehouseScopes,
+                    projectIds: newUserProjectScopes
+                  })
+                });
+                if (!res.ok) {
+                  setAdminMessage("Не удалось создать пользователя");
+                  return;
+                }
+                setAdminMessage("Пользователь создан");
+                setNewUserEmail("");
+                setNewUserFullName("");
+                setNewUserWarehouseScopes([]);
+                setNewUserProjectScopes([]);
+                await loadAdminData();
+              }}
+            >
+              Создать пользователя
+            </button>
+          </div>
+          <hr />
+          <h3>Редактирование существующего пользователя</h3>
           <div className="form">
             <label>
               Пользователь
@@ -3196,7 +3415,7 @@ function App() {
               <select value={selectedRoleName} onChange={(e) => setSelectedRoleName(e.target.value)}>
                 {roles.map((r) => (
                   <option key={r.id} value={r.name}>
-                    {r.name}
+                    {roleLabel(r.name)}
                   </option>
                 ))}
               </select>
@@ -3207,8 +3426,8 @@ function App() {
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value as "ACTIVE" | "BLOCKED")}
               >
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="BLOCKED">BLOCKED</option>
+                <option value="ACTIVE">{statusLabel("ACTIVE")}</option>
+                <option value="BLOCKED">{statusLabel("BLOCKED")}</option>
               </select>
             </label>
             <label>
@@ -3332,6 +3551,95 @@ function App() {
             </button>
           </div>
           {adminMessage && <p className="muted">{adminMessage}</p>}
+        </div>
+      )}
+
+      {activeTab === "profile" && me && (
+        <div className="card">
+          <h2>Мой профиль</h2>
+          <div className="form">
+            <label>
+              Email
+              <input value={me.email} disabled />
+            </label>
+            <label>
+              ФИО
+              <input value={profileFullName} onChange={(e) => setProfileFullName(e.target.value)} />
+            </label>
+            <label>
+              Роль
+              <input value={roleLabel(me.role)} disabled />
+            </label>
+            <label>
+              Аватар
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setProfileAvatarUrl(typeof reader.result === "string" ? reader.result : null);
+                  reader.readAsDataURL(file);
+                }}
+              />
+            </label>
+          </div>
+          <div className="toolbar">
+            <button
+              onClick={async () => {
+                try {
+                  await updateProfile({ fullName: profileFullName, avatarUrl: profileAvatarUrl });
+                  setProfileMessage("Профиль обновлен");
+                } catch {
+                  setProfileMessage("Не удалось обновить профиль");
+                }
+              }}
+            >
+              Сохранить профиль
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await updateProfile({ avatarUrl: null });
+                  setProfileAvatarUrl(null);
+                  setProfileMessage("Аватар удален");
+                } catch {
+                  setProfileMessage("Не удалось удалить аватар");
+                }
+              }}
+            >
+              Удалить аватар
+            </button>
+          </div>
+          {profileMessage && <p className="muted">{profileMessage}</p>}
+        </div>
+      )}
+
+      {activeTab === "settings" && (
+        <div className="card">
+          <h2>Настройки</h2>
+          <div className="form">
+            <label>
+              <span>Показывать SKU в остатках</span>
+              <input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} />
+            </label>
+            <label>
+              <span>Показывать резерв в остатках</span>
+              <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} />
+            </label>
+            <label>
+              <span>Вид стартового раздела</span>
+              <select value={activeTab} onChange={(e) => setActiveTab(e.target.value as typeof activeTab)}>
+                <option value="stocks">Главная и остатки</option>
+                {canReadIssues && <option value="issues">Быстрая выдача</option>}
+                {canReadTools && <option value="tools">Инструменты</option>}
+                {canReadIntegrations && <option value="integrations">Интеграции</option>}
+              </select>
+            </label>
+          </div>
+          <p className="muted">Профиль пользователя доступен во вкладке "Профиль".</p>
         </div>
       )}
 

@@ -13,6 +13,15 @@
   flex-direction: column;
   gap: 6px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-y: auto;
+}
+
+.navSectionTitle {
+  margin: 10px 8px 2px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9db2e7;
 }
 
 .brandWrap {
@@ -213,6 +222,16 @@ button:hover {
   border: 1px solid #dbe1ec;
 }
 
+.topIconBtn {
+  width: auto;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid #dbe1ec;
+  background: #fff;
+  color: #3d4d6d;
+  font-size: 12px;
+}
+
 .userChip {
   display: inline-flex;
   align-items: center;
@@ -235,6 +254,13 @@ button:hover {
   align-items: center;
   justify-content: center;
   font-weight: 700;
+  overflow: hidden;
+}
+
+.userAvatarImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .toolbar input {
@@ -549,9 +575,10 @@ tr.low {
 }
 
 .kpi strong {
-  font-size: 40px;
+  font-size: clamp(26px, 3vw, 36px);
   line-height: 1.05;
   color: #1f2937;
+  overflow-wrap: anywhere;
 }
 
 .dashboardStrip {
@@ -559,11 +586,15 @@ tr.low {
 }
 
 .dashboardFacts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: #f8fbff;
   border: 1px solid #e6edf8;
   border-radius: 10px;
   padding: 6px 10px;
   color: #53617e;
+  white-space: nowrap;
 }
 
 .actionBar {

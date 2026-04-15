@@ -16,7 +16,9 @@ const createUserSchema = z.object({
   email: z.string().email(),
   fullName: z.string().min(2),
   roleName: z.string().min(1),
-  password: z.string().min(4)
+  password: z.string().min(4),
+  warehouseIds: z.array(z.string().min(1)).default([]),
+  projectIds: z.array(z.string().min(1)).default([])
 });
 
 const updateRolePermissionsSchema = z.object({
@@ -52,6 +54,7 @@ adminRouter.get("/users", async (_req, res) => {
       fullName: u.fullName,
       status: u.status,
       role: u.role.name,
+      avatarUrl: u.avatarUrl,
       permissions: normalizePermissions(u.role.permissions),
       warehouseScopeIds: u.warehouseScopes.map((s) => s.warehouseId),
       projectScopeIds: u.projectScopes.map((s) => s.projectId),
@@ -122,21 +125,36 @@ adminRouter.post("/users", async (req, res) => {
     return res.status(404).json({ error: "Role not found" });
   }
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
-  const created = await prisma.user.create({
-    data: {
-      email: parsed.data.email,
-      fullName: parsed.data.fullName,
-      roleId: role.id,
-      passwordHash
-    },
-    include: { role: true }
+  const created = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email: parsed.data.email,
+        fullName: parsed.data.fullName.trim(),
+        roleId: role.id,
+        passwordHash
+      },
+      include: { role: true }
+    });
+
+    if (parsed.data.warehouseIds.length) {
+      await tx.userWarehouseScope.createMany({
+        data: parsed.data.warehouseIds.map((warehouseId) => ({ userId: user.id, warehouseId }))
+      });
+    }
+    if (parsed.data.projectIds.length) {
+      await tx.userProjectScope.createMany({
+        data: parsed.data.projectIds.map((projectId) => ({ userId: user.id, projectId }))
+      });
+    }
+    return user;
   });
   return res.status(201).json({
     id: created.id,
     email: created.email,
     fullName: created.fullName,
     status: created.status,
-    role: created.role.name
+    role: created.role.name,
+    avatarUrl: created.avatarUrl
   });
 });
 

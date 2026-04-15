@@ -81,6 +81,7 @@ model User {
   email            String               @unique
   passwordHash     String
   fullName         String
+  avatarUrl        String?
   status           UserStatus           @default(ACTIVE)
   roleId           String
   role             Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)

@@ -18,6 +18,11 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(4)
 });
 
+const updateProfileSchema = z.object({
+  fullName: z.string().min(2).max(120).optional(),
+  avatarUrl: z.string().max(500000).nullable().optional()
+});
+
 export const authRouter = Router();
 
 authRouter.post("/login", async (req, res) => {
@@ -54,6 +59,7 @@ authRouter.post("/login", async (req, res) => {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
+      avatarUrl: user.avatarUrl,
       role: roleName,
       permissions
     }
@@ -72,6 +78,7 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     id: me.id,
     email: me.email,
     fullName: me.fullName,
+    avatarUrl: me.avatarUrl,
     role: me.role.name,
     permissions: normalizePermissions(me.role.permissions)
   });
@@ -100,4 +107,31 @@ authRouter.post("/change-password", requireAuth, async (req: AuthedRequest, res)
   });
 
   return res.json({ ok: true });
+});
+
+authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = updateProfileSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: {
+      ...(typeof parsed.data.fullName === "string" ? { fullName: parsed.data.fullName.trim() } : {}),
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "avatarUrl")
+        ? { avatarUrl: parsed.data.avatarUrl ?? null }
+        : {})
+    },
+    include: { role: true }
+  });
+
+  return res.json({
+    id: updated.id,
+    email: updated.email,
+    fullName: updated.fullName,
+    avatarUrl: updated.avatarUrl,
+    role: updated.role.name,
+    permissions: normalizePermissions(updated.role.permissions)
+  });
 });
