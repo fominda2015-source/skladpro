@@ -541,6 +541,43 @@ function App() {
       VERIFIED: []
     })[status] ?? [];
   const isTaskClosed = (status: string) => status === "DONE" || status === "VERIFIED";
+  const taskSlaKind = (task: TeamTask) => {
+    if (!task.dueAt || isTaskClosed(task.status)) return "normal" as const;
+    const due = new Date(task.dueAt).getTime();
+    const now = Date.now();
+    if (due < now) return "overdue" as const;
+    if (due - now < 24 * 60 * 60 * 1000) return "today" as const;
+    return "week" as const;
+  };
+  const taskSlaLabel = (task: TeamTask) =>
+    ({
+      overdue: "Просрочено",
+      today: "Срок сегодня",
+      week: "На неделе",
+      normal: "Планово"
+    })[taskSlaKind(task)];
+  const taskSlaClass = (task: TeamTask) =>
+    ({
+      overdue: "slaBadge bad",
+      today: "slaBadge warn",
+      week: "slaBadge neutral",
+      normal: "slaBadge ok"
+    })[taskSlaKind(task)];
+  const groupedInboxTasks = useMemo(() => {
+    const source = myTasks.filter((t) => {
+      const overdue = taskSlaKind(t) === "overdue";
+      if (inboxFilter === "new") return t.status === "OPEN";
+      if (inboxFilter === "critical") return overdue;
+      if (inboxFilter === "overdue") return overdue;
+      return true;
+    });
+    return {
+      overdue: source.filter((t) => taskSlaKind(t) === "overdue"),
+      today: source.filter((t) => taskSlaKind(t) === "today"),
+      week: source.filter((t) => taskSlaKind(t) === "week"),
+      later: source.filter((t) => taskSlaKind(t) === "normal")
+    };
+  }, [myTasks, inboxFilter]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -2297,49 +2334,60 @@ function App() {
           {canReadTeam && (
             <>
               <h3 style={{ marginTop: 14 }}>Мои задачи</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Задача</th>
-                    <th>Срок</th>
-                    <th>Статус</th>
-                    <th>Следующий шаг</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myTasks
-                    .filter((t) => {
-                      const overdue = Boolean(t.dueAt && new Date(t.dueAt) < new Date() && !isTaskClosed(t.status));
-                      if (inboxFilter === "new") return t.status === "OPEN";
-                      if (inboxFilter === "critical") return overdue;
-                      if (inboxFilter === "overdue") return overdue;
-                      return true;
-                    })
-                    .map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          {t.title}
-                          {t.description ? <p className="muted">{t.description}</p> : null}
-                        </td>
-                        <td>{t.dueAt ? new Date(t.dueAt).toLocaleString() : "—"}</td>
-                        <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
-                        <td>
-                          <div className="toolbar">
-                            {teamTaskNextStatuses(t.status).map((next) => (
-                              <button
-                                key={`${t.id}-inbox-${next}`}
-                                type="button"
-                                onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
-                              >
-                                {teamTaskStatusLabel(next)}
-                              </button>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+              {[
+                { key: "overdue", title: "Просроченные", rows: groupedInboxTasks.overdue },
+                { key: "today", title: "На сегодня", rows: groupedInboxTasks.today },
+                { key: "week", title: "На этой неделе", rows: groupedInboxTasks.week },
+                { key: "later", title: "Позже / без срока", rows: groupedInboxTasks.later }
+              ].map((group) => (
+                <div key={group.key} className="card inboxGroupCard">
+                  <div className="rightCardHeader">
+                    <h4>{group.title}</h4>
+                    <span className="muted">{group.rows.length}</span>
+                  </div>
+                  {group.rows.length ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Задача</th>
+                          <th>SLA</th>
+                          <th>Срок</th>
+                          <th>Статус</th>
+                          <th>Следующий шаг</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((t) => (
+                          <tr key={t.id}>
+                            <td>
+                              {t.title}
+                              {t.description ? <p className="muted">{t.description}</p> : null}
+                            </td>
+                            <td><span className={taskSlaClass(t)}>{taskSlaLabel(t)}</span></td>
+                            <td>{t.dueAt ? new Date(t.dueAt).toLocaleString() : "—"}</td>
+                            <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
+                            <td>
+                              <div className="toolbar">
+                                {teamTaskNextStatuses(t.status).map((next) => (
+                                  <button
+                                    key={`${t.id}-inbox-${next}`}
+                                    type="button"
+                                    onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
+                                  >
+                                    {teamTaskStatusLabel(next)}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted">Нет задач в этой группе.</p>
+                  )}
+                </div>
+              ))}
             </>
           )}
         </div>

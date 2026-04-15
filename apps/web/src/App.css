@@ -649,6 +649,43 @@ tr.low {
   margin-top: 12px;
 }
 
+.inboxGroupCard {
+  margin-top: 10px;
+}
+
+.slaBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.slaBadge.ok {
+  color: #1f8f49;
+  border-color: #bde9ca;
+  background: #effbf2;
+}
+
+.slaBadge.warn {
+  color: #8a5a0a;
+  border-color: #f3d49a;
+  background: #fff7e8;
+}
+
+.slaBadge.bad {
+  color: #b42318;
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.slaBadge.neutral {
+  color: #475467;
+  border-color: #d0d5dd;
+  background: #f8f9fb;
+}
+
 @media (max-width: 1200px) {
   .kpiRow {
     grid-template-columns: repeat(3, minmax(0, 1fr));
