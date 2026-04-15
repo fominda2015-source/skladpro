@@ -562,6 +562,7 @@ function App() {
   const [chatText, setChatText] = useState("");
   const [chatAttachment, setChatAttachment] = useState<File | null>(null);
   const [chatError, setChatError] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
   const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
   const [chatWidgetUserId, setChatWidgetUserId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
@@ -798,6 +799,26 @@ function App() {
       }, 0),
     [chatRecent, me?.id, chatViewedAt]
   );
+  const groupedChatMessages = useMemo(() => {
+    const rows: Array<{ type: "date"; label: string } | { type: "message"; item: ChatMessage }> = [];
+    let prevDateKey = "";
+    const now = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    for (const item of chatMessages) {
+      const dt = new Date(item.createdAt);
+      const dateKey = dt.toDateString();
+      if (dateKey !== prevDateKey) {
+        let label = dt.toLocaleDateString();
+        if (dt.toDateString() === now.toDateString()) label = "Сегодня";
+        if (dt.toDateString() === yesterday.toDateString()) label = "Вчера";
+        rows.push({ type: "date", label });
+        prevDateKey = dateKey;
+      }
+      rows.push({ type: "message", item });
+    }
+    return rows;
+  }, [chatMessages]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -1297,15 +1318,18 @@ function App() {
   async function loadConversationMessages(conversationId: string) {
     if (!token || !conversationId) return;
     setChatError("");
+    setChatLoading(true);
     const res = await fetch(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
       setChatError("Не удалось загрузить сообщения");
+      setChatLoading(false);
       return;
     }
     setChatMessages((await res.json()) as ChatMessage[]);
     setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
+    setChatLoading(false);
   }
 
   async function sendConversationMessage() {
@@ -5570,16 +5594,35 @@ function App() {
                     <strong>{chatUsers.find((u) => u.id === chatWidgetUserId)?.fullName || "Диалог"}</strong>
                   </div>
                   <div className="chatMessages" ref={chatMessagesRef}>
-                    {chatMessages.map((m) => (
-                      <div key={m.id} className={`chatBubble ${m.senderId === me?.id ? "mine" : ""}`}>
-                        <p>{m.text}</p>
-                        {m.attachments.map((a) => (
-                          <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
-                            Вложение
-                          </a>
-                        ))}
-                      </div>
-                    ))}
+                    {chatLoading ? (
+                      <>
+                        <div className="chatSkeleton" />
+                        <div className="chatSkeleton short" />
+                        <div className="chatSkeleton" />
+                      </>
+                    ) : groupedChatMessages.length ? (
+                      groupedChatMessages.map((row, idx) =>
+                        row.type === "date" ? (
+                          <div key={`date-${idx}`} className="chatDateDivider">{row.label}</div>
+                        ) : (
+                          <div key={row.item.id} className={`chatBubble ${row.item.senderId === me?.id ? "mine" : ""}`}>
+                            <p>{row.item.text}</p>
+                            {row.item.attachments.map((a) => (
+                              <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
+                                Вложение
+                              </a>
+                            ))}
+                            {row.item.senderId === me?.id ? (
+                              <small className="chatDeliveryState">
+                                {Date.now() - new Date(row.item.createdAt).getTime() > 8000 ? "Доставлено" : "Отправлено"}
+                              </small>
+                            ) : null}
+                          </div>
+                        )
+                      )
+                    ) : (
+                      <p className="muted">Пока нет сообщений. Начни диалог первым.</p>
+                    )}
                   </div>
                   <div className="chatComposer">
                     <input

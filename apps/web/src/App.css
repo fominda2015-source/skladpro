@@ -905,6 +905,16 @@ tr.low {
   align-content: start;
 }
 
+.chatDateDivider {
+  justify-self: center;
+  font-size: 11px;
+  color: #60708e;
+  background: #eef2f8;
+  border: 1px solid #e1e8f5;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
 .chatBubble {
   background: #eef2ff;
   border-radius: 10px;
@@ -918,11 +928,36 @@ tr.low {
   justify-self: end;
 }
 
+.chatDeliveryState {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #60708e;
+  text-align: right;
+}
+
 .chatAttachmentLink {
   display: inline-block;
   margin-top: 6px;
   font-size: 12px;
   color: #2563eb;
+}
+
+.chatSkeleton {
+  height: 54px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #eef2f8 25%, #e5ebf5 37%, #eef2f8 63%);
+  background-size: 400% 100%;
+  animation: chatShimmer 1.2s ease-in-out infinite;
+}
+
+.chatSkeleton.short {
+  width: 72%;
+}
+
+@keyframes chatShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
 }
 
 .chatComposer {
