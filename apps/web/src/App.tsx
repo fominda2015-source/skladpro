@@ -442,6 +442,7 @@ function App() {
   const [myTasks, setMyTasks] = useState<TeamTask[]>([]);
   const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue" | "read_today">("all");
   const [selectedNotificationIds, setSelectedNotificationIds] = useState<string[]>([]);
+  const [focusedTeamTaskId, setFocusedTeamTaskId] = useState("");
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -917,7 +918,8 @@ function App() {
     }
     if (entityType === "stafftask" || entityType === "task") {
       setActiveTab("team");
-      setTeamMessage(`Открой задачу в списке команды: ${notification.entityId}`);
+      setFocusedTeamTaskId(notification.entityId);
+      setTeamMessage(`Открыта задача из входящих: ${notification.entityId}`);
       return;
     }
     if (entityType === "integrationjob") {
@@ -1620,6 +1622,14 @@ function App() {
     void loadProjects();
     void loadTeamData();
   }, [token, activeTab, canReadTeam]);
+
+  useEffect(() => {
+    if (activeTab !== "team" || !focusedTeamTaskId) return;
+    const row = document.getElementById(`team-task-${focusedTeamTaskId}`);
+    if (row) {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [activeTab, focusedTeamTaskId, teamTasks]);
 
   useEffect(() => {
     if (!token || activeTab !== "inbox") return;
@@ -2640,7 +2650,7 @@ function App() {
             </thead>
             <tbody>
               {teamTasks.map((t) => (
-                <tr key={t.id}>
+                <tr key={t.id} id={`team-task-${t.id}`} className={focusedTeamTaskId === t.id ? "selectedRow" : ""}>
                   <td>
                     {t.title}
                     {t.description ? <p className="muted">{t.description}</p> : null}
@@ -2655,7 +2665,10 @@ function App() {
                         <button
                           key={`${t.id}-${next}`}
                           type="button"
-                          onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
+                          onClick={() => {
+                            setFocusedTeamTaskId(t.id);
+                            void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED");
+                          }}
                         >
                           {teamTaskStatusLabel(next)}
                         </button>
@@ -2666,6 +2679,11 @@ function App() {
               ))}
             </tbody>
           </table>
+          {focusedTeamTaskId && (
+            <div className="toolbar">
+              <button type="button" onClick={() => setFocusedTeamTaskId("")}>Снять фокус с задачи</button>
+            </div>
+          )}
           {teamMessage && <p className="muted">{teamMessage}</p>}
         </div>
       )}
