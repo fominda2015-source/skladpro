@@ -333,6 +333,7 @@ function App() {
   const [stockMovementsError, setStockMovementsError] = useState("");
   const [expandedStockRowId, setExpandedStockRowId] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     | "stocks"
     | "warehouse"
@@ -2460,6 +2461,10 @@ function App() {
   }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueFlowFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
 
   useEffect(() => {
+    setMobileNavOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
     if (!isStorekeeperMode || !stockOptionsForIssue.length || issueLines.length) return;
     setIssueLines([{ id: `issue-line-${Date.now()}`, materialId: stockOptionsForIssue[0].materialId, quantity: 1 }]);
   }, [isStorekeeperMode, stockOptionsForIssue, issueLines.length]);
@@ -2644,7 +2649,7 @@ function App() {
 
   return (
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
-      <aside className="sidebar">
+      <aside className={`sidebar ${mobileNavOpen ? "mobileOpen" : ""}`}>
         <div className="brandWrap">
           <h2 className="brand">СкладПро</h2>
           <p className="brandSub">Warehouse ERP</p>
@@ -2682,8 +2687,24 @@ function App() {
         <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Смена пароля</button>
         <button className="navBtn danger" onClick={onLogout}>Выйти</button>
       </aside>
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="mobileNavBackdrop"
+          onClick={() => setMobileNavOpen(false)}
+          aria-label="Закрыть меню"
+        />
+      )}
       <section className="canvas">
         <header className="pageHeader">
+          <button
+            type="button"
+            className="mobileMenuBtn"
+            onClick={() => setMobileNavOpen((v) => !v)}
+            aria-label="Открыть меню"
+          >
+            ☰
+          </button>
           <div className="pageTitleBlock">
             <h1>{currentTitle}</h1>
             <p className="crumbs">{currentSection} / {currentTitle}</p>
@@ -3045,7 +3066,7 @@ function App() {
           {loadingStocks && <p>Загрузка остатков...</p>}
           {stocksError && <p className="error">{stocksError}</p>}
           {!loadingStocks && !stocksError && (
-            <table>
+            <table className="desktopTable">
               <thead>
                 <tr>
                   <th>Склад</th>
@@ -3118,6 +3139,23 @@ function App() {
                 ))}
               </tbody>
             </table>
+          )}
+          {!loadingStocks && !stocksError && (
+            <div className="mobileCards">
+              {stocks.map((row) => (
+                <article key={`m-stock-${row.id}`} className={`mobileCard ${row.isLow ? "low" : ""}`}>
+                  <h4>{safeName(row.materialName)}</h4>
+                  <p><strong>Склад:</strong> {safeName(row.warehouseName)}</p>
+                  {showStockSku ? <p><strong>SKU:</strong> {row.materialSku || "-"}</p> : null}
+                  <p><strong>Ед.:</strong> {row.materialUnit}</p>
+                  <p><strong>Помещение:</strong> {row.storageRoom || "—"}</p>
+                  <p><strong>Ячейка:</strong> {row.storageCell || "—"}</p>
+                  <p><strong>Остаток:</strong> {row.quantity}</p>
+                  {showStockReserve ? <p><strong>Резерв:</strong> {row.reserved}</p> : null}
+                  <p><strong>Доступно:</strong> {row.available}</p>
+                </article>
+              ))}
+            </div>
           )}
           {stockMovementsLoading && <p>Загрузка движений...</p>}
           {stockMovementsError && <p className="error">{stockMovementsError}</p>}
@@ -3786,7 +3824,7 @@ function App() {
           </div>
           {opsMessage && <p className="muted">{opsMessage}</p>}
           <h3>Последние приходы</h3>
-          <table>
+          <table className="desktopTable">
             <thead>
               <tr><th>Документ</th><th>Тип</th><th>Дата</th><th>Файлы</th></tr>
             </thead>
@@ -3801,6 +3839,16 @@ function App() {
               ))}
             </tbody>
           </table>
+          <div className="mobileCards">
+            {operations.filter((o) => o.type === "INCOME").map((o) => (
+              <article key={`m-op-${o.id}`} className="mobileCard">
+                <h4>{o.documentNumber || o.id.slice(0, 8)}</h4>
+                <p><strong>Тип:</strong> {o.type}</p>
+                <p><strong>Дата:</strong> {o.operationDate ? new Date(o.operationDate).toLocaleString() : "-"}</p>
+                <button type="button" onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button>
+              </article>
+            ))}
+          </div>
         </div>
       )}
 
@@ -3994,7 +4042,7 @@ function App() {
                 По текущему списку: Прямые {issueFlowCounters.direct} · Заявки {issueFlowCounters.request}
               </p>
               <h3>Последние выдачи</h3>
-              <table>
+              <table className="desktopTable">
                 <thead>
                   <tr>
                     <th>Номер</th>
@@ -4016,6 +4064,21 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              <div className="mobileCards">
+                {issues.slice(0, 20).map((i) => (
+                  <article key={`m-issue-${i.id}`} className="mobileCard">
+                    <h4>{i.number}</h4>
+                    <p>
+                      <strong>Статус:</strong> <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
+                    </p>
+                    <p>
+                      <strong>Поток:</strong> <span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span>
+                    </p>
+                    <p><strong>Ответственный:</strong> {i.responsibleName || "—"}</p>
+                    <p><strong>Дата:</strong> {new Date(i.createdAt).toLocaleString()}</p>
+                  </article>
+                ))}
+              </div>
             </>
           ) : (
             <>
