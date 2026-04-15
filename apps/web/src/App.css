@@ -689,6 +689,12 @@ tr.low {
   cursor: pointer;
 }
 
+.kpiBtn.activeKpi {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  background: #f7faff;
+}
+
 .kpi span {
   font-size: 12px;
   color: #667085;

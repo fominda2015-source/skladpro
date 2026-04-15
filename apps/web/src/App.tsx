@@ -3812,6 +3812,32 @@ function App() {
               <p className="muted">
                 Выбери материалы со склада, количество и укажи ответственное лицо. Система сразу проводит выдачу.
               </p>
+              <div className="kpiRow">
+                <button
+                  type="button"
+                  className={`kpi kpiBtn ${issueFlowFilter === "" ? "activeKpi" : ""}`}
+                  onClick={() => setIssueFlowFilter("")}
+                >
+                  <span>Все потоки</span>
+                  <strong>{issues.length}</strong>
+                </button>
+                <button
+                  type="button"
+                  className={`kpi kpiBtn ${issueFlowFilter === "DIRECT_ISSUE" ? "activeKpi" : ""}`}
+                  onClick={() => setIssueFlowFilter("DIRECT_ISSUE")}
+                >
+                  <span>Прямые выдачи</span>
+                  <strong>{issueFlowCounters.direct}</strong>
+                </button>
+                <button
+                  type="button"
+                  className={`kpi kpiBtn ${issueFlowFilter === "REQUEST" ? "activeKpi" : ""}`}
+                  onClick={() => setIssueFlowFilter("REQUEST")}
+                >
+                  <span>Заявки</span>
+                  <strong>{issueFlowCounters.request}</strong>
+                </button>
+              </div>
               <div className="form">
                 <label>
                   Склад
