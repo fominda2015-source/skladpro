@@ -498,6 +498,14 @@ function App() {
       EMERGENCY: "Аварийная потребность",
       OTHER: "Другое"
     })[basisType] ?? basisType;
+  const issueActionLabel = (action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue") =>
+    ({
+      "send-for-approval": "Отправить на согласование",
+      approve: "Согласовать",
+      reject: "Отклонить",
+      cancel: "Отменить",
+      issue: "Выдать"
+    })[action];
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -1020,6 +1028,58 @@ function App() {
     setIssues(data);
     if (data.length && !selectedIssueId) {
       setSelectedIssueId(data[0].id);
+    }
+  }
+
+  async function executeIssueAction(
+    issueId: string,
+    action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue",
+    opts?: { fromApprovals?: boolean; closeDrawer?: boolean }
+  ) {
+    if (!token) return;
+    const actionText = issueActionLabel(action).toLowerCase();
+    const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
+    if (!ok) return;
+    const res = await fetch(`${API_URL}/api/issues/${issueId}/${action}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setIssuesMessage(`Не удалось выполнить действие: ${issueActionLabel(action)}`);
+      return;
+    }
+    if (opts?.closeDrawer) setDrawerMode("");
+    setIssuesMessage(`Готово: ${issueActionLabel(action)}`);
+    await loadIssues();
+    if (opts?.fromApprovals) {
+      await loadApprovalQueue();
+    }
+    if (action === "issue") {
+      await loadStocks(q);
+    }
+  }
+
+  async function executeWaybillStatus(
+    waybillId: string,
+    status: WaybillStatus,
+    comment: string
+  ) {
+    if (!token) return;
+    const ok = window.confirm(`Подтвердить перевод ТН в статус "${waybillStatusLabel(status)}"?`);
+    if (!ok) return;
+    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/status`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status, comment })
+    });
+    if (!res.ok) {
+      setWaybillsMessage(`Не удалось обновить статус: ${waybillStatusLabel(status)}`);
+      return;
+    }
+    setWaybillsMessage(`Статус обновлен: ${waybillStatusLabel(status)}`);
+    await loadWaybills();
+    if (selectedWaybillId === waybillId) {
+      await loadWaybillEvents(waybillId);
     }
   }
 
@@ -1866,43 +1926,18 @@ function App() {
                     <div className="approvalActions">
                       <button
                         className="dangerBtn"
-                        onClick={async () => {
-                          if (!token || !approvalQueue[0]) return;
-                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/reject`, {
-                            method: "PATCH",
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          await loadApprovalQueue();
-                          await loadIssues();
-                        }}
+                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "reject", { fromApprovals: true })}
                       >
                         Отклонить
                       </button>
                       <button
-                        onClick={async () => {
-                          if (!token || !approvalQueue[0]) return;
-                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/approve`, {
-                            method: "PATCH",
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          await loadApprovalQueue();
-                          await loadIssues();
-                        }}
+                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "approve", { fromApprovals: true })}
                       >
                         Подтвердить
                       </button>
                       <button
                         className="secondaryBtn"
-                        onClick={async () => {
-                          if (!token || !approvalQueue[0]) return;
-                          await fetch(`${API_URL}/api/issues/${approvalQueue[0].id}/issue`, {
-                            method: "PATCH",
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          await loadApprovalQueue();
-                          await loadIssues();
-                          await loadStocks(q);
-                        }}
+                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "issue", { fromApprovals: true })}
                       >
                         Выдать
                       </button>
@@ -2555,7 +2590,7 @@ function App() {
               onClick={async () => {
                 if (!token || !selectedIssueIds.length) return;
                 for (const id of selectedIssueIds) {
-                  await fetch(`${API_URL}/api/issues/${id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } });
+                  await executeIssueAction(id, "send-for-approval");
                 }
                 setSelectedIssueIds([]);
                 await loadIssues();
@@ -2625,19 +2660,19 @@ function App() {
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       {i.status === "DRAFT" && (
-                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/send-for-approval`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>На согласование</button>
+                        <button onClick={() => void executeIssueAction(i.id, "send-for-approval")}>На согласование</button>
                       )}
                       {i.status === "ON_APPROVAL" && (
                         <>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Одобрить</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/reject`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Отклонить</button>
+                          <button onClick={() => void executeIssueAction(i.id, "approve")}>Одобрить</button>
+                          <button onClick={() => void executeIssueAction(i.id, "reject")}>Отклонить</button>
                         </>
                       )}
                       {(i.status === "DRAFT" || i.status === "ON_APPROVAL") && (
-                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/cancel`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); }}>Отменить</button>
+                        <button onClick={() => void executeIssueAction(i.id, "cancel")}>Отменить</button>
                       )}
                       {(i.status === "DRAFT" || i.status === "APPROVED") && (
-                        <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/issue`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadIssues(); await loadStocks(q); }}>Выдать</button>
+                        <button onClick={() => void executeIssueAction(i.id, "issue")}>Выдать</button>
                       )}
                       <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                     </div>
@@ -2801,6 +2836,7 @@ function App() {
       {activeTab === "approvals" && (
         <div className="card">
           <h2>Очередь согласований</h2>
+          {issuesMessage && <p className="muted">{issuesMessage}</p>}
           <div className="kpiRow">
             <div className="kpi">
               <span>На согласовании</span>
@@ -2827,8 +2863,8 @@ function App() {
                   <td>
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/approve`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Одобрить</button>
-                      <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/issues/${i.id}/reject`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }); await loadApprovalQueue(); await loadIssues(); }}>Отклонить</button>
+                      <button onClick={() => void executeIssueAction(i.id, "approve", { fromApprovals: true })}>Одобрить</button>
+                      <button onClick={() => void executeIssueAction(i.id, "reject", { fromApprovals: true })}>Отклонить</button>
                       <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                     </div>
                   </td>
@@ -3158,10 +3194,10 @@ function App() {
                       <td>
                         <div className="toolbar">
                           <button onClick={() => { setSelectedWaybillId(w.id); setDrawerMode("waybill"); }}>Детали</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED", comment: "Сформировано в интерфейсе" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Сформировать</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Отгружено к месту назначения" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Получено в пункте назначения" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED", comment: "Закрыто" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Закрыть</button>
+                          <button onClick={() => void executeWaybillStatus(w.id, "FORMED", "Сформировано в интерфейсе")}>Сформировать</button>
+                          <button onClick={() => void executeWaybillStatus(w.id, "SHIPPED", "Отгружено к месту назначения")}>Отгружено</button>
+                          <button onClick={() => void executeWaybillStatus(w.id, "RECEIVED", "Получено в пункте назначения")}>Получено</button>
+                          <button onClick={() => void executeWaybillStatus(w.id, "CLOSED", "Закрыто")}>Закрыть</button>
                           <button onClick={async () => { await openWaybillPdf(w.id, w.number); }}>PDF</button>
                         </div>
                       </td>
@@ -3239,12 +3275,7 @@ function App() {
             {(selectedIssue.status === "DRAFT" || selectedIssue.status === "ON_APPROVAL") && token ? (
               <button
                 onClick={async () => {
-                  await fetch(`${API_URL}/api/issues/${selectedIssue.id}/cancel`, {
-                    method: "PATCH",
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  setDrawerMode("");
-                  await loadIssues();
+                  await executeIssueAction(selectedIssue.id, "cancel", { closeDrawer: true });
                 }}
               >
                 Отменить заявку
