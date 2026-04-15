@@ -225,6 +225,7 @@ type AuditLogRow = {
   createdAt: string;
   user?: { email: string; fullName: string };
 };
+type ResultTone = "neutral" | "success" | "error" | "conflict";
 type TeamEmployee = {
   id: string;
   fullName: string;
@@ -320,6 +321,7 @@ function App() {
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
+  const [issuesTone, setIssuesTone] = useState<ResultTone>("neutral");
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issuesError, setIssuesError] = useState("");
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
@@ -383,6 +385,7 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [toolsMessage, setToolsMessage] = useState("");
+  const [toolsTone, setToolsTone] = useState<ResultTone>("neutral");
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsError, setToolsError] = useState("");
   const [toolName, setToolName] = useState("Перфоратор Bosch");
@@ -402,6 +405,7 @@ function App() {
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
+  const [waybillsTone, setWaybillsTone] = useState<ResultTone>("neutral");
   const [waybillsLoading, setWaybillsLoading] = useState(false);
   const [waybillsError, setWaybillsError] = useState("");
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
@@ -439,6 +443,7 @@ function App() {
   const [teamEmployees, setTeamEmployees] = useState<TeamEmployee[]>([]);
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
   const [teamMessage, setTeamMessage] = useState("");
+  const [teamTone, setTeamTone] = useState<ResultTone>("neutral");
   const [teamAssigneeId, setTeamAssigneeId] = useState("");
   const [teamTaskTitle, setTeamTaskTitle] = useState("");
   const [teamTaskDescription, setTeamTaskDescription] = useState("");
@@ -657,6 +662,13 @@ function App() {
   };
   const currentTitle = tabTitleMap[activeTab] ?? "СкладПро";
   const currentSection = tabSectionMap[activeTab] ?? "Раздел";
+  const resultToneClass = (tone: ResultTone) =>
+    ({
+      neutral: "muted",
+      success: "ok",
+      error: "error",
+      conflict: "warnText"
+    })[tone];
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
@@ -946,6 +958,7 @@ function App() {
       setActiveTab("team");
       setFocusedTeamTaskId(notification.entityId);
       setTeamMessage(`Открыта задача из входящих: ${notification.entityId}`);
+      setTeamTone("neutral");
       return;
     }
     if (entityType === "integrationjob") {
@@ -1001,6 +1014,7 @@ function App() {
   async function createTeamTask() {
     if (!token || !canWriteTeamTasks) return;
     setTeamMessage("");
+    setTeamTone("neutral");
     const res = await fetch(`${API_URL}/api/team/tasks`, {
       method: "POST",
       headers: {
@@ -1018,9 +1032,11 @@ function App() {
     });
     if (!res.ok) {
       setTeamMessage("Не удалось поставить задачу");
+      setTeamTone(res.status === 409 ? "conflict" : "error");
       return;
     }
     setTeamMessage("Задача поставлена");
+    setTeamTone("success");
     setTeamTaskTitle("");
     setTeamTaskDescription("");
     setTeamTaskDueAt("");
@@ -1041,9 +1057,11 @@ function App() {
     });
     if (!res.ok) {
       setTeamMessage("Не удалось обновить статус задачи");
+      setTeamTone(res.status === 409 ? "conflict" : "error");
       return;
     }
     setTeamMessage(`Статус задачи обновлен: ${teamTaskStatusLabel(status)}`);
+    setTeamTone("success");
     await loadTeamData();
   }
 
@@ -1249,10 +1267,12 @@ function App() {
     });
     if (!res.ok) {
       setIssuesMessage(`Не удалось выполнить действие: ${issueActionLabel(action)}`);
+      setIssuesTone(res.status === 409 ? "conflict" : "error");
       return;
     }
     if (opts?.closeDrawer) setDrawerMode("");
     setIssuesMessage(`Готово: ${issueActionLabel(action)}`);
+    setIssuesTone("success");
     await loadIssues();
     if (opts?.fromApprovals) {
       await loadApprovalQueue();
@@ -1277,9 +1297,11 @@ function App() {
     });
     if (!res.ok) {
       setWaybillsMessage(`Не удалось обновить статус: ${waybillStatusLabel(status)}`);
+      setWaybillsTone(res.status === 409 ? "conflict" : "error");
       return;
     }
     setWaybillsMessage(`Статус обновлен: ${waybillStatusLabel(status)}`);
+    setWaybillsTone("success");
     await loadWaybills();
     if (selectedWaybillId === waybillId) {
       await loadWaybillEvents(waybillId);
@@ -1376,6 +1398,7 @@ function App() {
   async function openWaybillPdf(waybillId: string, waybillNumber: string) {
     if (!token) {
       setWaybillsMessage("Нет токена авторизации. Перелогинься.");
+      setWaybillsTone("error");
       return;
     }
     const pdfUrl = `${API_URL}/api/waybills/${waybillId}/pdf?access_token=${encodeURIComponent(token)}&filename=${encodeURIComponent(waybillNumber)}.pdf`;
@@ -1384,6 +1407,7 @@ function App() {
       window.location.assign(pdfUrl);
     }
     setWaybillsMessage("Открываю PDF...");
+    setWaybillsTone("neutral");
   }
 
   async function doToolAction(
@@ -1396,6 +1420,7 @@ function App() {
     const comment = opts?.comment?.trim() || undefined;
     if (action === "ISSUE" && !responsible) {
       setToolsMessage("Выдача отменена: ответственное лицо обязательно");
+      setToolsTone("conflict");
       return;
     }
     const res = await fetch(`${API_URL}/api/tools/${toolId}/action`, {
@@ -1405,8 +1430,10 @@ function App() {
     });
     if (!res.ok) {
       setToolsMessage("Не удалось изменить статус инструмента");
+      setToolsTone(res.status === 409 ? "conflict" : "error");
       return;
     }
+    setToolsTone("success");
     if (opts?.photo) {
       const formData = new FormData();
       formData.append("entityType", "tool");
@@ -2749,7 +2776,7 @@ function App() {
               <button type="button" onClick={() => setFocusedTeamTaskId("")}>Снять фокус с задачи</button>
             </div>
           )}
-          {teamMessage && <p className="muted">{teamMessage}</p>}
+          {teamMessage && <p className={resultToneClass(teamTone)}>{teamMessage}</p>}
         </div>
       )}
 
@@ -3050,16 +3077,18 @@ function App() {
                 });
                 if (!res.ok) {
                   setIssuesMessage("Ошибка создания заявки");
+                  setIssuesTone(res.status === 409 ? "conflict" : "error");
                   return;
                 }
                 setIssuesMessage("Заявка создана");
+                setIssuesTone("success");
                 await loadIssues();
               }}
             >
               Создать заявку
             </button>
           </div>
-          {issuesMessage && <p className="muted">{issuesMessage}</p>}
+          {issuesMessage && <p className={resultToneClass(issuesTone)}>{issuesMessage}</p>}
           {issuesLoading && <LoadingState text="Загрузка заявок..." />}
           {issuesError && <ErrorState text={issuesError} />}
           {!issuesLoading && !issuesError && !filteredIssues.length && (
@@ -3278,7 +3307,7 @@ function App() {
       {activeTab === "approvals" && (
         <div className="card">
           <h2>Очередь согласований</h2>
-          {issuesMessage && <p className="muted">{issuesMessage}</p>}
+          {issuesMessage && <p className={resultToneClass(issuesTone)}>{issuesMessage}</p>}
           <div className="kpiRow">
             <div className="kpi">
               <span>На согласовании</span>
@@ -3581,6 +3610,7 @@ function App() {
                   onClick={async () => {
                     if (!token || !waybillFromWarehouseId || !waybillMaterialId || !waybillToLocation) return;
                     setWaybillsMessage("");
+                    setWaybillsTone("neutral");
                     const res = await fetch(`${API_URL}/api/waybills`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -3596,9 +3626,11 @@ function App() {
                     });
                     if (!res.ok) {
                       setWaybillsMessage("Ошибка создания ТН");
+                      setWaybillsTone(res.status === 409 ? "conflict" : "error");
                       return;
                     }
                     setWaybillsMessage("ТН создана");
+                    setWaybillsTone("success");
                     await loadWaybills();
                   }}
                 >
@@ -3609,7 +3641,7 @@ function App() {
 
             <div className="card">
               <h3>Список ТН</h3>
-              {waybillsMessage && <p className="muted">{waybillsMessage}</p>}
+              {waybillsMessage && <p className={resultToneClass(waybillsTone)}>{waybillsMessage}</p>}
               {!waybillsLoading && !waybillsError && !waybills.length && <EmptyState title="ТН пока нет" hint="Создай первую транспортную накладную." />}
               <div className="toolbar">
                 <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
@@ -3916,6 +3948,7 @@ function App() {
               onClick={async () => {
                 if (!token || !toolName || !toolInventoryNumber) return;
                 setToolsMessage("");
+                setToolsTone("neutral");
                 const res = await fetch(`${API_URL}/api/tools`, {
                   method: "POST",
                   headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -3930,9 +3963,11 @@ function App() {
                 if (!res.ok) {
                   const text = await res.text();
                   setToolsMessage(`Ошибка создания инструмента: ${text}`);
+                  setToolsTone(res.status === 409 ? "conflict" : "error");
                   return;
                 }
                 setToolsMessage("Инструмент создан");
+                setToolsTone("success");
                 setToolInventoryNumber(`INV-${Date.now()}`);
                 setToolSerialNumber("");
                 await loadTools();
@@ -3944,6 +3979,7 @@ function App() {
               onClick={async () => {
                 if (!token || !selectedToolIds.length) {
                   setToolsMessage("Выбери хотя бы один инструмент");
+                  setToolsTone("conflict");
                   return;
                 }
                 const res = await fetch(`${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`, {
@@ -3951,6 +3987,7 @@ function App() {
                 });
                 if (!res.ok) {
                   setToolsMessage("Не удалось сформировать PDF");
+                  setToolsTone("error");
                   return;
                 }
                 const blob = await res.blob();
@@ -3965,7 +4002,7 @@ function App() {
               Печать QR (PDF)
             </button>
           </div>
-          {toolsMessage && <p className="muted">{toolsMessage}</p>}
+          {toolsMessage && <p className={resultToneClass(toolsTone)}>{toolsMessage}</p>}
           {!toolsLoading && !toolsError && !tools.length && <EmptyState title="Инструменты не найдены" hint="Добавь инструмент или проверь фильтры." />}
           {toolQrPreview && (
             <div className="card">
@@ -4018,6 +4055,7 @@ function App() {
                           });
                           if (!res.ok) {
                             setToolsMessage("Не удалось получить QR");
+                            setToolsTone("error");
                             return;
                           }
                           const data = (await res.json()) as { toolId?: string; id: string; dataUrl: string; qrCode: string };

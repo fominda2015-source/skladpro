@@ -455,6 +455,10 @@ tr.low {
   color: #c23535;
 }
 
+.warnText {
+  color: #9a6700;
+}
+
 .muted {
   color: #667085;
   font-size: 13px;
