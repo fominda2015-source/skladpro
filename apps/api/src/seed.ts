@@ -24,7 +24,11 @@ const baseWarehouseOps = [
   "tools.read",
   "tools.write",
   "waybills.read",
-  "waybills.write"
+  "waybills.write",
+  "integrations.read",
+  "integrations.write",
+  "notifications.read",
+  "notifications.write"
 ] as const;
 
 const defaultRoles = [
@@ -55,7 +59,9 @@ const defaultRoles = [
       "tools.read",
       "tools.write",
       "waybills.read",
-      "waybills.write"
+      "waybills.write",
+      "integrations.read",
+      "notifications.read"
     ]
   },
   {
@@ -70,7 +76,8 @@ const defaultRoles = [
       "issues.write",
       "documents.read",
       "tools.read",
-      "waybills.read"
+      "waybills.read",
+      "notifications.read"
     ]
   },
   {
@@ -100,7 +107,8 @@ const defaultRoles = [
       "issues.read",
       "operations.read",
       "documents.read",
-      "waybills.read"
+      "waybills.read",
+      "notifications.read"
     ]
   },
   {
@@ -115,7 +123,8 @@ const defaultRoles = [
       "operations.read",
       "documents.read",
       "tools.read",
-      "waybills.read"
+      "waybills.read",
+      "notifications.read"
     ]
   },
   {
@@ -130,7 +139,8 @@ const defaultRoles = [
       "limits.read",
       "documents.read",
       "tools.read",
-      "waybills.read"
+      "waybills.read",
+      "notifications.read"
     ]
   }
 ];

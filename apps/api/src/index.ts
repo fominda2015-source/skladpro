@@ -8,7 +8,9 @@ import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { auditRouter } from "./routes/audit.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { contractsRouter } from "./routes/contracts.js";
 import { documentsRouter } from "./routes/documents.js";
+import { integrationsRouter } from "./routes/integrations.js";
 import { issueRequestsRouter } from "./routes/issueRequests.js";
 import { materialMatchRouter } from "./routes/materialMatch.js";
 import { materialsRouter } from "./routes/materials.js";
@@ -17,6 +19,7 @@ import { projectsRouter } from "./routes/projects.js";
 import { projectLimitsRouter } from "./routes/projectLimits.js";
 import { stockMovementsRouter } from "./routes/stockMovements.js";
 import { stocksRouter } from "./routes/stocks.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { transportWaybillsRouter } from "./routes/transportWaybills.js";
 import { toolsRouter } from "./routes/tools.js";
 import { warehousesRouter } from "./routes/warehouses.js";
@@ -72,6 +75,9 @@ app.use("/api/waybills", transportWaybillsRouter);
 app.use("/api/material-match", materialMatchRouter);
 app.use("/api/audit", auditRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/integrations", integrationsRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/contracts", contractsRouter);
 
 async function start() {
   await seedBaseData();

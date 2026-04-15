@@ -203,6 +203,27 @@ type AuditLogRow = {
   createdAt: string;
   user?: { email: string; fullName: string };
 };
+type IntegrationJobRow = {
+  id: string;
+  kind: string;
+  status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+  payload?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+};
+type NotificationRow = {
+  id: string;
+  title: string;
+  message: string;
+  level: "INFO" | "WARNING" | "ERROR";
+  isRead: boolean;
+  createdAt: string;
+  entityType?: string | null;
+  entityId?: string | null;
+};
 
 const API_URL = import.meta.env.VITE_API_URL || "http://194.156.117.250";
 const TOKEN_KEY = "skladpro_token";
@@ -237,6 +258,7 @@ function App() {
     | "waybills"
     | "matching"
     | "audit"
+    | "integrations"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -372,6 +394,11 @@ function App() {
   const [materialMergeHistory, setMaterialMergeHistory] = useState<MaterialMergeHistoryRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
+  const [integrationJobs, setIntegrationJobs] = useState<IntegrationJobRow[]>([]);
+  const [integrationKind, setIntegrationKind] = useState("erp-sync");
+  const [integrationPayload, setIntegrationPayload] = useState("{\"batch\":1}");
+  const [integrationMessage, setIntegrationMessage] = useState("");
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
@@ -515,6 +542,74 @@ function App() {
     } else {
       setAuditMessage(`Не удалось загрузить аудит: HTTP ${r.status}`);
     }
+  }
+
+  async function loadIntegrationJobs() {
+    if (!token) return;
+    const r = await fetch(`${API_URL}/api/integrations/jobs`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      setIntegrationMessage(`Не удалось загрузить интеграции: HTTP ${r.status}`);
+      return;
+    }
+    setIntegrationJobs((await r.json()) as IntegrationJobRow[]);
+  }
+
+  async function createIntegrationJob() {
+    if (!token) return;
+    let payloadObj: Record<string, unknown> | undefined;
+    try {
+      payloadObj = integrationPayload.trim() ? (JSON.parse(integrationPayload) as Record<string, unknown>) : undefined;
+    } catch {
+      setIntegrationMessage("Payload должен быть валидным JSON");
+      return;
+    }
+    const r = await fetch(`${API_URL}/api/integrations/jobs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: integrationKind.trim(), payload: payloadObj })
+    });
+    if (!r.ok) {
+      setIntegrationMessage(`Не удалось создать задачу: HTTP ${r.status}`);
+      return;
+    }
+    setIntegrationMessage("Задача интеграции создана");
+    await loadIntegrationJobs();
+  }
+
+  async function runIntegrationJob(id: string) {
+    if (!token) return;
+    const r = await fetch(`${API_URL}/api/integrations/jobs/${encodeURIComponent(id)}/run`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      setIntegrationMessage(`Не удалось запустить задачу: HTTP ${r.status}`);
+      return;
+    }
+    setIntegrationMessage("Задача выполнена");
+    await loadIntegrationJobs();
+    await loadNotifications();
+  }
+
+  async function loadNotifications() {
+    if (!token) return;
+    const r = await fetch(`${API_URL}/api/notifications`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) return;
+    setNotifications((await r.json()) as NotificationRow[]);
+  }
+
+  async function markNotificationsRead(ids: string[]) {
+    if (!token || !ids.length) return;
+    await fetch(`${API_URL}/api/notifications/read`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+    });
+    await loadNotifications();
   }
 
   async function runMaterialMatch(enqueue: boolean) {
@@ -1057,6 +1152,14 @@ function App() {
   }, [token, activeTab, canReadAudit]);
 
   useEffect(() => {
+    if (!token || activeTab !== "integrations") {
+      return;
+    }
+    void loadIntegrationJobs();
+    void loadNotifications();
+  }, [token, activeTab]);
+
+  useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
@@ -1192,6 +1295,8 @@ function App() {
     setToken(null);
     setStocks([]);
     setStockMovements([]);
+    setIntegrationJobs([]);
+    setNotifications([]);
     setUsers([]);
     setRoles([]);
     setMe(null);
@@ -1239,6 +1344,7 @@ function App() {
         <button className="navBtn" onClick={() => setActiveTab("waybills")}>Транспортные ТН</button>
         <button className="navBtn" onClick={() => setActiveTab("qr")}>QR</button>
         <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструмент</button>
+        <button className="navBtn" onClick={() => setActiveTab("integrations")}>Интеграции</button>
         {canReadAudit && <button className="navBtn" onClick={() => setActiveTab("audit")}>Аудит</button>}
         {canManageUsers && <button className="navBtn" onClick={() => setActiveTab("admin")}>Доступы</button>}
         <button className="navBtn" onClick={() => setActiveTab("password")}>Сменить пароль</button>
@@ -1272,6 +1378,8 @@ function App() {
                                     ? "QR-сканирование"
                                     : activeTab === "tools"
                                       ? "Инструмент и QR"
+                                      : activeTab === "integrations"
+                                        ? "Интеграции и уведомления"
                                       : activeTab === "admin"
                                         ? "Управление доступами"
                                         : "Смена пароля"}
@@ -1617,6 +1725,92 @@ function App() {
             </tbody>
           </table>
           {!auditLogs.length && <p className="muted">Записей пока нет.</p>}
+        </div>
+      )}
+
+      {activeTab === "integrations" && (
+        <div className="card">
+          <h2>IntegrationJob</h2>
+          <div className="form grid2">
+            <label>
+              Тип задачи
+              <input value={integrationKind} onChange={(e) => setIntegrationKind(e.target.value)} />
+            </label>
+            <label>
+              Payload (JSON)
+              <input value={integrationPayload} onChange={(e) => setIntegrationPayload(e.target.value)} />
+            </label>
+          </div>
+          <div className="toolbar">
+            <button type="button" onClick={() => void createIntegrationJob()}>Создать задачу</button>
+            <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
+          </div>
+          {integrationMessage && <p className="muted">{integrationMessage}</p>}
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Тип</th>
+                <th>Статус</th>
+                <th>Ошибка</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {integrationJobs.map((job) => (
+                <tr key={job.id}>
+                  <td>{new Date(job.createdAt).toLocaleString()}</td>
+                  <td>{job.kind}</td>
+                  <td><span className={`badge ${statusClass(job.status)}`}>{job.status}</span></td>
+                  <td>{job.error || "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => void runIntegrationJob(job.id)}
+                      disabled={job.status === "RUNNING"}
+                    >
+                      Запустить
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!integrationJobs.length && <p className="muted">Задач пока нет.</p>}
+
+          <h3 style={{ marginTop: 16 }}>Уведомления</h3>
+          <div className="toolbar">
+            <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>
+            <button
+              type="button"
+              onClick={() => void markNotificationsRead(notifications.filter((n) => !n.isRead).map((n) => n.id))}
+            >
+              Отметить все как прочитанные
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Время</th>
+                <th>Уровень</th>
+                <th>Тема</th>
+                <th>Сообщение</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {notifications.map((n) => (
+                <tr key={n.id}>
+                  <td>{new Date(n.createdAt).toLocaleString()}</td>
+                  <td>{n.level}</td>
+                  <td>{n.title}</td>
+                  <td>{n.message}</td>
+                  <td>{n.isRead ? "Прочитано" : "Новое"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!notifications.length && <p className="muted">Уведомлений пока нет.</p>}
         </div>
       )}
 

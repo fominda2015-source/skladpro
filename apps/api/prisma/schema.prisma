@@ -63,6 +63,19 @@ enum MaterialMatchQueueStatus {
   REJECTED
 }
 
+enum IntegrationJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum NotificationLevel {
+  INFO
+  WARNING
+  ERROR
+}
+
 model User {
   id               String               @id @default(cuid())
   email            String               @unique
@@ -79,6 +92,7 @@ model User {
   approvedIssues   IssueRequest[]       @relation("IssueApprovedBy")
   documentLinks    DocumentLink[]
   materialMerges   MaterialMergeHistory[]
+  notifications    Notification[]       @relation("NotificationRecipient")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -379,6 +393,39 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([userId])
   @@index([createdAt])
+}
+
+model IntegrationJob {
+  id          String               @id @default(cuid())
+  kind        String
+  status      IntegrationJobStatus @default(PENDING)
+  payload     Json?
+  result      Json?
+  error       String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  requestedBy String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([kind, createdAt])
+  @@index([status, createdAt])
+}
+
+model Notification {
+  id          String            @id @default(cuid())
+  userId      String
+  title       String
+  message     String
+  level       NotificationLevel @default(INFO)
+  isRead      Boolean           @default(false)
+  entityType  String?
+  entityId    String?
+  createdAt   DateTime          @default(now())
+  readAt      DateTime?
+  user        User              @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
 }
 
 model Tool {
