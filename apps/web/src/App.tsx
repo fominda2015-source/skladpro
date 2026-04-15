@@ -443,9 +443,14 @@ function App() {
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
   const roleLabel = (role: string) =>
     ({
-      SYSTEM_ADMIN: "Системный администратор",
+      ADMIN: "Системный администратор",
       WAREHOUSE_MANAGER: "Кладовщик",
+      CHIEF_WAREHOUSE: "Главный по складу/объекту",
+      STOREKEEPER: "Кладовщик участка",
+      FOREMAN: "Прораб",
       PROJECT_MANAGER: "Руководитель проекта",
+      ACCOUNTING: "Бухгалтерия",
+      MANAGEMENT: "Руководство",
       VIEWER: "Наблюдатель"
     })[role] ?? role;
   const statusLabel = (status: "ACTIVE" | "BLOCKED") => (status === "ACTIVE" ? "Активен" : "Заблокирован");
@@ -458,6 +463,34 @@ function App() {
       ISSUED: "Выдано",
       CANCELLED: "Отменено"
     })[status] ?? status;
+  const waybillStatusLabel = (status: string) =>
+    ({
+      DRAFT: "Черновик",
+      FORMED: "Сформирована",
+      SHIPPED: "В пути",
+      RECEIVED: "Получена",
+      CLOSED: "Закрыта"
+    })[status] ?? status;
+  const toolStatusLabel = (status: string) =>
+    ({
+      IN_STOCK: "На складе",
+      ISSUED: "Выдан",
+      IN_REPAIR: "В ремонте",
+      DAMAGED: "Поврежден",
+      LOST: "Утерян",
+      WRITTEN_OFF: "Списан",
+      DISPUTED: "Спор"
+    })[status] ?? status;
+  const toolActionLabel = (action: string) =>
+    ({
+      ISSUE: "Выдача",
+      RETURN: "Возврат",
+      SEND_TO_REPAIR: "Передача в ремонт",
+      MARK_DAMAGED: "Пометка повреждения",
+      MARK_LOST: "Пометка утери",
+      MARK_DISPUTED: "Спор",
+      WRITE_OFF: "Списание"
+    })[action] ?? action;
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -2071,27 +2104,27 @@ function App() {
 
       {activeTab === "integrations" && (
         <div className="card">
-          <h2>IntegrationJob</h2>
+          <h2>Интеграционные задачи</h2>
           <div className="form grid2">
             <label>
               Тип задачи
               <input value={integrationKind} onChange={(e) => setIntegrationKind(e.target.value)} />
             </label>
             <label>
-              Payload (JSON)
+              Параметры (JSON)
               <input value={integrationPayload} onChange={(e) => setIntegrationPayload(e.target.value)} />
             </label>
           </div>
           <div className="toolbar">
             <button type="button" onClick={() => void createIntegrationJob()}>Создать задачу</button>
             <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
-            <button type="button" onClick={() => void loadReadiness()}>Readiness-check</button>
+            <button type="button" onClick={() => void loadReadiness()}>Проверка готовности</button>
           </div>
           {integrationMessage && <ErrorState text={integrationMessage} />}
           {readiness ? (
             <ReadinessPanel readiness={readiness} />
           ) : (
-            <LoadingState text="Readiness еще не загружен." />
+            <LoadingState text="Проверка готовности еще не загружена." />
           )}
           {integrationJobs.length ? (
             <IntegrationJobsTable
@@ -2482,11 +2515,11 @@ function App() {
             <input placeholder="Поиск заявки (номер/статус)" value={issueSearch} onChange={(e) => setIssueSearch(e.target.value)} />
             <select value={issueStatusFilter} onChange={(e) => setIssueStatusFilter((e.target.value || "") as "" | IssueStatus)}>
               <option value="">Все статусы заявок</option>
-              <option value="DRAFT">DRAFT</option>
+              <option value="DRAFT">{issueStatusLabel("DRAFT")}</option>
               <option value="ON_APPROVAL">ON_APPROVAL</option>
               <option value="APPROVED">APPROVED</option>
               <option value="REJECTED">REJECTED</option>
-              <option value="ISSUED">ISSUED</option>
+              <option value="ISSUED">{issueStatusLabel("ISSUED")}</option>
               <option value="CANCELLED">CANCELLED</option>
             </select>
             <select
@@ -2974,7 +3007,7 @@ function App() {
               </table>
             </div>
             <div className="card">
-              <h3>Preview panel</h3>
+              <h3>Панель предпросмотра</h3>
               {selectedDocument ? (
                 <>
                   <p className="muted">{selectedDocument.fileName} • v{selectedDocument.version}</p>
@@ -2999,11 +3032,11 @@ function App() {
           <div className="toolbar">
             <select value={waybillStatusFilter} onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}>
               <option value="">Все статусы</option>
-              <option value="DRAFT">DRAFT</option>
-              <option value="FORMED">FORMED</option>
-              <option value="SHIPPED">SHIPPED</option>
-              <option value="RECEIVED">RECEIVED</option>
-              <option value="CLOSED">CLOSED</option>
+              <option value="DRAFT">{waybillStatusLabel("DRAFT")}</option>
+              <option value="FORMED">{waybillStatusLabel("FORMED")}</option>
+              <option value="SHIPPED">{waybillStatusLabel("SHIPPED")}</option>
+              <option value="RECEIVED">{waybillStatusLabel("RECEIVED")}</option>
+              <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
             </select>
             <button onClick={() => void loadWaybills()}>Обновить</button>
           </div>
@@ -3083,7 +3116,7 @@ function App() {
                 <select value={selectedWaybillId} onChange={(e) => setSelectedWaybillId(e.target.value)}>
                   {waybills.map((w) => (
                     <option key={w.id} value={w.id}>
-                      {w.number} ({w.status})
+                      {w.number} ({waybillStatusLabel(w.status)})
                     </option>
                   ))}
                 </select>
@@ -3102,15 +3135,15 @@ function App() {
                   {waybills.map((w) => (
                     <tr key={w.id}>
                       <td>{w.number}</td>
-                      <td><span className={`badge ${statusClass(w.status)}`}>{w.status}</span></td>
+                      <td><span className={`badge ${statusClass(w.status)}`}>{waybillStatusLabel(w.status)}</span></td>
                       <td>{w.toLocation}</td>
                       <td>
                         <div className="toolbar">
                           <button onClick={() => { setSelectedWaybillId(w.id); setDrawerMode("waybill"); }}>Детали</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED", comment: "Formed in UI" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Сформировать</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Shipped to destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Received by destination" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
-                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED", comment: "Closed" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Закрыть</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "FORMED", comment: "Сформировано в интерфейсе" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Сформировать</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "SHIPPED", comment: "Отгружено к месту назначения" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Отгружено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "RECEIVED", comment: "Получено в пункте назначения" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Получено</button>
+                          <button onClick={async () => { if (!token) return; await fetch(`${API_URL}/api/waybills/${w.id}/status`, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ status: "CLOSED", comment: "Закрыто" }) }); await loadWaybills(); if (selectedWaybillId === w.id) await loadWaybillEvents(w.id); }}>Закрыть</button>
                           <button onClick={async () => { await openWaybillPdf(w.id, w.number); }}>PDF</button>
                         </div>
                       </td>
@@ -3131,7 +3164,7 @@ function App() {
                   {waybillEvents.map((e) => (
                     <tr key={e.id}>
                       <td>{new Date(e.createdAt).toLocaleString()}</td>
-                      <td>{e.status}</td>
+                      <td>{waybillStatusLabel(e.status)}</td>
                       <td>{e.comment || "-"}</td>
                     </tr>
                   ))}
@@ -3209,7 +3242,7 @@ function App() {
             <h3>Карточка ТН {selectedWaybill.number}</h3>
             <button onClick={() => setDrawerMode("")}>Закрыть</button>
           </div>
-          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedWaybill.status)}`}>{selectedWaybill.status}</span></p>
+          <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedWaybill.status)}`}>{waybillStatusLabel(selectedWaybill.status)}</span></p>
           <p><strong>Маршрут:</strong> {selectedWaybill.toLocation}</p>
           <p><strong>Отправитель:</strong> {selectedWaybill.sender || "-"}</p>
           <p><strong>Получатель:</strong> {selectedWaybill.recipient || "-"}</p>
@@ -3239,7 +3272,7 @@ function App() {
             <div className="card">
               <h3>{qrResult.tool.name}</h3>
               <p className="muted">Инв. номер: {qrResult.tool.inventoryNumber}</p>
-              <p className="muted">Статус: {qrResult.tool.status}</p>
+              <p className="muted">Статус: {toolStatusLabel(qrResult.tool.status)}</p>
               <div className="toolbar">
                 <button onClick={() => { setActiveTab("tools"); }}>Открыть модуль инструмента</button>
                 <button onClick={() => openToolActionDialog(qrResult.tool.id, "ISSUE")}>Выдать</button>
@@ -3277,13 +3310,13 @@ function App() {
             />
             <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
               <option value="">Все статусы</option>
-              <option value="IN_STOCK">IN_STOCK</option>
-              <option value="ISSUED">ISSUED</option>
-              <option value="IN_REPAIR">IN_REPAIR</option>
-              <option value="DAMAGED">DAMAGED</option>
-              <option value="LOST">LOST</option>
-              <option value="WRITTEN_OFF">WRITTEN_OFF</option>
-              <option value="DISPUTED">DISPUTED</option>
+              <option value="IN_STOCK">{toolStatusLabel("IN_STOCK")}</option>
+              <option value="ISSUED">{toolStatusLabel("ISSUED")}</option>
+              <option value="IN_REPAIR">{toolStatusLabel("IN_REPAIR")}</option>
+              <option value="DAMAGED">{toolStatusLabel("DAMAGED")}</option>
+              <option value="LOST">{toolStatusLabel("LOST")}</option>
+              <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
+              <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
             </select>
             <button onClick={() => void loadTools()}>Обновить список</button>
           </div>
@@ -3405,7 +3438,7 @@ function App() {
                   <td>{t.inventoryNumber}</td>
                   <td>{t.name}</td>
                   <td>{t.serialNumber || "-"}</td>
-                  <td><span className={`badge ${statusClass(t.status)}`}>{t.status}</span></td>
+                  <td><span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span></td>
                   <td>
                     <div className="toolbar">
                       <button onClick={() => openToolActionDialog(t.id, "ISSUE")}>Выдать</button>
@@ -3461,8 +3494,8 @@ function App() {
               {toolEvents.map((e) => (
                 <tr key={e.id}>
                   <td>{new Date(e.createdAt).toLocaleString()}</td>
-                  <td>{e.action}</td>
-                  <td>{e.status}</td>
+                  <td>{toolActionLabel(e.action)}</td>
+                  <td>{toolStatusLabel(e.status)}</td>
                   <td>{e.comment || "-"}</td>
                 </tr>
               ))}
@@ -3470,7 +3503,7 @@ function App() {
           </table>
           {toolAction && (
             <div className="card">
-              <h3>Подтверждение действия: {toolAction.action}</h3>
+              <h3>Подтверждение действия: {toolActionLabel(toolAction.action)}</h3>
               <div className="form">
                 <label>
                   Ответственное лицо {toolAction.action === "ISSUE" ? "(обязательно)" : ""}

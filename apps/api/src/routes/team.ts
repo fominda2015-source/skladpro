@@ -1,5 +1,7 @@
 import { Router } from "express";
+import { NotificationLevel } from "@prisma/client";
 import { z } from "zod";
+import { notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -79,6 +81,17 @@ teamRouter.post("/tasks", requirePermission("team.tasks.write"), async (req: Aut
       warehouse: true
     }
   });
+
+  if (created.assigneeId !== req.user!.userId) {
+    await notifyUser({
+      userId: created.assigneeId,
+      title: "Новая задача от руководителя",
+      message: `Вам поставлена задача: "${created.title}".`,
+      level: NotificationLevel.INFO,
+      entityType: "StaffTask",
+      entityId: created.id
+    });
+  }
 
   return res.status(201).json(created);
 });
