@@ -159,6 +159,16 @@
   color: #7a859c;
 }
 
+.processCard {
+  margin: 10px 0 12px;
+  border-color: #dbe4ff;
+  background: #f8faff;
+}
+
+.processCard h4 {
+  margin: 0 0 8px;
+}
+
 .form {
   display: grid;
   gap: 12px;

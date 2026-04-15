@@ -506,6 +506,23 @@ function App() {
       cancel: "Отменить",
       issue: "Выдать"
     })[action];
+  const issueProcessStep = (status: string) =>
+    ({
+      DRAFT: "Черновик заявки",
+      ON_APPROVAL: "Согласование",
+      APPROVED: "Готова к выдаче",
+      ISSUED: "Завершено",
+      REJECTED: "Отклонена",
+      CANCELLED: "Отменена"
+    })[status] ?? status;
+  const waybillProcessStep = (status: string) =>
+    ({
+      DRAFT: "Черновик ТН",
+      FORMED: "Сформирована",
+      SHIPPED: "В пути",
+      RECEIVED: "Получена",
+      CLOSED: "Закрыта"
+    })[status] ?? status;
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -3242,6 +3259,33 @@ function App() {
             <button onClick={() => setDrawerMode("")}>Закрыть</button>
           </div>
           <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{issueStatusLabel(selectedIssue.status)}</span></p>
+          <div className="card processCard">
+            <h4>Шаг процесса</h4>
+            <p className="muted">Текущий этап: <strong>{issueProcessStep(selectedIssue.status)}</strong></p>
+            <div className="toolbar">
+              {selectedIssue.status === "DRAFT" && (
+                <button onClick={() => void executeIssueAction(selectedIssue.id, "send-for-approval", { closeDrawer: true })}>
+                  На согласование
+                </button>
+              )}
+              {selectedIssue.status === "ON_APPROVAL" && (
+                <>
+                  <button onClick={() => void executeIssueAction(selectedIssue.id, "approve", { closeDrawer: true })}>Согласовать</button>
+                  <button className="dangerBtn" onClick={() => void executeIssueAction(selectedIssue.id, "reject", { closeDrawer: true })}>Отклонить</button>
+                </>
+              )}
+              {(selectedIssue.status === "DRAFT" || selectedIssue.status === "APPROVED") && (
+                <button className="secondaryBtn" onClick={() => void executeIssueAction(selectedIssue.id, "issue", { closeDrawer: true })}>
+                  Выдать
+                </button>
+              )}
+              {(selectedIssue.status === "DRAFT" || selectedIssue.status === "ON_APPROVAL") && (
+                <button className="dangerBtn" onClick={() => void executeIssueAction(selectedIssue.id, "cancel", { closeDrawer: true })}>
+                  Отменить
+                </button>
+              )}
+            </div>
+          </div>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
           <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
           <p><strong>Основание:</strong> {basisTypeLabel(selectedIssue.basisType || "OTHER")}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
@@ -3272,15 +3316,6 @@ function App() {
           <div className="toolbar">
             <button onClick={() => openDocumentsForEntity("issue", selectedIssue.id)}>Файлы</button>
             <button onClick={() => setActiveTab("issues")}>Открыть список</button>
-            {(selectedIssue.status === "DRAFT" || selectedIssue.status === "ON_APPROVAL") && token ? (
-              <button
-                onClick={async () => {
-                  await executeIssueAction(selectedIssue.id, "cancel", { closeDrawer: true });
-                }}
-              >
-                Отменить заявку
-              </button>
-            ) : null}
           </div>
         </aside>
       )}
@@ -3292,6 +3327,29 @@ function App() {
             <button onClick={() => setDrawerMode("")}>Закрыть</button>
           </div>
           <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedWaybill.status)}`}>{waybillStatusLabel(selectedWaybill.status)}</span></p>
+          <div className="card processCard">
+            <h4>Шаг процесса</h4>
+            <p className="muted">Текущий этап: <strong>{waybillProcessStep(selectedWaybill.status)}</strong></p>
+            <div className="toolbar">
+              {selectedWaybill.status === "DRAFT" && (
+                <button onClick={() => void executeWaybillStatus(selectedWaybill.id, "FORMED", "Сформировано в карточке ТН")}>Сформировать</button>
+              )}
+              {selectedWaybill.status === "FORMED" && (
+                <button onClick={() => void executeWaybillStatus(selectedWaybill.id, "SHIPPED", "Отгружено к месту назначения")}>Отгрузить</button>
+              )}
+              {selectedWaybill.status === "SHIPPED" && (
+                <button onClick={() => void executeWaybillStatus(selectedWaybill.id, "RECEIVED", "Получено в пункте назначения")}>Подтвердить получение</button>
+              )}
+              {selectedWaybill.status === "RECEIVED" && (
+                <button className="secondaryBtn" onClick={() => void executeWaybillStatus(selectedWaybill.id, "CLOSED", "Закрыто после подтверждения")}>Закрыть ТН</button>
+              )}
+            </div>
+            {waybillEvents.length ? (
+              <p className="muted">
+                Последнее событие: {new Date(waybillEvents[0].createdAt).toLocaleString()} — {waybillStatusLabel(waybillEvents[0].status)}
+              </p>
+            ) : null}
+          </div>
           <p><strong>Маршрут:</strong> {selectedWaybill.toLocation}</p>
           <p><strong>Отправитель:</strong> {selectedWaybill.sender || "-"}</p>
           <p><strong>Получатель:</strong> {selectedWaybill.recipient || "-"}</p>
