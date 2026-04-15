@@ -815,9 +815,33 @@ tr.low {
 .chatUserMeta {
   display: grid;
   text-align: left;
+  min-width: 0;
 }
 
 .chatUserMeta small {
+  font-size: 11px;
+  color: #60708e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatUnreadBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-style: normal;
+  font-size: 11px;
+}
+
+.chatUserTime {
+  margin-left: auto;
   font-size: 11px;
   color: #60708e;
 }
@@ -862,6 +886,8 @@ tr.low {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+  border-top: 1px solid #ecf0f8;
+  padding-top: 8px;
 }
 
 @media (max-width: 1200px) {

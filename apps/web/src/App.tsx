@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
@@ -564,11 +564,14 @@ function App() {
   const [chatError, setChatError] = useState("");
   const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
   const [chatWidgetUserId, setChatWidgetUserId] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatViewedAt, setChatViewedAt] = useState<Record<string, string>>({});
   const [feedbackMessages, setFeedbackMessages] = useState<ChatMessage[]>([]);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
   const [feedbackError, setFeedbackError] = useState("");
   const [reportProjectId, setReportProjectId] = useState("");
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -750,9 +753,40 @@ function App() {
       other: source.filter((n) => n.isRead && !(new Date(n.createdAt) >= startOfToday) && n.level === "INFO")
     };
   }, [notifications, inboxFilter]);
+  const dmByUserId = useMemo(() => {
+    const map = new Map<string, Conversation>();
+    for (const conv of chatConversations) {
+      if (conv.kind !== "DM") continue;
+      const peer = conv.participants.find((p) => p.user.id !== me?.id)?.user;
+      if (peer) map.set(peer.id, conv);
+    }
+    return map;
+  }, [chatConversations, me?.id]);
+  const filteredChatUsers = useMemo(() => {
+    const qv = chatSearch.trim().toLowerCase();
+    const rows = qv
+      ? chatUsers.filter((u) => `${u.fullName} ${u.position || ""} ${roleLabel(u.role)}`.toLowerCase().includes(qv))
+      : chatUsers;
+    return rows.sort((a, b) => {
+      const aConv = dmByUserId.get(a.id);
+      const bConv = dmByUserId.get(b.id);
+      const aLast = aConv?.messages?.[0]?.createdAt || "";
+      const bLast = bConv?.messages?.[0]?.createdAt || "";
+      return bLast.localeCompare(aLast);
+    });
+  }, [chatUsers, chatSearch, dmByUserId]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
+  };
+  const chatTimeLabel = (iso?: string) => {
+    if (!iso) return "";
+    const date = new Date(iso);
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return date.toLocaleDateString();
   };
   const tabTitleMap: Record<string, string> = {
     stocks: "Главная и остатки",
@@ -1243,6 +1277,7 @@ function App() {
     });
     if (!res.ok) return;
     setChatMessages((await res.json()) as ChatMessage[]);
+    setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
   }
 
   async function sendConversationMessage() {
@@ -1993,15 +2028,26 @@ function App() {
   }, [dashboardWarehouseId, warehouses]);
 
   useEffect(() => {
-    if (!token || activeTab !== "chat") return;
+    if (!token || !chatWidgetOpen) return;
     void loadChatUsers();
     void loadConversations();
-  }, [token, activeTab]);
+    const timer = window.setInterval(() => {
+      void loadConversations();
+      if (selectedConversationId) void loadConversationMessages(selectedConversationId);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [token, chatWidgetOpen, selectedConversationId]);
 
   useEffect(() => {
-    if (!token || activeTab !== "chat" || !selectedConversationId) return;
+    if (!token || !chatWidgetOpen || !selectedConversationId) return;
     void loadConversationMessages(selectedConversationId);
-  }, [token, activeTab, selectedConversationId]);
+  }, [token, chatWidgetOpen, selectedConversationId]);
+
+  useEffect(() => {
+    const node = chatMessagesRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [chatMessages, selectedConversationId]);
 
   useEffect(() => {
     if (!token || activeTab !== "feedback") return;
@@ -5419,14 +5465,28 @@ function App() {
                 <button type="button" onClick={() => setChatWidgetOpen(false)}>×</button>
               </div>
               {!chatWidgetUserId ? (
-                <div className="chatUserList">
-                  {chatUsers.map((u) => (
+                <>
+                  <input
+                    value={chatSearch}
+                    onChange={(e) => setChatSearch(e.target.value)}
+                    placeholder="Поиск сотрудника..."
+                  />
+                  <div className="chatUserList">
+                  {filteredChatUsers.map((u) => {
+                    const conv = dmByUserId.get(u.id);
+                    const last = conv?.messages?.[0];
+                    const unread =
+                      conv && last && last.senderId !== me?.id && new Date(last.createdAt) > new Date(chatViewedAt[conv.id] || 0)
+                        ? 1
+                        : 0;
+                    return (
                     <button
                       key={u.id}
                       type="button"
                       className="chatUserItem"
                       onClick={async () => {
-                        await startDmConversation(u.id);
+                        const convId = await startDmConversation(u.id);
+                        if (convId) setChatViewedAt((prev) => ({ ...prev, [convId]: new Date().toISOString() }));
                         setChatWidgetUserId(u.id);
                       }}
                     >
@@ -5434,19 +5494,26 @@ function App() {
                         {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
                       </span>
                       <span className="chatUserMeta">
-                        <strong>{u.fullName}</strong>
-                        <small>{u.position || roleLabel(u.role)}</small>
+                        <strong>
+                          {u.fullName}
+                          {unread > 0 ? <em className="chatUnreadBadge">{unread}</em> : null}
+                        </strong>
+                        <small>
+                          {last?.text ? `${last.text.slice(0, 34)}${last.text.length > 34 ? "..." : ""}` : (u.position || roleLabel(u.role))}
+                        </small>
                       </span>
+                      <span className="chatUserTime">{chatTimeLabel(last?.createdAt)}</span>
                     </button>
-                  ))}
-                </div>
+                  );})}
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="chatThreadHead">
                     <button type="button" className="ghostBtn" onClick={() => setChatWidgetUserId("")}>← К списку</button>
                     <strong>{chatUsers.find((u) => u.id === chatWidgetUserId)?.fullName || "Диалог"}</strong>
                   </div>
-                  <div className="chatMessages">
+                  <div className="chatMessages" ref={chatMessagesRef}>
                     {chatMessages.map((m) => (
                       <div key={m.id} className={`chatBubble ${m.senderId === me?.id ? "mine" : ""}`}>
                         <p>{m.text}</p>
@@ -5459,7 +5526,17 @@ function App() {
                     ))}
                   </div>
                   <div className="chatComposer">
-                    <input value={chatText} onChange={(e) => setChatText(e.target.value)} placeholder="Введите сообщение" />
+                    <input
+                      value={chatText}
+                      onChange={(e) => setChatText(e.target.value)}
+                      placeholder="Введите сообщение"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendConversationMessage();
+                        }
+                      }}
+                    />
                     <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
                     <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
                       Отправить
