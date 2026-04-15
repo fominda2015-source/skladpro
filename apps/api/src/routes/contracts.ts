@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
 
 export const contractsRouter = Router();
 
@@ -492,6 +493,42 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           responses: { "200": { description: "Meta info" } }
         }
       },
+      "/api/contracts/readiness": {
+        get: {
+          tags: ["contracts"],
+          summary: "Readiness checklist before full test run",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Readiness status",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      checks: {
+                        type: "object",
+                        properties: {
+                          hasRoles: { type: "boolean" },
+                          hasUsers: { type: "boolean" },
+                          hasWarehouses: { type: "boolean" },
+                          hasMaterials: { type: "boolean" },
+                          hasIssueRequests: { type: "boolean" },
+                          hasDocumentFiles: { type: "boolean" },
+                          hasIntegrationJobs: { type: "boolean" },
+                          hasNotifications: { type: "boolean" }
+                        }
+                      }
+                    },
+                    required: ["ok", "checks"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "/api/contracts/openapi.json": {
         get: {
           tags: ["contracts"],
@@ -502,4 +539,63 @@ contractsRouter.get("/openapi.json", (_req, res) => {
     }
   };
   res.json(doc);
+});
+
+contractsRouter.get("/readiness", async (_req, res) => {
+  const [
+    rolesCount,
+    usersCount,
+    warehousesCount,
+    materialsCount,
+    issuesCount,
+    docsCount,
+    integrationJobsCount,
+    notificationsCount
+  ] = await Promise.all([
+    prisma.role.count(),
+    prisma.user.count(),
+    prisma.warehouse.count(),
+    prisma.material.count(),
+    prisma.issueRequest.count(),
+    prisma.documentFile.count(),
+    prisma.integrationJob.count(),
+    prisma.notification.count()
+  ]);
+
+  const checks = {
+    hasRoles: rolesCount > 0,
+    hasUsers: usersCount > 0,
+    hasWarehouses: warehousesCount > 0,
+    hasMaterials: materialsCount > 0,
+    hasIssueRequests: issuesCount > 0,
+    hasDocumentFiles: docsCount > 0,
+    hasIntegrationJobs: integrationJobsCount > 0,
+    hasNotifications: notificationsCount > 0
+  };
+  const ok = Object.values(checks).every(Boolean);
+
+  return res.json({
+    ok,
+    checks,
+    counts: {
+      roles: rolesCount,
+      users: usersCount,
+      warehouses: warehousesCount,
+      materials: materialsCount,
+      issueRequests: issuesCount,
+      documentFiles: docsCount,
+      integrationJobs: integrationJobsCount,
+      notifications: notificationsCount
+    },
+    countsByCheck: {
+      hasRoles: rolesCount,
+      hasUsers: usersCount,
+      hasWarehouses: warehousesCount,
+      hasMaterials: materialsCount,
+      hasIssueRequests: issuesCount,
+      hasDocumentFiles: docsCount,
+      hasIntegrationJobs: integrationJobsCount,
+      hasNotifications: notificationsCount
+    }
+  });
 });

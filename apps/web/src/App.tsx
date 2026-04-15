@@ -227,6 +227,12 @@ type NotificationRow = {
   entityType?: string | null;
   entityId?: string | null;
 };
+type ReadinessResponse = {
+  ok: boolean;
+  checks: Record<string, boolean>;
+  counts?: Record<string, number>;
+  countsByCheck?: Record<string, number>;
+};
 
 const API_URL = import.meta.env.VITE_API_URL || "http://194.156.117.250";
 const TOKEN_KEY = "skladpro_token";
@@ -402,6 +408,7 @@ function App() {
   const [integrationPayload, setIntegrationPayload] = useState("{\"batch\":1}");
   const [integrationMessage, setIntegrationMessage] = useState("");
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => Boolean(me?.permissions?.includes("*") || me?.permissions?.includes("admin.users.manage")), [me]);
@@ -613,6 +620,18 @@ function App() {
       body: JSON.stringify({ ids })
     });
     await loadNotifications();
+  }
+
+  async function loadReadiness() {
+    if (!token) return;
+    const r = await fetch(`${API_URL}/api/contracts/readiness`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      setIntegrationMessage(`Не удалось получить readiness: HTTP ${r.status}`);
+      return;
+    }
+    setReadiness((await r.json()) as ReadinessResponse);
   }
 
   async function runMaterialMatch(enqueue: boolean) {
@@ -1160,6 +1179,7 @@ function App() {
     }
     void loadIntegrationJobs();
     void loadNotifications();
+    void loadReadiness();
   }, [token, activeTab]);
 
   useEffect(() => {
@@ -1757,8 +1777,34 @@ function App() {
           <div className="toolbar">
             <button type="button" onClick={() => void createIntegrationJob()}>Создать задачу</button>
             <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
+            <button type="button" onClick={() => void loadReadiness()}>Readiness-check</button>
           </div>
           {integrationMessage && <p className="muted">{integrationMessage}</p>}
+          {readiness && (
+            <div className="card">
+              <h3>Готовность перед полным тест-прогоном</h3>
+              <p className="muted">
+                Статус:{" "}
+                <strong className={readiness.ok ? "ok" : "bad"}>
+                  {readiness.ok ? "ГОТОВО" : "НЕ ПОЛНОСТЬЮ ГОТОВО"}
+                </strong>
+              </p>
+              <table>
+                <thead>
+                  <tr><th>Проверка</th><th>Результат</th><th>Количество</th></tr>
+                </thead>
+                <tbody>
+                  {Object.entries(readiness.checks).map(([key, passed]) => (
+                    <tr key={key}>
+                      <td>{key}</td>
+                      <td>{passed ? "OK" : "MISSING"}</td>
+                      <td>{readiness.countsByCheck?.[key] ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <table>
             <thead>
               <tr>
