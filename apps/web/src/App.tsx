@@ -1441,123 +1441,159 @@ function App() {
         )}
         {dashboardError && <p className="error">{dashboardError}</p>}
         {activeTab === "stocks" && (
-          <div className="kpiRow">
-            <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Позиций</span><strong>{stocks.length}</strong></button>
-            <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("stocks"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
-            <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
-            <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Транспортные ТН</span><strong>{waybills.length}</strong></button>
-            <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
-            <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
+          <div className="dashboardBoard">
+            <section className="dashboardMain">
+              <div className="kpiRow">
+                <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Поступления</span><strong>{dashboard?.warehouse.receiptsToday ?? stocks.length}</strong></button>
+                <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("stocks"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
+                <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
+                <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Перемещения</span><strong>{dashboard?.warehouse.transfersToday ?? waybills.length}</strong></button>
+                <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
+                <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
+              </div>
+              <div className="card">
+                <div className="toolbar">
+                  <input
+                    placeholder="Поиск по материалу, sku, синониму"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                  />
+                  <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
+                  <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
+                  <button onClick={() => void loadStocks(q)}>Найти</button>
+                  <button type="button" onClick={() => void loadStockMovements()}>
+                    Журнал движений
+                  </button>
+                </div>
+
+                {loadingStocks && <p>Загрузка остатков...</p>}
+                {stocksError && <p className="error">{stocksError}</p>}
+                {!loadingStocks && !stocksError && (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Склад</th>
+                        <th>Материал</th>
+                        {showStockSku && <th>SKU</th>}
+                        <th>Ед.</th>
+                        <th>Остаток</th>
+                        {showStockReserve && <th>Резерв</th>}
+                        <th>Доступно</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stocks.map((row) => (
+                        <tr key={row.id} className={row.isLow ? "low" : ""}>
+                          <td>{row.warehouseName}</td>
+                          <td>{row.materialName}</td>
+                          {showStockSku && <td>{row.materialSku || "-"}</td>}
+                          <td>{row.materialUnit}</td>
+                          <td>{row.quantity}</td>
+                          {showStockReserve && <td>{row.reserved}</td>}
+                          <td>{row.available}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {stockMovementsLoading && <p>Загрузка движений...</p>}
+                {stockMovementsError && <p className="error">{stockMovementsError}</p>}
+                {!stockMovementsLoading && stockMovements.length > 0 && (
+                  <>
+                    <h3 style={{ marginTop: 16 }}>Журнал движений (последние записи)</h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Время</th>
+                          <th>Склад</th>
+                          <th>Материал</th>
+                          <th>Напр.</th>
+                          <th>Кол-во</th>
+                          <th>Источник</th>
+                          <th>Операция / заявка</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockMovements.map((m) => (
+                          <tr key={m.id}>
+                            <td>{new Date(m.createdAt).toLocaleString()}</td>
+                            <td>{m.warehouse?.name ?? m.warehouseId}</td>
+                            <td>{m.material?.name ?? m.materialId}</td>
+                            <td>{m.direction}</td>
+                            <td>{m.quantity}</td>
+                            <td>{m.sourceDocumentType}</td>
+                            <td>
+                              {m.operation?.documentNumber || m.operation?.id || "—"}
+                              {m.issueRequest?.number ? ` · заявка ${m.issueRequest.number}` : ""}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </div>
+              <div className="grid2">
+                <div className="card">
+                  <h3>Проблемные остатки</h3>
+                  <ul className="plainList">
+                    <li>Критичных остатков: <strong>{stocks.filter((x) => x.isLow).length}</strong></li>
+                    <li>На согласовании: <strong>{approvalQueue.length}</strong></li>
+                    <li>Заявки в работе: <strong>{issues.filter((x) => x.status !== "ISSUED" && x.status !== "REJECTED").length}</strong></li>
+                  </ul>
+                </div>
+                <div className="card">
+                  <h3>Быстрые действия</h3>
+                  <div className="toolbar">
+                    <button onClick={() => setActiveTab("operations")}>Новое поступление</button>
+                    <button onClick={() => setActiveTab("issues")}>Новая выдача</button>
+                    <button onClick={() => setActiveTab("waybills")}>Новая ТН</button>
+                    <button onClick={() => setActiveTab("tools")}>Инструмент / QR</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <aside className="dashboardRight">
+              <div className="card">
+                <h3>Очередь заявок</h3>
+                <div className="queueList">
+                  {(approvalQueue.length ? approvalQueue : issues.filter((i) => i.status !== "ISSUED").slice(0, 5)).map((i) => (
+                    <div key={i.id} className="queueItem">
+                      <div>
+                        <strong>{i.number}</strong>
+                        <p className="muted">{i.requestedBy?.fullName || i.requestedById}</p>
+                      </div>
+                      <span className={`badge ${statusClass(i.status)}`}>{i.status}</span>
+                    </div>
+                  ))}
+                  {!approvalQueue.length && !issues.length && <p className="muted">Очередь пуста</p>}
+                </div>
+              </div>
+              <div className="card">
+                <h3>Последние заявки</h3>
+                <div className="queueList">
+                  {issues.slice(0, 4).map((i) => (
+                    <div key={i.id} className="queueItem">
+                      <span>{i.number}</span>
+                      <strong>{i.status}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="card">
+                <h3>Динамика расходов</h3>
+                <div className="miniBars">
+                  {[32, 46, 28, 62, 52, 44].map((v, idx) => (
+                    <div key={idx} className="miniBarWrap">
+                      <div className="miniBar" style={{ height: `${v}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
           </div>
         )}
         <p className="muted">Если в названиях видишь `????`, это старые тестовые данные с поврежденной кодировкой.</p>
-
-      {activeTab === "stocks" && (
-        <div className="card">
-          <div className="toolbar">
-            <input
-              placeholder="Поиск по материалу, sku, синониму"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
-            <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
-            <button onClick={() => void loadStocks(q)}>Найти</button>
-            <button type="button" onClick={() => void loadStockMovements()}>
-              Журнал движений
-            </button>
-          </div>
-
-          {loadingStocks && <p>Загрузка остатков...</p>}
-          {stocksError && <p className="error">{stocksError}</p>}
-          {!loadingStocks && !stocksError && (
-            <table>
-              <thead>
-                <tr>
-                  <th>Склад</th>
-                  <th>Материал</th>
-                  {showStockSku && <th>SKU</th>}
-                  <th>Ед.</th>
-                  <th>Остаток</th>
-                  {showStockReserve && <th>Резерв</th>}
-                  <th>Доступно</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stocks.map((row) => (
-                  <tr key={row.id} className={row.isLow ? "low" : ""}>
-                    <td>{row.warehouseName}</td>
-                    <td>{row.materialName}</td>
-                    {showStockSku && <td>{row.materialSku || "-"}</td>}
-                    <td>{row.materialUnit}</td>
-                    <td>{row.quantity}</td>
-                    {showStockReserve && <td>{row.reserved}</td>}
-                    <td>{row.available}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {stockMovementsLoading && <p>Загрузка движений...</p>}
-          {stockMovementsError && <p className="error">{stockMovementsError}</p>}
-          {!stockMovementsLoading && stockMovements.length > 0 && (
-            <>
-              <h3 style={{ marginTop: 16 }}>Журнал движений (последние записи)</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Время</th>
-                    <th>Склад</th>
-                    <th>Материал</th>
-                    <th>Напр.</th>
-                    <th>Кол-во</th>
-                    <th>Источник</th>
-                    <th>Операция / заявка</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stockMovements.map((m) => (
-                    <tr key={m.id}>
-                      <td>{new Date(m.createdAt).toLocaleString()}</td>
-                      <td>{m.warehouse?.name ?? m.warehouseId}</td>
-                      <td>{m.material?.name ?? m.materialId}</td>
-                      <td>{m.direction}</td>
-                      <td>{m.quantity}</td>
-                      <td>{m.sourceDocumentType}</td>
-                      <td>
-                        {m.operation?.documentNumber || m.operation?.id || "—"}
-                        {m.issueRequest?.number ? ` · заявка ${m.issueRequest.number}` : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      )}
-
-      {activeTab === "stocks" && (
-        <div className="grid2">
-          <div className="card">
-            <h3>Проблемы сегодня</h3>
-            <ul className="plainList">
-              <li>Критичных остатков: <strong>{stocks.filter((x) => x.isLow).length}</strong></li>
-              <li>На согласовании: <strong>{approvalQueue.length}</strong></li>
-              <li>Заявки в работе: <strong>{issues.filter((x) => x.status !== "ISSUED" && x.status !== "REJECTED").length}</strong></li>
-            </ul>
-          </div>
-          <div className="card">
-            <h3>Быстрые действия</h3>
-            <div className="toolbar">
-              <button onClick={() => setActiveTab("operations")}>Новое поступление</button>
-              <button onClick={() => setActiveTab("issues")}>Новая выдача</button>
-              <button onClick={() => setActiveTab("waybills")}>Новая ТН</button>
-              <button onClick={() => setActiveTab("tools")}>Инструмент / QR</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {activeTab === "matching" && (
         <div className="card">

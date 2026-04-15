@@ -325,6 +325,67 @@ tr.low {
   margin-bottom: 12px;
 }
 
+.dashboardBoard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  align-items: start;
+}
+
+.dashboardMain {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboardRight {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  top: 88px;
+}
+
+.queueList {
+  display: grid;
+  gap: 8px;
+}
+
+.queueItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #edf1f7;
+  border-radius: 12px;
+  padding: 10px 10px;
+  background: #fcfdff;
+}
+
+.queueItem p {
+  margin: 4px 0 0;
+}
+
+.miniBars {
+  height: 120px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.miniBarWrap {
+  flex: 1;
+  height: 100%;
+  background: #eef3ff;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.miniBar {
+  width: 100%;
+  background: linear-gradient(180deg, #7fa2ff 0%, #2563eb 100%);
+  border-radius: 8px;
+}
+
 .kpi {
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -371,6 +432,12 @@ tr.low {
 @media (max-width: 1200px) {
   .kpiRow {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .dashboardBoard {
+    grid-template-columns: 1fr;
+  }
+  .dashboardRight {
+    position: static;
   }
 }
 
