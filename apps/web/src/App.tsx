@@ -898,6 +898,43 @@ function App() {
     await loadNotifications();
   }
 
+  function openInboxEntity(notification: NotificationRow) {
+    if (!notification.entityType || !notification.entityId) return;
+    const entityType = notification.entityType.toLowerCase();
+    if (entityType === "issuerequest" || entityType === "issue") {
+      setIssueStatusFilter("");
+      setSelectedIssueId(notification.entityId);
+      setDrawerMode("issue");
+      setActiveTab("issues");
+      return;
+    }
+    if (entityType === "transportwaybill" || entityType === "waybill") {
+      setWaybillStatusFilter("");
+      setSelectedWaybillId(notification.entityId);
+      setDrawerMode("waybill");
+      setActiveTab("waybills");
+      return;
+    }
+    if (entityType === "stafftask" || entityType === "task") {
+      setActiveTab("team");
+      setTeamMessage(`Открой задачу в списке команды: ${notification.entityId}`);
+      return;
+    }
+    if (entityType === "integrationjob") {
+      setActiveTab("integrations");
+      return;
+    }
+    if (entityType === "toolevent" || entityType === "tool") {
+      setActiveTab("tools");
+      return;
+    }
+    if (entityType === "documentfile") {
+      setActiveTab("documents");
+      return;
+    }
+    setActiveTab("integrations");
+  }
+
   async function loadReadiness() {
     if (!token) return;
     const r = await fetch(`${API_URL}/api/contracts/readiness`, {
@@ -2349,7 +2386,7 @@ function App() {
                           <th>Уровень</th>
                           <th>Тема</th>
                           <th>Статус</th>
-                          <th>Действие</th>
+                          <th>Действия</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2371,11 +2408,16 @@ function App() {
                             <td>{n.title}</td>
                             <td>{n.isRead ? "Прочитано" : "Новое"}</td>
                             <td>
-                              {!n.isRead ? (
-                                <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
-                              ) : (
-                                <span className="muted">—</span>
-                              )}
+                              <div className="toolbar">
+                                {!n.isRead ? (
+                                  <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                                {n.entityType && n.entityId ? (
+                                  <button type="button" onClick={() => openInboxEntity(n)}>Открыть</button>
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                         ))}
