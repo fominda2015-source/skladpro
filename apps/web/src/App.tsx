@@ -1334,22 +1334,22 @@ function App() {
           <h2 className="brand">СкладПро</h2>
           <p className="brandSub">Warehouse ERP</p>
         </div>
-        <button className="navBtn" onClick={() => setActiveTab("stocks")}>Главная</button>
-        <button className="navBtn" onClick={() => setActiveTab("issues")}>Быстрая выдача</button>
-        <button className="navBtn" onClick={() => setActiveTab("approvals")}>Очередь заявок</button>
-        <button className="navBtn" onClick={() => setActiveTab("operations")}>Приходы</button>
-        <button className="navBtn" onClick={() => setActiveTab("waybills")}>Перемещения</button>
-        <button className="navBtn" onClick={() => setActiveTab("catalog")}>Справочники</button>
-        <button className="navBtn" onClick={() => setActiveTab("stocks")}>Остатки</button>
-        <button className="navBtn" onClick={() => setActiveTab("documents")}>Документы</button>
-        <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструменты</button>
-        <button className="navBtn" onClick={() => setActiveTab("matching")}>Сопоставление</button>
-        <button className="navBtn" onClick={() => setActiveTab("limits")}>Лимиты</button>
-        <button className="navBtn" onClick={() => setActiveTab("qr")}>QR</button>
-        <button className="navBtn" onClick={() => setActiveTab("integrations")}>Интеграции</button>
-        {canReadAudit && <button className="navBtn" onClick={() => setActiveTab("audit")}>Аудит</button>}
-        {canManageUsers && <button className="navBtn" onClick={() => setActiveTab("admin")}>Доступы</button>}
-        <button className="navBtn" onClick={() => setActiveTab("password")}>Сменить пароль</button>
+        <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>
+        <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Быстрая выдача</button>
+        <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Очередь заявок</button>
+        <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>
+        <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>
+        <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>
+        <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">◫</span>Остатки</button>
+        <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>
+        <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>
+        <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>
+        <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>
+        <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>
+        <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>
+        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
+        {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
+        <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Сменить пароль</button>
         <button className="navBtn danger" onClick={onLogout}>Выйти</button>
       </aside>
       <section className="canvas">
