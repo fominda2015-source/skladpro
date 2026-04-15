@@ -167,7 +167,7 @@ export async function seedBaseData() {
   }
 
   const passwordHash = await bcrypt.hash(config.adminPassword, 10);
-  await prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { email: config.adminEmail },
     update: {
       fullName: config.adminName,
@@ -181,4 +181,34 @@ export async function seedBaseData() {
       roleId: adminRole.id
     }
   });
+
+  for (const title of ["Кладовщик", "Прораб", "Руководитель проекта", "Администратор"]) {
+    await prisma.position.upsert({
+      where: { name: title },
+      update: {},
+      create: { name: title }
+    });
+  }
+
+  const adminPosition = await prisma.position.findUnique({ where: { name: "Администратор" } });
+  if (adminPosition) {
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: { positionId: adminPosition.id }
+    });
+  }
+
+  const [projects, warehouses] = await Promise.all([
+    prisma.project.findMany({ select: { id: true } }),
+    prisma.warehouse.findMany({ select: { id: true } })
+  ]);
+  for (const p of projects) {
+    for (const w of warehouses) {
+      await prisma.projectWarehouse.upsert({
+        where: { projectId_warehouseId: { projectId: p.id, warehouseId: w.id } },
+        update: {},
+        create: { projectId: p.id, warehouseId: w.id }
+      });
+    }
+  }
 }

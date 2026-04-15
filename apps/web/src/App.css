@@ -16,6 +16,28 @@
   overflow-y: auto;
 }
 
+.warehouseMode .sidebar {
+  background: linear-gradient(180deg, #7c2d12 0%, #9a3412 100%);
+}
+
+.warehouseMode .navBtn.active {
+  background: #f97316;
+  border-color: #fb923c;
+}
+
+.warehouseMode button {
+  background: #ea580c;
+}
+
+.warehouseMode button:hover {
+  background: #c2410c;
+}
+
+.warehouseMode .topIconBtn,
+.warehouseMode .userChip {
+  border-color: #fdba74;
+}
+
 .navSectionTitle {
   margin: 10px 8px 2px;
   font-size: 11px;

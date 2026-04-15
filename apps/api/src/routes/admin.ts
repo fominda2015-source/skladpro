@@ -4,21 +4,27 @@ import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizePermissions } from "../lib/permissions.js";
+import { getEffectivePermissions } from "../lib/access.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { UserStatus } from "@prisma/client";
 
 const updateUserAccessSchema = z.object({
   roleName: z.string().optional(),
-  status: z.enum(["ACTIVE", "BLOCKED"]).optional()
+  status: z.enum(["ACTIVE", "BLOCKED"]).optional(),
+  permissions: z.array(z.string().min(1)).optional(),
+  positionId: z.string().nullable().optional()
 });
 
 const createUserSchema = z.object({
   email: z.string().email(),
   fullName: z.string().min(2),
-  roleName: z.string().min(1),
+  roleName: z.string().min(1).default("VIEWER"),
   password: z.string().min(4),
   warehouseIds: z.array(z.string().min(1)).default([]),
-  projectIds: z.array(z.string().min(1)).default([])
+  projectIds: z.array(z.string().min(1)).default([]),
+  permissions: z.array(z.string().min(1)).default([]),
+  positionId: z.string().nullable().optional(),
+  positionName: z.string().min(2).optional()
 });
 
 const updateRolePermissionsSchema = z.object({
@@ -42,6 +48,7 @@ adminRouter.get("/users", async (_req, res) => {
   const users = await prisma.user.findMany({
     include: {
       role: true,
+      position: true,
       warehouseScopes: { select: { warehouseId: true } },
       projectScopes: { select: { projectId: true } }
     },
@@ -54,8 +61,10 @@ adminRouter.get("/users", async (_req, res) => {
       fullName: u.fullName,
       status: u.status,
       role: u.role.name,
+      position: u.position?.name || null,
       avatarUrl: u.avatarUrl,
-      permissions: normalizePermissions(u.role.permissions),
+      permissions: getEffectivePermissions(u.role.permissions, u.customPermissions),
+      customPermissions: normalizePermissions(u.customPermissions),
       warehouseScopeIds: u.warehouseScopes.map((s) => s.warehouseId),
       projectScopeIds: u.projectScopes.map((s) => s.projectId),
       createdAt: u.createdAt
@@ -87,11 +96,20 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
   }
 
   await prisma.$transaction(async (tx) => {
+    const linkedWarehouses = parsed.data.projectIds.length
+      ? await tx.projectWarehouse.findMany({
+          where: { projectId: { in: parsed.data.projectIds } },
+          select: { warehouseId: true }
+        })
+      : [];
+    const warehouseIds = Array.from(
+      new Set([...parsed.data.warehouseIds, ...linkedWarehouses.map((x) => x.warehouseId)])
+    );
     await tx.userWarehouseScope.deleteMany({ where: { userId } });
     await tx.userProjectScope.deleteMany({ where: { userId } });
-    if (parsed.data.warehouseIds.length) {
+    if (warehouseIds.length) {
       await tx.userWarehouseScope.createMany({
-        data: parsed.data.warehouseIds.map((warehouseId) => ({ userId, warehouseId }))
+        data: warehouseIds.map((warehouseId) => ({ userId, warehouseId }))
       });
     }
     if (parsed.data.projectIds.length) {
@@ -124,6 +142,24 @@ adminRouter.post("/users", async (req, res) => {
   if (!role) {
     return res.status(404).json({ error: "Role not found" });
   }
+  let positionId = parsed.data.positionId ?? null;
+  if (parsed.data.positionName?.trim()) {
+    const p = await prisma.position.upsert({
+      where: { name: parsed.data.positionName.trim() },
+      update: {},
+      create: { name: parsed.data.positionName.trim() }
+    });
+    positionId = p.id;
+  }
+  const linkedWarehouses = parsed.data.projectIds.length
+    ? await prisma.projectWarehouse.findMany({
+        where: { projectId: { in: parsed.data.projectIds } },
+        select: { warehouseId: true }
+      })
+    : [];
+  const warehouseIds = Array.from(
+    new Set([...parsed.data.warehouseIds, ...linkedWarehouses.map((x) => x.warehouseId)])
+  );
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
   const created = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
@@ -131,14 +167,16 @@ adminRouter.post("/users", async (req, res) => {
         email: parsed.data.email,
         fullName: parsed.data.fullName.trim(),
         roleId: role.id,
-        passwordHash
+        passwordHash,
+        customPermissions: parsed.data.permissions,
+        positionId
       },
-      include: { role: true }
+      include: { role: true, position: true }
     });
 
-    if (parsed.data.warehouseIds.length) {
+    if (warehouseIds.length) {
       await tx.userWarehouseScope.createMany({
-        data: parsed.data.warehouseIds.map((warehouseId) => ({ userId: user.id, warehouseId }))
+        data: warehouseIds.map((warehouseId) => ({ userId: user.id, warehouseId }))
       });
     }
     if (parsed.data.projectIds.length) {
@@ -154,7 +192,9 @@ adminRouter.post("/users", async (req, res) => {
     fullName: created.fullName,
     status: created.status,
     role: created.role.name,
-    avatarUrl: created.avatarUrl
+    avatarUrl: created.avatarUrl,
+    position: created.position?.name || null,
+    permissions: getEffectivePermissions(created.role.permissions, created.customPermissions)
   });
 });
 
@@ -178,9 +218,13 @@ adminRouter.patch("/users/:id/access", async (req, res) => {
     where: { id: userId },
     data: {
       ...(roleId ? { roleId } : {}),
-      ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {})
+      ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {}),
+      ...(parsed.data.permissions ? { customPermissions: parsed.data.permissions } : {}),
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "positionId")
+        ? { positionId: parsed.data.positionId ?? null }
+        : {})
     },
-    include: { role: true }
+    include: { role: true, position: true }
   });
 
   return res.json({
@@ -188,7 +232,9 @@ adminRouter.patch("/users/:id/access", async (req, res) => {
     email: updated.email,
     fullName: updated.fullName,
     status: updated.status,
-    role: updated.role.name
+    role: updated.role.name,
+    position: updated.position?.name || null,
+    permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
   });
 });
 
@@ -216,6 +262,11 @@ adminRouter.get("/roles", async (_req, res) => {
       permissions: normalizePermissions(r.permissions)
     }))
   );
+});
+
+adminRouter.get("/positions", async (_req, res) => {
+  const rows = await prisma.position.findMany({ orderBy: { name: "asc" } });
+  return res.json(rows);
 });
 
 adminRouter.patch("/roles/:name/permissions", async (req, res) => {

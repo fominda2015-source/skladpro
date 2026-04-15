@@ -18,6 +18,8 @@ const trySchema = z.object({
 export const materialMatchRouter = Router();
 materialMatchRouter.use(requireAuth);
 
+const AUTO_SAFE_THRESHOLD = 0.92;
+
 materialMatchRouter.post("/try", requirePermission("materials.read"), async (req: AuthedRequest, res) => {
   const parsed = trySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -34,6 +36,33 @@ materialMatchRouter.post("/try", requirePermission("materials.read"), async (req
   const norm = normalizeMaterialName(parsed.data.rawName) || parsed.data.rawName.trim();
 
   if (!result.matched && parsed.data.enqueue) {
+    if (result.suggestedMaterialId && result.confidence >= AUTO_SAFE_THRESHOLD) {
+      const autoResolved = await prisma.materialMatchQueue.create({
+        data: {
+          rawName: parsed.data.rawName.trim(),
+          normalizedName: norm,
+          unit: parsed.data.unit,
+          article: parsed.data.article,
+          status: MaterialMatchQueueStatus.RESOLVED,
+          confidence: result.confidence,
+          suggestedMaterialId: result.suggestedMaterialId,
+          resolvedMaterialId: result.suggestedMaterialId,
+          source: parsed.data.source,
+          createdById: req.user!.userId
+        },
+        include: { resolvedMaterial: true, suggestedMaterial: true }
+      });
+      const value = parsed.data.rawName.trim();
+      const dup = await prisma.materialSynonym.findFirst({
+        where: { materialId: result.suggestedMaterialId, value }
+      });
+      if (!dup) {
+        await prisma.materialSynonym.create({
+          data: { materialId: result.suggestedMaterialId, value }
+        });
+      }
+      return res.json({ ...result, autoResolved: true, queueEntry: autoResolved });
+    }
     const row = await prisma.materialMatchQueue.create({
       data: {
         rawName: parsed.data.rawName.trim(),

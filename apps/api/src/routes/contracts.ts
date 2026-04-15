@@ -6,7 +6,7 @@ export const contractsRouter = Router();
 contractsRouter.get("/meta", (_req, res) => {
   res.json({
     name: "SkladPro API contract",
-    version: "2026-04-15.4",
+    version: "2026-04-15.5",
     format: "openapi-3.1",
     endpoints: {
       health: "/api/health",
@@ -17,6 +17,9 @@ contractsRouter.get("/meta", (_req, res) => {
       issues: "/api/issues",
       waybills: "/api/waybills",
       tools: "/api/tools",
+      chat: "/api/chat/conversations",
+      feedback: "/api/feedback/messages",
+      reports: "/api/reports/object/:projectId/summary.pdf",
       operations: "/api/operations",
       documents: "/api/documents",
       materialMatch: "/api/material-match/queue",
@@ -32,9 +35,9 @@ contractsRouter.get("/openapi.json", (_req, res) => {
     openapi: "3.1.0",
     info: {
       title: "SkladPro API",
-      version: "2026-04-15.4",
+      version: "2026-04-15.5",
       description:
-        "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, waybills, tools, documents, integrations and notifications."
+        "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, waybills, tools, chat, feedback, reports, documents, integrations and notifications."
     },
     servers: [{ url: "/", description: "Same-origin API server" }],
     tags: [
@@ -45,6 +48,9 @@ contractsRouter.get("/openapi.json", (_req, res) => {
       { name: "issues" },
       { name: "waybills" },
       { name: "tools" },
+      { name: "chat" },
+      { name: "feedback" },
+      { name: "reports" },
       { name: "documents" },
       { name: "integrations" },
       { name: "notifications" },
@@ -552,6 +558,61 @@ contractsRouter.get("/openapi.json", (_req, res) => {
               }
             }
           }
+        }
+      },
+      "/api/chat/conversations": {
+        get: {
+          tags: ["chat"],
+          summary: "List my conversations",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Conversation list" } }
+        }
+      },
+      "/api/chat/conversations/dm": {
+        post: {
+          tags: ["chat"],
+          summary: "Create or get direct conversation",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Conversation" }, "201": { description: "Conversation created" } }
+        }
+      },
+      "/api/chat/conversations/{id}/messages": {
+        get: {
+          tags: ["chat"],
+          summary: "List messages in conversation",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Message list" } }
+        },
+        post: {
+          tags: ["chat"],
+          summary: "Send message to conversation",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "201": { description: "Message created" } }
+        }
+      },
+      "/api/feedback/messages": {
+        get: {
+          tags: ["feedback"],
+          summary: "Get feedback chat with admin",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Feedback messages" } }
+        },
+        post: {
+          tags: ["feedback"],
+          summary: "Send feedback message to admin",
+          security: [{ bearerAuth: [] }],
+          responses: { "201": { description: "Feedback message created" } }
+        }
+      },
+      "/api/reports/object/{projectId}/summary.pdf": {
+        get: {
+          tags: ["reports"],
+          summary: "Download object summary PDF",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "projectId", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "PDF document (application/pdf)" } }
         }
       },
       "/api/documents": {

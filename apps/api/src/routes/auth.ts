@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../config.js";
-import { normalizePermissions } from "../lib/permissions.js";
+import { getEffectivePermissions } from "../lib/access.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
 
@@ -33,7 +33,7 @@ authRouter.post("/login", async (req, res) => {
 
   const user = await prisma.user.findUnique({
     where: { email: parsed.data.email },
-    include: { role: true }
+    include: { role: true, position: true }
   });
 
   if (!user) {
@@ -46,7 +46,7 @@ authRouter.post("/login", async (req, res) => {
   }
 
   const roleName = user.role.name as RoleName;
-  const permissions = normalizePermissions(user.role.permissions);
+  const permissions = getEffectivePermissions(user.role.permissions, user.customPermissions);
   const token = jwt.sign(
     { userId: user.id, role: roleName, email: user.email, permissions },
     config.jwtSecret,
@@ -60,6 +60,7 @@ authRouter.post("/login", async (req, res) => {
       email: user.email,
       fullName: user.fullName,
       avatarUrl: user.avatarUrl,
+      position: user.position?.name || null,
       role: roleName,
       permissions
     }
@@ -69,7 +70,7 @@ authRouter.post("/login", async (req, res) => {
 authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   const me = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    include: { role: true }
+    include: { role: true, position: true }
   });
   if (!me) {
     return res.status(404).json({ error: "User not found" });
@@ -79,8 +80,9 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     email: me.email,
     fullName: me.fullName,
     avatarUrl: me.avatarUrl,
+    position: me.position?.name || null,
     role: me.role.name,
-    permissions: normalizePermissions(me.role.permissions)
+    permissions: getEffectivePermissions(me.role.permissions, me.customPermissions)
   });
 });
 
@@ -123,7 +125,7 @@ authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => 
         ? { avatarUrl: parsed.data.avatarUrl ?? null }
         : {})
     },
-    include: { role: true }
+    include: { role: true, position: true }
   });
 
   return res.json({
@@ -131,7 +133,8 @@ authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => 
     email: updated.email,
     fullName: updated.fullName,
     avatarUrl: updated.avatarUrl,
+    position: updated.position?.name || null,
     role: updated.role.name,
-    permissions: normalizePermissions(updated.role.permissions)
+    permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
   });
 });

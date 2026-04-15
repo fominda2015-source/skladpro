@@ -76,6 +76,11 @@ enum NotificationLevel {
   ERROR
 }
 
+enum ConversationKind {
+  DM
+  FEEDBACK
+}
+
 model User {
   id               String               @id @default(cuid())
   email            String               @unique
@@ -85,6 +90,9 @@ model User {
   status           UserStatus           @default(ACTIVE)
   roleId           String
   role             Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  customPermissions Json?
+  positionId       String?
+  position         Position?            @relation(fields: [positionId], references: [id], onDelete: SetNull)
   actionLogs       ActionLog[]
   auditLogs        AuditLog[]
   warehouseScopes  UserWarehouseScope[]
@@ -96,8 +104,18 @@ model User {
   notifications    Notification[]       @relation("NotificationRecipient")
   assignedTasks    StaffTask[]          @relation("StaffTaskAssignee")
   createdTasks     StaffTask[]          @relation("StaffTaskCreator")
+  conversationParticipants ConversationParticipant[]
+  sentMessages     Message[]            @relation("MessageSender")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+}
+
+model Position {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model StaffTask {
@@ -163,6 +181,7 @@ model Warehouse {
   waybillsFrom TransportWaybill[] @relation("WaybillFromWarehouse")
   userScopes  UserWarehouseScope[]
   staffTasks  StaffTask[]
+  projectLinks ProjectWarehouse[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -264,8 +283,21 @@ model Project {
   tools       Tool[]
   userScopes  UserProjectScope[]
   staffTasks  StaffTask[]
+  warehouseLinks ProjectWarehouse[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
+}
+
+model ProjectWarehouse {
+  id          String    @id @default(cuid())
+  projectId   String
+  warehouseId String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([projectId, warehouseId])
+  @@index([warehouseId])
 }
 
 model ProjectLimit {
@@ -479,6 +511,50 @@ model ToolEvent {
   actorId   String?
   createdAt DateTime @default(now())
   tool      Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id           String                    @id @default(cuid())
+  kind         ConversationKind          @default(DM)
+  participants ConversationParticipant[]
+  messages     Message[]
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId, createdAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  text           String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  attachments    MessageAttachment[]
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageAttachment {
+  id        String   @id @default(cuid())
+  messageId String
+  fileName  String
+  mimeType  String?
+  dataUrl   String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 }
 
 model IssueRequest {

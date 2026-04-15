@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
@@ -12,7 +12,7 @@ import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/R
 
 type LoginResponse = {
   token: string;
-  user: { id: string; email: string; fullName: string; avatarUrl?: string | null; role: string; permissions: string[] };
+  user: { id: string; email: string; fullName: string; avatarUrl?: string | null; position?: string | null; role: string; permissions: string[] };
 };
 type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
 type StockMovementRow = {
@@ -36,6 +36,7 @@ type MeResponse = {
   email: string;
   fullName: string;
   avatarUrl?: string | null;
+  position?: string | null;
   role: string;
   permissions: string[];
 };
@@ -45,12 +46,15 @@ type AdminUser = {
   fullName: string;
   avatarUrl?: string | null;
   role: string;
+  position?: string | null;
   status: "ACTIVE" | "BLOCKED";
   permissions: string[];
+  customPermissions?: string[];
   warehouseScopeIds?: string[];
   projectScopeIds?: string[];
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
+type Position = { id: string; name: string };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = {
   id: string;
@@ -141,7 +145,16 @@ type PagedResponse<T> = {
   pageSize: number;
 };
 type ListPageSize = 20 | 50 | 100;
-type Project = { id: string; name: string; code?: string | null };
+type Project = { id: string; name: string; code?: string | null; warehouseIds?: string[] };
+type ChatUser = { id: string; fullName: string; avatarUrl?: string | null; role: string; position?: string | null };
+type ChatAttachment = { id: string; fileName: string; mimeType?: string | null; dataUrl: string };
+type ChatMessage = { id: string; text: string; createdAt: string; senderId: string; sender: { id: string; fullName: string }; attachments: ChatAttachment[] };
+type Conversation = {
+  id: string;
+  kind: "DM" | "FEEDBACK";
+  participants: Array<{ user: ChatUser }>;
+  messages: ChatMessage[];
+};
 type ProjectLimitSummaryItem = {
   materialId: string;
   materialName: string;
@@ -288,10 +301,19 @@ function App() {
     | "profile"
     | "team"
     | "inbox"
+    | "chat"
+    | "feedback"
+    | "reports"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [newPositionName, setNewPositionName] = useState("");
+  const [newUserPositionId, setNewUserPositionId] = useState("");
+  const [selectedPositionId, setSelectedPositionId] = useState("");
+  const [newUserPermissions, setNewUserPermissions] = useState<string[]>([]);
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRoleName, setSelectedRoleName] = useState("VIEWER");
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
@@ -498,9 +520,52 @@ function App() {
   const [inboxError, setInboxError] = useState("");
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState("");
+  const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+  const [chatConversations, setChatConversations] = useState<Conversation[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [chatAttachment, setChatAttachment] = useState<File | null>(null);
+  const [chatError, setChatError] = useState("");
+  const [feedbackMessages, setFeedbackMessages] = useState<ChatMessage[]>([]);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [reportProjectId, setReportProjectId] = useState("");
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
+  const allPermissionOptions = [
+    "dashboard.read",
+    "audit.read",
+    "materials.match",
+    "warehouses.read",
+    "warehouses.write",
+    "materials.read",
+    "materials.write",
+    "operations.read",
+    "operations.write",
+    "stocks.read",
+    "limits.read",
+    "limits.write",
+    "issues.read",
+    "issues.write",
+    "issues.approve",
+    "documents.read",
+    "documents.write",
+    "documents.upload",
+    "tools.read",
+    "tools.write",
+    "waybills.read",
+    "waybills.write",
+    "integrations.read",
+    "integrations.write",
+    "notifications.read",
+    "notifications.write",
+    "team.read",
+    "team.tasks.write",
+    "admin.users.manage"
+  ];
   const roleLabel = (role: string) =>
     ({
       ADMIN: "Системный администратор",
@@ -513,6 +578,16 @@ function App() {
       MANAGEMENT: "Руководство",
       VIEWER: "Наблюдатель"
     })[role] ?? role;
+  const togglePermission = (setter: Dispatch<SetStateAction<string[]>>, permission: string, checked: boolean) => {
+    setter((prev) => (checked ? (prev.includes(permission) ? prev : [...prev, permission]) : prev.filter((p) => p !== permission)));
+  };
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(new Error("file_read_error"));
+      reader.readAsDataURL(file);
+    });
   const statusLabel = (status: "ACTIVE" | "BLOCKED") => (status === "ACTIVE" ? "Активен" : "Заблокирован");
   const issueStatusLabel = (status: string) =>
     ({
@@ -674,6 +749,9 @@ function App() {
     integrations: "Интеграции и уведомления",
     inbox: "Центр входящих",
     team: "Команда и задачи",
+    chat: "Личные сообщения",
+    feedback: "Обратная связь",
+    reports: "PDF сводка по объекту",
     profile: "Мой профиль",
     settings: "Настройки интерфейса",
     admin: "Управление доступами",
@@ -689,6 +767,9 @@ function App() {
     limits: "Контроль",
     matching: "Контроль",
     team: "Контроль",
+    chat: "Контроль",
+    feedback: "Контроль",
+    reports: "Контроль",
     audit: "Контроль",
     catalog: "Сервис",
     tools: "Сервис",
@@ -738,6 +819,7 @@ function App() {
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
   const canReadTeam = useMemo(() => hasPermission("team.read"), [me]);
   const canWriteTeamTasks = useMemo(() => hasPermission("team.tasks.write"), [me]);
+  const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   async function loadStockMovements() {
     if (!token) {
@@ -1098,6 +1180,96 @@ function App() {
     await loadTeamData();
   }
 
+  async function loadChatUsers() {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/chat/users`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    setChatUsers((await res.json()) as ChatUser[]);
+  }
+
+  async function loadConversations() {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/chat/conversations`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const rows = (await res.json()) as Conversation[];
+    setChatConversations(rows);
+    if (rows.length && !selectedConversationId) setSelectedConversationId(rows[0].id);
+  }
+
+  async function startDmConversation(userId: string) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/chat/conversations/dm`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ userId })
+    });
+    if (!res.ok) {
+      setChatError("Не удалось создать диалог");
+      return;
+    }
+    const row = (await res.json()) as { id: string };
+    setSelectedConversationId(row.id);
+    await loadConversations();
+  }
+
+  async function loadConversationMessages(conversationId: string) {
+    if (!token || !conversationId) return;
+    const res = await fetch(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setChatMessages((await res.json()) as ChatMessage[]);
+  }
+
+  async function sendConversationMessage() {
+    if (!token || !selectedConversationId || !chatText.trim()) return;
+    const attachments = chatAttachment
+      ? [{ fileName: chatAttachment.name, mimeType: chatAttachment.type, dataUrl: await fileToDataUrl(chatAttachment) }]
+      : [];
+    const res = await fetch(`${API_URL}/api/chat/conversations/${selectedConversationId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: chatText.trim(), attachments })
+    });
+    if (!res.ok) {
+      setChatError("Не удалось отправить сообщение");
+      return;
+    }
+    setChatText("");
+    setChatAttachment(null);
+    await loadConversationMessages(selectedConversationId);
+    await loadConversations();
+  }
+
+  async function loadFeedbackMessages() {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/feedback/messages`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const payload = (await res.json()) as { items: ChatMessage[] };
+    setFeedbackMessages(payload.items);
+  }
+
+  async function sendFeedbackMessage() {
+    if (!token || !feedbackText.trim()) return;
+    const attachments = feedbackAttachment
+      ? [{ fileName: feedbackAttachment.name, mimeType: feedbackAttachment.type, dataUrl: await fileToDataUrl(feedbackAttachment) }]
+      : [];
+    const res = await fetch(`${API_URL}/api/feedback/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: feedbackText.trim(), attachments })
+    });
+    if (!res.ok) {
+      setFeedbackError("Не удалось отправить сообщение в поддержку");
+      return;
+    }
+    setFeedbackText("");
+    setFeedbackAttachment(null);
+    await loadFeedbackMessages();
+  }
+
   async function runMaterialMatch(enqueue: boolean) {
     if (!token) {
       return;
@@ -1119,6 +1291,9 @@ function App() {
         throw new Error(data.error || `HTTP ${r.status}`);
       }
       setMatchTryResult(data);
+      if (data.autoResolved) {
+        setMatchMessage("Авто-сопоставление: материал автоматически схлопнут (safe-режим).");
+      }
       if (enqueue) {
         await loadMatchQueue();
       }
@@ -1196,21 +1371,27 @@ function App() {
     if (!token || !canManageUsers) {
       return;
     }
-    const [usersRes, rolesRes] = await Promise.all([
+    const [usersRes, rolesRes, positionsRes] = await Promise.all([
       fetch(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } })
+      fetch(`${API_URL}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_URL}/api/admin/positions`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
-    if (!usersRes.ok || !rolesRes.ok) {
+    if (!usersRes.ok || !rolesRes.ok || !positionsRes.ok) {
       throw new Error("Не удалось загрузить админ-данные");
     }
     const usersData = (await usersRes.json()) as AdminUser[];
     const rolesData = (await rolesRes.json()) as AdminRole[];
+    const positionsData = (await positionsRes.json()) as Position[];
     setUsers(usersData);
     setRoles(rolesData);
+    setPositions(positionsData);
     if (usersData.length && !selectedUserId) {
       setSelectedUserId(usersData[0].id);
       setSelectedRoleName(usersData[0].role);
       setSelectedStatus(usersData[0].status);
+      setSelectedPermissions(usersData[0].customPermissions || usersData[0].permissions || []);
+      const pos = positionsData.find((p) => p.name === usersData[0].position);
+      setSelectedPositionId(pos?.id || "");
     }
   }
 
@@ -1220,7 +1401,7 @@ function App() {
     }
     const [wRes, mRes] = await Promise.all([
       fetch(`${API_URL}/api/warehouses`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/materials`, { headers: { Authorization: `Bearer ${token}` } })
+      fetch(`${API_URL}/api/materials?expandMerged=1`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
     if (!wRes.ok || !mRes.ok) {
       throw new Error("Не удалось загрузить справочники");
@@ -1256,6 +1437,9 @@ function App() {
     setProjects(data);
     if (data.length && !limitProjectId) {
       setLimitProjectId(data[0].id);
+    }
+    if (data.length && !reportProjectId) {
+      setReportProjectId(data[0].id);
     }
   }
 
@@ -1755,6 +1939,22 @@ function App() {
   }, [token, activeTab, canReadTeam]);
 
   useEffect(() => {
+    if (!token || activeTab !== "chat") return;
+    void loadChatUsers();
+    void loadConversations();
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "chat" || !selectedConversationId) return;
+    void loadConversationMessages(selectedConversationId);
+  }, [token, activeTab, selectedConversationId]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "feedback") return;
+    void loadFeedbackMessages();
+  }, [token, activeTab]);
+
+  useEffect(() => {
     if (activeTab !== "team" || !focusedTeamTaskId) return;
     const row = document.getElementById(`team-task-${focusedTeamTaskId}`);
     if (row) {
@@ -1795,6 +1995,9 @@ function App() {
     if (canReadIntegrations) visibleTabs.add("integrations");
     if (canReadIntegrations || canReadTeam) visibleTabs.add("inbox");
     if (canReadTeam) visibleTabs.add("team");
+    visibleTabs.add("chat");
+    visibleTabs.add("feedback");
+    visibleTabs.add("reports");
     if (canReadAudit) visibleTabs.add("audit");
     if (canManageUsers) visibleTabs.add("admin");
     visibleTabs.add("password");
@@ -1826,8 +2029,11 @@ function App() {
     if (u) {
       setSelectedWarehouseScopes(u.warehouseScopeIds ?? []);
       setSelectedProjectScopes(u.projectScopeIds ?? []);
+      setSelectedPermissions(u.customPermissions || u.permissions || []);
+      const pos = positions.find((p) => p.name === u.position);
+      setSelectedPositionId(pos?.id || "");
     }
-  }, [users, selectedUserId]);
+  }, [users, selectedUserId, positions]);
 
   useEffect(() => {
     if (token && (activeTab === "catalog" || activeTab === "operations")) {
@@ -2025,7 +2231,7 @@ function App() {
   }
 
   return (
-    <main className="shell uiSupreme">
+    <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
       <aside className="sidebar">
         <div className="brandWrap">
           <h2 className="brand">СкладПро</h2>
@@ -2044,6 +2250,9 @@ function App() {
         {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
+        <button className={`navBtn ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}><span className="navIcon">💬</span>Чаты</button>
+        <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
+        <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка PDF</button>
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
 
         <p className="navSectionTitle">Сервис</p>
@@ -2066,7 +2275,7 @@ function App() {
           <div className="pageTitleBlock">
             <h1>{currentTitle}</h1>
             <p className="crumbs">{currentSection} / {currentTitle}</p>
-            {me && <p className="muted">{me.fullName} ({roleLabel(me.role)})</p>}
+            {me && <p className="muted">{me.fullName} ({roleLabel(me.role)}{me.position ? ` · ${me.position}` : ""})</p>}
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
@@ -4306,6 +4515,122 @@ function App() {
         </div>
       )}
 
+      {activeTab === "chat" && (
+        <div className="card">
+          <h2>Личные сообщения</h2>
+          {chatError && <ErrorState text={chatError} />}
+          <div className="grid2">
+            <div className="card">
+              <h3>Пользователи</h3>
+              <div className="plainList">
+                {chatUsers.map((u) => (
+                  <div key={u.id} className="toolbar">
+                    <span>{u.fullName} ({roleLabel(u.role)})</span>
+                    <button type="button" onClick={() => void startDmConversation(u.id)}>Открыть чат</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="card">
+              <h3>Диалоги</h3>
+              <select value={selectedConversationId} onChange={(e) => setSelectedConversationId(e.target.value)}>
+                <option value="">Выбери диалог</option>
+                {chatConversations.map((c) => {
+                  const peer = c.participants.map((p) => p.user.fullName).join(", ");
+                  return <option key={c.id} value={c.id}>{peer}</option>;
+                })}
+              </select>
+              <div className="plainList" style={{ maxHeight: 280, overflow: "auto", marginTop: 10 }}>
+                {chatMessages.map((m) => (
+                  <div key={m.id} className="card" style={{ marginBottom: 8 }}>
+                    <p><strong>{m.sender.fullName}</strong> · {new Date(m.createdAt).toLocaleString()}</p>
+                    <p>{m.text}</p>
+                    {m.attachments?.map((a) => (
+                      <p key={a.id}><a href={a.dataUrl} target="_blank" rel="noreferrer">{a.fileName}</a></p>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div className="form">
+                <label>
+                  Сообщение
+                  <textarea value={chatText} onChange={(e) => setChatText(e.target.value)} />
+                </label>
+                <label>
+                  Скриншот (опционально)
+                  <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
+                </label>
+              </div>
+              <div className="toolbar">
+                <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
+                  Отправить
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "feedback" && (
+        <div className="card">
+          <h2>Обратная связь</h2>
+          <p className="muted">Чат напрямую с администратором. Можно приложить скриншот ошибки.</p>
+          {feedbackError && <ErrorState text={feedbackError} />}
+          <div className="plainList" style={{ maxHeight: 300, overflow: "auto", marginBottom: 10 }}>
+            {feedbackMessages.map((m) => (
+              <div key={m.id} className="card" style={{ marginBottom: 8 }}>
+                <p><strong>{m.sender.fullName}</strong> · {new Date(m.createdAt).toLocaleString()}</p>
+                <p>{m.text}</p>
+                {m.attachments?.map((a) => (
+                  <p key={a.id}><a href={a.dataUrl} target="_blank" rel="noreferrer">{a.fileName}</a></p>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="form">
+            <label>
+              Описание проблемы
+              <textarea value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} />
+            </label>
+            <label>
+              Скриншот
+              <input type="file" accept="image/*" onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)} />
+            </label>
+          </div>
+          <div className="toolbar">
+            <button type="button" onClick={() => void sendFeedbackMessage()}>Отправить в поддержку</button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "reports" && (
+        <div className="card">
+          <h2>Сводка по объекту в PDF</h2>
+          <div className="form">
+            <label>
+              Объект (проект)
+              <select value={reportProjectId} onChange={(e) => setReportProjectId(e.target.value)}>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{safeName(p.name)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={() => {
+                if (!token || !reportProjectId) return;
+                const url = `${API_URL}/api/reports/object/${encodeURIComponent(reportProjectId)}/summary.pdf?access_token=${encodeURIComponent(token)}`;
+                window.open(url, "_blank", "noopener,noreferrer");
+              }}
+            >
+              Скачать PDF сводку
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeTab === "admin" && canManageUsers && (
         <div className="card">
           <h2>Управление доступами</h2>
@@ -4332,6 +4657,19 @@ function App() {
             <label>
               Пароль
               <input value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} />
+            </label>
+            <label>
+              Должность
+              <select value={newUserPositionId} onChange={(e) => setNewUserPositionId(e.target.value)}>
+                <option value="">Не выбрана</option>
+                {positions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Новая должность (создать)
+              <input value={newPositionName} onChange={(e) => setNewPositionName(e.target.value)} />
             </label>
           </div>
           <div className="grid2" style={{ marginTop: 16 }}>
@@ -4366,12 +4704,31 @@ function App() {
                         setNewUserProjectScopes((prev) =>
                           e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
                         );
+                        const linked = p.warehouseIds || [];
+                        if (e.target.checked) {
+                          setNewUserWarehouseScopes((prev) => Array.from(new Set([...prev, ...linked])));
+                        }
                       }}
                     />{" "}
                     {safeName(p.name)}
                   </label>
                 ))}
               </div>
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3>Доступ к вкладкам и модулям (индивидуально)</h3>
+            <div className="plainList">
+              {allPermissionOptions.map((perm) => (
+                <label key={`new-perm-${perm}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={newUserPermissions.includes(perm)}
+                    onChange={(e) => togglePermission(setNewUserPermissions, perm, e.target.checked)}
+                  />{" "}
+                  {perm}
+                </label>
+              ))}
             </div>
           </div>
           <div className="toolbar">
@@ -4392,7 +4749,10 @@ function App() {
                     roleName: newUserRoleName,
                     password: newUserPassword,
                     warehouseIds: newUserWarehouseScopes,
-                    projectIds: newUserProjectScopes
+                    projectIds: newUserProjectScopes,
+                    permissions: newUserPermissions,
+                    positionId: newUserPositionId || undefined,
+                    positionName: newPositionName.trim() || undefined
                   })
                 });
                 if (!res.ok) {
@@ -4404,6 +4764,9 @@ function App() {
                 setNewUserFullName("");
                 setNewUserWarehouseScopes([]);
                 setNewUserProjectScopes([]);
+                setNewUserPermissions([]);
+                setNewPositionName("");
+                setNewUserPositionId("");
                 await loadAdminData();
               }}
             >
@@ -4424,6 +4787,9 @@ function App() {
                   if (user) {
                     setSelectedRoleName(user.role);
                     setSelectedStatus(user.status);
+                    setSelectedPermissions(user.customPermissions || user.permissions || []);
+                    const pos = positions.find((p) => p.name === user.position);
+                    setSelectedPositionId(pos?.id || "");
                   }
                 }}
               >
@@ -4457,6 +4823,15 @@ function App() {
             <label>
               Новый пароль (сброс)
               <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </label>
+            <label>
+              Должность
+              <select value={selectedPositionId} onChange={(e) => setSelectedPositionId(e.target.value)}>
+                <option value="">Не выбрана</option>
+                {positions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="grid2" style={{ marginTop: 16 }}>
@@ -4529,6 +4904,21 @@ function App() {
               Сохранить склады/проекты (scope)
             </button>
           </div>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3>Индивидуальные доступы (override)</h3>
+            <div className="plainList">
+              {allPermissionOptions.map((perm) => (
+                <label key={`selected-perm-${perm}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPermissions.includes(perm)}
+                    onChange={(e) => togglePermission(setSelectedPermissions, perm, e.target.checked)}
+                  />{" "}
+                  {perm}
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="toolbar">
             <button
               onClick={async () => {
@@ -4540,7 +4930,12 @@ function App() {
                     Authorization: `Bearer ${token}`,
                     "Content-Type": "application/json"
                   },
-                  body: JSON.stringify({ roleName: selectedRoleName, status: selectedStatus })
+                  body: JSON.stringify({
+                    roleName: selectedRoleName,
+                    status: selectedStatus,
+                    permissions: selectedPermissions,
+                    positionId: selectedPositionId || null
+                  })
                 });
                 if (!res.ok) {
                   setAdminMessage("Ошибка сохранения доступа");

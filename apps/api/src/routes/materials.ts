@@ -39,6 +39,7 @@ materialsRouter.get("/", async (req, res) => {
   const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
   const unit = typeof req.query.unit === "string" ? req.query.unit.trim() : "";
   const includeMerged = req.query.includeMerged === "1";
+  const expandMerged = req.query.expandMerged === "1";
 
   const rows = await prisma.material.findMany({
     where: {
@@ -55,7 +56,17 @@ materialsRouter.get("/", async (req, res) => {
       ...(category ? { category: { equals: category, mode: "insensitive" } } : {}),
       ...(unit ? { unit: { equals: unit, mode: "insensitive" } } : {})
     },
-    include: { synonyms: true },
+    include: {
+      synonyms: true,
+      ...(expandMerged
+        ? {
+            mergedFrom: {
+              where: includeMerged ? {} : { mergedIntoId: { not: null } },
+              include: { synonyms: true }
+            }
+          }
+        : {})
+    },
     orderBy: { createdAt: "desc" },
     take: 200
   });
