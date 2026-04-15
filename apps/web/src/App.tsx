@@ -327,6 +327,7 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
     | "stocks"
+    | "warehouse"
     | "admin"
     | "password"
     | "catalog"
@@ -601,7 +602,8 @@ function App() {
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
   const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
-    { id: "stocks", label: "Склад", permissions: ["dashboard.read", "stocks.read"] },
+    { id: "stocks", label: "Главная", permissions: ["dashboard.read"] },
+    { id: "warehouse", label: "Склад", permissions: ["stocks.read"] },
     { id: "operations", label: "Приходы", permissions: ["operations.read", "operations.write"] },
     { id: "issues", label: "Выдачи", permissions: ["issues.read", "issues.write"] },
     { id: "approvals", label: "Согласования", permissions: ["issues.approve"] },
@@ -895,7 +897,8 @@ function App() {
     return date.toLocaleDateString();
   };
   const tabTitleMap: Record<string, string> = {
-    stocks: "Склад",
+    stocks: "Главная",
+    warehouse: "Склад",
     catalog: "Справочники",
     matching: "Сопоставление номенклатуры",
     audit: "Аудит действий",
@@ -920,6 +923,7 @@ function App() {
   };
   const tabSectionMap: Record<string, string> = {
     stocks: "Операции",
+    warehouse: "Операции",
     operations: "Операции",
     issues: "Операции",
     approvals: "Операции",
@@ -2342,7 +2346,8 @@ function App() {
 
   useEffect(() => {
     const visibleTabs = new Set<string>();
-    if (canReadStocks || canDashboard) visibleTabs.add("stocks");
+    if (canDashboard) visibleTabs.add("stocks");
+    if (canReadStocks) visibleTabs.add("warehouse");
     if (canReadIssues) {
       visibleTabs.add("issues");
       visibleTabs.add("approvals");
@@ -2602,7 +2607,8 @@ function App() {
           <p className="brandSub">Warehouse ERP</p>
         </div>
         <p className="navSectionTitle">Операции</p>
-        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Склад</button>}
+        {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
+        {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
         {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Согласования</button>}
@@ -2642,7 +2648,7 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("stocks"); }}>Найти</button>
+            <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
             {(canReadIntegrations || canReadTeam) && <button className="topIconBtn" onClick={() => setActiveTab("inbox")}>Входящие</button>}
             <button className="topIconBtn" onClick={() => setActiveTab("profile")}>Профиль</button>
@@ -2714,13 +2720,17 @@ function App() {
             <section className="dashboardMain">
               <div className="kpiRow">
                 <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Поступления</span><strong>{dashboard?.warehouse.receiptsToday ?? stocks.length}</strong></button>
-                <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("stocks"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
+                <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("warehouse"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Перемещения</span><strong>{dashboard?.warehouse.transfersToday ?? waybills.length}</strong></button>
                 <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
                 <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
               </div>
               <div className="card">
+                <h3>Обзор по объекту</h3>
+                <p className="muted">
+                  Детальный список материалов и все остатки перенесены в отдельную вкладку `Склад`.
+                </p>
                 <div className="toolbar">
                   <label>
                     Объект
@@ -2730,132 +2740,8 @@ function App() {
                       ))}
                     </select>
                   </label>
-                  <input
-                    placeholder="Поиск по материалу, sku, синониму"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                  />
-                  <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
-                  <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
-                  <button onClick={() => void loadStocks(q)}>Найти</button>
-                  <button type="button" onClick={() => void loadStockMovements()}>
-                    Журнал движений
-                  </button>
+                  <button type="button" onClick={() => setActiveTab("warehouse")}>Открыть склад</button>
                 </div>
-
-                {loadingStocks && <p>Загрузка остатков...</p>}
-                {stocksError && <p className="error">{stocksError}</p>}
-                {!loadingStocks && !stocksError && (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Склад</th>
-                        <th>Материал</th>
-                        {showStockSku && <th>SKU</th>}
-                        <th>Ед.</th>
-                        <th>Помещение</th>
-                        <th>Ячейка</th>
-                        <th>Остаток</th>
-                        {showStockReserve && <th>Резерв</th>}
-                        <th>Доступно</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stocks.map((row) => (
-                        <Fragment key={row.id}>
-                        <tr className={row.isLow ? "low" : ""}>
-                          <td>{safeName(row.warehouseName)}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              onClick={() => {
-                                void loadStockMovements();
-                                setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
-                              }}
-                            >
-                              {expandedStockRowId === row.id ? "−" : "+"}
-                            </button>{" "}
-                            {safeName(row.materialName)}
-                          </td>
-                          {showStockSku && <td>{row.materialSku || "-"}</td>}
-                          <td>{row.materialUnit}</td>
-                          <td>{row.storageRoom || "—"}</td>
-                          <td>{row.storageCell || "—"}</td>
-                          <td>{row.quantity}</td>
-                          {showStockReserve && <td>{row.reserved}</td>}
-                          <td>{row.available}</td>
-                        </tr>
-                        {expandedStockRowId === row.id && (
-                          <tr>
-                            <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
-                              <div className="card">
-                                <h4>Движения по позиции (куски, возвраты, приходы)</h4>
-                                <table>
-                                  <thead>
-                                    <tr>
-                                      <th>Время</th>
-                                      <th>Тип</th>
-                                      <th>Кол-во</th>
-                                      <th>Источник</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
-                                      <tr key={`slice-${m.id}`}>
-                                        <td>{new Date(m.createdAt).toLocaleString()}</td>
-                                        <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
-                                        <td>{m.quantity}</td>
-                                        <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                        </Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-                {stockMovementsLoading && <p>Загрузка движений...</p>}
-                {stockMovementsError && <p className="error">{stockMovementsError}</p>}
-                {!stockMovementsLoading && stockMovements.length > 0 && (
-                  <>
-                    <h3 style={{ marginTop: 16 }}>Журнал движений (последние записи)</h3>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Время</th>
-                          <th>Склад</th>
-                          <th>Материал</th>
-                          <th>Напр.</th>
-                          <th>Кол-во</th>
-                          <th>Источник</th>
-                          <th>Операция / заявка</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stockMovements.map((m) => (
-                          <tr key={m.id}>
-                            <td>{new Date(m.createdAt).toLocaleString()}</td>
-                            <td>{m.warehouse?.name ?? m.warehouseId}</td>
-                            <td>{m.material?.name ?? m.materialId}</td>
-                            <td>{m.direction}</td>
-                            <td>{m.quantity}</td>
-                            <td>{m.sourceDocumentType}</td>
-                            <td>
-                              {m.operation?.documentNumber || m.operation?.id || "—"}
-                              {m.issueRequest?.number ? ` · заявка ${m.issueRequest.number}` : ""}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </>
-                )}
               </div>
               <div className="grid2">
                 <div className="card">
@@ -3096,6 +2982,102 @@ function App() {
             </tbody>
           </table>
           {!materialMergeHistory.length && <p className="muted">Объединений пока нет.</p>}
+        </div>
+      )}
+
+      {activeTab === "warehouse" && (
+        <div className="card">
+          <h2>Склад: материалы и остатки</h2>
+          <div className="toolbar">
+            <input
+              placeholder="Поиск по материалу, sku, синониму"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
+            <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
+            <button onClick={() => void loadStocks(q)}>Найти</button>
+            <button type="button" onClick={() => void loadStockMovements()}>Журнал движений</button>
+          </div>
+          {loadingStocks && <p>Загрузка остатков...</p>}
+          {stocksError && <p className="error">{stocksError}</p>}
+          {!loadingStocks && !stocksError && (
+            <table>
+              <thead>
+                <tr>
+                  <th>Склад</th>
+                  <th>Материал</th>
+                  {showStockSku && <th>SKU</th>}
+                  <th>Ед.</th>
+                  <th>Помещение</th>
+                  <th>Ячейка</th>
+                  <th>Остаток</th>
+                  {showStockReserve && <th>Резерв</th>}
+                  <th>Доступно</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stocks.map((row) => (
+                  <Fragment key={row.id}>
+                    <tr className={row.isLow ? "low" : ""}>
+                      <td>{safeName(row.warehouseName)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          onClick={() => {
+                            void loadStockMovements();
+                            setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
+                          }}
+                        >
+                          {expandedStockRowId === row.id ? "−" : "+"}
+                        </button>{" "}
+                        {safeName(row.materialName)}
+                      </td>
+                      {showStockSku && <td>{row.materialSku || "-"}</td>}
+                      <td>{row.materialUnit}</td>
+                      <td>{row.storageRoom || "—"}</td>
+                      <td>{row.storageCell || "—"}</td>
+                      <td>{row.quantity}</td>
+                      {showStockReserve && <td>{row.reserved}</td>}
+                      <td>{row.available}</td>
+                    </tr>
+                    {expandedStockRowId === row.id && (
+                      <tr>
+                        <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
+                          <div className="card">
+                            <h4>Движения по позиции (куски, возвраты, приходы)</h4>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Время</th>
+                                  <th>Тип</th>
+                                  <th>Кол-во</th>
+                                  <th>Источник</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
+                                  <tr key={`slice-${m.id}`}>
+                                    <td>{new Date(m.createdAt).toLocaleString()}</td>
+                                    <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
+                                    <td>{m.quantity}</td>
+                                    <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {stockMovementsLoading && <p>Загрузка движений...</p>}
+          {stockMovementsError && <p className="error">{stockMovementsError}</p>}
         </div>
       )}
 
@@ -5835,7 +5817,8 @@ function App() {
             <label>
               <span>Вид стартового раздела</span>
               <select value={activeTab} onChange={(e) => setActiveTab(e.target.value as typeof activeTab)}>
-                <option value="stocks">Главная и остатки</option>
+                <option value="stocks">Главная</option>
+                {canReadStocks && <option value="warehouse">Склад</option>}
                 {canReadIssues && <option value="issues">Быстрая выдача</option>}
                 {canReadTools && <option value="tools">Инструменты</option>}
                 {canReadIntegrations && <option value="integrations">Интеграции</option>}
