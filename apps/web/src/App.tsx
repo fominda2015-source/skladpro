@@ -3945,7 +3945,7 @@ function App() {
                     <tr key={i.id}>
                       <td>{i.number}</td>
                       <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                      <td>{i.responsibleName || (i.note || "").split("|")[0]?.replace("Ответственный:", "").trim() || "—"}</td>
+                      <td>{i.responsibleName || "—"}</td>
                       <td>{new Date(i.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}

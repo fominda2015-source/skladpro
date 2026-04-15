@@ -188,6 +188,8 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
 
 const updateDraftIssueSchema = z.object({
   note: z.string().optional().nullable(),
+  responsibleName: z.string().max(160).optional().nullable(),
+  flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
   basisType: z.nativeEnum(IssueBasisType).optional(),
   basisRef: z.string().max(500).optional().nullable()
 });
@@ -213,6 +215,8 @@ issueRequestsRouter.patch(
       where: { id },
       data: {
         ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+        ...(parsed.data.responsibleName !== undefined ? { responsibleName: parsed.data.responsibleName } : {}),
+        ...(parsed.data.flowType !== undefined ? { flowType: parsed.data.flowType } : {}),
         ...(parsed.data.basisType !== undefined ? { basisType: parsed.data.basisType } : {}),
         ...(parsed.data.basisRef !== undefined ? { basisRef: parsed.data.basisRef } : {})
       }
