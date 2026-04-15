@@ -491,6 +491,13 @@ function App() {
       MARK_DISPUTED: "Спор",
       WRITE_OFF: "Списание"
     })[action] ?? action;
+  const basisTypeLabel = (basisType: string) =>
+    ({
+      PROJECT_WORK: "Работы по проекту",
+      INTERNAL_NEED: "Внутренняя потребность",
+      EMERGENCY: "Аварийная потребность",
+      OTHER: "Другое"
+    })[basisType] ?? basisType;
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -2516,21 +2523,21 @@ function App() {
             <select value={issueStatusFilter} onChange={(e) => setIssueStatusFilter((e.target.value || "") as "" | IssueStatus)}>
               <option value="">Все статусы заявок</option>
               <option value="DRAFT">{issueStatusLabel("DRAFT")}</option>
-              <option value="ON_APPROVAL">ON_APPROVAL</option>
-              <option value="APPROVED">APPROVED</option>
-              <option value="REJECTED">REJECTED</option>
+              <option value="ON_APPROVAL">{issueStatusLabel("ON_APPROVAL")}</option>
+              <option value="APPROVED">{issueStatusLabel("APPROVED")}</option>
+              <option value="REJECTED">{issueStatusLabel("REJECTED")}</option>
               <option value="ISSUED">{issueStatusLabel("ISSUED")}</option>
-              <option value="CANCELLED">CANCELLED</option>
+              <option value="CANCELLED">{issueStatusLabel("CANCELLED")}</option>
             </select>
             <select
               value={issueBasisFilter}
               onChange={(e) => setIssueBasisFilter((e.target.value || "") as "" | IssueBasisType)}
             >
               <option value="">Все типы основания</option>
-              <option value="PROJECT_WORK">PROJECT_WORK</option>
-              <option value="INTERNAL_NEED">INTERNAL_NEED</option>
-              <option value="EMERGENCY">EMERGENCY</option>
-              <option value="OTHER">OTHER</option>
+              <option value="PROJECT_WORK">{basisTypeLabel("PROJECT_WORK")}</option>
+              <option value="INTERNAL_NEED">{basisTypeLabel("INTERNAL_NEED")}</option>
+              <option value="EMERGENCY">{basisTypeLabel("EMERGENCY")}</option>
+              <option value="OTHER">{basisTypeLabel("OTHER")}</option>
             </select>
             <button onClick={() => void loadIssues()}>Обновить список</button>
             <button
@@ -2599,7 +2606,7 @@ function App() {
                   </td>
                   <td>{i.project?.name || "—"}</td>
                   <td className="muted">
-                    {i.basisType || "OTHER"}
+                    {basisTypeLabel(i.basisType || "OTHER")}
                     {i.basisRef ? ` · ${i.basisRef}` : ""}
                   </td>
                   <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
@@ -2631,7 +2638,7 @@ function App() {
           <div className="actionBar">
             <button onClick={() => setActiveTab("approvals")}>Открыть согласования</button>
             <button onClick={() => setIssueStatusFilter("DRAFT")}>Показать черновики</button>
-            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать ON_APPROVAL</button>
+            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать на согласовании</button>
             <button onClick={() => setIssueStatusFilter("")}>Сбросить фильтр</button>
           </div>
         </div>
@@ -3190,7 +3197,7 @@ function App() {
           <p><strong>Статус:</strong> <span className={`badge ${statusClass(selectedIssue.status)}`}>{issueStatusLabel(selectedIssue.status)}</span></p>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
           <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
-          <p><strong>Основание:</strong> {selectedIssue.basisType || "OTHER"}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
+          <p><strong>Основание:</strong> {basisTypeLabel(selectedIssue.basisType || "OTHER")}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
           {selectedIssue.note ? <p><strong>Примечание:</strong> {selectedIssue.note}</p> : null}
           <p><strong>Инициатор:</strong> {selectedIssue.requestedBy?.fullName || selectedIssue.requestedById}</p>
           {selectedIssue.approvedBy ? (

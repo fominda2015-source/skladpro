@@ -21,7 +21,7 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessResponse }) 
         {Object.entries(readiness.checks).map(([key, passed]) => (
           <tr key={key}>
             <td>{key}</td>
-            <td>{passed ? "OK" : "MISSING"}</td>
+            <td>{passed ? "OK" : "Нет данных"}</td>
             <td>{readiness.countsByCheck?.[key] ?? "—"}</td>
           </tr>
         ))}
