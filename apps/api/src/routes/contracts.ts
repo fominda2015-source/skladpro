@@ -6,7 +6,7 @@ export const contractsRouter = Router();
 contractsRouter.get("/meta", (_req, res) => {
   res.json({
     name: "SkladPro API contract",
-    version: "2026-04-15.3",
+    version: "2026-04-15.4",
     format: "openapi-3.1",
     endpoints: {
       health: "/api/health",
@@ -15,6 +15,8 @@ contractsRouter.get("/meta", (_req, res) => {
       stocks: "/api/stocks",
       dashboard: "/api/dashboard/summary",
       issues: "/api/issues",
+      waybills: "/api/waybills",
+      tools: "/api/tools",
       operations: "/api/operations",
       documents: "/api/documents",
       materialMatch: "/api/material-match/queue",
@@ -30,9 +32,9 @@ contractsRouter.get("/openapi.json", (_req, res) => {
     openapi: "3.1.0",
     info: {
       title: "SkladPro API",
-      version: "2026-04-15.3",
+      version: "2026-04-15.4",
       description:
-        "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, documents, integrations and notifications."
+        "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, waybills, tools, documents, integrations and notifications."
     },
     servers: [{ url: "/", description: "Same-origin API server" }],
     tags: [
@@ -41,6 +43,8 @@ contractsRouter.get("/openapi.json", (_req, res) => {
       { name: "materials" },
       { name: "stocks" },
       { name: "issues" },
+      { name: "waybills" },
+      { name: "tools" },
       { name: "documents" },
       { name: "integrations" },
       { name: "notifications" },
@@ -147,6 +151,69 @@ contractsRouter.get("/openapi.json", (_req, res) => {
             items: {
               type: "array",
               items: { $ref: "#/components/schemas/IssueRequest" }
+            },
+            total: { type: "integer" },
+            page: { type: "integer" },
+            pageSize: { type: "integer" }
+          },
+          required: ["items", "total", "page", "pageSize"]
+        },
+        Waybill: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            number: { type: "string" },
+            status: { type: "string", enum: ["DRAFT", "FORMED", "SHIPPED", "RECEIVED", "CLOSED"] },
+            fromWarehouseId: { type: ["string", "null"] },
+            toLocation: { type: "string" },
+            sender: { type: ["string", "null"] },
+            recipient: { type: ["string", "null"] },
+            vehicle: { type: ["string", "null"] },
+            driverName: { type: ["string", "null"] },
+            route: { type: ["string", "null"] },
+            createdAt: { type: "string", format: "date-time" }
+          },
+          required: ["id", "number", "status", "toLocation", "createdAt"]
+        },
+        PagedWaybillResponse: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Waybill" }
+            },
+            total: { type: "integer" },
+            page: { type: "integer" },
+            pageSize: { type: "integer" }
+          },
+          required: ["items", "total", "page", "pageSize"]
+        },
+        Tool: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            inventoryNumber: { type: "string" },
+            serialNumber: { type: ["string", "null"] },
+            qrCode: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["IN_STOCK", "ISSUED", "IN_REPAIR", "DAMAGED", "LOST", "WRITTEN_OFF", "DISPUTED"]
+            },
+            warehouseId: { type: ["string", "null"] },
+            projectId: { type: ["string", "null"] },
+            responsible: { type: ["string", "null"] },
+            note: { type: ["string", "null"] },
+            createdAt: { type: "string", format: "date-time" }
+          },
+          required: ["id", "name", "inventoryNumber", "qrCode", "status", "createdAt"]
+        },
+        PagedToolResponse: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Tool" }
             },
             total: { type: "integer" },
             page: { type: "integer" },
@@ -419,6 +486,69 @@ contractsRouter.get("/openapi.json", (_req, res) => {
               description: "Issue request created",
               content: {
                 "application/json": { schema: { $ref: "#/components/schemas/IssueRequest" } }
+              }
+            }
+          }
+        }
+      },
+      "/api/waybills": {
+        get: {
+          tags: ["waybills"],
+          summary: "List transport waybills",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "status",
+              in: "query",
+              schema: { type: "string", enum: ["DRAFT", "FORMED", "SHIPPED", "RECEIVED", "CLOSED"] }
+            },
+            {
+              name: "sort",
+              in: "query",
+              schema: { type: "string", enum: ["created_desc", "status", "number"] }
+            },
+            { name: "page", in: "query", schema: { type: "integer", minimum: 1 } },
+            { name: "pageSize", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } }
+          ],
+          responses: {
+            "200": {
+              description: "Paged waybills",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PagedWaybillResponse" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/api/tools": {
+        get: {
+          tags: ["tools"],
+          summary: "List tools",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: "q", in: "query", schema: { type: "string" } },
+            {
+              name: "status",
+              in: "query",
+              schema: { type: "string", enum: ["IN_STOCK", "ISSUED", "IN_REPAIR", "DAMAGED", "LOST", "WRITTEN_OFF", "DISPUTED"] }
+            },
+            {
+              name: "sort",
+              in: "query",
+              schema: { type: "string", enum: ["created_desc", "inventory", "status"] }
+            },
+            { name: "page", in: "query", schema: { type: "integer", minimum: 1 } },
+            { name: "pageSize", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } }
+          ],
+          responses: {
+            "200": {
+              description: "Paged tools",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PagedToolResponse" }
+                }
               }
             }
           }
