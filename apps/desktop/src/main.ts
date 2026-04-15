@@ -1,10 +1,13 @@
 import { app, BrowserWindow, dialog } from "electron";
 import log from "electron-log";
 import { autoUpdater } from "electron-updater";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 const WEB_URL = process.env.SKLADPRO_WEB_URL || "http://localhost:5173";
 
 function createWindow() {
+  const bundledWebIndex = path.resolve(app.getAppPath(), "web-dist/index.html");
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -16,6 +19,11 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+
+  if (existsSync(bundledWebIndex)) {
+    void win.loadFile(bundledWebIndex);
+    return;
+  }
 
   void win.loadURL(WEB_URL);
 }

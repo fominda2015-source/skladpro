@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
-    "electron": "^38.7.0",
+    "electron": "38.7.0",
     "electron-builder": "^26.0.12",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
@@ -27,7 +27,14 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*"
+      "dist/**/*",
+      {
+        "from": "../web/dist",
+        "to": "web-dist",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
       "target": "nsis"
