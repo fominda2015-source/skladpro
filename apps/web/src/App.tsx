@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
+import { API_URL, ISSUE_FILTER_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
+import { EmptyState, ErrorState, LoadingState } from "./shared/ui/StateViews";
+import {
+  IntegrationJobsTable,
+  type IntegrationJobRow
+} from "./widgets/integrations/IntegrationJobsTable";
+import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
+import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 type LoginResponse = { token: string; user: { id: string; email: string; fullName: string; role: string; permissions: string[] } };
 type StockRow = { id: string; warehouseName: string; materialName: string; materialSku: string | null; materialUnit: string; quantity: number; reserved: number; available: number; isLow: boolean; updatedAt: string };
@@ -206,39 +214,6 @@ type AuditLogRow = {
   createdAt: string;
   user?: { email: string; fullName: string };
 };
-type IntegrationJobRow = {
-  id: string;
-  kind: string;
-  status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
-  payload?: Record<string, unknown> | null;
-  result?: Record<string, unknown> | null;
-  error?: string | null;
-  createdAt: string;
-  startedAt?: string | null;
-  finishedAt?: string | null;
-};
-type NotificationRow = {
-  id: string;
-  title: string;
-  message: string;
-  level: "INFO" | "WARNING" | "ERROR";
-  isRead: boolean;
-  createdAt: string;
-  entityType?: string | null;
-  entityId?: string | null;
-};
-type ReadinessResponse = {
-  ok: boolean;
-  checks: Record<string, boolean>;
-  counts?: Record<string, number>;
-  countsByCheck?: Record<string, number>;
-};
-
-const API_URL = import.meta.env.VITE_API_URL || "http://194.156.117.250";
-const TOKEN_KEY = "skladpro_token";
-const STOCK_VIEW_KEY = "skladpro_stock_view";
-const ISSUE_FILTER_KEY = "skladpro_issue_filter";
-
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
   const [password, setPassword] = useState("1111");
@@ -1779,63 +1754,23 @@ function App() {
             <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
             <button type="button" onClick={() => void loadReadiness()}>Readiness-check</button>
           </div>
-          {integrationMessage && <p className="muted">{integrationMessage}</p>}
-          {readiness && (
-            <div className="card">
-              <h3>Готовность перед полным тест-прогоном</h3>
-              <p className="muted">
-                Статус:{" "}
-                <strong className={readiness.ok ? "ok" : "bad"}>
-                  {readiness.ok ? "ГОТОВО" : "НЕ ПОЛНОСТЬЮ ГОТОВО"}
-                </strong>
-              </p>
-              <table>
-                <thead>
-                  <tr><th>Проверка</th><th>Результат</th><th>Количество</th></tr>
-                </thead>
-                <tbody>
-                  {Object.entries(readiness.checks).map(([key, passed]) => (
-                    <tr key={key}>
-                      <td>{key}</td>
-                      <td>{passed ? "OK" : "MISSING"}</td>
-                      <td>{readiness.countsByCheck?.[key] ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {integrationMessage && <ErrorState text={integrationMessage} />}
+          {readiness ? (
+            <ReadinessPanel readiness={readiness} />
+          ) : (
+            <LoadingState text="Readiness еще не загружен." />
           )}
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Тип</th>
-                <th>Статус</th>
-                <th>Ошибка</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {integrationJobs.map((job) => (
-                <tr key={job.id}>
-                  <td>{new Date(job.createdAt).toLocaleString()}</td>
-                  <td>{job.kind}</td>
-                  <td><span className={`badge ${statusClass(job.status)}`}>{job.status}</span></td>
-                  <td>{job.error || "—"}</td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => void runIntegrationJob(job.id)}
-                      disabled={job.status === "RUNNING"}
-                    >
-                      Запустить
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!integrationJobs.length && <p className="muted">Задач пока нет.</p>}
+          {integrationJobs.length ? (
+            <IntegrationJobsTable
+              jobs={integrationJobs}
+              statusClass={statusClass}
+              onRun={(id) => {
+                void runIntegrationJob(id);
+              }}
+            />
+          ) : (
+            <EmptyState title="Задач пока нет." hint="Создай первую integration job и запусти ее." />
+          )}
 
           <h3 style={{ marginTop: 16 }}>Уведомления</h3>
           <div className="toolbar">
@@ -1847,29 +1782,11 @@ function App() {
               Отметить все как прочитанные
             </button>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Время</th>
-                <th>Уровень</th>
-                <th>Тема</th>
-                <th>Сообщение</th>
-                <th>Статус</th>
-              </tr>
-            </thead>
-            <tbody>
-              {notifications.map((n) => (
-                <tr key={n.id}>
-                  <td>{new Date(n.createdAt).toLocaleString()}</td>
-                  <td>{n.level}</td>
-                  <td>{n.title}</td>
-                  <td>{n.message}</td>
-                  <td>{n.isRead ? "Прочитано" : "Новое"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!notifications.length && <p className="muted">Уведомлений пока нет.</p>}
+          {notifications.length ? (
+            <NotificationsTable notifications={notifications} />
+          ) : (
+            <EmptyState title="Уведомлений пока нет." />
+          )}
         </div>
       )}
 
