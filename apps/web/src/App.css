@@ -153,6 +153,12 @@
   letter-spacing: -0.02em;
 }
 
+.crumbs {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  color: #7a859c;
+}
+
 .form {
   display: grid;
   gap: 12px;

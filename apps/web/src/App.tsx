@@ -502,6 +502,48 @@ function App() {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
   };
+  const tabTitleMap: Record<string, string> = {
+    stocks: "Главная и остатки",
+    catalog: "Справочники",
+    matching: "Сопоставление номенклатуры",
+    audit: "Аудит действий",
+    operations: "Приходы и расходы",
+    issues: "Заявки на выдачу",
+    limits: "Лимиты проекта",
+    approvals: "Очередь согласований",
+    documents: "Документы",
+    waybills: "Транспортные накладные",
+    qr: "QR-сканирование",
+    tools: "Инструменты",
+    integrations: "Интеграции и уведомления",
+    team: "Команда и задачи",
+    profile: "Мой профиль",
+    settings: "Настройки интерфейса",
+    admin: "Управление доступами",
+    password: "Смена пароля"
+  };
+  const tabSectionMap: Record<string, string> = {
+    stocks: "Операции",
+    operations: "Операции",
+    issues: "Операции",
+    approvals: "Операции",
+    waybills: "Операции",
+    documents: "Контроль",
+    limits: "Контроль",
+    matching: "Контроль",
+    team: "Контроль",
+    audit: "Контроль",
+    catalog: "Сервис",
+    tools: "Сервис",
+    qr: "Сервис",
+    integrations: "Сервис",
+    admin: "Администрирование",
+    profile: "Аккаунт",
+    settings: "Аккаунт",
+    password: "Аккаунт"
+  };
+  const currentTitle = tabTitleMap[activeTab] ?? "СкладПро";
+  const currentSection = tabSectionMap[activeTab] ?? "Раздел";
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
@@ -1583,23 +1625,27 @@ function App() {
           <h2 className="brand">СкладПро</h2>
           <p className="brandSub">Warehouse ERP</p>
         </div>
-        <p className="navSectionTitle">Склад</p>
-        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная и остатки</button>}
-        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы/расходы</button>}
-        {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Быстрая выдача</button>}
+        <p className="navSectionTitle">Операции</p>
+        {(canReadStocks || canDashboard) && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
+        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы и расходы</button>}
+        {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Согласования</button>}
         {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
-        {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
 
-        <p className="navSectionTitle">Справочники и сервис</p>
+        <p className="navSectionTitle">Контроль</p>
+        {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
+        {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+        {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
+        {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
+        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
+
+        <p className="navSectionTitle">Сервис</p>
         {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
         {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
         {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
-        {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
-        {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
         {canReadIntegrations && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>}
-        {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Сотрудники и задачи</button>}
-        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
+
+        <p className="navSectionTitle">Администрирование</p>
         {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
 
         <p className="navSectionTitle">Аккаунт</p>
@@ -1611,43 +1657,8 @@ function App() {
       <section className="canvas">
         <header className="pageHeader">
           <div className="pageTitleBlock">
-            <h1>
-              {activeTab === "stocks"
-                ? "Остатки"
-                : activeTab === "catalog"
-                  ? "Справочники"
-                  : activeTab === "matching"
-                    ? "Сопоставление номенклатуры"
-                    : activeTab === "audit"
-                      ? "Аудит действий"
-                      : activeTab === "operations"
-                        ? "Операции прихода/расхода"
-                        : activeTab === "issues"
-                          ? "Заявки на выдачу"
-                          : activeTab === "limits"
-                            ? "Лимиты проекта"
-                            : activeTab === "approvals"
-                              ? "Очередь согласований"
-                              : activeTab === "documents"
-                                ? "Документы"
-                                : activeTab === "waybills"
-                                  ? "Транспортные накладные"
-                                  : activeTab === "qr"
-                                    ? "QR-сканирование"
-                                    : activeTab === "tools"
-                                      ? "Инструмент и QR"
-                                      : activeTab === "integrations"
-                                        ? "Интеграции и уведомления"
-                                      : activeTab === "team"
-                                        ? "Команда и задачи"
-                                      : activeTab === "profile"
-                                        ? "Мой профиль"
-                                      : activeTab === "settings"
-                                        ? "Настройки интерфейса"
-                                      : activeTab === "admin"
-                                        ? "Управление доступами"
-                                        : "Смена пароля"}
-            </h1>
+            <h1>{currentTitle}</h1>
+            <p className="crumbs">{currentSection} / {currentTitle}</p>
             {me && <p className="muted">{me.fullName} ({roleLabel(me.role)})</p>}
           </div>
           <div className="toolbar topToolbar">
