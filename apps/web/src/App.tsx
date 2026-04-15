@@ -901,6 +901,16 @@ function App() {
         .map((s) => ({ materialId: s.materialId, label: `${s.materialName} · доступно ${s.available} ${s.materialUnit}` })),
     [stocks, issueWarehouseId]
   );
+  const issueFlowCounters = useMemo(() => {
+    return issues.reduce(
+      (acc, row) => {
+        if (row.flowType === "REQUEST") acc.request += 1;
+        else acc.direct += 1;
+        return acc;
+      },
+      { direct: 0, request: 0 }
+    );
+  }, [issues]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -3954,6 +3964,9 @@ function App() {
                   </select>
                 </label>
               </div>
+              <p className="muted">
+                По текущему списку: Прямые {issueFlowCounters.direct} · Заявки {issueFlowCounters.request}
+              </p>
               <h3>Последние выдачи</h3>
               <table>
                 <thead>
