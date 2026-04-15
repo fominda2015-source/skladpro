@@ -571,10 +571,12 @@ function App() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
   const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [reportProjectId, setReportProjectId] = useState("");
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
+  const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -1385,12 +1387,19 @@ function App() {
 
   async function loadFeedbackMessages() {
     if (!token) return;
+    setFeedbackLoading(true);
+    setFeedbackError("");
     const res = await fetch(`${API_URL}/api/feedback/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      setFeedbackError("Не удалось загрузить сообщения поддержки");
+      setFeedbackLoading(false);
+      return;
+    }
     const payload = (await res.json()) as { items: ChatMessage[] };
     setFeedbackMessages(payload.items);
+    setFeedbackLoading(false);
   }
 
   async function sendFeedbackMessage() {
@@ -2137,6 +2146,13 @@ function App() {
     if (!token || activeTab !== "feedback") return;
     void loadFeedbackMessages();
   }, [token, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "feedback") return;
+    const node = feedbackMessagesRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [activeTab, feedbackMessages, feedbackLoading]);
 
   useEffect(() => {
     if (activeTab !== "team" || !focusedTeamTaskId) return;
@@ -4808,8 +4824,14 @@ function App() {
           <h2>Обратная связь</h2>
           <p className="muted">Чат напрямую с администратором. Можно приложить скриншот ошибки.</p>
           {feedbackError && <ErrorState text={feedbackError} />}
-          <div className="chatMessages feedbackThread">
-            {groupedFeedbackMessages.length ? (
+          <div className="chatMessages feedbackThread" ref={feedbackMessagesRef}>
+            {feedbackLoading ? (
+              <>
+                <div className="chatSkeleton" />
+                <div className="chatSkeleton short" />
+                <div className="chatSkeleton" />
+              </>
+            ) : groupedFeedbackMessages.length ? (
               groupedFeedbackMessages.map((row, idx) =>
                 row.type === "date" ? (
                   <div key={`feedback-date-${idx}`} className="chatDateDivider">{row.label}</div>
@@ -4841,6 +4863,12 @@ function App() {
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
               placeholder="Опиши проблему или вопрос"
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void sendFeedbackMessage();
+                }
+              }}
             />
             <div className="chatComposerActions">
               <button
@@ -4860,6 +4888,7 @@ function App() {
               />
               <button type="button" onClick={() => void sendFeedbackMessage()}>Отправить в поддержку</button>
             </div>
+            <p className="muted">Подсказка: `Ctrl+Enter` отправляет сообщение.</p>
             {feedbackAttachment ? (
               <div className="chatAttachmentBar">
                 <small>{feedbackAttachment.name}</small>
