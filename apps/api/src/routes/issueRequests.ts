@@ -1,6 +1,7 @@
 import {
   IssueBasisType,
   IssueRequestStatus,
+  NotificationLevel,
   OperationType,
   StockMovementDirection
 } from "@prisma/client";
@@ -13,6 +14,7 @@ import {
   getRequestDataScope,
   mergeIssueWhere
 } from "../lib/dataScope.js";
+import { notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -38,6 +40,14 @@ async function getLatestProjectLimit(projectId: string) {
     include: { items: true },
     orderBy: { version: "desc" }
   });
+}
+
+async function safeNotify(params: Parameters<typeof notifyUser>[0]) {
+  try {
+    await notifyUser(params);
+  } catch {
+    // Best-effort side effect: notification failure must not break core flow.
+  }
 }
 
 export const issueRequestsRouter = Router();
@@ -194,6 +204,13 @@ issueRequestsRouter.patch(
       where: { id },
       data: { status: IssueRequestStatus.ON_APPROVAL }
     });
+    await safeNotify({
+      userId: updated.requestedById,
+      title: "Заявка отправлена на согласование",
+      message: `Заявка ${updated.number} переведена в ON_APPROVAL.`,
+      entityType: "IssueRequest",
+      entityId: updated.id
+    });
     return res.json(updated);
   }
 );
@@ -223,6 +240,13 @@ issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), a
     before: { status: prev.status, approvedById: prev.approvedById },
     after: { status: updated.status, approvedById: updated.approvedById }
   });
+  await safeNotify({
+    userId: updated.requestedById,
+    title: "Заявка согласована",
+    message: `Заявка ${updated.number} одобрена и готова к выдаче.`,
+    entityType: "IssueRequest",
+    entityId: updated.id
+  });
   return res.json(updated);
 });
 
@@ -247,6 +271,14 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
     entityId: id,
     before: { status: prev.status },
     after: { status: updated.status }
+  });
+  await safeNotify({
+    userId: updated.requestedById,
+    title: "Заявка отклонена",
+    message: `Заявка ${updated.number} отклонена. Проверьте детали и при необходимости исправьте черновик.`,
+    level: NotificationLevel.WARNING,
+    entityType: "IssueRequest",
+    entityId: updated.id
   });
   return res.json(updated);
 });
@@ -275,6 +307,14 @@ issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), asyn
     entityId: id,
     before: { status: prev.status },
     after: { status: updated.status }
+  });
+  await safeNotify({
+    userId: updated.requestedById,
+    title: "Заявка отменена",
+    message: `Заявка ${updated.number} отменена.`,
+    level: NotificationLevel.WARNING,
+    entityType: "IssueRequest",
+    entityId: updated.id
   });
   return res.json(updated);
 });
@@ -408,6 +448,13 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       entityId: id,
       before: { status: prevStatus as IssueRequestStatus },
       after: { status: issue.status, operationId: operation.id }
+    });
+    await safeNotify({
+      userId: issue.requestedById,
+      title: "Материалы выданы по заявке",
+      message: `Заявка ${issue.number} проведена. Операция: ${operation.documentNumber || operation.id}.`,
+      entityType: "IssueRequest",
+      entityId: issue.id
     });
 
     return res.json({ operation, issue });
