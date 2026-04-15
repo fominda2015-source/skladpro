@@ -905,6 +905,10 @@ tr.low {
   align-content: start;
 }
 
+.feedbackThread {
+  margin-bottom: 10px;
+}
+
 .chatDateDivider {
   justify-self: center;
   font-size: 11px;

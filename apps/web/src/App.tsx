@@ -574,6 +574,7 @@ function App() {
   const [reportProjectId, setReportProjectId] = useState("");
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const hasPermission = (permission: string) =>
     Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
@@ -804,6 +805,10 @@ function App() {
     () => ["Принято", "Проверю и отпишусь", "Готово", "Нужны уточнения", "Сделаю сегодня"],
     []
   );
+  const feedbackQuickReplies = useMemo(
+    () => ["Проблема повторяется", "Добавил скриншот", "Нужно срочно", "Подтвердите получение", "Спасибо, вопрос решен"],
+    []
+  );
   const groupedChatMessages = useMemo(() => {
     const rows: Array<{ type: "date"; label: string } | { type: "message"; item: ChatMessage }> = [];
     let prevDateKey = "";
@@ -824,6 +829,26 @@ function App() {
     }
     return rows;
   }, [chatMessages]);
+  const groupedFeedbackMessages = useMemo(() => {
+    const rows: Array<{ type: "date"; label: string } | { type: "message"; item: ChatMessage }> = [];
+    let prevDateKey = "";
+    const now = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    for (const item of feedbackMessages) {
+      const dt = new Date(item.createdAt);
+      const dateKey = dt.toDateString();
+      if (dateKey !== prevDateKey) {
+        let label = dt.toLocaleDateString();
+        if (dt.toDateString() === now.toDateString()) label = "Сегодня";
+        if (dt.toDateString() === yesterday.toDateString()) label = "Вчера";
+        rows.push({ type: "date", label });
+        prevDateKey = dateKey;
+      }
+      rows.push({ type: "message", item });
+    }
+    return rows;
+  }, [feedbackMessages]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -1370,6 +1395,7 @@ function App() {
 
   async function sendFeedbackMessage() {
     if (!token || !feedbackText.trim()) return;
+    setFeedbackError("");
     const attachments = feedbackAttachment
       ? [{ fileName: feedbackAttachment.name, mimeType: feedbackAttachment.type, dataUrl: await fileToDataUrl(feedbackAttachment) }]
       : [];
@@ -4782,29 +4808,66 @@ function App() {
           <h2>Обратная связь</h2>
           <p className="muted">Чат напрямую с администратором. Можно приложить скриншот ошибки.</p>
           {feedbackError && <ErrorState text={feedbackError} />}
-          <div className="plainList" style={{ maxHeight: 300, overflow: "auto", marginBottom: 10 }}>
-            {feedbackMessages.map((m) => (
-              <div key={m.id} className="card" style={{ marginBottom: 8 }}>
-                <p><strong>{m.sender.fullName}</strong> · {new Date(m.createdAt).toLocaleString()}</p>
-                <p>{m.text}</p>
-                {m.attachments?.map((a) => (
-                  <p key={a.id}><a href={a.dataUrl} target="_blank" rel="noreferrer">{a.fileName}</a></p>
-                ))}
+          <div className="chatMessages feedbackThread">
+            {groupedFeedbackMessages.length ? (
+              groupedFeedbackMessages.map((row, idx) =>
+                row.type === "date" ? (
+                  <div key={`feedback-date-${idx}`} className="chatDateDivider">{row.label}</div>
+                ) : (
+                  <div key={row.item.id} className={`chatBubble ${row.item.senderId === me?.id ? "mine" : ""}`}>
+                    <p>{row.item.text}</p>
+                    {row.item.attachments?.map((a) => (
+                      <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
+                        {a.fileName}
+                      </a>
+                    ))}
+                    <small className="chatDeliveryState">{row.item.senderId === me?.id ? "Вы" : "Администратор"}</small>
+                  </div>
+                )
+              )
+            ) : (
+              <p className="muted">Сообщений пока нет. Опиши проблему, и админ ответит в этом треде.</p>
+            )}
+          </div>
+          <div className="chatComposer">
+            <div className="chatQuickReplies">
+              {feedbackQuickReplies.map((text) => (
+                <button key={`feedback-quick-${text}`} type="button" className="ghostBtn" onClick={() => setFeedbackText(text)}>
+                  {text}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              placeholder="Опиши проблему или вопрос"
+            />
+            <div className="chatComposerActions">
+              <button
+                type="button"
+                className="ghostBtn chatAttachBtn"
+                title="Добавить скриншот"
+                onClick={() => feedbackFileInputRef.current?.click()}
+              >
+                📎
+              </button>
+              <input
+                ref={feedbackFileInputRef}
+                className="chatHiddenFile"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)}
+              />
+              <button type="button" onClick={() => void sendFeedbackMessage()}>Отправить в поддержку</button>
+            </div>
+            {feedbackAttachment ? (
+              <div className="chatAttachmentBar">
+                <small>{feedbackAttachment.name}</small>
+                <button type="button" className="ghostBtn" onClick={() => setFeedbackAttachment(null)}>
+                  Убрать
+                </button>
               </div>
-            ))}
-          </div>
-          <div className="form">
-            <label>
-              Описание проблемы
-              <textarea value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} />
-            </label>
-            <label>
-              Скриншот
-              <input type="file" accept="image/*" onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)} />
-            </label>
-          </div>
-          <div className="toolbar">
-            <button type="button" onClick={() => void sendFeedbackMessage()}>Отправить в поддержку</button>
+            ) : null}
           </div>
         </div>
       )}
