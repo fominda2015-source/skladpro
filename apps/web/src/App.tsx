@@ -523,6 +523,20 @@ function App() {
       RECEIVED: "Получена",
       CLOSED: "Закрыта"
     })[status] ?? status;
+  const teamTaskStatusLabel = (status: string) =>
+    ({
+      OPEN: "Новая",
+      IN_PROGRESS: "В работе",
+      DONE: "Выполнена",
+      VERIFIED: "Проверена"
+    })[status] ?? status;
+  const teamTaskNextStatuses = (status: string) =>
+    ({
+      OPEN: ["IN_PROGRESS", "DONE"],
+      IN_PROGRESS: ["DONE"],
+      DONE: ["VERIFIED"],
+      VERIFIED: []
+    })[status] ?? [];
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -866,6 +880,26 @@ function App() {
     setTeamTaskTitle("");
     setTeamTaskDescription("");
     setTeamTaskDueAt("");
+    await loadTeamData();
+  }
+
+  async function updateTeamTaskStatus(taskId: string, status: "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED") {
+    if (!token) return;
+    const ok = window.confirm(`Подтвердить перевод задачи в статус "${teamTaskStatusLabel(status)}"?`);
+    if (!ok) return;
+    const res = await fetch(`${API_URL}/api/team/tasks/${taskId}/status`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) {
+      setTeamMessage("Не удалось обновить статус задачи");
+      return;
+    }
+    setTeamMessage(`Статус задачи обновлен: ${teamTaskStatusLabel(status)}`);
     await loadTeamData();
   }
 
@@ -1381,6 +1415,7 @@ function App() {
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
   const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
+  const selectedTool = tools.find((x) => x.id === selectedToolForEvents) || tools[0] || null;
   const filteredIssues = issues.filter((i) => {
     if (!issueSearch.trim()) return true;
     const q = issueSearch.toLowerCase();
@@ -2314,6 +2349,7 @@ function App() {
                 <th>От кого</th>
                 <th>Объект</th>
                 <th>Статус</th>
+                <th>Следующий шаг</th>
               </tr>
             </thead>
             <tbody>
@@ -2326,7 +2362,20 @@ function App() {
                   <td>{t.assignee?.fullName || "-"}</td>
                   <td>{t.createdBy?.fullName || "-"}</td>
                   <td>{t.project?.name || t.warehouse?.name || "-"}</td>
-                  <td>{t.status === "DONE" ? "Выполнена" : "Открыта"}</td>
+                  <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
+                  <td>
+                    <div className="toolbar">
+                      {teamTaskNextStatuses(t.status).map((next) => (
+                        <button
+                          key={`${t.id}-${next}`}
+                          type="button"
+                          onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
+                        >
+                          {teamTaskStatusLabel(next)}
+                        </button>
+                      ))}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -3427,6 +3476,33 @@ function App() {
             </select>
             <button onClick={() => void loadTools()}>Обновить список</button>
           </div>
+          {selectedTool && (
+            <div className="card processCard">
+              <h4>Шаг процесса инструмента</h4>
+              <p className="muted">
+                {selectedTool.inventoryNumber} · {selectedTool.name} · текущий этап:{" "}
+                <strong>{toolStatusLabel(selectedTool.status)}</strong>
+              </p>
+              <div className="toolbar">
+                {selectedTool.status !== "ISSUED" && (
+                  <button onClick={() => openToolActionDialog(selectedTool.id, "ISSUE")}>Выдать</button>
+                )}
+                {selectedTool.status !== "IN_STOCK" && (
+                  <button onClick={() => openToolActionDialog(selectedTool.id, "RETURN")}>Вернуть на склад</button>
+                )}
+                {selectedTool.status !== "IN_REPAIR" && (
+                  <button onClick={() => openToolActionDialog(selectedTool.id, "SEND_TO_REPAIR")}>Передать в ремонт</button>
+                )}
+                {selectedTool.status !== "DISPUTED" && (
+                  <button onClick={() => openToolActionDialog(selectedTool.id, "MARK_DISPUTED")}>Открыть спор</button>
+                )}
+                {selectedTool.status !== "WRITTEN_OFF" && (
+                  <button className="dangerBtn" onClick={() => openToolActionDialog(selectedTool.id, "WRITE_OFF")}>Списать</button>
+                )}
+              </div>
+              <p className="muted">История изменений доступна ниже в журнале инструмента.</p>
+            </div>
+          )}
           <div className="form">
             <label>
               Название

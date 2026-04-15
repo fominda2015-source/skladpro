@@ -13,6 +13,9 @@ const createTaskSchema = z.object({
   warehouseId: z.string().min(1).optional(),
   dueAt: z.string().datetime().optional()
 });
+const updateTaskStatusSchema = z.object({
+  status: z.enum(["OPEN", "IN_PROGRESS", "DONE", "VERIFIED"])
+});
 
 export const teamRouter = Router();
 teamRouter.use(requireAuth);
@@ -106,6 +109,24 @@ teamRouter.patch("/tasks/:id/close", async (req: AuthedRequest, res) => {
   const updated = await prisma.staffTask.update({
     where: { id },
     data: { status: "DONE" }
+  });
+  return res.json(updated);
+});
+
+teamRouter.patch("/tasks/:id/status", async (req: AuthedRequest, res) => {
+  const parsed = updateTaskStatusSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const id = String(req.params.id);
+  const task = await prisma.staffTask.findUnique({ where: { id } });
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  if (task.assigneeId !== req.user!.userId && task.createdById !== req.user!.userId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const updated = await prisma.staffTask.update({
+    where: { id },
+    data: { status: parsed.data.status }
   });
   return res.json(updated);
 });
