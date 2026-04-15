@@ -45,6 +45,14 @@ transportWaybillsRouter.use(requirePermission("waybills.read"));
 
 transportWaybillsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
+  const pageRaw = Number(req.query.page);
+  const pageSizeRaw = Number(req.query.pageSize);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(100, Math.max(1, Math.floor(pageSizeRaw))) : 20;
+  const sort =
+    typeof req.query.sort === "string" && ["created_desc", "status", "number"].includes(req.query.sort)
+      ? req.query.sort
+      : "created_desc";
   const status =
     typeof req.query.status === "string" && Object.values(TransportWaybillStatus).includes(req.query.status as TransportWaybillStatus)
       ? (req.query.status as TransportWaybillStatus)
@@ -61,19 +69,33 @@ transportWaybillsRouter.get("/", async (req: AuthedRequest, res) => {
           ? statusPart
           : undefined;
 
-  const rows = await prisma.transportWaybill.findMany({
-    where,
-    include: {
-      fromWarehouse: true,
-      operation: true,
-      issueRequest: true,
-      items: { include: { material: true } },
-      events: { orderBy: { createdAt: "desc" }, take: 5 }
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200
+  const [total, rows] = await prisma.$transaction([
+    prisma.transportWaybill.count({ where }),
+    prisma.transportWaybill.findMany({
+      where,
+      include: {
+        fromWarehouse: true,
+        operation: true,
+        issueRequest: true,
+        items: { include: { material: true } },
+        events: { orderBy: { createdAt: "desc" }, take: 5 }
+      },
+      orderBy:
+        sort === "status"
+          ? { status: "asc" }
+          : sort === "number"
+            ? { number: "asc" }
+            : { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+  return res.json({
+    items: rows,
+    total,
+    page,
+    pageSize
   });
-  return res.json(rows);
 });
 
 transportWaybillsRouter.post("/", requirePermission("waybills.write"), async (req: AuthedRequest, res) => {

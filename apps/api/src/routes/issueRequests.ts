@@ -56,6 +56,15 @@ issueRequestsRouter.use(requirePermission("issues.read"));
 
 issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
+  const pageRaw = Number(req.query.page);
+  const pageSizeRaw = Number(req.query.pageSize);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(100, Math.max(1, Math.floor(pageSizeRaw))) : 20;
+  const sort =
+    typeof req.query.sort === "string" && ["created_desc", "status", "number"].includes(req.query.sort)
+      ? req.query.sort
+      : "created_desc";
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   const statusParam = typeof req.query.status === "string" ? req.query.status : undefined;
   const statusFilter =
     statusParam && Object.values(IssueRequestStatus).includes(statusParam as IssueRequestStatus)
@@ -66,20 +75,43 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     basisParam && Object.values(IssueBasisType).includes(basisParam as IssueBasisType)
       ? { basisType: basisParam as IssueBasisType }
       : {};
-  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter });
-  const rows = await prisma.issueRequest.findMany({
-    where,
-    include: {
-      items: { include: { material: true } },
-      warehouse: true,
-      project: true,
-      requestedBy: true,
-      approvedBy: true
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200
+  const searchFilter = q
+    ? {
+        OR: [
+          { number: { contains: q, mode: "insensitive" as const } },
+          { basisRef: { contains: q, mode: "insensitive" as const } },
+          { note: { contains: q, mode: "insensitive" as const } }
+        ]
+      }
+    : {};
+  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...searchFilter });
+  const [total, rows] = await prisma.$transaction([
+    prisma.issueRequest.count({ where }),
+    prisma.issueRequest.findMany({
+      where,
+      include: {
+        items: { include: { material: true } },
+        warehouse: true,
+        project: true,
+        requestedBy: true,
+        approvedBy: true
+      },
+      orderBy:
+        sort === "status"
+          ? { status: "asc" }
+          : sort === "number"
+            ? { number: "asc" }
+            : { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+  return res.json({
+    items: rows,
+    total,
+    page,
+    pageSize
   });
-  return res.json(rows);
 });
 
 issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: AuthedRequest, res) => {

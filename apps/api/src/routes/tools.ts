@@ -59,38 +59,61 @@ toolsRouter.use(requirePermission("tools.read"));
 
 toolsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
+  const pageRaw = Number(req.query.page);
+  const pageSizeRaw = Number(req.query.pageSize);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(100, Math.max(1, Math.floor(pageSizeRaw))) : 20;
+  const sort =
+    typeof req.query.sort === "string" && ["created_desc", "inventory", "status"].includes(req.query.sort)
+      ? req.query.sort
+      : "created_desc";
   const q = typeof req.query.q === "string" ? req.query.q : "";
   const status =
     typeof req.query.status === "string" && Object.values(ToolStatus).includes(req.query.status as ToolStatus)
       ? (req.query.status as ToolStatus)
       : undefined;
-  const rows = await prisma.tool.findMany({
-    where: {
-      AND: [
-        toolWhereFromScope(scope),
-        {
-          ...(status ? { status } : {}),
-      ...(q
-        ? {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { inventoryNumber: { contains: q, mode: "insensitive" } },
-              { serialNumber: { contains: q, mode: "insensitive" } },
-              { qrCode: { contains: q, mode: "insensitive" } }
-            ]
-          }
-        : {})
-        }
-      ]
-    },
-    include: {
-      warehouse: true,
-      project: true
-    },
-    orderBy: { createdAt: "desc" },
-    take: 300
+  const where = {
+    AND: [
+      toolWhereFromScope(scope),
+      {
+        ...(status ? { status } : {}),
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: "insensitive" as const } },
+                { inventoryNumber: { contains: q, mode: "insensitive" as const } },
+                { serialNumber: { contains: q, mode: "insensitive" as const } },
+                { qrCode: { contains: q, mode: "insensitive" as const } }
+              ]
+            }
+          : {})
+      }
+    ]
+  };
+  const [total, rows] = await prisma.$transaction([
+    prisma.tool.count({ where }),
+    prisma.tool.findMany({
+      where,
+      include: {
+        warehouse: true,
+        project: true
+      },
+      orderBy:
+        sort === "status"
+          ? { status: "asc" }
+          : sort === "inventory"
+            ? { inventoryNumber: "asc" }
+            : { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+  return res.json({
+    items: rows,
+    total,
+    page,
+    pageSize
   });
-  return res.json(rows);
 });
 
 toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedRequest, res) => {

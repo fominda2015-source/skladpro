@@ -134,6 +134,12 @@ type WaybillEvent = {
   comment?: string | null;
   createdAt: string;
 };
+type PagedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
 type Project = { id: string; name: string; code?: string | null };
 type ProjectLimitSummaryItem = {
   materialId: string;
@@ -326,6 +332,7 @@ function App() {
   const [issuesError, setIssuesError] = useState("");
   const [issuesSort, setIssuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
   const [issuesPage, setIssuesPage] = useState(1);
+  const [issuesTotal, setIssuesTotal] = useState(0);
   const [issueStatusFilter, setIssueStatusFilter] = useState<"" | IssueStatus>(() => {
     const saved = localStorage.getItem(ISSUE_FILTER_KEY);
     return (saved as "" | IssueStatus) || "";
@@ -392,6 +399,7 @@ function App() {
   const [toolsError, setToolsError] = useState("");
   const [toolsSort, setToolsSort] = useState<"created_desc" | "inventory" | "status">("created_desc");
   const [toolsPage, setToolsPage] = useState(1);
+  const [toolsTotal, setToolsTotal] = useState(0);
   const [toolName, setToolName] = useState("Перфоратор Bosch");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
   const [toolSerialNumber, setToolSerialNumber] = useState("");
@@ -414,6 +422,7 @@ function App() {
   const [waybillsError, setWaybillsError] = useState("");
   const [waybillsSort, setWaybillsSort] = useState<"created_desc" | "number" | "status">("created_desc");
   const [waybillsPage, setWaybillsPage] = useState(1);
+  const [waybillsTotal, setWaybillsTotal] = useState(0);
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
   const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
   const [waybillToLocation, setWaybillToLocation] = useState("Объект 1");
@@ -1233,16 +1242,22 @@ function App() {
       const params = new URLSearchParams();
       if (issueStatusFilter) params.set("status", issueStatusFilter);
       if (issueBasisFilter) params.set("basisType", issueBasisFilter);
+      if (issueSearch.trim()) params.set("q", issueSearch.trim());
+      params.set("sort", issuesSort);
+      params.set("page", String(issuesPage));
+      params.set("pageSize", "20");
       const qs = params.toString();
       const query = qs ? `?${qs}` : "";
       const res = await fetch(`${API_URL}/api/issues${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as IssueRequest[];
-      setIssues(data);
-      if (data.length && !selectedIssueId) {
-        setSelectedIssueId(data[0].id);
+      const payload = (await res.json()) as PagedResponse<IssueRequest> | IssueRequest[];
+      const items = Array.isArray(payload) ? payload : payload.items;
+      setIssues(items);
+      setIssuesTotal(Array.isArray(payload) ? items.length : payload.total);
+      if (items.length && !selectedIssueId) {
+        setSelectedIssueId(items[0].id);
       }
     } catch (e) {
       setIssuesError(`Не удалось загрузить заявки: ${String(e)}`);
@@ -1313,7 +1328,8 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
-    setApprovalQueue((await res.json()) as IssueRequest[]);
+    const payload = (await res.json()) as PagedResponse<IssueRequest> | IssueRequest[];
+    setApprovalQueue(Array.isArray(payload) ? payload : payload.items);
   }
 
   async function loadOperations() {
@@ -1332,20 +1348,25 @@ function App() {
     try {
       const queryParts = [
         toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
-        toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : ""
+        toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
+        `sort=${encodeURIComponent(toolsSort)}`,
+        `page=${encodeURIComponent(String(toolsPage))}`,
+        "pageSize=20"
       ].filter(Boolean);
       const query = queryParts.length ? `?${queryParts.join("&")}` : "";
       const res = await fetch(`${API_URL}/api/tools${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as ToolItem[];
-      setTools(data);
-      if (data.length && !selectedToolIds.length) {
-        setSelectedToolIds([data[0].id]);
+      const payload = (await res.json()) as PagedResponse<ToolItem> | ToolItem[];
+      const items = Array.isArray(payload) ? payload : payload.items;
+      setTools(items);
+      setToolsTotal(Array.isArray(payload) ? items.length : payload.total);
+      if (items.length && !selectedToolIds.length) {
+        setSelectedToolIds([items[0].id]);
       }
-      if (data.length && !selectedToolForEvents) {
-        setSelectedToolForEvents(data[0].id);
+      if (items.length && !selectedToolForEvents) {
+        setSelectedToolForEvents(items[0].id);
       }
     } catch (e) {
       setToolsError(`Не удалось загрузить инструменты: ${String(e)}`);
@@ -1368,15 +1389,23 @@ function App() {
     setWaybillsError("");
     setWaybillsLoading(true);
     try {
-      const query = waybillStatusFilter ? `?status=${encodeURIComponent(waybillStatusFilter)}` : "";
+      const params = new URLSearchParams();
+      if (waybillStatusFilter) params.set("status", waybillStatusFilter);
+      params.set("sort", waybillsSort);
+      params.set("page", String(waybillsPage));
+      params.set("pageSize", "20");
+      const qs = params.toString();
+      const query = qs ? `?${qs}` : "";
       const res = await fetch(`${API_URL}/api/waybills${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as Waybill[];
-      setWaybills(data);
-      if (data.length && !selectedWaybillId) {
-        setSelectedWaybillId(data[0].id);
+      const payload = (await res.json()) as PagedResponse<Waybill> | Waybill[];
+      const items = Array.isArray(payload) ? payload : payload.items;
+      setWaybills(items);
+      setWaybillsTotal(Array.isArray(payload) ? items.length : payload.total);
+      if (items.length && !selectedWaybillId) {
+        setSelectedWaybillId(items[0].id);
       }
     } catch (e) {
       setWaybillsError(`Не удалось загрузить ТН: ${String(e)}`);
@@ -1610,60 +1639,9 @@ function App() {
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
   const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
   const selectedTool = tools.find((x) => x.id === selectedToolForEvents) || tools[0] || null;
-  const filteredIssues = issues.filter((i) => {
-    if (!issueSearch.trim()) return true;
-    const q = issueSearch.toLowerCase();
-    const basis = `${i.basisType || ""} ${i.basisRef || ""}`.toLowerCase();
-    return (
-      i.number.toLowerCase().includes(q) ||
-      i.status.toLowerCase().includes(q) ||
-      basis.includes(q)
-    );
-  });
-  const sortedIssues = useMemo(() => {
-    const rows = [...filteredIssues];
-    if (issuesSort === "status") {
-      rows.sort((a, b) => a.status.localeCompare(b.status));
-    } else if (issuesSort === "number") {
-      rows.sort((a, b) => a.number.localeCompare(b.number));
-    } else {
-      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-    }
-    return rows;
-  }, [filteredIssues, issuesSort]);
-  const issuesPageSize = 20;
-  const issuesTotalPages = Math.max(1, Math.ceil(sortedIssues.length / issuesPageSize));
-  const pagedIssues = sortedIssues.slice((issuesPage - 1) * issuesPageSize, issuesPage * issuesPageSize);
-
-  const sortedWaybills = useMemo(() => {
-    const rows = [...waybills];
-    if (waybillsSort === "status") {
-      rows.sort((a, b) => a.status.localeCompare(b.status));
-    } else if (waybillsSort === "number") {
-      rows.sort((a, b) => a.number.localeCompare(b.number));
-    } else {
-      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-    }
-    return rows;
-  }, [waybills, waybillsSort]);
-  const waybillsPageSize = 20;
-  const waybillsTotalPages = Math.max(1, Math.ceil(sortedWaybills.length / waybillsPageSize));
-  const pagedWaybills = sortedWaybills.slice((waybillsPage - 1) * waybillsPageSize, waybillsPage * waybillsPageSize);
-
-  const sortedTools = useMemo(() => {
-    const rows = [...tools];
-    if (toolsSort === "status") {
-      rows.sort((a, b) => a.status.localeCompare(b.status));
-    } else if (toolsSort === "inventory") {
-      rows.sort((a, b) => a.inventoryNumber.localeCompare(b.inventoryNumber));
-    } else {
-      rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-    }
-    return rows;
-  }, [tools, toolsSort]);
-  const toolsPageSize = 20;
-  const toolsTotalPages = Math.max(1, Math.ceil(sortedTools.length / toolsPageSize));
-  const pagedTools = sortedTools.slice((toolsPage - 1) * toolsPageSize, toolsPage * toolsPageSize);
+  const issuesTotalPages = Math.max(1, Math.ceil(issuesTotal / 20));
+  const waybillsTotalPages = Math.max(1, Math.ceil(waybillsTotal / 20));
+  const toolsTotalPages = Math.max(1, Math.ceil(toolsTotal / 20));
 
   async function resolveQrCode() {
     const value = qrCode.trim();
@@ -1683,8 +1661,10 @@ function App() {
       setQrResult(null);
       return;
     }
-    const items = (await res.json()) as ToolItem[];
+    const payload = (await res.json()) as PagedResponse<ToolItem> | ToolItem[];
+    const items = Array.isArray(payload) ? payload : payload.items;
     setTools(items);
+    setToolsTotal(Array.isArray(payload) ? items.length : payload.total);
     const toolHit = items.find(
       (t) =>
         t.qrCode.toLowerCase() === value.toLowerCase() ||
@@ -1839,7 +1819,7 @@ function App() {
       void loadProjects();
       void loadIssues();
     }
-  }, [token, activeTab, issueStatusFilter, issueBasisFilter]);
+  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueSearch, issuesSort, issuesPage]);
 
   useEffect(() => {
     localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
@@ -1908,14 +1888,14 @@ function App() {
       void loadCatalogData();
       void loadTools();
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter]);
+  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage]);
 
   useEffect(() => {
     if (token && activeTab === "waybills") {
       void loadCatalogData();
       void loadWaybills();
     }
-  }, [token, activeTab, waybillStatusFilter]);
+  }, [token, activeTab, waybillStatusFilter, waybillsSort, waybillsPage]);
 
   useEffect(() => {
     if (token && activeTab === "waybills" && selectedWaybillId) {
@@ -2551,7 +2531,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {group.rows.map((n) => (
+                        {group.rows.map((n: NotificationRow) => (
                           <tr key={n.id}>
                             <td>
                               <input
@@ -2618,7 +2598,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {group.rows.map((t) => (
+                        {group.rows.map((t: TeamTask) => (
                           <tr key={t.id}>
                             <td>
                               {t.title}
@@ -3163,10 +3143,10 @@ function App() {
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           {issuesLoading && <LoadingState text="Загрузка заявок..." />}
           {issuesError && <ErrorState text={issuesError} />}
-          {!issuesLoading && !issuesError && !sortedIssues.length && (
+          {!issuesLoading && !issuesError && !issues.length && (
             <EmptyState title="Заявок не найдено" hint="Смени фильтры или создай новую заявку." />
           )}
-          {!issuesLoading && !issuesError && sortedIssues.length > 0 && (
+          {!issuesLoading && !issuesError && issues.length > 0 && (
           <table>
             <thead>
               <tr>
@@ -3178,7 +3158,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {pagedIssues.map((i) => (
+              {issues.map((i) => (
                 <tr key={i.id}>
                   <td>
                     <input
@@ -3224,7 +3204,7 @@ function App() {
             </tbody>
           </table>
           )}
-          {!issuesLoading && !issuesError && sortedIssues.length > 0 && (
+          {!issuesLoading && !issuesError && issues.length > 0 && (
             <div className="toolbar">
               <button type="button" onClick={() => setIssuesPage((p) => Math.max(1, p - 1))} disabled={issuesPage <= 1}>
                 Назад
@@ -3755,7 +3735,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pagedWaybills.map((w) => (
+                  {waybills.map((w) => (
                     <tr key={w.id}>
                       <td>{w.number}</td>
                       <td><span className={`badge ${statusClass(w.status)}`}>{waybillStatusLabel(w.status)}</span></td>
@@ -4132,7 +4112,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {pagedTools.map((t) => (
+              {tools.map((t) => (
                 <tr key={t.id}>
                   <td>
                     <input
