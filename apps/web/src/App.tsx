@@ -1328,20 +1328,24 @@ function App() {
   }
 
   return (
-    <main className="shell">
+    <main className="shell uiSupreme">
       <aside className="sidebar">
-        <h2 className="brand">SkladPro</h2>
-        <button className="navBtn" onClick={() => setActiveTab("stocks")}>Остатки</button>
+        <div className="brandWrap">
+          <h2 className="brand">СкладПро</h2>
+          <p className="brandSub">Warehouse ERP</p>
+        </div>
+        <button className="navBtn" onClick={() => setActiveTab("stocks")}>Главная</button>
+        <button className="navBtn" onClick={() => setActiveTab("issues")}>Быстрая выдача</button>
+        <button className="navBtn" onClick={() => setActiveTab("approvals")}>Очередь заявок</button>
+        <button className="navBtn" onClick={() => setActiveTab("operations")}>Приходы</button>
+        <button className="navBtn" onClick={() => setActiveTab("waybills")}>Перемещения</button>
         <button className="navBtn" onClick={() => setActiveTab("catalog")}>Справочники</button>
-        <button className="navBtn" onClick={() => setActiveTab("matching")}>Сопоставление</button>
-        <button className="navBtn" onClick={() => setActiveTab("operations")}>Операции</button>
-        <button className="navBtn" onClick={() => setActiveTab("issues")}>Заявки</button>
-        <button className="navBtn" onClick={() => setActiveTab("limits")}>Лимиты</button>
-        <button className="navBtn" onClick={() => setActiveTab("approvals")}>Согласования</button>
+        <button className="navBtn" onClick={() => setActiveTab("stocks")}>Остатки</button>
         <button className="navBtn" onClick={() => setActiveTab("documents")}>Документы</button>
-        <button className="navBtn" onClick={() => setActiveTab("waybills")}>Транспортные ТН</button>
+        <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструменты</button>
+        <button className="navBtn" onClick={() => setActiveTab("matching")}>Сопоставление</button>
+        <button className="navBtn" onClick={() => setActiveTab("limits")}>Лимиты</button>
         <button className="navBtn" onClick={() => setActiveTab("qr")}>QR</button>
-        <button className="navBtn" onClick={() => setActiveTab("tools")}>Инструмент</button>
         <button className="navBtn" onClick={() => setActiveTab("integrations")}>Интеграции</button>
         {canReadAudit && <button className="navBtn" onClick={() => setActiveTab("audit")}>Аудит</button>}
         {canManageUsers && <button className="navBtn" onClick={() => setActiveTab("admin")}>Доступы</button>}
@@ -1384,10 +1388,13 @@ function App() {
             </h1>
             {me && <p className="muted">{me.fullName} ({me.role})</p>}
           </div>
-          <div className="toolbar">
+          <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("stocks"); }}>Найти</button>
             <button onClick={() => setActiveTab("qr")}>QR</button>
+            <span className="topIcon">?</span>
+            <span className="topIcon">!</span>
+            <span className="topIcon">⚙</span>
           </div>
         </header>
         {dashboard && (

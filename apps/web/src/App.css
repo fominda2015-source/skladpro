@@ -1,40 +1,64 @@
 .shell {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: 260px 1fr;
   min-height: 100vh;
+  background: #f3f6fa;
 }
 
 .sidebar {
-  background: #0f1a36;
-  color: #d9e3ff;
-  padding: 20px 14px;
+  background: linear-gradient(180deg, #0b1f44 0%, #0d244f 100%);
+  color: #dfe8ff;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brandWrap {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .brand {
-  margin: 0 0 12px;
+  margin: 0;
+  font-size: 22px;
   color: #fff;
+}
+
+.brandSub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #9db2e7;
 }
 
 .navBtn {
   width: 100%;
+  height: 38px;
   text-align: left;
-  background: #17264b;
-  color: #d9e3ff;
-  border: 1px solid #253661;
+  border-radius: 10px;
+  background: transparent;
+  color: #e3ebff;
+  border: 1px solid transparent;
+  font-weight: 500;
+}
+
+.navBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .navBtn.danger {
   margin-top: auto;
-  background: #8f2c2c;
-  border-color: #a23d3d;
+  background: rgba(239, 68, 68, 0.22);
+  border: 1px solid rgba(239, 68, 68, 0.44);
 }
 
 .canvas {
-  padding: 20px;
-  background: #f4f7fc;
+  padding: 16px 20px 24px;
+  background: #f3f6fa;
 }
 
 .app {
@@ -43,27 +67,32 @@
 }
 
 .card {
-  border: 1px solid #d8dee9;
-  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
   padding: 16px;
   background: #fff;
+  box-shadow: 0 6px 20px rgba(12, 24, 52, 0.05);
 }
 
 .pageHeader {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 16px;
   gap: 16px;
   position: sticky;
   top: 0;
-  z-index: 5;
-  background: #f4f7fc;
-  padding: 8px 0 12px;
+  z-index: 10;
+  background: #f3f6fa;
+  border-bottom: 1px solid #e6eaf2;
+  padding: 8px 2px 14px;
+  margin-bottom: 14px;
 }
 
 .pageTitleBlock h1 {
   margin: 0;
+  font-size: 34px;
+  font-weight: 700;
+  color: #1f2937;
 }
 
 .form {
@@ -74,36 +103,65 @@
 label {
   display: grid;
   gap: 6px;
-  font-size: 14px;
+  font-size: 13px;
+  color: #667085;
 }
 
 input,
 button,
 select {
   height: 40px;
-  border: 1px solid #ccd4e0;
-  border-radius: 8px;
+  border: 1px solid #dbe1ec;
+  border-radius: 12px;
   padding: 0 12px;
   font-size: 14px;
   width: 100%;
 }
 
+input,
+select {
+  background: #fff;
+  color: #1f2937;
+}
+
 button {
   cursor: pointer;
-  background: #1f4ae0;
-  color: #fff;
   border: none;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+button:hover {
+  background: #1f56cf;
 }
 
 .toolbar {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
+}
+
+.topToolbar {
+  align-items: center;
+}
+
+.topToolbar .topIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #5f6f8e;
+  border: 1px solid #dbe1ec;
 }
 
 .toolbar input {
   flex: 1;
+  min-width: 220px;
 }
 
 .grid2 {
@@ -125,30 +183,30 @@ button {
 
 .badge {
   display: inline-block;
-  padding: 4px 8px;
+  padding: 4px 9px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
 }
 
 .badge.ok {
-  background: #e7f8ee;
-  color: #1e7a3f;
+  background: #e8f9ef;
+  color: #1f8f49;
 }
 
 .badge.warn {
-  background: #fff6df;
-  color: #8b6400;
+  background: #fff7e2;
+  color: #9a6d03;
 }
 
 .badge.bad {
-  background: #ffe8e8;
-  color: #ac1f1f;
+  background: #ffebeb;
+  color: #bc2e2e;
 }
 
 .badge.neutral {
-  background: #eef2f8;
-  color: #4c5b78;
+  background: #eef3ff;
+  color: #4e6291;
 }
 
 .plainList {
@@ -163,17 +221,17 @@ button {
 
 .detailDrawer {
   position: fixed;
-  right: 16px;
+  right: 18px;
   top: 72px;
-  width: 360px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 88px);
+  width: 420px;
+  max-width: calc(100vw - 36px);
+  max-height: calc(100vh - 96px);
   overflow: auto;
-  background: #ffffff;
-  border: 1px solid #d8dee9;
-  border-radius: 12px;
-  padding: 14px;
-  box-shadow: 0 10px 25px rgba(14, 26, 54, 0.2);
+  background: #fff;
+  border: 1px solid #dce3ee;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 18px 38px rgba(11, 31, 68, 0.24);
   z-index: 20;
 }
 
@@ -208,7 +266,7 @@ button {
 }
 
 .dropZone.over {
-  border-color: #1f4ae0;
+  border-color: #2563eb;
   background: #ecf1ff;
 }
 
@@ -218,7 +276,8 @@ button {
 
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 th,
@@ -227,6 +286,15 @@ td {
   border-bottom: 1px solid #edf1f7;
   padding: 10px 8px;
   font-size: 13px;
+}
+
+th {
+  color: #667085;
+  font-weight: 600;
+  background: #fafcff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 tr.low {
@@ -238,39 +306,49 @@ tr.low {
 }
 
 .muted {
-  color: #617089;
+  color: #667085;
   font-size: 13px;
 }
 
+.ok {
+  color: #1f8f49;
+}
+
+.bad {
+  color: #bc2e2e;
+}
+
 .kpiRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .kpi {
   background: #fff;
-  border: 1px solid #d8dee9;
-  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
   padding: 10px 14px;
-  min-width: 160px;
   display: grid;
 }
 
 .kpiBtn {
   width: auto;
-  border: 1px solid #d8dee9;
+  border: 1px solid #e5e7eb;
   text-align: left;
   cursor: pointer;
 }
 
 .kpi span {
   font-size: 12px;
-  color: #617089;
+  color: #667085;
 }
 
 .kpi strong {
-  font-size: 24px;
+  font-size: 36px;
+  line-height: 1.05;
+  color: #1f2937;
 }
 
 .dashboardStrip {
@@ -283,18 +361,34 @@ tr.low {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  background: rgba(244, 247, 252, 0.95);
+  background: rgba(243, 246, 250, 0.96);
   padding: 10px;
   border: 1px solid #d8dee9;
-  border-radius: 10px;
+  border-radius: 12px;
   margin-top: 12px;
 }
 
+@media (max-width: 1200px) {
+  .kpiRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
-  .grid2 {
+  .grid2,
+  .docCenterSplit,
+  .docCenterForm {
     grid-template-columns: 1fr;
+  }
+  .kpiRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .shell {
     grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
 }
