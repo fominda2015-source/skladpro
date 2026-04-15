@@ -127,6 +127,11 @@ type ToolReceiptLine = {
   serialNumber: string;
   note: string;
 };
+type IssueLine = {
+  id: string;
+  materialId: string;
+  quantity: number;
+};
 type QrResult =
   | { kind: "tool"; tool: ToolItem };
 type ToolStatus = "IN_STOCK" | "ISSUED" | "IN_REPAIR" | "DAMAGED" | "LOST" | "WRITTEN_OFF" | "DISPUTED";
@@ -434,6 +439,8 @@ function App() {
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
   const [issueQuantity, setIssueQuantity] = useState(1);
+  const [issueResponsible, setIssueResponsible] = useState("");
+  const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
@@ -883,6 +890,13 @@ function App() {
     }
     return map;
   }, [stockMovements]);
+  const stockOptionsForIssue = useMemo(
+    () =>
+      stocks
+        .filter((s) => s.warehouseId === issueWarehouseId && s.available > 0)
+        .map((s) => ({ materialId: s.materialId, label: `${s.materialName} · доступно ${s.available} ${s.materialUnit}` })),
+    [stocks, issueWarehouseId]
+  );
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -2418,8 +2432,14 @@ function App() {
       void loadCatalogData();
       void loadProjects();
       void loadIssues();
+      void loadStocks(q);
     }
   }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
+
+  useEffect(() => {
+    if (!isStorekeeperMode || !stockOptionsForIssue.length || issueLines.length) return;
+    setIssueLines([{ id: `issue-line-${Date.now()}`, materialId: stockOptionsForIssue[0].materialId, quantity: 1 }]);
+  }, [isStorekeeperMode, stockOptionsForIssue, issueLines.length]);
 
   useEffect(() => {
     localStorage.setItem(ISSUE_FILTER_KEY, issueStatusFilter);
@@ -3763,7 +3783,175 @@ function App() {
 
       {activeTab === "issues" && (
         <div className="card">
-          <h2>Заявки на выдачу</h2>
+          <h2>{isStorekeeperMode ? "Выдача материалов" : "Заявки на выдачу"}</h2>
+          {isStorekeeperMode ? (
+            <>
+              <p className="muted">
+                Выбери материалы со склада, количество и укажи ответственное лицо. Система сразу проводит выдачу.
+              </p>
+              <div className="form">
+                <label>
+                  Склад
+                  <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)}>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Ответственное лицо (свободный ввод)
+                  <input
+                    value={issueResponsible}
+                    onChange={(e) => setIssueResponsible(e.target.value)}
+                    placeholder="ФИО или любое название"
+                  />
+                </label>
+                <label>
+                  Комментарий
+                  <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder="Необязательно" />
+                </label>
+              </div>
+              <h3>Позиции на выдачу</h3>
+              <div className="plainList">
+                {issueLines.map((line, idx) => (
+                  <div className="receiptLine" key={line.id}>
+                    <label>
+                      Материал со склада
+                      <select
+                        value={line.materialId}
+                        onChange={(e) =>
+                          setIssueLines((prev) =>
+                            prev.map((x, i) => (i === idx ? { ...x, materialId: e.target.value } : x))
+                          )
+                        }
+                      >
+                        {stockOptionsForIssue.map((s) => (
+                          <option key={`issue-stock-${s.materialId}`} value={s.materialId}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Количество
+                      <input
+                        type="number"
+                        min={0.001}
+                        step={0.001}
+                        value={line.quantity}
+                        onChange={(e) =>
+                          setIssueLines((prev) =>
+                            prev.map((x, i) => (i === idx ? { ...x, quantity: Number(e.target.value) } : x))
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() => setIssueLines((prev) => prev.filter((x) => x.id !== line.id))}
+                    >
+                      Убрать
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  onClick={() =>
+                    setIssueLines((prev) => [
+                      ...prev,
+                      {
+                        id: `issue-line-${Date.now()}-${Math.random()}`,
+                        materialId: stockOptionsForIssue[0]?.materialId || "",
+                        quantity: 1
+                      }
+                    ])
+                  }
+                >
+                  + Добавить материал
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!token || !issueWarehouseId || !issueResponsible.trim()) {
+                      setIssuesMessage("Укажи склад, материалы и ответственное лицо");
+                      setIssuesTone("error");
+                      return;
+                    }
+                    const validLines = issueLines.filter((x) => x.materialId && x.quantity > 0);
+                    if (!validLines.length) {
+                      setIssuesMessage("Добавь хотя бы одну позицию для выдачи");
+                      setIssuesTone("error");
+                      return;
+                    }
+                    setIssuesMessage("");
+                    const noteParts = [`Ответственный: ${issueResponsible.trim()}`];
+                    if (issueNote.trim()) noteParts.push(issueNote.trim());
+                    const createRes = await fetch(`${API_URL}/api/issues`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        warehouseId: issueWarehouseId,
+                        note: noteParts.join(" | "),
+                        basisType: "OTHER",
+                        items: validLines.map((x) => ({ materialId: x.materialId, quantity: x.quantity }))
+                      })
+                    });
+                    if (!createRes.ok) {
+                      setIssuesMessage("Не удалось создать выдачу");
+                      setIssuesTone(createRes.status === 409 ? "conflict" : "error");
+                      return;
+                    }
+                    const created = (await createRes.json()) as { id: string; number: string };
+                    const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+                      method: "PATCH",
+                      headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (!issueRes.ok) {
+                      const text = await issueRes.text();
+                      setIssuesMessage(`Выдача создана, но не проведена: ${text}`);
+                      setIssuesTone("conflict");
+                      await loadIssues();
+                      return;
+                    }
+                    setIssuesMessage(`Материалы выданы: ${created.number}`);
+                    setIssuesTone("success");
+                    await loadIssues();
+                    await loadStocks(q);
+                    await loadStockMovements();
+                  }}
+                >
+                  Выдать материалы
+                </button>
+              </div>
+              {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
+              <h3>Последние выдачи</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Номер</th>
+                    <th>Статус</th>
+                    <th>Ответственный</th>
+                    <th>Дата</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {issues.slice(0, 20).map((i) => (
+                    <tr key={i.id}>
+                      <td>{i.number}</td>
+                      <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
+                      <td>{(i.note || "").split("|")[0]?.replace("Ответственный:", "").trim() || "—"}</td>
+                      <td>{new Date(i.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <>
           <div className="form">
             <label>
               Склад
@@ -3982,6 +4170,8 @@ function App() {
             <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать на согласовании</button>
             <button onClick={() => setIssueStatusFilter("")}>Сбросить фильтр</button>
           </div>
+          </>
+          )}
         </div>
       )}
 
