@@ -58,6 +58,24 @@ npm run release:preflight
 npm run pack:win
 ```
 
+Собрать полный install-бандл в одну папку:
+
+```bash
+npm run release:bundle
+```
+
+Папка результата:
+- `release/install-bundle`
+
+Подготовить update-канал, который коммитится в git:
+
+```bash
+npm run release:git-channel
+```
+
+После этого файлы лежат в:
+- `updates/win/x64`
+
 Публикация обновлений:
 
 ```bash

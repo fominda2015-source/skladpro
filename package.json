@@ -15,6 +15,8 @@
     "build:api": "npm run build --workspace @skladpro/api",
     "build:desktop": "npm run build:web && npm run build --workspace @skladpro/desktop",
     "pack:win": "npm run build:desktop && npm run pack:win --workspace @skladpro/desktop",
-    "release:preflight": "npm run build:api && npm run build:web && npm run build --workspace @skladpro/desktop"
+    "release:preflight": "npm run build:api && npm run build:web && npm run build --workspace @skladpro/desktop",
+    "release:bundle": "npm run pack:win && node scripts/collect-install-bundle.mjs",
+    "release:git-channel": "npm run release:bundle && node scripts/stage-updates-for-git.mjs"
   }
 }

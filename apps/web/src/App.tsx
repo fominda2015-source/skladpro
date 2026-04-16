@@ -334,6 +334,11 @@ function App() {
   const [expandedStockRowId, setExpandedStockRowId] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [qrScanning, setQrScanning] = useState(false);
+  const [qrScanError, setQrScanError] = useState("");
+  const [qrStream, setQrStream] = useState<MediaStream | null>(null);
+  const qrVideoRef = useRef<HTMLVideoElement | null>(null);
+  const qrDetectTimerRef = useRef<number | null>(null);
   const [activeTab, setActiveTab] = useState<
     | "stocks"
     | "warehouse"
@@ -2465,6 +2470,90 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (!qrScanning) return;
+    if (!("mediaDevices" in navigator) || !navigator.mediaDevices?.getUserMedia) {
+      setQrScanError("Сканер не поддерживается браузером. Введи код вручную.");
+      setQrScanning(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (!qrVideoRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        qrVideoRef.current.srcObject = stream;
+        setQrStream(stream);
+        setQrScanError("");
+
+        const AnyBarcodeDetector = (window as any).BarcodeDetector;
+        if (!AnyBarcodeDetector) {
+          setQrScanError("Сканер доступен только в современных браузерах (BarcodeDetector).");
+          return;
+        }
+        const detector = new AnyBarcodeDetector({ formats: ["qr_code"] });
+
+        const tick = async () => {
+          if (!qrVideoRef.current || cancelled) return;
+          try {
+            const codes = await detector.detect(qrVideoRef.current);
+            if (codes && codes.length) {
+              const value = codes[0].rawValue || "";
+              if (value) {
+                setQrCode(value);
+                stopQrScan();
+                await resolveQrCode();
+                return;
+              }
+            }
+          } catch {
+            // ignore frame errors
+          }
+          if (!cancelled && qrDetectTimerRef.current !== null) {
+            window.clearTimeout(qrDetectTimerRef.current);
+          }
+          if (!cancelled) {
+            qrDetectTimerRef.current = window.setTimeout(tick, 900);
+          }
+        };
+
+        qrDetectTimerRef.current = window.setTimeout(tick, 900);
+      } catch (e) {
+        setQrScanError(`Не удалось открыть камеру: ${String(e)}`);
+        setQrScanning(false);
+      }
+    }
+
+    void start();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qrScanning]);
+
+  function stopQrScan() {
+    if (qrDetectTimerRef.current !== null) {
+      window.clearTimeout(qrDetectTimerRef.current);
+      qrDetectTimerRef.current = null;
+    }
+    if (qrStream) {
+      qrStream.getTracks().forEach((t) => t.stop());
+      setQrStream(null);
+    }
+    setQrScanning(false);
+  }
+
+  useEffect(() => {
+    if (activeTab !== "qr") {
+      stopQrScan();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     if (!isStorekeeperMode || !stockOptionsForIssue.length || issueLines.length) return;
     setIssueLines([{ id: `issue-line-${Date.now()}`, materialId: stockOptionsForIssue[0].materialId, quantity: 1 }]);
   }, [isStorekeeperMode, stockOptionsForIssue, issueLines.length]);
@@ -2727,53 +2816,126 @@ function App() {
             ) : null}
           </div>
         </header>
-        {dashboard && (
+        {dashboard && activeTab === "stocks" && (
           <div className="card dashboardStrip">
             <div className="toolbar dashboardFacts" style={{ flexWrap: "wrap", gap: 12 }}>
-              <span>
+              <button type="button" className="dashboardFactBtn" onClick={() => canReadOperations && setActiveTab("operations")}>
                 Приходов сегодня: <strong>{dashboard.warehouse.receiptsToday}</strong>
-              </span>
-              <span>
+              </button>
+              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("issues")}>
                 Расходов (операций) сегодня: <strong>{dashboard.warehouse.issuesOperationsToday}</strong>
-              </span>
-              <span>
+              </button>
+              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("issues")}>
                 Выдано заявок сегодня: <strong>{dashboard.warehouse.issuesRequestsIssuedToday}</strong>
-              </span>
-              <span>
+              </button>
+              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("approvals")}>
                 На согласовании: <strong>{dashboard.warehouse.pendingApprovals}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadStocks) return;
+                  setQ("low");
+                  void loadStocks("low");
+                  setActiveTab("warehouse");
+                }}
+              >
                 Низкий остаток (&lt;5): <strong>{dashboard.warehouse.lowStockLines}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadTools) return;
+                  setToolStatusFilter("IN_REPAIR");
+                  setActiveTab("tools");
+                }}
+              >
                 Инструмент в ремонте: <strong>{dashboard.warehouse.toolsInRepair}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canMaterialMatch) return;
+                  setActiveTab("matching");
+                }}
+              >
                 Очередь сопоставления: <strong>{dashboard.warehouse.matchQueuePending}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadIntegrations) return;
+                  setActiveTab("integrations");
+                }}
+              >
                 Сбои интеграций (24ч): <strong>{dashboard.warehouse.failedIntegrations24h}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!(canReadIntegrations || canReadTeam)) return;
+                  setActiveTab("inbox");
+                }}
+              >
                 Мои непрочитанные уведомления: <strong>{dashboard.warehouse.unreadNotifications}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!(canReadIntegrations || canReadTeam)) return;
+                  setActiveTab("inbox");
+                }}
+              >
                 Критические уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadStocks) return;
+                  setActiveTab("warehouse");
+                }}
+              >
                 Объект: <strong>{dashboard.object?.warehouseName || "—"}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadLimits) return;
+                  setActiveTab("limits");
+                }}
+              >
                 Проектов: <strong>{dashboard.object?.projectsCount ?? 0}</strong>
-              </span>
-              <span>
+              </button>
+              <button
+                type="button"
+                className="dashboardFactBtn"
+                onClick={() => {
+                  if (!canReadLimits) return;
+                  setActiveTab("limits");
+                }}
+              >
                 Выполнение лимитов: <strong>{dashboard.object?.usagePercent ?? 0}%</strong>
-              </span>
+              </button>
               {dashboard.admin && (
-                <span>
+                <button
+                  type="button"
+                  className="dashboardFactBtn"
+                  onClick={() => {
+                    if (canReadTeam) setActiveTab("team");
+                    else if (canReadAudit) setActiveTab("audit");
+                  }}
+                >
                   Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
                   <strong>{dashboard.admin.auditEvents24h}</strong>
-                </span>
+                </button>
               )}
             </div>
           </div>
@@ -5026,7 +5188,7 @@ function App() {
 
       {activeTab === "qr" && (
         <div className="card">
-          <h2>QR инструмента</h2>
+          <h2>QR-сканирование</h2>
           <div className="toolbar">
             <input
               placeholder="Вставь QR/код инструмента: TOOL:INV-001 или инв. номер"
@@ -5034,8 +5196,25 @@ function App() {
               onChange={(e) => setQrCode(e.target.value)}
             />
             <button onClick={() => void resolveQrCode()}>Найти</button>
+            <button
+              type="button"
+              onClick={() => {
+                setQrMessage("");
+                setQrScanError("");
+                setQrScanning((v) => !v);
+              }}
+            >
+              {qrScanning ? "Остановить сканер" : "Сканировать камерой"}
+            </button>
           </div>
           {qrMessage && <p className="muted">{qrMessage}</p>}
+          {qrScanError && <p className="error">{qrScanError}</p>}
+          {qrScanning && (
+            <div className="qrScanner">
+              <video ref={qrVideoRef} className="qrVideo" autoPlay muted playsInline />
+              <p className="muted">Наведи камеру на QR-код инструмента.</p>
+            </div>
+          )}
 
           {qrResult?.kind === "tool" && (
             <div className="card">

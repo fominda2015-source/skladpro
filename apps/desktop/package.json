@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npm run build && electron dist/main.js",
     "build": "tsc -p tsconfig.json",
-    "pack:win": "npm run build && electron-builder --win nsis --publish never",
+    "pack:win": "npm run build && set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win nsis --publish never",
     "publish:win": "npm run build && electron-builder --win nsis --publish always"
   },
   "dependencies": {
@@ -37,7 +37,13 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     },
     "publish": [
       {

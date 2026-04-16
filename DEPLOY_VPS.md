@@ -87,18 +87,16 @@ docker compose logs -f api
 
 Это означает: при первом старте таблицы создадутся автоматически в PostgreSQL.
 
-## 8) Канал обновлений .exe на сервере
+## 8) Канал обновлений .exe через git
 
-Создать папку обновлений внутри `nginx` контейнера:
-
-```bash
-docker exec -it skladpro-nginx sh -c "mkdir -p /var/www/updates/win/x64"
-```
+Теперь update-канал берется из репозитория:
+- локально: `updates/win/x64`
+- внутри nginx: `/var/www/updates/win/x64`
 
 Проверка в браузере:
-- `http://193.176.78.148/updates/`
+- `http://193.176.78.148/updates/win/x64/latest.yml`
 
-## 9) Публикация новой версии desktop
+## 9) Публикация новой версии desktop (git flow)
 
 На локальной Windows-машине:
 
@@ -107,24 +105,31 @@ docker exec -it skladpro-nginx sh -c "mkdir -p /var/www/updates/win/x64"
 
 ```powershell
 npm install
-npm run publish:win --workspace @skladpro/desktop
+npm run release:git-channel
 ```
 
-Файлы появятся в `apps/desktop/release`.
+Команда:
+- соберет инсталлер
+- соберет единый install-бандл
+- положит update-файлы в `updates/win/x64`
 
-3. Залить файлы на VPS:
+3. Закоммитить и запушить update-файлы:
 
 ```powershell
-scp apps/desktop/release/* root@193.176.78.148:/opt/skladpro/updates_tmp/
+git add updates/win/x64
+git commit -m "release desktop 0.1.x"
+git push
 ```
 
-4. На сервере переместить файлы в update-канал:
+4. На VPS:
 
 ```bash
-docker cp /opt/skladpro/updates_tmp/. skladpro-nginx:/var/www/updates/win/x64/
+cd /opt/skladpro
+git pull
+docker compose up -d nginx
 ```
 
-После этого клиенты получают новую версию автоматически.
+После `git pull` клиенты получают обновление автоматически через `latest.yml`.
 
 ## 10) Бэкапы БД (обязательно)
 

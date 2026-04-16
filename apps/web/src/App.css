@@ -208,13 +208,18 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
   background: #f3f6fa;
   border-bottom: 1px solid #e6eaf2;
   padding: 8px 2px 14px;
   margin-bottom: 14px;
+}
+
+@media (min-width: 901px) {
+  .pageHeader {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
 }
 
 .pageTitleBlock h1 {
@@ -497,6 +502,20 @@ button:hover {
 
 .detailDrawerHeader button {
   width: auto;
+}
+
+.qrScanner {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.qrVideo {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+  border: 1px solid #dbe1ec;
+  background: #000;
 }
 
 .docCenterForm {
