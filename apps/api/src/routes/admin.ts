@@ -37,7 +37,15 @@ const resetPasswordSchema = z.object({
 
 const setUserScopesSchema = z.object({
   warehouseIds: z.array(z.string().min(1)).default([]),
-  projectIds: z.array(z.string().min(1)).default([])
+  projectIds: z.array(z.string().min(1)).default([]),
+  sectionScopes: z
+    .array(
+      z.object({
+        warehouseId: z.string().min(1),
+        section: z.enum(["SS", "EOM"])
+      })
+    )
+    .default([])
 });
 const createObjectSchema = z.object({
   name: z.string().min(2),
@@ -45,6 +53,9 @@ const createObjectSchema = z.object({
   userIds: z.array(z.string().min(1)).default([])
 });
 const bindObjectUsersSchema = z.object({
+  userIds: z.array(z.string().min(1)).default([])
+});
+const bindObjectSectionUsersSchema = z.object({
   userIds: z.array(z.string().min(1)).default([])
 });
 
@@ -58,7 +69,8 @@ adminRouter.get("/users", async (_req, res) => {
       role: true,
       position: true,
       warehouseScopes: { select: { warehouseId: true } },
-      projectScopes: { select: { projectId: true } }
+      projectScopes: { select: { projectId: true } },
+      warehouseSectionScopes: { select: { warehouseId: true, section: true } }
     },
     orderBy: { createdAt: "desc" }
   });
@@ -75,6 +87,7 @@ adminRouter.get("/users", async (_req, res) => {
       customPermissions: normalizePermissions(u.customPermissions),
       warehouseScopeIds: u.warehouseScopes.map((s) => s.warehouseId),
       projectScopeIds: u.projectScopes.map((s) => s.projectId),
+      sectionScopes: u.warehouseSectionScopes,
       createdAt: u.createdAt
     }))
   );
@@ -82,13 +95,15 @@ adminRouter.get("/users", async (_req, res) => {
 
 adminRouter.get("/users/:id/scopes", async (req, res) => {
   const userId = String(req.params.id);
-  const [wh, pj] = await Promise.all([
+  const [wh, pj, sec] = await Promise.all([
     prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
-    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } })
+    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
+    prisma.userWarehouseSectionScope.findMany({ where: { userId }, select: { warehouseId: true, section: true } })
   ]);
   return res.json({
     warehouseIds: wh.map((x) => x.warehouseId),
-    projectIds: pj.map((x) => x.projectId)
+    projectIds: pj.map((x) => x.projectId),
+    sectionScopes: sec
   });
 });
 
@@ -123,6 +138,7 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
     );
     await tx.userWarehouseScope.deleteMany({ where: { userId } });
     await tx.userProjectScope.deleteMany({ where: { userId } });
+    await tx.userWarehouseSectionScope.deleteMany({ where: { userId } });
     if (warehouseIds.length) {
       await tx.userWarehouseScope.createMany({
         data: warehouseIds.map((warehouseId) => ({ userId, warehouseId }))
@@ -133,6 +149,16 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
         data: parsed.data.projectIds.map((projectId) => ({ userId, projectId }))
       });
     }
+    if (parsed.data.sectionScopes.length) {
+      await tx.userWarehouseSectionScope.createMany({
+        data: parsed.data.sectionScopes.map((s) => ({
+          userId,
+          warehouseId: s.warehouseId,
+          section: s.section
+        })),
+        skipDuplicates: true
+      });
+    }
   });
 
   await recordAudit({
@@ -140,12 +166,17 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
     action: "USER_SCOPES_SET",
     entityType: "User",
     entityId: userId,
-    after: { warehouseIds: parsed.data.warehouseIds, projectIds: parsed.data.projectIds }
+    after: {
+      warehouseIds: parsed.data.warehouseIds,
+      projectIds: parsed.data.projectIds,
+      sectionScopes: parsed.data.sectionScopes
+    }
   });
 
   return res.json({
     warehouseIds: parsed.data.warehouseIds,
-    projectIds: parsed.data.projectIds
+    projectIds: parsed.data.projectIds,
+    sectionScopes: parsed.data.sectionScopes
   });
 });
 
@@ -313,9 +344,10 @@ adminRouter.patch("/roles/:name/permissions", async (req, res) => {
 });
 
 adminRouter.get("/objects", async (_req, res) => {
-  const [warehouses, links] = await Promise.all([
+  const [warehouses, links, sectionLinks] = await Promise.all([
     prisma.warehouse.findMany({ orderBy: { createdAt: "desc" } }),
-    prisma.userWarehouseScope.findMany({ select: { userId: true, warehouseId: true } })
+    prisma.userWarehouseScope.findMany({ select: { userId: true, warehouseId: true } }),
+    prisma.userWarehouseSectionScope.findMany({ select: { userId: true, warehouseId: true, section: true } })
   ]);
   const userIdsByWarehouse = new Map<string, string[]>();
   for (const l of links) {
@@ -323,13 +355,23 @@ adminRouter.get("/objects", async (_req, res) => {
     arr.push(l.userId);
     userIdsByWarehouse.set(l.warehouseId, arr);
   }
+  const sectionUserIdsByWarehouse = new Map<string, { SS: string[]; EOM: string[] }>();
+  for (const l of sectionLinks) {
+    const current = sectionUserIdsByWarehouse.get(l.warehouseId) || { SS: [], EOM: [] };
+    current[l.section].push(l.userId);
+    sectionUserIdsByWarehouse.set(l.warehouseId, current);
+  }
   return res.json(
     warehouses.map((w) => ({
       id: w.id,
       name: w.name,
       address: w.address,
       isActive: w.isActive,
-      userIds: Array.from(new Set(userIdsByWarehouse.get(w.id) || []))
+      userIds: Array.from(new Set(userIdsByWarehouse.get(w.id) || [])),
+      sectionUsers: {
+        SS: Array.from(new Set(sectionUserIdsByWarehouse.get(w.id)?.SS || [])),
+        EOM: Array.from(new Set(sectionUserIdsByWarehouse.get(w.id)?.EOM || []))
+      }
     }))
   );
 });
@@ -385,6 +427,44 @@ adminRouter.post("/objects/:id/users", async (req: AuthedRequest, res) => {
     entityType: "Warehouse",
     entityId: warehouseId,
     after: { userIds: parsed.data.userIds }
+  });
+  return res.json({ ok: true });
+});
+
+adminRouter.put("/objects/:id/sections/:section/users", async (req: AuthedRequest, res) => {
+  const parsed = bindObjectSectionUsersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const warehouseId = String(req.params.id);
+  const sectionRaw = String(req.params.section).toUpperCase();
+  if (sectionRaw !== "SS" && sectionRaw !== "EOM") {
+    return res.status(400).json({ error: "Invalid section. Use SS or EOM." });
+  }
+  const section = sectionRaw as "SS" | "EOM";
+  const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!object) return res.status(404).json({ error: "Object not found" });
+  await prisma.$transaction(async (tx) => {
+    await tx.userWarehouseSectionScope.deleteMany({
+      where: {
+        warehouseId,
+        section,
+        ...(parsed.data.userIds.length ? { userId: { notIn: parsed.data.userIds } } : {})
+      }
+    });
+    if (parsed.data.userIds.length) {
+      await tx.userWarehouseSectionScope.createMany({
+        data: parsed.data.userIds.map((userId) => ({ userId, warehouseId, section })),
+        skipDuplicates: true
+      });
+    }
+  });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_SECTION_USERS_SYNC",
+    entityType: "Warehouse",
+    entityId: warehouseId,
+    after: { section, userIds: parsed.data.userIds }
   });
   return res.json({ ok: true });
 });

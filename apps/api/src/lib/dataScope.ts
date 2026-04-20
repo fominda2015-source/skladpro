@@ -10,6 +10,8 @@ export type DataScope = {
   warehouseIds: string[] | null;
   /** Если непустой — ограничение по проектам (заявки, лимиты, проекты в списке). */
   projectIds: string[] | null;
+  /** Доступы по секциям внутри объекта (склада). */
+  sectionScopes: Array<{ warehouseId: string; section: "SS" | "EOM" }>;
 };
 
 export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope> {
@@ -26,16 +28,18 @@ export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope
 
 async function loadDataScope(userId: string, permissions: string[]): Promise<DataScope> {
   if (permissions.includes("*")) {
-    return { unrestricted: true, warehouseIds: null, projectIds: null };
+    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
   }
-  const [whRows, pjRows] = await Promise.all([
+  const [whRows, pjRows, sectionRows] = await Promise.all([
     prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
-    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } })
+    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
+    prisma.userWarehouseSectionScope.findMany({ where: { userId }, select: { warehouseId: true, section: true } })
   ]);
   return {
     unrestricted: false,
     warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : null,
-    projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null
+    projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
+    sectionScopes: sectionRows
   };
 }
 
@@ -93,17 +97,39 @@ export function warehouseWhereFromScope(scope: DataScope): Prisma.WarehouseWhere
 }
 
 export function projectWhereFromScope(scope: DataScope): Prisma.ProjectWhereInput {
-  if (scope.unrestricted || !scope.projectIds?.length) {
+  if (scope.unrestricted) {
     return {};
   }
-  return { id: { in: scope.projectIds } };
+  const parts: Prisma.ProjectWhereInput[] = [];
+  if (scope.projectIds?.length) {
+    parts.push({ id: { in: scope.projectIds } });
+  }
+  if (scope.sectionScopes.length) {
+    parts.push({
+      OR: scope.sectionScopes.map((s) => ({
+        warehouseId: s.warehouseId,
+        section: s.section
+      }))
+    });
+  }
+  if (!parts.length) {
+    return {};
+  }
+  if (parts.length === 1) {
+    return parts[0];
+  }
+  return { AND: parts };
 }
 
 export function projectLimitWhereFromScope(scope: DataScope): Prisma.ProjectLimitWhereInput {
-  if (scope.unrestricted || !scope.projectIds?.length) {
+  if (scope.unrestricted) {
     return {};
   }
-  return { projectId: { in: scope.projectIds } };
+  const pScope = projectWhereFromScope(scope);
+  if (!Object.keys(pScope).length) {
+    return {};
+  }
+  return { project: pScope };
 }
 
 export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {

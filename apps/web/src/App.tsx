@@ -70,7 +70,13 @@ type AdminUser = {
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Position = { id: string; name: string };
-type AdminObject = { id: string; name: string; address?: string | null; userIds: string[] };
+type AdminObject = {
+  id: string;
+  name: string;
+  address?: string | null;
+  userIds: string[];
+  sectionUsers?: { SS: string[]; EOM: string[] };
+};
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = {
   id: string;
@@ -186,7 +192,7 @@ type PagedResponse<T> = {
   pageSize: number;
 };
 type ListPageSize = 20 | 50 | 100;
-type Project = { id: string; name: string; code?: string | null; warehouseId?: string | null };
+type Project = { id: string; name: string; code?: string | null; warehouseId?: string | null; section?: "SS" | "EOM" };
 type ChatUser = { id: string; fullName: string; avatarUrl?: string | null; role: string; position?: string | null };
 type ChatAttachment = { id: string; fileName: string; mimeType?: string | null; dataUrl: string };
 type ChatMessage = { id: string; text: string; createdAt: string; senderId: string; sender: { id: string; fullName: string }; attachments: ChatAttachment[] };
@@ -289,7 +295,9 @@ type AuditLogRow = {
   id: string;
   userId: string;
   action: string;
+  actionLabel?: string;
   entityType: string;
+  entityLabel?: string;
   entityId: string;
   beforeData: unknown;
   afterData: unknown;
@@ -373,6 +381,8 @@ function App() {
   const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
   const [selectedObjectId, setSelectedObjectId] = useState("");
   const [bindObjectUserIds, setBindObjectUserIds] = useState<string[]>([]);
+  const [selectedObjectSection, setSelectedObjectSection] = useState<"SS" | "EOM">("SS");
+  const [bindObjectSectionUserIds, setBindObjectSectionUserIds] = useState<string[]>([]);
   const [objectQuickUserIds, setObjectQuickUserIds] = useState<Record<string, string>>({});
   const [positions, setPositions] = useState<Position[]>([]);
   const [newPositionName, setNewPositionName] = useState("");
@@ -457,6 +467,7 @@ function App() {
   const [projectName, setProjectName] = useState("Проект 1");
   const [projectCode, setProjectCode] = useState("PRJ-001");
   const [projectWarehouseId, setProjectWarehouseId] = useState("");
+  const [projectSection, setProjectSection] = useState<"SS" | "EOM">("SS");
   const [limitProjectId, setLimitProjectId] = useState("");
   const [limitName, setLimitName] = useState("Лимит основного этапа");
   const [limitMaterialId, setLimitMaterialId] = useState("");
@@ -1502,6 +1513,18 @@ function App() {
     return true;
   }
 
+  async function syncObjectSectionUsers(objectId: string, section: "SS" | "EOM", userIds: string[]) {
+    if (!token) return false;
+    const res = await fetch(`${API_URL}/api/admin/objects/${objectId}/sections/${section}/users`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds })
+    });
+    if (!res.ok) return false;
+    await loadAdminData();
+    return true;
+  }
+
   async function runMaterialMatch(enqueue: boolean) {
     if (!token) {
       return;
@@ -1623,6 +1646,7 @@ function App() {
     if (objectsData.length && !selectedObjectId) {
       setSelectedObjectId(objectsData[0].id);
       setBindObjectUserIds(objectsData[0].userIds || []);
+      setBindObjectSectionUserIds(objectsData[0].sectionUsers?.[selectedObjectSection] || []);
     }
     if (usersData.length && !selectedUserId) {
       setSelectedUserId(usersData[0].id);
@@ -3343,9 +3367,9 @@ function App() {
                 <tr key={row.id}>
                   <td>{new Date(row.createdAt).toLocaleString()}</td>
                   <td>{row.user?.fullName || row.userId}</td>
-                  <td>{row.action}</td>
+                  <td>{row.actionLabel || row.action}</td>
                   <td>
-                    {row.entityType} / {row.entityId}
+                    {row.entityLabel || row.entityType} / {row.entityId}
                   </td>
                   <td>
                     <details>
@@ -4498,6 +4522,13 @@ function App() {
                     ))}
                   </select>
                 </label>
+                <label>
+                  Раздел объекта
+                  <select value={projectSection} onChange={(e) => setProjectSection(e.target.value as "SS" | "EOM")}>
+                    <option value="SS">СС</option>
+                    <option value="EOM">ЭОМ</option>
+                  </select>
+                </label>
                 <button
                   disabled={!canWriteLimits}
                   onClick={async () => {
@@ -4505,7 +4536,12 @@ function App() {
                     const res = await fetch(`${API_URL}/api/projects`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: projectName, code: projectCode, warehouseId: projectWarehouseId || undefined })
+                      body: JSON.stringify({
+                        name: projectName,
+                        code: projectCode,
+                        warehouseId: projectWarehouseId || undefined,
+                        section: projectSection
+                      })
                     });
                     if (!res.ok) {
                       setLimitsMessage("Ошибка создания проекта");
@@ -4527,7 +4563,9 @@ function App() {
                   Проект
                   <select value={limitProjectId} onChange={(e) => setLimitProjectId(e.target.value)}>
                     {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{safeName(p.name)}</option>
+                      <option key={p.id} value={p.id}>
+                        {safeName(p.name)} {p.section ? `(${p.section})` : ""}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -5783,11 +5821,27 @@ function App() {
                       setSelectedObjectId(e.target.value);
                       const obj = adminObjects.find((x) => x.id === e.target.value);
                       setBindObjectUserIds(obj?.userIds || []);
+                      setBindObjectSectionUserIds(obj?.sectionUsers?.[selectedObjectSection] || []);
                     }}
                   >
                     {adminObjects.map((o) => (
                       <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
+                  </select>
+                </label>
+                <label>
+                  Раздел для точечного доступа
+                  <select
+                    value={selectedObjectSection}
+                    onChange={(e) => {
+                      const section = e.target.value as "SS" | "EOM";
+                      setSelectedObjectSection(section);
+                      const obj = adminObjects.find((x) => x.id === selectedObjectId);
+                      setBindObjectSectionUserIds(obj?.sectionUsers?.[section] || []);
+                    }}
+                  >
+                    <option value="SS">СС</option>
+                    <option value="EOM">ЭОМ</option>
                   </select>
                 </label>
                 <div className="plainList">
@@ -5798,6 +5852,23 @@ function App() {
                         checked={bindObjectUserIds.includes(u.id)}
                         onChange={(e) => {
                           setBindObjectUserIds((prev) =>
+                            e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                          );
+                        }}
+                      />{" "}
+                      {u.fullName}
+                    </label>
+                  ))}
+                </div>
+                <h4 style={{ margin: "10px 0 6px" }}>Доступ к разделу {selectedObjectSection}</h4>
+                <div className="plainList">
+                  {users.map((u) => (
+                    <label key={`obj-bind-sec-user-${u.id}`} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        checked={bindObjectSectionUserIds.includes(u.id)}
+                        onChange={(e) => {
+                          setBindObjectSectionUserIds((prev) =>
                             e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
                           );
                         }}
@@ -5826,6 +5897,24 @@ function App() {
                   }}
                 >
                   Привязать пользователей
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!selectedObjectId) return;
+                    const ok = await syncObjectSectionUsers(
+                      selectedObjectId,
+                      selectedObjectSection,
+                      bindObjectSectionUserIds
+                    );
+                    if (!ok) {
+                      setAdminMessage("Не удалось сохранить доступы по разделу");
+                      return;
+                    }
+                    setAdminMessage(`Доступы к разделу ${selectedObjectSection} сохранены`);
+                  }}
+                >
+                  Сохранить доступ к разделу
                 </button>
               </div>
             </div>

@@ -7,7 +7,8 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 const createProjectSchema = z.object({
   name: z.string().min(2),
   code: z.string().min(1).optional(),
-  warehouseId: z.string().optional()
+  warehouseId: z.string().optional(),
+  section: z.enum(["SS", "EOM"]).default("SS")
 });
 
 export const projectsRouter = Router();
@@ -42,7 +43,8 @@ projectsRouter.post("/", requirePermission("limits.write"), async (req, res) => 
     data: {
       name: parsed.data.name,
       code: parsed.data.code,
-      warehouseId: parsed.data.warehouseId
+      warehouseId: parsed.data.warehouseId,
+      section: parsed.data.section
     },
     include: { warehouseLinks: { select: { warehouseId: true } }, warehouse: true }
   });

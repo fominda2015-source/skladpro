@@ -7,7 +7,12 @@ import path from "node:path";
 const WEB_URL = process.env.SKLADPRO_WEB_URL || "http://localhost:5173";
 
 function createWindow() {
-  const bundledWebIndex = path.resolve(app.getAppPath(), "web-dist/index.html");
+  const bundledCandidates = [
+    path.resolve(app.getAppPath(), "web-dist/index.html"),
+    path.resolve(process.resourcesPath, "app.asar/web-dist/index.html"),
+    path.resolve(process.resourcesPath, "app/web-dist/index.html")
+  ];
+  const bundledWebIndex = bundledCandidates.find((x) => existsSync(x));
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -20,11 +25,17 @@ function createWindow() {
     }
   });
 
-  if (existsSync(bundledWebIndex)) {
+  win.webContents.on("did-fail-load", (_event, code, desc, url) => {
+    log.error(`Renderer load failed: code=${code} desc=${desc} url=${url}`);
+  });
+
+  if (bundledWebIndex) {
+    log.info(`Loading bundled web index: ${bundledWebIndex}`);
     void win.loadFile(bundledWebIndex);
     return;
   }
 
+  log.warn(`Bundled web index not found, fallback to URL: ${WEB_URL}`);
   void win.loadURL(WEB_URL);
 }
 
