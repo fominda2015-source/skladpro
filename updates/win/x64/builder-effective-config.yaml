@@ -1,0 +1,23 @@
+directories:
+  output: release
+  buildResources: build
+appId: ru.skladpro.desktop
+productName: SkladPro
+files:
+  - filter:
+      - dist/**/*
+  - from: ../web/dist
+    to: web-dist
+    filter:
+      - '**/*'
+win:
+  target: nsis
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+publish:
+  - provider: generic
+    url: http://193.176.78.148/updates/win/x64
+electronVersion: 38.7.0

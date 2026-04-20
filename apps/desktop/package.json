@@ -1,6 +1,6 @@
 {
   "name": "@skladpro/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
@@ -48,7 +48,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "http://194.156.117.250/updates/win/x64"
+        "url": "http://193.176.78.148/updates/win/x64"
       }
     ]
   }

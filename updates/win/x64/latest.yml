@@ -1,8 +1,8 @@
-version: 0.1.0
+version: 0.1.1
 files:
-  - url: SkladPro Setup 0.1.0.exe
-    sha512: 75j8r64STE0bsSIFGoq8BLQgNQC6QTmIfysLxaiYYtz6ueHuXKFP4gjg9g1sYkpPpbbXkRgZWsUKx0aOz7ytQg==
-    size: 96006961
-path: SkladPro Setup 0.1.0.exe
-sha512: 75j8r64STE0bsSIFGoq8BLQgNQC6QTmIfysLxaiYYtz6ueHuXKFP4gjg9g1sYkpPpbbXkRgZWsUKx0aOz7ytQg==
-releaseDate: '2026-04-15T15:31:40.331Z'
+  - url: SkladPro Setup 0.1.1.exe
+    sha512: kNHOF5F7gi6D22tbZ/q1lwtsgAHRtd+RgIWc0WaygykwMs9qvqrOcYj3zmlIRl22XbkIYhlRjfQCECWehTG8GA==
+    size: 96008205
+path: SkladPro Setup 0.1.1.exe
+sha512: kNHOF5F7gi6D22tbZ/q1lwtsgAHRtd+RgIWc0WaygykwMs9qvqrOcYj3zmlIRl22XbkIYhlRjfQCECWehTG8GA==
+releaseDate: '2026-04-20T07:34:00.630Z'
