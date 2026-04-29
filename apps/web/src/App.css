@@ -319,6 +319,44 @@ button:hover {
   box-shadow: 0 4px 16px rgba(12, 24, 52, 0.04);
 }
 
+.sectionToggle {
+  display: inline-flex;
+  border: 1px solid #dbe1ec;
+  border-radius: 999px;
+  background: #fff;
+  overflow: hidden;
+  height: 40px;
+}
+
+.sectionToggleBtn {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 0;
+  background: transparent !important;
+  color: #3d4d6d !important;
+  border: none !important;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sectionToggleBtn.active {
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+.warehouseMode .sectionToggle {
+  border-color: #fdba74;
+}
+
+.warehouseMode .sectionToggleBtn {
+  color: #9a3412 !important;
+}
+
+.warehouseMode .sectionToggleBtn.active {
+  background: #ea580c !important;
+  color: #fff !important;
+}
+
 .topToolbar .topIcon {
   width: 34px;
   height: 34px;

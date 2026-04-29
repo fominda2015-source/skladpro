@@ -1191,6 +1191,12 @@ function App() {
     return true;
   }
 
+  function setSection(next: "SS" | "EOM") {
+    setObjectSectionFilter(next);
+    if (!activeObjectId || !token) return;
+    void updateAuthContext({ warehouseId: activeObjectId, section: next });
+  }
+
   async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
     if (!token) return;
     const res = await fetch(`${API_URL}/api/auth/me/profile`, {
@@ -3004,10 +3010,22 @@ function App() {
             </label>
             <label>
               Раздел
-              <select value={objectSectionFilter} onChange={(e) => setObjectSectionFilter(e.target.value as "SS" | "EOM")}>
-                <option value="SS">СС</option>
-                <option value="EOM">ЭОМ</option>
-              </select>
+              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                  onClick={() => setObjectSectionFilter("SS")}
+                >
+                  СС
+                </button>
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                  onClick={() => setObjectSectionFilter("EOM")}
+                >
+                  ЭОМ
+                </button>
+              </div>
             </label>
             <button
               type="button"
@@ -3106,19 +3124,22 @@ function App() {
                 </option>
               ))}
             </select>
-            <select
-              value={objectSectionFilter}
-              onChange={(e) => {
-                const section = e.target.value as "SS" | "EOM";
-                setObjectSectionFilter(section);
-                if (activeObjectId) {
-                  void updateAuthContext({ warehouseId: activeObjectId, section });
-                }
-              }}
-            >
-              <option value="SS">Раздел: СС</option>
-              <option value="EOM">Раздел: ЭОМ</option>
-            </select>
+            <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+              <button
+                type="button"
+                className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                onClick={() => setSection("SS")}
+              >
+                СС
+              </button>
+              <button
+                type="button"
+                className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                onClick={() => setSection("EOM")}
+              >
+                ЭОМ
+              </button>
+            </div>
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
             {(canReadIntegrations || canReadTeam) && <button className="topIconBtn" onClick={() => setActiveTab("inbox")}>Входящие</button>}
@@ -6827,6 +6848,42 @@ function App() {
         <div className="card">
           <h2>Мой профиль</h2>
           <div className="form">
+            <label>
+              Объект
+              <select
+                value={activeObjectId}
+                onChange={(e) => {
+                  const warehouseId = e.target.value;
+                  if (!warehouseId) return;
+                  void updateAuthContext({ warehouseId, section: objectSectionFilter });
+                }}
+              >
+                {availableObjects.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {safeName(o.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Раздел
+              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                  onClick={() => setSection("SS")}
+                >
+                  СС
+                </button>
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                  onClick={() => setSection("EOM")}
+                >
+                  ЭОМ
+                </button>
+              </div>
+            </label>
             <label>
               Email
               <input value={me.email} disabled />
