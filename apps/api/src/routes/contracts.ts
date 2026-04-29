@@ -6,7 +6,7 @@ export const contractsRouter = Router();
 contractsRouter.get("/meta", (_req, res) => {
   res.json({
     name: "SkladPro API contract",
-    version: "2026-04-15.5",
+    version: "2026-04-29.1",
     format: "openapi-3.1",
     endpoints: {
       health: "/api/health",
@@ -21,6 +21,10 @@ contractsRouter.get("/meta", (_req, res) => {
       feedback: "/api/feedback/messages",
       reports: "/api/reports/object/:projectId/summary.pdf",
       operations: "/api/operations",
+      authContext: "/api/auth/context",
+      materialMappings: "/api/material-mappings",
+      limitImports: "/api/limit-imports",
+      receiptRequests: "/api/receipt-requests",
       documents: "/api/documents",
       materialMatch: "/api/material-match/queue",
       materialMerge: "/api/materials/merge",
@@ -35,7 +39,7 @@ contractsRouter.get("/openapi.json", (_req, res) => {
     openapi: "3.1.0",
     info: {
       title: "SkladPro API",
-      version: "2026-04-15.5",
+      version: "2026-04-29.1",
       description:
         "Formalized API contract for core warehouse flows: auth, materials, stocks, issues, waybills, tools, chat, feedback, reports, documents, integrations and notifications."
     },
@@ -44,6 +48,7 @@ contractsRouter.get("/openapi.json", (_req, res) => {
       { name: "health" },
       { name: "auth" },
       { name: "materials" },
+      { name: "limits" },
       { name: "stocks" },
       { name: "issues" },
       { name: "waybills" },
@@ -355,6 +360,35 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           }
         }
       },
+      "/api/auth/context": {
+        get: {
+          tags: ["auth"],
+          summary: "Get active object and section context",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Context payload" } }
+        },
+        put: {
+          tags: ["auth"],
+          summary: "Update active object and section context",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["warehouseId", "section"],
+                  properties: {
+                    warehouseId: { type: "string" },
+                    section: { type: "string", enum: ["SS", "EOM"] }
+                  }
+                }
+              }
+            }
+          },
+          responses: { "200": { description: "Updated context" } }
+        }
+      },
       "/api/materials": {
         get: {
           tags: ["materials"],
@@ -663,6 +697,61 @@ contractsRouter.get("/openapi.json", (_req, res) => {
               }
             }
           }
+        }
+      },
+      "/api/material-mappings": {
+        get: {
+          tags: ["materials"],
+          summary: "List manual material mapping library",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Mapping rows" } }
+        },
+        put: {
+          tags: ["materials"],
+          summary: "Create or update manual mapping",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Saved mapping row" } }
+        }
+      },
+      "/api/limit-imports": {
+        get: {
+          tags: ["limits"],
+          summary: "List imported limits trees by object/section",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Imported limits" } }
+        }
+      },
+      "/api/limit-imports/upload": {
+        post: {
+          tags: ["limits"],
+          summary: "Upload limits xlsx and build limits tree",
+          security: [{ bearerAuth: [] }],
+          responses: { "201": { description: "Import created" } }
+        }
+      },
+      "/api/receipt-requests": {
+        get: {
+          tags: ["operations"],
+          summary: "List receipt requests imported from xlsx",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Receipt requests" } }
+        }
+      },
+      "/api/receipt-requests/upload": {
+        post: {
+          tags: ["operations"],
+          summary: "Upload order xlsx into receipt requests",
+          security: [{ bearerAuth: [] }],
+          responses: { "201": { description: "Receipt request created" } }
+        }
+      },
+      "/api/receipt-requests/{id}/accept": {
+        post: {
+          tags: ["operations"],
+          summary: "Accept receipt request and post income operation",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Accepted and posted" } }
         }
       },
       "/api/material-match/try": {

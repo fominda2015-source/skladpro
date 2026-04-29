@@ -22,6 +22,25 @@ const updateProfileSchema = z.object({
   fullName: z.string().min(2).max(120).optional(),
   avatarUrl: z.string().max(500000).nullable().optional()
 });
+const updateContextSchema = z.object({
+  warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS")
+});
+
+async function getAllowedWarehouses(userId: string, permissions: string[]) {
+  if (permissions.includes("*")) {
+    return prisma.warehouse.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, address: true }
+    });
+  }
+  const scopes = await prisma.userWarehouseScope.findMany({
+    where: { userId },
+    select: { warehouse: { select: { id: true, name: true, address: true } } }
+  });
+  return scopes.map((x) => x.warehouse);
+}
 
 export const authRouter = Router();
 
@@ -33,7 +52,7 @@ authRouter.post("/login", async (req, res) => {
 
   const user = await prisma.user.findUnique({
     where: { email: parsed.data.email },
-    include: { role: true, position: true }
+    include: { role: true, position: true, activeWarehouse: { select: { id: true, name: true, address: true } } }
   });
 
   if (!user) {
@@ -47,6 +66,17 @@ authRouter.post("/login", async (req, res) => {
 
   const roleName = user.role.name as RoleName;
   const permissions = getEffectivePermissions(user.role.permissions, user.customPermissions);
+  const allowedWarehouses = await getAllowedWarehouses(user.id, permissions);
+  const activeWarehouseId =
+    user.activeWarehouseId && allowedWarehouses.some((w) => w.id === user.activeWarehouseId)
+      ? user.activeWarehouseId
+      : allowedWarehouses[0]?.id || null;
+  if (activeWarehouseId && activeWarehouseId !== user.activeWarehouseId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { activeWarehouseId, activeSection: user.activeSection || "SS" }
+    });
+  }
   const token = jwt.sign(
     { userId: user.id, role: roleName, email: user.email, permissions },
     config.jwtSecret,
@@ -62,7 +92,11 @@ authRouter.post("/login", async (req, res) => {
       avatarUrl: user.avatarUrl,
       position: user.position?.name || null,
       role: roleName,
-      permissions
+      permissions,
+      activeWarehouseId,
+      activeSection: user.activeSection || "SS",
+      requireObjectSelection: !activeWarehouseId,
+      availableObjects: allowedWarehouses
     }
   });
 });
@@ -70,11 +104,17 @@ authRouter.post("/login", async (req, res) => {
 authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   const me = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    include: { role: true, position: true }
+    include: { role: true, position: true, activeWarehouse: { select: { id: true, name: true, address: true } } }
   });
   if (!me) {
     return res.status(404).json({ error: "User not found" });
   }
+  const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
+  const allowedWarehouses = await getAllowedWarehouses(me.id, permissions);
+  const activeWarehouseId =
+    me.activeWarehouseId && allowedWarehouses.some((w) => w.id === me.activeWarehouseId)
+      ? me.activeWarehouseId
+      : allowedWarehouses[0]?.id || null;
   return res.json({
     id: me.id,
     email: me.email,
@@ -82,7 +122,54 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     avatarUrl: me.avatarUrl,
     position: me.position?.name || null,
     role: me.role.name,
-    permissions: getEffectivePermissions(me.role.permissions, me.customPermissions)
+    permissions,
+    activeWarehouseId,
+    activeSection: me.activeSection || "SS",
+    requireObjectSelection: !activeWarehouseId,
+    availableObjects: allowedWarehouses
+  });
+});
+
+authRouter.get("/context", requireAuth, async (req: AuthedRequest, res) => {
+  const me = await prisma.user.findUnique({
+    where: { id: req.user!.userId },
+    include: { role: true, activeWarehouse: { select: { id: true, name: true, address: true } } }
+  });
+  if (!me) return res.status(404).json({ error: "User not found" });
+  const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
+  const objects = await getAllowedWarehouses(me.id, permissions);
+  return res.json({
+    activeWarehouseId: me.activeWarehouseId,
+    activeSection: me.activeSection || "SS",
+    objects
+  });
+});
+
+authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = updateContextSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const me = await prisma.user.findUnique({
+    where: { id: req.user!.userId },
+    include: { role: true }
+  });
+  if (!me) return res.status(404).json({ error: "User not found" });
+  const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
+  const objects = await getAllowedWarehouses(me.id, permissions);
+  if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
+    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+  }
+  const updated = await prisma.user.update({
+    where: { id: me.id },
+    data: {
+      activeWarehouseId: parsed.data.warehouseId,
+      activeSection: parsed.data.section
+    }
+  });
+  return res.json({
+    activeWarehouseId: updated.activeWarehouseId,
+    activeSection: updated.activeSection || "SS"
   });
 });
 

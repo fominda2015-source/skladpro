@@ -12,7 +12,19 @@ import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/R
 
 type LoginResponse = {
   token: string;
-  user: { id: string; email: string; fullName: string; avatarUrl?: string | null; position?: string | null; role: string; permissions: string[] };
+  user: {
+    id: string;
+    email: string;
+    fullName: string;
+    avatarUrl?: string | null;
+    position?: string | null;
+    role: string;
+    permissions: string[];
+    activeWarehouseId?: string | null;
+    activeSection?: "SS" | "EOM";
+    requireObjectSelection?: boolean;
+    availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
+  };
 };
 type StockRow = {
   id: string;
@@ -55,6 +67,10 @@ type MeResponse = {
   position?: string | null;
   role: string;
   permissions: string[];
+  activeWarehouseId?: string | null;
+  activeSection?: "SS" | "EOM";
+  requireObjectSelection?: boolean;
+  availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
 };
 type AdminUser = {
   id: string;
@@ -331,11 +347,52 @@ type TeamTask = {
   warehouse?: { id: string; name: string } | null;
   createdAt: string;
 };
+type LimitImportNode = {
+  id: string;
+  parentId?: string | null;
+  nodeType: "GROUP" | "MATERIAL";
+  title: string;
+  materialName?: string | null;
+  unit?: string | null;
+  plannedQty?: string | number | null;
+  issuedQty?: string | number | null;
+  orderNo: number;
+};
+type LimitImportTemplate = {
+  id: string;
+  warehouseId: string;
+  section: "SS" | "EOM";
+  title: string;
+  sourceFileName?: string | null;
+  nodes: LimitImportNode[];
+  createdAt: string;
+};
+type ReceiptRequestItem = {
+  id: string;
+  sourceName: string;
+  sourceUnit?: string | null;
+  quantity: string | number;
+  mappedMaterialId?: string | null;
+  acceptedQty?: string | number | null;
+};
+type ReceiptRequestRow = {
+  id: string;
+  number: string;
+  warehouseId: string;
+  section: "SS" | "EOM";
+  status: "NEW" | "IN_PROGRESS" | "RECEIVED" | "CANCELLED";
+  sourceFileName?: string | null;
+  items: ReceiptRequestItem[];
+  createdAt: string;
+};
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
   const [password, setPassword] = useState("1111");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
   const [authError, setAuthError] = useState("");
+  const [availableObjects, setAvailableObjects] = useState<Array<{ id: string; name: string; address?: string | null }>>([]);
+  const [activeObjectId, setActiveObjectId] = useState("");
+  const [mustPickObject, setMustPickObject] = useState(false);
   const [stocks, setStocks] = useState<StockRow[]>([]);
   const [q, setQ] = useState("");
   const [objectSectionFilter, setObjectSectionFilter] = useState<"SS" | "EOM">("SS");
@@ -466,6 +523,9 @@ function App() {
   const [issueQuantity, setIssueQuantity] = useState(1);
   const [issueResponsible, setIssueResponsible] = useState("");
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
+  const [issueSelectedMaterialIds, setIssueSelectedMaterialIds] = useState<string[]>([]);
+  const [issueQuantitiesByMaterial, setIssueQuantitiesByMaterial] = useState<Record<string, number>>({});
+  const [issueLimitMappingByMaterial, setIssueLimitMappingByMaterial] = useState<Record<string, string>>({});
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
@@ -479,6 +539,11 @@ function App() {
   const [limitPlannedQty, setLimitPlannedQty] = useState(100);
   const [limitIdForSummary, setLimitIdForSummary] = useState("");
   const [limitSummary, setLimitSummary] = useState<ProjectLimitSummary | null>(null);
+  const [limitImportFile, setLimitImportFile] = useState<File | null>(null);
+  const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
+  const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
+  const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
+  const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
   const [docEntityType, setDocEntityType] = useState<"operation" | "issue">("issue");
@@ -1033,6 +1098,7 @@ function App() {
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
   const canReadTeam = useMemo(() => hasPermission("team.read"), [me]);
+  const showLegacyMatching = false;
   const canWriteTeamTasks = useMemo(() => hasPermission("team.tasks.write"), [me]);
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
@@ -1099,6 +1165,30 @@ function App() {
     setMe(data);
     setProfileFullName(data.fullName);
     setProfileAvatarUrl(data.avatarUrl ?? null);
+    if (Array.isArray(data.availableObjects)) {
+      setAvailableObjects(data.availableObjects);
+    }
+    if (data.activeWarehouseId) {
+      setActiveObjectId(data.activeWarehouseId);
+    }
+    if (data.activeSection) {
+      setObjectSectionFilter(data.activeSection);
+    }
+    setMustPickObject(Boolean(data.requireObjectSelection));
+  }
+
+  async function updateAuthContext(next: { warehouseId: string; section: "SS" | "EOM" }) {
+    if (!token) return false;
+    const res = await fetch(`${API_URL}/api/auth/context`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(next)
+    });
+    if (!res.ok) return false;
+    setActiveObjectId(next.warehouseId);
+    setObjectSectionFilter(next.section);
+    setMustPickObject(false);
+    return true;
   }
 
   async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
@@ -1717,6 +1807,103 @@ function App() {
     }
   }
 
+  async function loadLimitTemplates() {
+    if (!token || !activeObjectId) return;
+    const params = new URLSearchParams({
+      warehouseId: activeObjectId,
+      section: objectSectionFilter
+    });
+    const res = await fetch(`${API_URL}/api/limit-imports?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setLimitTemplates((await res.json()) as LimitImportTemplate[]);
+  }
+
+  async function uploadLimitTemplate() {
+    if (!token || !activeObjectId || !limitImportFile) return;
+    const form = new FormData();
+    form.append("file", limitImportFile);
+    form.append("warehouseId", activeObjectId);
+    form.append("section", objectSectionFilter);
+    const res = await fetch(`${API_URL}/api/limit-imports/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось загрузить лимиты из Excel");
+      return;
+    }
+    setLimitsMessage("Лимиты загружены из Excel");
+    setLimitImportFile(null);
+    await loadLimitTemplates();
+  }
+
+  async function loadReceiptRequests() {
+    if (!token || !activeObjectId) return;
+    const params = new URLSearchParams({
+      warehouseId: activeObjectId,
+      section: objectSectionFilter
+    });
+    const res = await fetch(`${API_URL}/api/receipt-requests?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setReceiptRequests((await res.json()) as ReceiptRequestRow[]);
+  }
+
+  async function uploadReceiptRequest() {
+    if (!token || !activeObjectId || !receiptRequestFile) return;
+    const form = new FormData();
+    form.append("file", receiptRequestFile);
+    form.append("warehouseId", activeObjectId);
+    form.append("section", objectSectionFilter);
+    const res = await fetch(`${API_URL}/api/receipt-requests/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+    if (!res.ok) {
+      setOpsMessage("Не удалось загрузить заявку из Excel");
+      return;
+    }
+    setOpsMessage("Заявка загружена");
+    setReceiptRequestFile(null);
+    await loadReceiptRequests();
+  }
+
+  async function acceptReceiptRequest(row: ReceiptRequestRow) {
+    if (!token) return;
+    const itemMappings = row.items
+      .filter((x) => x.mappedMaterialId)
+      .map((x) => ({
+        itemId: x.id,
+        materialId: x.mappedMaterialId!,
+        acceptedQty: Number(x.acceptedQty || x.quantity)
+      }));
+    if (!itemMappings.length) {
+      setOpsMessage("Для приемки нужно сопоставить хотя бы одну позицию");
+      return;
+    }
+    const res = await fetch(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        itemMappings,
+        documentNumber: row.number
+      })
+    });
+    if (!res.ok) {
+      setOpsMessage("Не удалось принять заявку");
+      return;
+    }
+    setOpsMessage("Заявка принята и оприходована");
+    await loadReceiptRequests();
+    await loadStocks(q);
+    await loadOperations();
+  }
+
   async function loadIssues() {
     if (!token) return;
     setIssuesError("");
@@ -2296,7 +2483,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (token) {
+    if (token && !mustPickObject) {
       void loadMe();
       void loadStocks(q);
       void loadIssues();
@@ -2304,7 +2491,7 @@ function App() {
       void loadChatUsers();
       void loadConversations();
     }
-  }, [token, objectSectionFilter]);
+  }, [token, objectSectionFilter, mustPickObject]);
 
   useEffect(() => {
     if (!token || !canDashboard) {
@@ -2348,9 +2535,9 @@ function App() {
 
   useEffect(() => {
     if (!dashboardWarehouseId && warehouses.length) {
-      setDashboardWarehouseId(warehouses[0].id);
+      setDashboardWarehouseId(activeObjectId || warehouses[0].id);
     }
-  }, [dashboardWarehouseId, warehouses]);
+  }, [dashboardWarehouseId, warehouses, activeObjectId]);
 
   useEffect(() => {
     if (!materials.length || receiptLines.length) return;
@@ -2489,6 +2676,7 @@ function App() {
       void loadCatalogData();
       if (activeTab === "operations") {
         void loadOperations();
+        void loadReceiptRequests();
       }
     }
   }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter]);
@@ -2651,6 +2839,7 @@ function App() {
     if (token && activeTab === "limits") {
       void loadCatalogData();
       void loadProjects();
+      void loadLimitTemplates();
     }
   }, [token, activeTab]);
 
@@ -2709,6 +2898,15 @@ function App() {
     }
   }, [docEntityType, issues, operations, docEntityId, warehouses, materials, waybillFromWarehouseId, waybillMaterialId]);
 
+  useEffect(() => {
+    if (activeObjectId) {
+      setOpWarehouseId(activeObjectId);
+      setIssueWarehouseId(activeObjectId);
+      setToolWarehouseId(activeObjectId);
+      if (!dashboardWarehouseId) setDashboardWarehouseId(activeObjectId);
+    }
+  }, [activeObjectId, dashboardWarehouseId]);
+
   async function onLoginSubmit(e: FormEvent) {
     e.preventDefault();
     setAuthError("");
@@ -2723,6 +2921,16 @@ function App() {
       }
       const data = (await res.json()) as LoginResponse;
       localStorage.setItem(TOKEN_KEY, data.token);
+      if (Array.isArray(data.user.availableObjects)) {
+        setAvailableObjects(data.user.availableObjects);
+      }
+      if (data.user.activeWarehouseId) {
+        setActiveObjectId(data.user.activeWarehouseId);
+      }
+      if (data.user.activeSection) {
+        setObjectSectionFilter(data.user.activeSection);
+      }
+      setMustPickObject(Boolean(data.user.requireObjectSelection));
       setToken(data.token);
     } catch (err) {
       setAuthError(String(err));
@@ -2741,6 +2949,9 @@ function App() {
     setUsers([]);
     setRoles([]);
     setMe(null);
+    setAvailableObjects([]);
+    setActiveObjectId("");
+    setMustPickObject(false);
   }
 
   if (!isAuthed) {
@@ -2773,6 +2984,49 @@ function App() {
     );
   }
 
+  if (mustPickObject) {
+    return (
+      <main className="loginShell">
+        <div className="loginCard card">
+          <h2>Выберите объект</h2>
+          <p className="muted">После выбора вы войдете в контур объекта. Сменить можно в верхней панели.</p>
+          <div className="form">
+            <label>
+              Объект
+              <select value={activeObjectId} onChange={(e) => setActiveObjectId(e.target.value)}>
+                <option value="">— выберите —</option>
+                {availableObjects.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {safeName(o.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Раздел
+              <select value={objectSectionFilter} onChange={(e) => setObjectSectionFilter(e.target.value as "SS" | "EOM")}>
+                <option value="SS">СС</option>
+                <option value="EOM">ЭОМ</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!activeObjectId}
+              onClick={async () => {
+                if (!activeObjectId) return;
+                const ok = await updateAuthContext({ warehouseId: activeObjectId, section: objectSectionFilter });
+                if (!ok) setAuthError("Не удалось сохранить выбор объекта");
+              }}
+            >
+              Войти в объект
+            </button>
+            {authError && <p className="error">{authError}</p>}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
       <aside className={`sidebar ${mobileNavOpen ? "mobileOpen" : ""}`}>
@@ -2791,7 +3045,7 @@ function App() {
         <p className="navSectionTitle">Контроль</p>
         {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
-        {canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
+        {showLegacyMatching && canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
         <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
@@ -2838,7 +3092,30 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            <select value={objectSectionFilter} onChange={(e) => setObjectSectionFilter(e.target.value as "SS" | "EOM")}>
+            <select
+              value={activeObjectId}
+              onChange={(e) => {
+                const warehouseId = e.target.value;
+                if (!warehouseId) return;
+                void updateAuthContext({ warehouseId, section: objectSectionFilter });
+              }}
+            >
+              {availableObjects.map((o) => (
+                <option key={o.id} value={o.id}>
+                  Объект: {safeName(o.name)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={objectSectionFilter}
+              onChange={(e) => {
+                const section = e.target.value as "SS" | "EOM";
+                setObjectSectionFilter(section);
+                if (activeObjectId) {
+                  void updateAuthContext({ warehouseId: activeObjectId, section });
+                }
+              }}
+            >
               <option value="SS">Раздел: СС</option>
               <option value="EOM">Раздел: ЭОМ</option>
             </select>
@@ -2899,7 +3176,7 @@ function App() {
                 type="button"
                 className="dashboardFactBtn"
                 onClick={() => {
-                  if (!canMaterialMatch) return;
+                  if (!canMaterialMatch || !showLegacyMatching) return;
                   setActiveTab("matching");
                 }}
               >
@@ -2990,7 +3267,9 @@ function App() {
                 <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("warehouse"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Перемещения</span><strong>{dashboard?.warehouse.transfersToday ?? waybills.length}</strong></button>
-                <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
+                {showLegacyMatching ? (
+                  <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
+                ) : null}
                 <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
               </div>
               <div className="card">
@@ -3001,10 +3280,12 @@ function App() {
                 <div className="toolbar">
                   <label>
                     Объект
-                    <select value={dashboardWarehouseId} onChange={(e) => setDashboardWarehouseId(e.target.value)}>
-                      {warehouses.map((w) => (
-                        <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                      ))}
+                    <select value={dashboardWarehouseId} onChange={(e) => setDashboardWarehouseId(e.target.value)} disabled>
+                      {warehouses
+                        .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
+                        .map((w) => (
+                          <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                        ))}
                     </select>
                   </label>
                   <button type="button" onClick={() => setActiveTab("warehouse")}>Открыть склад</button>
@@ -3107,7 +3388,7 @@ function App() {
             </aside>
           </div>
         )}
-      {activeTab === "matching" && (
+      {showLegacyMatching && activeTab === "matching" && (
         <div className="card">
           <h2>Сопоставление с канонической номенклатурой</h2>
           <p className="muted">
@@ -3826,13 +4107,88 @@ function App() {
           <h2>Приходы (упрощенно)</h2>
           <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           <p className="muted">Один экран: добавляй материалы/инструменты, документы и проводи приход.</p>
+          <h3>Заявки из Excel</h3>
+          <div className="toolbar">
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setReceiptRequestFile(e.target.files?.[0] || null)}
+            />
+            <button type="button" onClick={() => void uploadReceiptRequest()} disabled={!receiptRequestFile}>
+              Загрузить заявку
+            </button>
+          </div>
+          {receiptRequests.length > 0 && (
+            <table className="desktopTable">
+              <thead>
+                <tr>
+                  <th>Заявка</th>
+                  <th>Статус</th>
+                  <th>Позиции и сопоставление</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receiptRequests.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.number}</td>
+                    <td>{row.status}</td>
+                    <td>
+                      <div className="plainList">
+                        {row.items.map((it) => (
+                          <div key={it.id} className="toolbar" style={{ marginBottom: 6 }}>
+                            <span>{it.sourceName} ({it.sourceUnit || "шт"}) · {it.quantity}</span>
+                            <select
+                              value={it.mappedMaterialId || ""}
+                              onChange={(e) =>
+                                setReceiptRequests((prev) =>
+                                  prev.map((r) =>
+                                    r.id !== row.id
+                                      ? r
+                                      : {
+                                          ...r,
+                                          items: r.items.map((x) =>
+                                            x.id === it.id ? { ...x, mappedMaterialId: e.target.value || null } : x
+                                          )
+                                        }
+                                  )
+                                )
+                              }
+                            >
+                              <option value="">Сопоставить с материалом лимита</option>
+                              {materials.map((m) => (
+                                <option key={`rr-map-${row.id}-${it.id}-${m.id}`} value={m.id}>
+                                  {safeName(m.name)} ({m.unit})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => void acceptReceiptRequest(row)}
+                        disabled={row.status === "RECEIVED"}
+                      >
+                        Принять и оприходовать
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           <div className="form">
             <label>
               Склад
-              <select value={opWarehouseId} onChange={(e) => setOpWarehouseId(e.target.value)}>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                ))}
+              <select value={opWarehouseId} onChange={(e) => setOpWarehouseId(e.target.value)} disabled>
+                {warehouses
+                  .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
+                  .map((w) => (
+                    <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                  ))}
               </select>
             </label>
             <label>
@@ -4095,10 +4451,12 @@ function App() {
               <div className="form">
                 <label>
                   Склад
-                  <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)}>
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                    ))}
+                  <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)} disabled>
+                    {warehouses
+                      .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
+                      .map((w) => (
+                        <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                      ))}
                   </select>
                 </label>
                 <label>
@@ -4115,67 +4473,78 @@ function App() {
                 </label>
               </div>
               <h3>Позиции на выдачу</h3>
-              <div className="plainList">
-                {issueLines.map((line, idx) => (
-                  <div className="receiptLine" key={line.id}>
-                    <label>
-                      Материал со склада
-                      <select
-                        value={line.materialId}
-                        onChange={(e) =>
-                          setIssueLines((prev) =>
-                            prev.map((x, i) => (i === idx ? { ...x, materialId: e.target.value } : x))
-                          )
-                        }
-                      >
-                        {stockOptionsForIssue.map((s) => (
-                          <option key={`issue-stock-${s.materialId}`} value={s.materialId}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Количество
-                      <input
-                        type="number"
-                        min={0.001}
-                        step={0.001}
-                        value={line.quantity}
-                        onChange={(e) =>
-                          setIssueLines((prev) =>
-                            prev.map((x, i) => (i === idx ? { ...x, quantity: Number(e.target.value) } : x))
-                          )
-                        }
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() => setIssueLines((prev) => prev.filter((x) => x.id !== line.id))}
-                    >
-                      Убрать
-                    </button>
+              <div className="grid2">
+                <div className="card">
+                  <h4>1) Выбор со склада</h4>
+                  <div className="plainList">
+                    {stocks
+                      .filter((s) => s.warehouseId === issueWarehouseId && s.available > 0)
+                      .map((s) => (
+                        <label key={`pick-${s.materialId}`} style={{ display: "block" }}>
+                          <input
+                            type="checkbox"
+                            checked={issueSelectedMaterialIds.includes(s.materialId)}
+                            onChange={(e) => {
+                              setIssueSelectedMaterialIds((prev) =>
+                                e.target.checked ? [...prev, s.materialId] : prev.filter((id) => id !== s.materialId)
+                              );
+                              setIssueQuantitiesByMaterial((prev) => ({
+                                ...prev,
+                                [s.materialId]: prev[s.materialId] || 1
+                              }));
+                            }}
+                          />{" "}
+                          {s.materialName} · доступно {s.available} {s.materialUnit}
+                          {issueSelectedMaterialIds.includes(s.materialId) && (
+                            <input
+                              style={{ marginLeft: 8, width: 96 }}
+                              type="number"
+                              min={0.001}
+                              step={0.001}
+                              value={issueQuantitiesByMaterial[s.materialId] || 1}
+                              onChange={(e) =>
+                                setIssueQuantitiesByMaterial((prev) => ({
+                                  ...prev,
+                                  [s.materialId]: Number(e.target.value)
+                                }))
+                              }
+                            />
+                          )}
+                        </label>
+                      ))}
                   </div>
-                ))}
+                </div>
+                <div className="card">
+                  <h4>2) Привязка к лимитам</h4>
+                  <div className="plainList">
+                    {issueSelectedMaterialIds.map((materialId) => {
+                      const stockRow = stocks.find((s) => s.materialId === materialId && s.warehouseId === issueWarehouseId);
+                      return (
+                        <label key={`map-issue-${materialId}`} style={{ display: "block" }}>
+                          <span>{stockRow?.materialName || materialId}</span>
+                          <select
+                            value={issueLimitMappingByMaterial[materialId] || ""}
+                            onChange={(e) =>
+                              setIssueLimitMappingByMaterial((prev) => ({
+                                ...prev,
+                                [materialId]: e.target.value
+                              }))
+                            }
+                          >
+                            <option value="">Сопоставить с материалом лимита</option>
+                            {materials.map((m) => (
+                              <option key={`issue-map-to-${materialId}-${m.id}`} value={m.id}>
+                                {safeName(m.name)} ({m.unit})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
               <div className="toolbar">
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  onClick={() =>
-                    setIssueLines((prev) => [
-                      ...prev,
-                      {
-                        id: `issue-line-${Date.now()}-${Math.random()}`,
-                        materialId: stockOptionsForIssue[0]?.materialId || "",
-                        quantity: 1
-                      }
-                    ])
-                  }
-                >
-                  + Добавить материал
-                </button>
                 <button
                   type="button"
                   onClick={async () => {
@@ -4184,11 +4553,40 @@ function App() {
                       setIssuesTone("error");
                       return;
                     }
-                    const validLines = issueLines.filter((x) => x.materialId && x.quantity > 0);
+                    const validLines = issueSelectedMaterialIds
+                      .map((materialId) => ({
+                        materialId,
+                        quantity: issueQuantitiesByMaterial[materialId] || 1
+                      }))
+                      .filter((x) => x.materialId && x.quantity > 0);
                     if (!validLines.length) {
                       setIssuesMessage("Добавь хотя бы одну позицию для выдачи");
                       setIssuesTone("error");
                       return;
+                    }
+                    const allMapped = validLines.every((x) => Boolean(issueLimitMappingByMaterial[x.materialId]));
+                    if (!allMapped) {
+                      setIssuesMessage("Сопоставь все выбранные позиции с материалами лимитов");
+                      setIssuesTone("conflict");
+                      return;
+                    }
+                    if (activeObjectId) {
+                      for (const line of validLines) {
+                        const stockRow = stocks.find(
+                          (s) => s.warehouseId === issueWarehouseId && s.materialId === line.materialId
+                        );
+                        await fetch(`${API_URL}/api/material-mappings`, {
+                          method: "PUT",
+                          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            warehouseId: activeObjectId,
+                            section: objectSectionFilter,
+                            sourceName: stockRow?.materialName || line.materialId,
+                            sourceUnit: stockRow?.materialUnit || null,
+                            targetMaterialId: issueLimitMappingByMaterial[line.materialId]
+                          })
+                        });
+                      }
                     }
                     setIssuesMessage("");
                     const createRes = await fetch(`${API_URL}/api/issues`, {
@@ -4523,6 +4921,71 @@ function App() {
       {activeTab === "limits" && (
         <div className="card">
           <h2>Лимиты по проектам</h2>
+          <p className="muted">Импортируй лимиты из Excel (drag&drop/файл), затем раскрывай разделы до материалов и отслеживай прогресс.</p>
+          <div
+            className="card"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files?.[0];
+              if (file) setLimitImportFile(file);
+            }}
+          >
+            <h3>Импорт лимитов (Excel)</h3>
+            <div className="toolbar">
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => setLimitImportFile(e.target.files?.[0] || null)} />
+              <button type="button" onClick={() => void uploadLimitTemplate()} disabled={!limitImportFile}>
+                Загрузить лимиты
+              </button>
+            </div>
+            {limitImportFile && <p className="muted">Файл: {limitImportFile.name}</p>}
+          </div>
+          {limitTemplates.map((tpl) => (
+            <div key={`limit-tpl-${tpl.id}`} className="card" style={{ marginTop: 10 }}>
+              <div className="rightCardHeader">
+                <h3>{tpl.title}</h3>
+                <span className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</span>
+              </div>
+              <div className="plainList">
+                {tpl.nodes
+                  .filter((n) => !n.parentId)
+                  .map((root) => (
+                    <Fragment key={root.id}>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() =>
+                          setExpandedLimitNodes((prev) => ({ ...prev, [root.id]: !prev[root.id] }))
+                        }
+                      >
+                        {expandedLimitNodes[root.id] ? "▾" : "▸"} {root.title}
+                      </button>
+                      {expandedLimitNodes[root.id] &&
+                        tpl.nodes
+                          .filter((n) => n.parentId === root.id)
+                          .map((ch) => (
+                            <div key={ch.id} style={{ marginLeft: 20 }}>
+                              {ch.nodeType === "GROUP" ? (
+                                <strong>{ch.title}</strong>
+                              ) : (
+                                <div>
+                                  {ch.materialName || ch.title} ({ch.unit || "шт"}){" "}
+                                  <span className="muted">
+                                    {Number(ch.issuedQty || 0)} / {Number(ch.plannedQty || 0)}
+                                  </span>
+                                  <progress
+                                    max={Math.max(1, Number(ch.plannedQty || 0))}
+                                    value={Math.min(Number(ch.issuedQty || 0), Math.max(1, Number(ch.plannedQty || 0)))}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                    </Fragment>
+                  ))}
+              </div>
+            </div>
+          ))}
           <div className="grid2">
             <div>
               <h3>Создать проект</h3>
@@ -5377,11 +5840,13 @@ function App() {
             </label>
             <label>
               Склад
-              <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
+              <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)} disabled>
                 <option value="">Не указан</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                ))}
+                {warehouses
+                  .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
+                  .map((w) => (
+                    <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+                  ))}
               </select>
             </label>
             <label>

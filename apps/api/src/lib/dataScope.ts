@@ -27,19 +27,46 @@ export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope
 }
 
 async function loadDataScope(userId: string, permissions: string[]): Promise<DataScope> {
-  if (permissions.includes("*")) {
-    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
-  }
-  const [whRows, pjRows, sectionRows] = await Promise.all([
+  const [userRow, whRows, pjRows, sectionRows] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { activeWarehouseId: true, activeSection: true }
+    }),
     prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
     prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
     prisma.userWarehouseSectionScope.findMany({ where: { userId }, select: { warehouseId: true, section: true } })
   ]);
+  if (permissions.includes("*")) {
+    if (userRow?.activeWarehouseId) {
+      return {
+        unrestricted: false,
+        warehouseIds: [userRow.activeWarehouseId],
+        projectIds: null,
+        sectionScopes: userRow.activeSection
+          ? [{ warehouseId: userRow.activeWarehouseId, section: userRow.activeSection }]
+          : []
+      };
+    }
+    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
+  }
+  const activeWarehouseId = userRow?.activeWarehouseId || null;
+  const activeSection = userRow?.activeSection || null;
+  const scopedWarehouses = whRows.map((r) => r.warehouseId);
+  const warehouseIds =
+    activeWarehouseId && scopedWarehouses.includes(activeWarehouseId) ? [activeWarehouseId] : scopedWarehouses;
+  const filteredSections = sectionRows.filter((s) =>
+    activeWarehouseId ? s.warehouseId === activeWarehouseId : true
+  );
+  const sectionScopes = activeSection
+    ? filteredSections
+        .filter((s) => s.section === activeSection)
+        .map((s) => ({ warehouseId: s.warehouseId, section: s.section }))
+    : filteredSections.map((s) => ({ warehouseId: s.warehouseId, section: s.section }));
   return {
     unrestricted: false,
-    warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : null,
+    warehouseIds: warehouseIds.length ? warehouseIds : null,
     projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
-    sectionScopes: sectionRows
+    sectionScopes
   };
 }
 

@@ -91,6 +91,18 @@ enum ObjectSection {
   EOM
 }
 
+enum ReceiptRequestStatus {
+  NEW
+  IN_PROGRESS
+  RECEIVED
+  CANCELLED
+}
+
+enum LimitNodeType {
+  GROUP
+  MATERIAL
+}
+
 model User {
   id               String               @id @default(cuid())
   email            String               @unique
@@ -102,7 +114,10 @@ model User {
   role             Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
   customPermissions Json?
   positionId       String?
+  activeWarehouseId String?
+  activeSection    ObjectSection?
   position         Position?            @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  activeWarehouse  Warehouse?           @relation("UserActiveWarehouse", fields: [activeWarehouseId], references: [id], onDelete: SetNull)
   actionLogs       ActionLog[]
   auditLogs        AuditLog[]
   warehouseScopes  UserWarehouseScope[]
@@ -117,6 +132,9 @@ model User {
   createdTasks     StaffTask[]          @relation("StaffTaskCreator")
   conversationParticipants ConversationParticipant[]
   sentMessages     Message[]            @relation("MessageSender")
+  limitTemplates   ObjectLimitTemplate[] @relation("LimitTemplateCreator")
+  materialMappings MaterialMappingLibrary[]
+  receiptRequests  ReceiptRequest[]      @relation("ReceiptRequestCreator")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -204,10 +222,14 @@ model Warehouse {
   tools       Tool[]
   waybillsFrom TransportWaybill[] @relation("WaybillFromWarehouse")
   userScopes  UserWarehouseScope[]
+  activeUsers User[]           @relation("UserActiveWarehouse")
   userSectionScopes UserWarehouseSectionScope[]
   staffTasks  StaffTask[]
   projectLinks ProjectWarehouse[]
   projects    Project[]      @relation("ProjectWarehouseMain")
+  limitTemplates ObjectLimitTemplate[]
+  materialMappings MaterialMappingLibrary[]
+  receiptRequests ReceiptRequest[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -228,6 +250,9 @@ model Material {
   issueItems      IssueRequestItem[]
   waybillItems    TransportWaybillItem[]
   stockMovements  StockMovement[]
+  limitNodes      ObjectLimitNode[]
+  mappingTargets  MaterialMappingLibrary[]
+  receiptMappedItems ReceiptRequestItem[]
   mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom      Material[]           @relation("MaterialMergedInto")
   mergeHistoryFrom MaterialMergeHistory[] @relation("MergeSource")
@@ -350,6 +375,7 @@ model ProjectLimitItem {
   plannedQty      Decimal      @db.Decimal(14, 3)
   issuedQty       Decimal      @default(0) @db.Decimal(14, 3)
   reservedQty     Decimal      @default(0) @db.Decimal(14, 3)
+  sourceNodeId    String?
   projectLimit    ProjectLimit @relation(fields: [projectLimitId], references: [id], onDelete: Cascade)
   material        Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
 
@@ -615,6 +641,98 @@ model IssueRequest {
   stockMovements StockMovement[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
+}
+
+model ObjectLimitTemplate {
+  id           String          @id @default(cuid())
+  warehouseId  String
+  section      ObjectSection
+  title        String
+  sourceFileName String?
+  createdById  String?
+  warehouse    Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy    User?           @relation("LimitTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  nodes        ObjectLimitNode[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([warehouseId, section, createdAt])
+}
+
+model ObjectLimitNode {
+  id           String            @id @default(cuid())
+  templateId   String
+  parentId     String?
+  orderNo      Int               @default(0)
+  nodeType     LimitNodeType     @default(GROUP)
+  indexLabel   String?
+  title        String
+  materialName String?
+  unit         String?
+  plannedQty   Decimal?          @db.Decimal(14, 3)
+  issuedQty    Decimal           @default(0) @db.Decimal(14, 3)
+  materialId   String?
+  template     ObjectLimitTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent       ObjectLimitNode?  @relation("LimitNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children     ObjectLimitNode[] @relation("LimitNodeTree")
+  material     Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([templateId, parentId, orderNo])
+}
+
+model MaterialMappingLibrary {
+  id               String        @id @default(cuid())
+  warehouseId      String
+  section          ObjectSection
+  sourceName       String
+  sourceUnit       String         @default("")
+  targetMaterialId String
+  createdById      String?
+  warehouse        Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  targetMaterial   Material      @relation(fields: [targetMaterialId], references: [id], onDelete: Cascade)
+  createdBy        User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([warehouseId, section, sourceName, sourceUnit])
+  @@index([warehouseId, section, createdAt])
+}
+
+model ReceiptRequest {
+  id             String             @id @default(cuid())
+  number         String             @unique
+  warehouseId    String
+  section        ObjectSection
+  status         ReceiptRequestStatus @default(NEW)
+  sourceFileName String?
+  createdById    String?
+  acceptedAt     DateTime?
+  warehouse      Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy      User?              @relation("ReceiptRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  items          ReceiptRequestItem[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([warehouseId, section, status, createdAt])
+}
+
+model ReceiptRequestItem {
+  id               String         @id @default(cuid())
+  receiptRequestId String
+  sourceName       String
+  sourceUnit       String         @default("шт")
+  quantity         Decimal        @db.Decimal(14, 3)
+  mappedMaterialId String?
+  acceptedQty      Decimal?       @db.Decimal(14, 3)
+  note             String?
+  receiptRequest   ReceiptRequest @relation(fields: [receiptRequestId], references: [id], onDelete: Cascade)
+  mappedMaterial   Material?      @relation(fields: [mappedMaterialId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([receiptRequestId])
 }
 
 model IssueRequestItem {
