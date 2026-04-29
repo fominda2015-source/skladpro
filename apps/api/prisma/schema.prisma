@@ -290,6 +290,7 @@ model Stock {
   id            String     @id @default(cuid())
   warehouseId   String
   materialId    String
+  section       ObjectSection @default(SS)
   quantity      Decimal    @db.Decimal(14, 3)
   reserved      Decimal    @default(0) @db.Decimal(14, 3)
   storageRoom   String?
@@ -298,7 +299,7 @@ model Stock {
   material      Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
   updatedAt     DateTime   @updatedAt
 
-  @@unique([warehouseId, materialId])
+  @@unique([warehouseId, materialId, section])
 }
 
 model Project {
@@ -359,6 +360,7 @@ model Operation {
   id              String          @id @default(cuid())
   type            OperationType
   warehouseId     String
+  section         ObjectSection   @default(SS)
   projectId       String?
   documentNumber  String?
   status          String          @default("DRAFT")
@@ -523,6 +525,7 @@ model Tool {
   qrCode          String     @unique
   status          ToolStatus @default(IN_STOCK)
   warehouseId     String?
+  section         ObjectSection   @default(SS)
   projectId       String?
   responsible     String?
   note            String?
@@ -597,6 +600,7 @@ model IssueRequest {
   basisRef      String?
   responsibleName String?
   warehouseId   String
+  section       ObjectSection   @default(SS)
   projectId     String?
   requestedById String
   approvedById  String?

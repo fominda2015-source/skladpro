@@ -18,6 +18,7 @@ type StockRow = {
   id: string;
   warehouseId: string;
   warehouseName: string;
+  section: "SS" | "EOM";
   materialId: string;
   materialName: string;
   materialSku: string | null;
@@ -94,6 +95,7 @@ type IssueRequest = {
   status: string;
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
+  section?: "SS" | "EOM";
   projectId?: string | null;
   requestedById: string;
   responsibleName?: string | null;
@@ -116,6 +118,7 @@ type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" 
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
+  section?: "SS" | "EOM";
   documentNumber?: string | null;
   operationDate?: string;
 };
@@ -151,6 +154,7 @@ type ToolItem = {
   serialNumber?: string | null;
   qrCode: string;
   status: ToolStatus;
+  section?: "SS" | "EOM";
   warehouseId?: string | null;
   responsible?: string | null;
   note?: string | null;
@@ -334,6 +338,7 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [stocks, setStocks] = useState<StockRow[]>([]);
   const [q, setQ] = useState("");
+  const [objectSectionFilter, setObjectSectionFilter] = useState<"SS" | "EOM">("SS");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
   const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
@@ -1061,7 +1066,10 @@ function App() {
     setLoadingStocks(true);
     setStocksError("");
     try {
-      const query = search ? `?q=${encodeURIComponent(search)}` : "";
+      const params = new URLSearchParams();
+      if (search) params.set("q", search);
+      params.set("section", objectSectionFilter);
+      const query = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`${API_URL}/api/stocks${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1718,6 +1726,7 @@ function App() {
       if (issueStatusFilter) params.set("status", issueStatusFilter);
       if (issueBasisFilter) params.set("basisType", issueBasisFilter);
       if (activeTab === "issues" && issueFlowFilter) params.set("flowType", issueFlowFilter);
+      params.set("section", objectSectionFilter);
       if (issueSearch.trim()) params.set("q", issueSearch.trim());
       params.set("sort", issuesSort);
       params.set("page", String(issuesPage));
@@ -1800,7 +1809,7 @@ function App() {
 
   async function loadApprovalQueue() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/issues?status=ON_APPROVAL`, {
+    const res = await fetch(`${API_URL}/api/issues?status=ON_APPROVAL&section=${encodeURIComponent(objectSectionFilter)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -1810,7 +1819,7 @@ function App() {
 
   async function loadOperations() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/operations`, {
+    const res = await fetch(`${API_URL}/api/operations?section=${encodeURIComponent(objectSectionFilter)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -1871,6 +1880,7 @@ function App() {
         body: JSON.stringify({
           type: "INCOME",
           warehouseId: opWarehouseId,
+          section: objectSectionFilter,
           documentNumber: receiptDocumentNumber.trim() || `IN-${Date.now()}`,
           storageRoom: opStorageRoom || undefined,
           storageCell: opStorageCell || undefined,
@@ -1893,6 +1903,7 @@ function App() {
             inventoryNumber: tool.inventoryNumber.trim(),
             serialNumber: tool.serialNumber.trim() || undefined,
             warehouseId: opWarehouseId,
+            section: objectSectionFilter,
             note: tool.note.trim() || undefined
           })
         });
@@ -1918,6 +1929,7 @@ function App() {
       body: JSON.stringify({
         type: "INCOME",
         warehouseId: opWarehouseId,
+        section: objectSectionFilter,
         documentNumber: `${returnDefect ? "RETURN-DEFECT" : "RETURN"}-${Date.now()}`,
         storageRoom: opStorageRoom || undefined,
         storageCell: opStorageCell || undefined,
@@ -1943,6 +1955,7 @@ function App() {
       const queryParts = [
         toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
+        `section=${encodeURIComponent(objectSectionFilter)}`,
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -2291,7 +2304,7 @@ function App() {
       void loadChatUsers();
       void loadConversations();
     }
-  }, [token]);
+  }, [token, objectSectionFilter]);
 
   useEffect(() => {
     if (!token || !canDashboard) {
@@ -2478,7 +2491,7 @@ function App() {
         void loadOperations();
       }
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter]);
+  }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "issues") {
@@ -2487,7 +2500,7 @@ function App() {
       void loadIssues();
       void loadStocks(q);
     }
-  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueFlowFilter, issueSearch, issuesSort, issuesPage, issuesPageSize]);
+  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueFlowFilter, issueSearch, issuesSort, issuesPage, issuesPageSize, objectSectionFilter]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -2660,7 +2673,7 @@ function App() {
       void loadCatalogData();
       void loadTools();
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage, toolsPageSize]);
+  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage, toolsPageSize, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "waybills") {
@@ -2825,6 +2838,10 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
+            <select value={objectSectionFilter} onChange={(e) => setObjectSectionFilter(e.target.value as "SS" | "EOM")}>
+              <option value="SS">Раздел: СС</option>
+              <option value="EOM">Раздел: ЭОМ</option>
+            </select>
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
             {(canReadIntegrations || canReadTeam) && <button className="topIconBtn" onClick={() => setActiveTab("inbox")}>Входящие</button>}
@@ -3238,6 +3255,7 @@ function App() {
       {activeTab === "warehouse" && (
         <div className="card">
           <h2>Склад: материалы и остатки</h2>
+          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           <div className="toolbar">
             <input
               placeholder="Поиск по материалу, sku, синониму"
@@ -3806,6 +3824,7 @@ function App() {
       {activeTab === "operations" && (
         <div className="card">
           <h2>Приходы (упрощенно)</h2>
+          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           <p className="muted">Один экран: добавляй материалы/инструменты, документы и проводи приход.</p>
           <div className="form">
             <label>
@@ -4041,6 +4060,7 @@ function App() {
       {activeTab === "issues" && (
         <div className="card">
           <h2>Выдача материалов</h2>
+          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           {true ? (
             <>
               <p className="muted">
@@ -4176,6 +4196,7 @@ function App() {
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                       body: JSON.stringify({
                         warehouseId: issueWarehouseId,
+                        section: objectSectionFilter,
                         note: issueNote.trim() || undefined,
                         responsibleName: issueResponsible.trim(),
                         flowType: "DIRECT_ISSUE",
@@ -5288,6 +5309,7 @@ function App() {
       {activeTab === "tools" && (
         <div className="card">
           <h2>Инструмент: карточка, QR и печать</h2>
+          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
           {toolsError && <ErrorState text={toolsError} />}
           <div className="toolbar">
@@ -5381,6 +5403,7 @@ function App() {
                     inventoryNumber: toolInventoryNumber,
                     serialNumber: toolSerialNumber || undefined,
                     warehouseId: toolWarehouseId || undefined,
+                    section: objectSectionFilter,
                     responsible: toolResponsible || undefined
                   })
                 });

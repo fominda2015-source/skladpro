@@ -11,6 +11,8 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
   const materialId = typeof req.query.materialId === "string" ? req.query.materialId : undefined;
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   const onlyLow =
     typeof req.query.onlyLow === "string" ? ["1", "true", "yes"].includes(req.query.onlyLow) : false;
@@ -26,6 +28,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
         {
           ...(warehouseId ? { warehouseId } : {}),
           ...(materialId ? { materialId } : {}),
+          ...(section ? { section } : {}),
       ...(q
         ? {
             material: {
@@ -58,6 +61,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       id: row.id,
       warehouseId: row.warehouseId,
       warehouseName: row.warehouse.name,
+      section: row.section,
       materialId: row.materialId,
       materialName: row.material.name,
       materialSku: row.material.sku,

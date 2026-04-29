@@ -20,6 +20,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 
 const createIssueSchema = z.object({
   warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS"),
   projectId: z.string().optional(),
   note: z.string().optional(),
   responsibleName: z.string().max(160).optional().nullable(),
@@ -92,7 +93,9 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
         ]
       }
     : {};
-  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...flowFilter, ...searchFilter } as any);
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const sectionFilter = sectionParam === "SS" || sectionParam === "EOM" ? { section: sectionParam } : {};
+  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...flowFilter, ...sectionFilter, ...searchFilter } as any);
   const [total, rows] = await prisma.$transaction([
     prisma.issueRequest.count({ where }),
     prisma.issueRequest.findMany({
@@ -171,6 +174,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
       number,
       flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
+      section: parsed.data.section,
       projectId: parsed.data.projectId,
       note: parsed.data.note,
       responsibleName: parsed.data.responsibleName ?? undefined,
@@ -391,9 +395,10 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
           where: {
-            warehouseId_materialId: {
+            warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
-              materialId: item.materialId
+              materialId: item.materialId,
+              section: issueRow.section
             }
           }
         });
@@ -426,6 +431,7 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         data: {
           type: OperationType.EXPENSE,
           warehouseId: issueRow.warehouseId,
+          section: issueRow.section,
           projectId: issueRow.projectId ?? undefined,
           documentNumber: issueRow.number,
           status: "POSTED",
@@ -442,9 +448,10 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       for (const item of issueRow.items) {
         await tx.stock.update({
           where: {
-            warehouseId_materialId: {
+            warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
-              materialId: item.materialId
+              materialId: item.materialId,
+              section: issueRow.section
             }
           },
           data: { quantity: { decrement: item.quantity } }

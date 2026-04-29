@@ -44,15 +44,30 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
 }
 
 export function stockWhereFromScope(scope: DataScope): Prisma.StockWhereInput {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
     return {};
   }
-  return { warehouseId: { in: scope.warehouseIds } };
+  if (scope.sectionScopes.length) {
+    return {
+      OR: scope.sectionScopes.map((s) => ({
+        warehouseId: s.warehouseId,
+        section: s.section
+      }))
+    };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds } };
+  }
+  return {};
 }
 
 export function issueWhereFromScope(scope: DataScope): Prisma.IssueRequestWhereInput {
   const parts: Prisma.IssueRequestWhereInput[] = [];
-  if (!scope.unrestricted && scope.warehouseIds?.length) {
+  if (!scope.unrestricted && scope.sectionScopes.length) {
+    parts.push({
+      OR: scope.sectionScopes.map((s) => ({ warehouseId: s.warehouseId, section: s.section }))
+    });
+  } else if (!scope.unrestricted && scope.warehouseIds?.length) {
     parts.push({ warehouseId: { in: scope.warehouseIds } });
   }
   if (!scope.unrestricted && scope.projectIds?.length) {
@@ -65,14 +80,36 @@ export function issueWhereFromScope(scope: DataScope): Prisma.IssueRequestWhereI
 }
 
 export function operationWhereFromScope(scope: DataScope): Prisma.OperationWhereInput {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
     return {};
   }
-  return { warehouseId: { in: scope.warehouseIds } };
+  if (scope.sectionScopes.length) {
+    return {
+      OR: scope.sectionScopes.map((s) => ({
+        warehouseId: s.warehouseId,
+        section: s.section
+      }))
+    };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds } };
+  }
+  return {};
 }
 
 export function toolWhereFromScope(scope: DataScope): Prisma.ToolWhereInput {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
+    return {};
+  }
+  if (scope.sectionScopes.length) {
+    return {
+      OR: scope.sectionScopes.map((s) => ({
+        warehouseId: s.warehouseId,
+        section: s.section
+      }))
+    };
+  }
+  if (!scope.warehouseIds?.length) {
     return {};
   }
   return {

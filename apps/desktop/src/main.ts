@@ -5,6 +5,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 const WEB_URL = process.env.SKLADPRO_WEB_URL || "http://localhost:5173";
+const DEFAULT_UPDATE_URL = "http://193.176.78.148/updates/win/x64";
+const UPDATE_URL = (process.env.SKLADPRO_UPDATE_URL || DEFAULT_UPDATE_URL).replace(/\/+$/, "");
 
 function createWindow() {
   const bundledCandidates = [
@@ -42,9 +44,23 @@ function createWindow() {
 function initAutoUpdate() {
   autoUpdater.logger = log;
   autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  try {
+    autoUpdater.setFeedURL({ provider: "generic", url: UPDATE_URL });
+  } catch (err) {
+    log.error("Failed to set updater feed URL:", err);
+  }
+
+  log.info(`Desktop version: ${app.getVersion()}`);
+  log.info(`Updater feed URL: ${UPDATE_URL}`);
 
   autoUpdater.on("update-available", () => {
     log.info("Update available");
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    log.info(`Update not available. Current=${app.getVersion()} Latest=${info?.version || "unknown"}`);
   });
 
   autoUpdater.on("update-downloaded", async () => {

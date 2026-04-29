@@ -154,14 +154,16 @@ materialsRouter.post("/merge", requirePermission("materials.write"), async (req:
     for (const st of source.stocks) {
       await tx.stock.upsert({
         where: {
-          warehouseId_materialId: {
+          warehouseId_materialId_section: {
             warehouseId: st.warehouseId,
-            materialId: targetMaterialId
+            materialId: targetMaterialId,
+            section: st.section
           }
         },
         create: {
           warehouseId: st.warehouseId,
           materialId: targetMaterialId,
+          section: st.section,
           quantity: st.quantity,
           reserved: st.reserved
         },

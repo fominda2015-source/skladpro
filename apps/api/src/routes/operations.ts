@@ -14,6 +14,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 const createOperationSchema = z.object({
   type: z.enum(["INCOME", "EXPENSE"]),
   warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS"),
   projectId: z.string().optional(),
   storageRoom: z.string().optional(),
   storageCell: z.string().optional(),
@@ -38,6 +39,8 @@ operationsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
 
   if (warehouseId && !scope.unrestricted && scope.warehouseIds?.length && !scope.warehouseIds.includes(warehouseId)) {
     return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
@@ -49,7 +52,8 @@ operationsRouter.get("/", async (req: AuthedRequest, res) => {
         operationWhereFromScope(scope),
         {
           ...(type ? { type: type as OperationType } : {}),
-          ...(warehouseId ? { warehouseId } : {})
+          ...(warehouseId ? { warehouseId } : {}),
+          ...(section ? { section } : {})
         }
       ]
     },
@@ -81,6 +85,7 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
         data: {
           type: data.type as OperationType,
           warehouseId: data.warehouseId,
+          section: data.section,
           projectId: data.projectId,
           documentNumber: data.documentNumber,
           operationDate: data.operationDate ? new Date(data.operationDate) : new Date(),
@@ -98,13 +103,25 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
 
       for (const item of data.items) {
         const existing = await tx.stock.findUnique({
-          where: { warehouseId_materialId: { warehouseId: data.warehouseId, materialId: item.materialId } }
+          where: {
+            warehouseId_materialId_section: {
+              warehouseId: data.warehouseId,
+              materialId: item.materialId,
+              section: data.section
+            }
+          }
         });
 
         if (data.type === "INCOME") {
           if (existing) {
             await tx.stock.update({
-              where: { warehouseId_materialId: { warehouseId: data.warehouseId, materialId: item.materialId } },
+              where: {
+                warehouseId_materialId_section: {
+                  warehouseId: data.warehouseId,
+                  materialId: item.materialId,
+                  section: data.section
+                }
+              },
               data: {
                 quantity: { increment: item.quantity },
                 ...(data.storageRoom !== undefined ? { storageRoom: data.storageRoom || null } : {}),
@@ -116,6 +133,7 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
               data: {
                 warehouseId: data.warehouseId,
                 materialId: item.materialId,
+                section: data.section,
                 quantity: item.quantity,
                 reserved: 0,
                 storageRoom: data.storageRoom || null,
@@ -130,7 +148,13 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
             throw new Error(`INSUFFICIENT_STOCK:${item.materialId}`);
           }
           await tx.stock.update({
-            where: { warehouseId_materialId: { warehouseId: data.warehouseId, materialId: item.materialId } },
+            where: {
+              warehouseId_materialId_section: {
+                warehouseId: data.warehouseId,
+                materialId: item.materialId,
+                section: data.section
+              }
+            },
             data: { quantity: { decrement: item.quantity } }
           });
         }

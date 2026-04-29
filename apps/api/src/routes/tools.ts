@@ -19,6 +19,7 @@ const createToolSchema = z.object({
   inventoryNumber: z.string().min(1),
   serialNumber: z.string().optional(),
   warehouseId: z.string().optional(),
+  section: z.enum(["SS", "EOM"]).default("SS"),
   projectId: z.string().optional(),
   responsible: z.string().optional(),
   note: z.string().optional()
@@ -28,6 +29,7 @@ const updateToolSchema = z.object({
   name: z.string().min(1).optional(),
   serialNumber: z.string().optional(),
   warehouseId: z.string().nullable().optional(),
+  section: z.enum(["SS", "EOM"]).optional(),
   projectId: z.string().nullable().optional(),
   responsible: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
@@ -68,6 +70,8 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
       ? req.query.sort
       : "created_desc";
   const q = typeof req.query.q === "string" ? req.query.q : "";
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section: "SS" | "EOM" | undefined = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   const status =
     typeof req.query.status === "string" && Object.values(ToolStatus).includes(req.query.status as ToolStatus)
       ? (req.query.status as ToolStatus)
@@ -77,6 +81,7 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
       toolWhereFromScope(scope),
       {
         ...(status ? { status } : {}),
+        ...(section ? { section } : {}),
         ...(q
           ? {
               OR: [
