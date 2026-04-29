@@ -4573,7 +4573,7 @@ function App() {
         <div className="card">
           <h2>Выдача материалов</h2>
           <p className="muted">Текущий раздел: {objectSectionFilter}</p>
-          {true ? (
+          {isStorekeeperMode ? (
             <>
               <p className="muted">
                 Выбери материалы со склада, количество и укажи ответственное лицо. Система сразу проводит выдачу.
