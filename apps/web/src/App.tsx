@@ -352,6 +352,7 @@ type LimitImportNode = {
   parentId?: string | null;
   nodeType: "GROUP" | "MATERIAL";
   title: string;
+  materialId?: string | null;
   materialName?: string | null;
   unit?: string | null;
   plannedQty?: string | number | null;
@@ -402,6 +403,7 @@ function App() {
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
   const [expandedStockRowId, setExpandedStockRowId] = useState("");
+  const [showAttachedMaterials, setShowAttachedMaterials] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
@@ -981,6 +983,126 @@ function App() {
     }
     return map;
   }, [stockMovements]);
+
+  const activeObjectName =
+    availableObjects.find((o) => o.id === activeObjectId)?.name || activeObjectId || "Без названия";
+
+  const limitMaterialCandidates = useMemo(() => {
+    const out: Array<{
+      nodeId: string;
+      materialId: string | null;
+      materialName: string;
+      unit: string;
+    }> = [];
+
+    for (const tpl of limitTemplates) {
+      for (const n of tpl.nodes) {
+        if (n.nodeType !== "MATERIAL") continue;
+        const materialName = String(n.materialName ?? n.title ?? "").trim();
+        if (!materialName) continue;
+        out.push({
+          nodeId: n.id,
+          materialId: (n.materialId ?? null) as string | null,
+          materialName,
+          unit: String(n.unit ?? "шт")
+        });
+      }
+    }
+
+    return out;
+  }, [limitTemplates]);
+
+  const limitMaterialIdSet = useMemo(
+    () => new Set(limitMaterialCandidates.filter((c) => !!c.materialId).map((c) => c.materialId as string)),
+    [limitMaterialCandidates]
+  );
+
+  const limitMaterialNameSet = useMemo(() => {
+    const normalize = (v: string) => v.trim().toLowerCase();
+    return new Set(limitMaterialCandidates.map((c) => normalize(c.materialName)).filter(Boolean));
+  }, [limitMaterialCandidates]);
+
+  const stockMaterialIdSet = useMemo(() => new Set(stocks.map((s) => s.materialId)), [stocks]);
+  const stockMaterialNameSet = useMemo(() => {
+    const normalize = (v: string) => v.trim().toLowerCase();
+    return new Set(stocks.map((s) => normalize(s.materialName)).filter(Boolean));
+  }, [stocks]);
+
+  const limitFilterEnabled = limitTemplates.length > 0 && (limitMaterialIdSet.size > 0 || limitMaterialNameSet.size > 0);
+
+  const virtualLimitRows = useMemo(() => {
+    if (!limitFilterEnabled) return [];
+
+    const normalize = (v: string) => v.trim().toLowerCase();
+    const qNorm = q.trim().toLowerCase();
+    const seen = new Set<string>();
+
+    const warehouseId = activeObjectId || stocks[0]?.warehouseId || "";
+    const warehouseName = activeObjectName;
+
+    const out: StockRow[] = [];
+    for (const c of limitMaterialCandidates) {
+      if (qNorm && !c.materialName.toLowerCase().includes(qNorm)) continue;
+
+      const exists = c.materialId
+        ? stockMaterialIdSet.has(c.materialId)
+        : stockMaterialNameSet.has(normalize(c.materialName));
+      if (exists) continue;
+
+      const key = c.materialId ? `id:${c.materialId}` : `name:${normalize(c.materialName)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        id: `limit-virtual-${c.nodeId}`,
+        warehouseId,
+        warehouseName,
+        section: objectSectionFilter,
+        materialId: c.materialId || `virtual-${c.nodeId}`,
+        materialName: c.materialName,
+        materialSku: null,
+        materialUnit: c.unit,
+        quantity: 0,
+        reserved: 0,
+        storageRoom: null,
+        storageCell: null,
+        available: 0,
+        isLow: true,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    return out;
+  }, [
+    limitFilterEnabled,
+    limitMaterialCandidates,
+    q,
+    stockMaterialIdSet,
+    stockMaterialNameSet,
+    activeObjectId,
+    activeObjectName,
+    objectSectionFilter,
+    stocks
+  ]);
+
+  const warehouseVisibleRows = useMemo(() => {
+    if (!limitFilterEnabled) return stocks;
+
+    const normalize = (v: string) => v.trim().toLowerCase();
+    const isLimitRow = (row: StockRow) =>
+      limitMaterialIdSet.has(row.materialId) || limitMaterialNameSet.has(normalize(row.materialName));
+
+    const baseStocks = showAttachedMaterials ? stocks : stocks.filter(isLimitRow);
+    return [...baseStocks, ...virtualLimitRows];
+  }, [
+    limitFilterEnabled,
+    stocks,
+    showAttachedMaterials,
+    limitMaterialIdSet,
+    limitMaterialNameSet,
+    virtualLimitRows
+  ]);
+
   const stockOptionsForIssue = useMemo(
     () =>
       stocks
@@ -2850,6 +2972,13 @@ function App() {
   }, [token, activeTab]);
 
   useEffect(() => {
+    if (token && activeTab === "warehouse") {
+      // Для вкладки "Склад" нужны материалы из лимитов, даже если остатки по ним сейчас 0
+      void loadLimitTemplates();
+    }
+  }, [token, activeTab, activeObjectId, objectSectionFilter]);
+
+  useEffect(() => {
     if (token && activeTab === "documents") {
       void loadIssues();
       void loadOperations();
@@ -3568,6 +3697,12 @@ function App() {
             <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
             <button onClick={() => void loadStocks(q)}>Найти</button>
             <button type="button" onClick={() => void loadStockMovements()}>Журнал движений</button>
+            <button
+              type="button"
+              onClick={() => setShowAttachedMaterials((v) => !v)}
+            >
+              {showAttachedMaterials ? "− Прикрепленные материалы" : "+ Прикрепленные материалы"}
+            </button>
           </div>
           {loadingStocks && <p>Загрузка остатков...</p>}
           {stocksError && <p className="error">{stocksError}</p>}
@@ -3587,7 +3722,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((row) => (
+                {warehouseVisibleRows.map((row) => (
                   <Fragment key={row.id}>
                     <tr className={row.isLow ? "low" : ""}>
                       <td>{safeName(row.warehouseName)}</td>
@@ -3600,7 +3735,7 @@ function App() {
                             setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
                           }}
                         >
-                          {expandedStockRowId === row.id ? "−" : "+"}
+                          {expandedStockRowId === row.id ? "+" : "−"}
                         </button>{" "}
                         {safeName(row.materialName)}
                       </td>
@@ -3608,9 +3743,9 @@ function App() {
                       <td>{row.materialUnit}</td>
                       <td>{row.storageRoom || "—"}</td>
                       <td>{row.storageCell || "—"}</td>
-                      <td>{row.quantity}</td>
-                      {showStockReserve && <td>{row.reserved}</td>}
-                      <td>{row.available}</td>
+                      <td>{Math.round(row.quantity)}</td>
+                      {showStockReserve && <td>{Math.round(row.reserved)}</td>}
+                      <td>{Math.round(row.available)}</td>
                     </tr>
                     {expandedStockRowId === row.id && (
                       <tr>
@@ -3631,7 +3766,7 @@ function App() {
                                   <tr key={`slice-${m.id}`}>
                                     <td>{new Date(m.createdAt).toLocaleString()}</td>
                                     <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
-                                    <td>{m.quantity}</td>
+                                    <td>{Number.isFinite(Number(m.quantity)) ? Math.round(Number(m.quantity)) : 0}</td>
                                     <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
                                   </tr>
                                 ))}
@@ -3648,7 +3783,7 @@ function App() {
           )}
           {!loadingStocks && !stocksError && (
             <div className="mobileCards">
-              {stocks.map((row) => (
+              {warehouseVisibleRows.map((row) => (
                 <article key={`m-stock-${row.id}`} className={`mobileCard ${row.isLow ? "low" : ""}`}>
                   <h4>{safeName(row.materialName)}</h4>
                   <p><strong>Склад:</strong> {safeName(row.warehouseName)}</p>
@@ -3656,9 +3791,9 @@ function App() {
                   <p><strong>Ед.:</strong> {row.materialUnit}</p>
                   <p><strong>Помещение:</strong> {row.storageRoom || "—"}</p>
                   <p><strong>Ячейка:</strong> {row.storageCell || "—"}</p>
-                  <p><strong>Остаток:</strong> {row.quantity}</p>
-                  {showStockReserve ? <p><strong>Резерв:</strong> {row.reserved}</p> : null}
-                  <p><strong>Доступно:</strong> {row.available}</p>
+                  <p><strong>Остаток:</strong> {Math.round(row.quantity)}</p>
+                  {showStockReserve ? <p><strong>Резерв:</strong> {Math.round(row.reserved)}</p> : null}
+                  <p><strong>Доступно:</strong> {Math.round(row.available)}</p>
                 </article>
               ))}
             </div>
