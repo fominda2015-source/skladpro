@@ -5105,12 +5105,26 @@ function App() {
               <div className="plainList">
                 {(() => {
                   const childrenByParent = new Map<string, LimitImportNode[]>();
+                  const nodeById = new Map<string, LimitImportNode>();
                   for (const n of tpl.nodes) {
                     const key = n.parentId || "__root__";
                     const arr = childrenByParent.get(key) || [];
                     arr.push(n);
                     childrenByParent.set(key, arr);
+                    nodeById.set(n.id, n);
                   }
+
+                  const collapseSubtree = (prev: Record<string, boolean>, nodeId: string) => {
+                    const next = { ...prev };
+                    const stack = [nodeId];
+                    while (stack.length) {
+                      const cur = stack.pop()!;
+                      next[cur] = false;
+                      const kids = childrenByParent.get(cur) || [];
+                      for (const k of kids) stack.push(k.id);
+                    }
+                    return next;
+                  };
 
                   const renderNode = (node: LimitImportNode, depth: number) => {
                     const children = childrenByParent.get(node.id) || [];
@@ -5128,7 +5142,30 @@ function App() {
                           <button
                             type="button"
                             className="ghostBtn"
-                            onClick={() => setExpandedLimitNodes((prev) => ({ ...prev, [node.id]: !prev[node.id] }))}
+                            onClick={() =>
+                              setExpandedLimitNodes((prev) => {
+                                const willExpand = !prev[node.id];
+                                const parentKey = node.parentId || "__root__";
+                                const siblings = childrenByParent.get(parentKey) || [];
+                                let next = { ...prev };
+
+                                // Аккордеон: при раскрытии закрываем соседей на том же уровне.
+                                if (willExpand) {
+                                  for (const s of siblings) {
+                                    if (s.id !== node.id) {
+                                      next = collapseSubtree(next, s.id);
+                                    }
+                                  }
+                                }
+
+                                // Переключаем текущий узел. При закрытии — закрываем и всё поддерево.
+                                next[node.id] = willExpand;
+                                if (!willExpand) {
+                                  next = collapseSubtree(next, node.id);
+                                }
+                                return next;
+                              })
+                            }
                           >
                             {children.length ? (isExpanded ? "▾" : "▸") : "•"} {node.title}
                           </button>
