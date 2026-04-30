@@ -5155,36 +5155,42 @@ function App() {
                     return (
                       <div key={node.id} style={{ marginLeft: depth * 18 }}>
                         {isGroup ? (
-                          <button
-                            type="button"
-                            className="ghostBtn"
-                            onClick={() =>
-                              setExpandedLimitNodes((prev) => {
-                                const willExpand = !prev[node.id];
-                                const parentKey = node.parentId || "__root__";
-                                const siblings = childrenByParent.get(parentKey) || [];
-                                let next = { ...prev };
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px" }}>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              style={{ width: 34, minWidth: 34, height: 34, borderRadius: 10 }}
+                              aria-label={isExpanded ? "Свернуть" : "Раскрыть"}
+                              onClick={() =>
+                                setExpandedLimitNodes((prev) => {
+                                  const willExpand = !prev[node.id];
+                                  const parentKey = node.parentId || "__root__";
+                                  const siblings = childrenByParent.get(parentKey) || [];
+                                  let next = { ...prev };
 
-                                // Аккордеон: при раскрытии закрываем соседей на том же уровне.
-                                if (willExpand) {
-                                  for (const s of siblings) {
-                                    if (s.id !== node.id) {
-                                      next = collapseSubtree(next, s.id);
+                                  // Аккордеон: при раскрытии закрываем соседей на том же уровне.
+                                  if (willExpand) {
+                                    for (const s of siblings) {
+                                      if (s.id !== node.id) {
+                                        next = collapseSubtree(next, s.id);
+                                      }
                                     }
                                   }
-                                }
 
-                                // Переключаем текущий узел. При закрытии — закрываем и всё поддерево.
-                                next[node.id] = willExpand;
-                                if (!willExpand) {
-                                  next = collapseSubtree(next, node.id);
-                                }
-                                return next;
-                              })
-                            }
-                          >
-                            {children.length ? (isExpanded ? "▾" : "▸") : "•"} {node.title}
-                          </button>
+                                  // Переключаем текущий узел. При закрытии — закрываем и всё поддерево.
+                                  next[node.id] = willExpand;
+                                  if (!willExpand) {
+                                    next = collapseSubtree(next, node.id);
+                                  }
+                                  return next;
+                                })
+                              }
+                              disabled={!children.length}
+                            >
+                              {children.length ? (isExpanded ? "▾" : "▸") : "•"}
+                            </button>
+                            <div style={{ fontWeight: 700, color: "#243656" }}>{node.title}</div>
+                          </div>
                         ) : (
                           <div className="card" style={{ padding: 10, marginTop: 6 }}>
                             <div className="rightCardHeader" style={{ marginBottom: 6 }}>

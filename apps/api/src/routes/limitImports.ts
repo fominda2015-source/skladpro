@@ -82,7 +82,7 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
     // В эталонном файле план берем из F (Коэф. расхода).
     // В боевом ТКП плановое количество лежит в G (Кол-во).
     const qtyRaw = (format === "ETALON" ? norm(row[5]) : norm(row[6])).replace(",", ".");
-    const qty = Number(qtyRaw);
+    const qty = qtyRaw ? Number(qtyRaw) : Number.NaN;
 
     if (!name) continue;
 
