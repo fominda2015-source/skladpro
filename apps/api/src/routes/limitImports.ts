@@ -32,22 +32,100 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
     raw: false,
     blankrows: false
   });
+  const norm = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const looksLikeWork = (nameRaw: string) => {
+    const s = nameRaw.trim().toLowerCase();
+    if (!s) return false;
+    // В ТКП встречаются строки работ (монтаж/прокладка/наладка/испытания) — их исключаем из лимитов.
+    return (
+      s.startsWith("монтаж ") ||
+      s.startsWith("прокладка ") ||
+      s.startsWith("демонтаж ") ||
+      s.includes("пуско-налад") ||
+      s.includes("пуско налад") ||
+      s.includes("наладоч") ||
+      s.includes("испытан") ||
+      s.includes("настройк")
+    );
+  };
+
+  // Поддерживаем 2 формата:
+  // 1) "эталон" (как в файле "материалы_и_заголовки"): A=№, B=Тип, C=Наименование, E=Ед.изм, F=Коэф.расхода
+  // 2) "боевой ТКП": B=номер п/п, C=Наименование затрат, E=Ед. изм., F=Коэф.расхода
+  let format: "ETALON" | "TKP" = "ETALON";
+  for (let i = 0; i < Math.min(rows.length, 20); i += 1) {
+    const r = rows[i] || [];
+    const a = norm(r[0]);
+    const b = norm(r[1]);
+    const c = norm(r[2]);
+    const e = norm(r[4]);
+    const f = norm(r[5]);
+    if (a === "№" && b.toLowerCase() === "тип" && c.toLowerCase().includes("наимен")) {
+      format = "ETALON";
+      break;
+    }
+    if (b.toLowerCase().includes("номер") && c.toLowerCase().includes("наимен") && e.toLowerCase().includes("ед") && f.toLowerCase().includes("коэф")) {
+      format = "TKP";
+      break;
+    }
+  }
+
   const out: FlatNode[] = [];
   let activeTop = "";
   for (const row of rows) {
-    const idx = String(row[0] ?? "").trim();
-    const name = String(row[1] ?? "").trim();
-    const unit = String(row[2] ?? "").trim();
-    const qtyRaw = String(row[3] ?? "").replace(",", ".").trim();
+    if (!Array.isArray(row)) continue;
+
+    const idx = format === "ETALON" ? norm(row[0]) : norm(row[1]);
+    const type = format === "ETALON" ? norm(row[1]) : "";
+    const name = format === "ETALON" ? norm(row[2]) : norm(row[2]);
+    const unit = format === "ETALON" ? norm(row[4]) : norm(row[4]);
+    const qtyRaw = (format === "ETALON" ? norm(row[5]) : norm(row[5])).replace(",", ".");
     const qty = Number(qtyRaw);
+
     if (!name) continue;
-    if (idx && !Number.isNaN(Number(idx)) && unit === "" && Number.isNaN(qty)) {
+
+    // Пропускаем служебные строки шапки
+    const nameLower = name.toLowerCase();
+    if (nameLower.includes("технико-коммерческое предложение") || nameLower.includes("указать название организации")) {
+      continue;
+    }
+
+    // Явная типизация из эталонного файла
+    if (format === "ETALON") {
+      if (type.toLowerCase().includes("заголовок")) {
+        out.push({ level: idx.includes(".") ? 1 : 0, title: name, indexLabel: idx, nodeType: "GROUP" });
+        if (!idx.includes(".")) activeTop = idx;
+        continue;
+      }
+      if (type.toLowerCase().includes("подзаголовок")) {
+        out.push({ level: 1, title: name, indexLabel: idx, nodeType: "GROUP" });
+        continue;
+      }
+      if (type.toLowerCase().includes("материал")) {
+        if (looksLikeWork(name)) continue;
+        out.push({
+          level: 2,
+          title: name,
+          nodeType: "MATERIAL",
+          materialName: name,
+          unit: unit || undefined,
+          plannedQty: Number.isFinite(qty) ? qty : undefined
+        });
+        continue;
+      }
+    }
+
+    // Не-эталон (боевой ТКП) — определяем по заполненности unit/qty и номеру
+    if (idx && idx !== "" && unit === "" && Number.isNaN(qty)) {
       activeTop = idx;
       out.push({ level: 0, title: name, indexLabel: idx, nodeType: "GROUP" });
       continue;
     }
     if (unit === "" && Number.isNaN(qty)) {
       out.push({ level: activeTop ? 1 : 0, title: name, indexLabel: activeTop || undefined, nodeType: "GROUP" });
+      continue;
+    }
+    if (looksLikeWork(name)) {
       continue;
     }
     out.push({

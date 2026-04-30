@@ -5103,42 +5103,59 @@ function App() {
                 <span className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</span>
               </div>
               <div className="plainList">
-                {tpl.nodes
-                  .filter((n) => !n.parentId)
-                  .map((root) => (
-                    <Fragment key={root.id}>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() =>
-                          setExpandedLimitNodes((prev) => ({ ...prev, [root.id]: !prev[root.id] }))
-                        }
-                      >
-                        {expandedLimitNodes[root.id] ? "▾" : "▸"} {root.title}
-                      </button>
-                      {expandedLimitNodes[root.id] &&
-                        tpl.nodes
-                          .filter((n) => n.parentId === root.id)
-                          .map((ch) => (
-                            <div key={ch.id} style={{ marginLeft: 20 }}>
-                              {ch.nodeType === "GROUP" ? (
-                                <strong>{ch.title}</strong>
-                              ) : (
-                                <div>
-                                  {ch.materialName || ch.title} ({ch.unit || "шт"}){" "}
-                                  <span className="muted">
-                                    {Number(ch.issuedQty || 0)} / {Number(ch.plannedQty || 0)}
-                                  </span>
-                                  <progress
-                                    max={Math.max(1, Number(ch.plannedQty || 0))}
-                                    value={Math.min(Number(ch.issuedQty || 0), Math.max(1, Number(ch.plannedQty || 0)))}
-                                  />
-                                </div>
-                              )}
+                {(() => {
+                  const childrenByParent = new Map<string, LimitImportNode[]>();
+                  for (const n of tpl.nodes) {
+                    const key = n.parentId || "__root__";
+                    const arr = childrenByParent.get(key) || [];
+                    arr.push(n);
+                    childrenByParent.set(key, arr);
+                  }
+
+                  const renderNode = (node: LimitImportNode, depth: number) => {
+                    const children = childrenByParent.get(node.id) || [];
+                    const isGroup = node.nodeType === "GROUP";
+                    const isExpanded = Boolean(expandedLimitNodes[node.id]);
+                    const title = node.materialName || node.title;
+                    const planned = Number(node.plannedQty || 0);
+                    const issued = Number(node.issuedQty || 0);
+                    const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
+                    const isOver = planned > 0 && issued > planned;
+
+                    return (
+                      <div key={node.id} style={{ marginLeft: depth * 18 }}>
+                        {isGroup ? (
+                          <button
+                            type="button"
+                            className="ghostBtn"
+                            onClick={() => setExpandedLimitNodes((prev) => ({ ...prev, [node.id]: !prev[node.id] }))}
+                          >
+                            {children.length ? (isExpanded ? "▾" : "▸") : "•"} {node.title}
+                          </button>
+                        ) : (
+                          <div className="card" style={{ padding: 10, marginTop: 6 }}>
+                            <div className="rightCardHeader" style={{ marginBottom: 6 }}>
+                              <strong style={{ fontSize: 13 }}>{title}</strong>
+                              <span className="muted">
+                                {issued} / {planned} {node.unit || "шт"}
+                              </span>
                             </div>
-                          ))}
-                    </Fragment>
-                  ))}
+                            <div className="progressWrap" style={{ width: "100%" }}>
+                              <div className={`progressBar ${isOver ? "bad" : ""}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        )}
+
+                        {isGroup && isExpanded && children.length
+                          ? children.map((ch) => renderNode(ch, depth + 1))
+                          : null}
+                      </div>
+                    );
+                  };
+
+                  const roots = childrenByParent.get("__root__") || [];
+                  return roots.map((r) => renderNode(r, 0));
+                })()}
               </div>
             </div>
           ))}
