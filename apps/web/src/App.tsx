@@ -1958,6 +1958,7 @@ function App() {
     });
     if (!res.ok) return;
     setLimitTemplates((await res.json()) as LimitImportTemplate[]);
+    setExpandedLimitNodes({});
   }
 
   async function uploadLimitTemplate() {
@@ -1977,6 +1978,7 @@ function App() {
     }
     setLimitsMessage("Лимиты загружены из Excel");
     setLimitImportFile(null);
+    setExpandedLimitNodes({});
     await loadLimitTemplates();
   }
 
