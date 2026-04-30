@@ -984,6 +984,18 @@ function App() {
     return map;
   }, [stockMovements]);
 
+  const issuedTotalsByMaterialId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of stockMovements) {
+      if (activeObjectId && m.warehouseId !== activeObjectId) continue;
+      if (m.direction !== "OUT") continue;
+      const qty = Number(m.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      map.set(m.materialId, (map.get(m.materialId) || 0) + qty);
+    }
+    return map;
+  }, [stockMovements, activeObjectId]);
+
   const activeObjectName =
     availableObjects.find((o) => o.id === activeObjectId)?.name || activeObjectId || "Без названия";
 
@@ -2968,6 +2980,8 @@ function App() {
       void loadCatalogData();
       void loadProjects();
       void loadLimitTemplates();
+      void loadStockMovements();
+      setExpandedLimitNodes({});
     }
   }, [token, activeTab]);
 
@@ -5132,7 +5146,7 @@ function App() {
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
                     const title = node.materialName || node.title;
                     const planned = Number(node.plannedQty || 0);
-                    const issued = Number(node.issuedQty || 0);
+                    const issued = node.materialId ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0) : 0;
                     const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
                     const isOver = planned > 0 && issued > planned;
 
@@ -5174,7 +5188,8 @@ function App() {
                             <div className="rightCardHeader" style={{ marginBottom: 6 }}>
                               <strong style={{ fontSize: 13 }}>{title}</strong>
                               <span className="muted">
-                                {issued} / {planned} {node.unit || "шт"}
+                                {Math.round(issued)} / {Number.isFinite(planned) ? planned : 0} {node.unit || "шт"}
+                                {!node.materialId ? " · не сопоставлено" : ""}
                               </span>
                             </div>
                             <div className="progressWrap" style={{ width: "100%" }}>

@@ -79,7 +79,9 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
     const type = format === "ETALON" ? norm(row[1]) : "";
     const name = format === "ETALON" ? norm(row[2]) : norm(row[2]);
     const unit = format === "ETALON" ? norm(row[4]) : norm(row[4]);
-    const qtyRaw = (format === "ETALON" ? norm(row[5]) : norm(row[5])).replace(",", ".");
+    // В эталонном файле план берем из F (Коэф. расхода).
+    // В боевом ТКП плановое количество лежит в G (Кол-во).
+    const qtyRaw = (format === "ETALON" ? norm(row[5]) : norm(row[6])).replace(",", ".");
     const qty = Number(qtyRaw);
 
     if (!name) continue;
@@ -179,6 +181,20 @@ limitImportsRouter.post(
       const parentByLevel = new Map<number, string>();
       for (let i = 0; i < nodes.length; i += 1) {
         const n = nodes[i];
+        let materialId: string | undefined = undefined;
+        if (n.nodeType === "MATERIAL") {
+          const name = String(n.materialName || n.title || "").trim();
+          const unit = String(n.unit || "шт").trim() || "шт";
+          if (name) {
+            const existing = await tx.material.findFirst({ where: { name, unit } });
+            if (existing) {
+              materialId = existing.id;
+            } else {
+              const createdMaterial = await tx.material.create({ data: { name, unit } });
+              materialId = createdMaterial.id;
+            }
+          }
+        }
         const row = await tx.objectLimitNode.create({
           data: {
             templateId: tpl.id,
@@ -189,7 +205,8 @@ limitImportsRouter.post(
             title: n.title,
             materialName: n.materialName,
             unit: n.unit,
-            plannedQty: n.plannedQty
+            plannedQty: n.plannedQty,
+            ...(materialId ? { materialId } : {})
           }
         });
         parentByLevel.set(n.level, row.id);
