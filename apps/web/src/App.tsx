@@ -1982,6 +1982,99 @@ function App() {
     await loadLimitTemplates();
   }
 
+  async function patchLimitTemplateTitle(templateId: string, title: string) {
+    if (!token) return;
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setLimitsMessage("Введите название шаблона лимитов");
+      return;
+    }
+    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: trimmed })
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось сохранить название шаблона лимитов");
+      return;
+    }
+    setLimitsMessage("Шаблон лимитов обновлён");
+    await loadLimitTemplates();
+  }
+
+  async function deleteLimitTemplate(templateId: string) {
+    if (!token) return;
+    if (!window.confirm("Удалить этот импорт лимитов целиком (все разделы и материалы)?")) return;
+    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось удалить шаблон лимитов");
+      return;
+    }
+    setLimitsMessage("Шаблон лимитов удалён");
+    await loadLimitTemplates();
+  }
+
+  async function createLimitImportNode(
+    templateId: string,
+    body: {
+      parentId?: string | null;
+      nodeType: "GROUP" | "MATERIAL";
+      title: string;
+      materialName?: string | null;
+      unit?: string | null;
+      plannedQty?: number | null;
+    }
+  ) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}/nodes`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось добавить строку в дерево лимитов");
+      return;
+    }
+    setLimitsMessage("Строка добавлена");
+    await loadLimitTemplates();
+  }
+
+  async function patchLimitImportNode(
+    nodeId: string,
+    body: Record<string, unknown>
+  ) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось сохранить изменения в лимите");
+      return;
+    }
+    setLimitsMessage("Изменения сохранены");
+    await loadLimitTemplates();
+  }
+
+  async function deleteLimitImportNode(nodeId: string) {
+    if (!token) return;
+    if (!window.confirm("Удалить эту строку? Дочерние элементы тоже будут удалены.")) return;
+    const res = await fetch(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setLimitsMessage("Не удалось удалить строку лимита");
+      return;
+    }
+    setLimitsMessage("Строка удалена");
+    await loadLimitTemplates();
+  }
+
   async function loadReceiptRequests() {
     if (!token || !activeObjectId) return;
     const params = new URLSearchParams({
@@ -2985,7 +3078,7 @@ function App() {
       void loadStockMovements();
       setExpandedLimitNodes({});
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "warehouse") {
@@ -5114,20 +5207,65 @@ function App() {
           </div>
           {limitTemplates.map((tpl) => (
             <div key={`limit-tpl-${tpl.id}`} className="card" style={{ marginTop: 10 }}>
-              <div className="rightCardHeader">
-                <h3>{tpl.title}</h3>
-                <span className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</span>
+              <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
+                  <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                    <input
+                      id={`limit-tpl-title-${tpl.id}`}
+                      key={`tpl-title-${tpl.id}-${tpl.title}`}
+                      defaultValue={tpl.title}
+                      aria-label="Название шаблона лимитов"
+                      style={{ minWidth: 220, flex: "1 1 220px" }}
+                      disabled={!canWriteLimits}
+                    />
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      disabled={!canWriteLimits}
+                      onClick={() => {
+                        const input = document.getElementById(`limit-tpl-title-${tpl.id}`) as HTMLInputElement | null;
+                        const v = input?.value || "";
+                        void patchLimitTemplateTitle(tpl.id, v);
+                      }}
+                    >
+                      Переименовать
+                    </button>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      disabled={!canWriteLimits}
+                      onClick={() => void deleteLimitTemplate(tpl.id)}
+                    >
+                      Удалить шаблон
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canWriteLimits}
+                      onClick={() =>
+                        void createLimitImportNode(tpl.id, {
+                          parentId: null,
+                          nodeType: "GROUP",
+                          title: "Новый раздел"
+                        })
+                      }
+                    >
+                      + Раздел
+                    </button>
+                  </div>
+                </div>
+                <span className="muted" style={{ whiteSpace: "nowrap" }}>
+                  {tpl.section} · {new Date(tpl.createdAt).toLocaleString()}
+                </span>
               </div>
               <div className="plainList">
                 {(() => {
                   const childrenByParent = new Map<string, LimitImportNode[]>();
-                  const nodeById = new Map<string, LimitImportNode>();
                   for (const n of tpl.nodes) {
                     const key = n.parentId || "__root__";
                     const arr = childrenByParent.get(key) || [];
                     arr.push(n);
                     childrenByParent.set(key, arr);
-                    nodeById.set(n.id, n);
                   }
 
                   const collapseSubtree = (prev: Record<string, boolean>, nodeId: string) => {
@@ -5146,7 +5284,6 @@ function App() {
                     const children = childrenByParent.get(node.id) || [];
                     const isGroup = node.nodeType === "GROUP";
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
-                    const title = node.materialName || node.title;
                     const planned = Number(node.plannedQty || 0);
                     const issued = node.materialId ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0) : 0;
                     const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
@@ -5155,7 +5292,7 @@ function App() {
                     return (
                       <div key={node.id} style={{ marginLeft: depth * 18 }}>
                         {isGroup ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px", flexWrap: "wrap" }}>
                             <button
                               type="button"
                               className="ghostBtn"
@@ -5189,16 +5326,149 @@ function App() {
                             >
                               {children.length ? (isExpanded ? "▾" : "▸") : "•"}
                             </button>
-                            <div style={{ fontWeight: 700, color: "#243656" }}>{node.title}</div>
+                            <input
+                              id={`limit-grp-title-${node.id}`}
+                              key={`grp-${node.id}-${node.title}`}
+                              defaultValue={node.title}
+                              aria-label="Название раздела"
+                              style={{ fontWeight: 700, color: "#243656", flex: "1 1 200px", minWidth: 120 }}
+                              disabled={!canWriteLimits}
+                            />
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              disabled={!canWriteLimits}
+                              onClick={() => {
+                                const input = document.getElementById(`limit-grp-title-${node.id}`) as HTMLInputElement | null;
+                                const v = (input?.value || "").trim();
+                                if (!v) return;
+                                void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
+                              }}
+                            >
+                              Сохранить
+                            </button>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              disabled={!canWriteLimits}
+                              onClick={() =>
+                                void createLimitImportNode(tpl.id, {
+                                  parentId: node.id,
+                                  nodeType: "GROUP",
+                                  title: "Новый подраздел"
+                                })
+                              }
+                            >
+                              + Подраздел
+                            </button>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              disabled={!canWriteLimits}
+                              onClick={() =>
+                                void createLimitImportNode(tpl.id, {
+                                  parentId: node.id,
+                                  nodeType: "MATERIAL",
+                                  title: "Новый материал",
+                                  materialName: "Новый материал",
+                                  unit: "шт",
+                                  plannedQty: 0
+                                })
+                              }
+                            >
+                              + Материал
+                            </button>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              disabled={!canWriteLimits}
+                              onClick={() => void deleteLimitImportNode(node.id)}
+                            >
+                              Удалить
+                            </button>
                           </div>
                         ) : (
                           <div className="card" style={{ padding: 10, marginTop: 6 }}>
-                            <div className="rightCardHeader" style={{ marginBottom: 6 }}>
-                              <strong style={{ fontSize: 13 }}>{title}</strong>
-                              <span className="muted">
-                                {Math.round(issued)} / {Number.isFinite(planned) ? planned : 0} {node.unit || "шт"}
-                                {!node.materialId ? " · не сопоставлено" : ""}
-                              </span>
+                            <div className="rightCardHeader" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
+                              <div style={{ flex: 1, minWidth: 0 }} className="form" data-compact-limit-form>
+                                <label style={{ marginBottom: 6 }}>
+                                  Наименование
+                                  <input
+                                    id={`limit-mat-name-${node.id}`}
+                                    key={`mat-name-${node.id}-${node.materialName || node.title}`}
+                                    defaultValue={String(node.materialName || node.title || "")}
+                                    disabled={!canWriteLimits}
+                                  />
+                                </label>
+                                <div className="grid2" style={{ gap: 8 }}>
+                                  <label style={{ marginBottom: 0 }}>
+                                    Ед.
+                                    <input
+                                      id={`limit-mat-unit-${node.id}`}
+                                      key={`mat-unit-${node.id}-${node.unit || ""}`}
+                                      defaultValue={String(node.unit || "шт")}
+                                      disabled={!canWriteLimits}
+                                    />
+                                  </label>
+                                  <label style={{ marginBottom: 0 }}>
+                                    План
+                                    <input
+                                      id={`limit-mat-plan-${node.id}`}
+                                      key={`mat-plan-${node.id}-${String(node.plannedQty ?? "")}`}
+                                      type="number"
+                                      step={0.001}
+                                      defaultValue={Number.isFinite(planned) ? planned : 0}
+                                      disabled={!canWriteLimits}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                                <span className="muted" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                  Выдано: {Math.round(issued)} / {Number.isFinite(planned) ? planned : 0}{" "}
+                                  {node.unit || "шт"}
+                                  {!node.materialId ? " · не сопоставлено" : ""}
+                                </span>
+                                <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+                                  <button
+                                    type="button"
+                                    className="ghostBtn"
+                                    disabled={!canWriteLimits}
+                                    onClick={() => {
+                                      const nameInput = document.getElementById(`limit-mat-name-${node.id}`) as HTMLInputElement | null;
+                                      const unitInput = document.getElementById(`limit-mat-unit-${node.id}`) as HTMLInputElement | null;
+                                      const planInput = document.getElementById(`limit-mat-plan-${node.id}`) as HTMLInputElement | null;
+                                      const name =
+                                        nameInput?.value.trim() ||
+                                        String(node.materialName || node.title || "").trim();
+                                      const unit = (unitInput?.value || "шт").trim() || "шт";
+                                      const planRaw = planInput?.value;
+                                      const planNum = planRaw === "" || planRaw === undefined ? null : Number(planRaw);
+                                      if (planNum !== null && !Number.isFinite(planNum)) {
+                                        setLimitsMessage("Некорректное плановое количество");
+                                        return;
+                                      }
+                                      void patchLimitImportNode(node.id, {
+                                        nodeType: "MATERIAL",
+                                        title: name,
+                                        materialName: name,
+                                        unit,
+                                        plannedQty: planNum
+                                      });
+                                    }}
+                                  >
+                                    Сохранить
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ghostBtn"
+                                    disabled={!canWriteLimits}
+                                    onClick={() => void deleteLimitImportNode(node.id)}
+                                  >
+                                    Удалить
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                             <div className="progressWrap" style={{ width: "100%" }}>
                               <div className={`progressBar ${isOver ? "bad" : ""}`} style={{ width: `${pct}%` }} />

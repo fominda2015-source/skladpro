@@ -729,6 +729,45 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           responses: { "201": { description: "Import created" } }
         }
       },
+      "/api/limit-imports/{templateId}": {
+        parameters: [{ name: "templateId", in: "path", required: true, schema: { type: "string" } }],
+        patch: {
+          tags: ["limits"],
+          summary: "Rename imported limits template",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Template updated" } }
+        },
+        delete: {
+          tags: ["limits"],
+          summary: "Delete imported limits template and its tree",
+          security: [{ bearerAuth: [] }],
+          responses: { "204": { description: "Deleted" } }
+        }
+      },
+      "/api/limit-imports/{templateId}/nodes": {
+        post: {
+          tags: ["limits"],
+          summary: "Create a group or material node under an imported template",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "templateId", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "201": { description: "Node created" } }
+        }
+      },
+      "/api/limit-imports/nodes/{nodeId}": {
+        parameters: [{ name: "nodeId", in: "path", required: true, schema: { type: "string" } }],
+        patch: {
+          tags: ["limits"],
+          summary: "Update a node in an imported limits tree",
+          security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Node updated" } }
+        },
+        delete: {
+          tags: ["limits"],
+          summary: "Delete a node (and its subtree) from imported limits",
+          security: [{ bearerAuth: [] }],
+          responses: { "204": { description: "Deleted" } }
+        }
+      },
       "/api/receipt-requests": {
         get: {
           tags: ["operations"],
