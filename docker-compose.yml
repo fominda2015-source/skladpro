@@ -22,9 +22,15 @@ services:
     environment:
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      SEED_ON_START: ${SEED_ON_START:-0}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@skladpro.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-System Admin}
     depends_on:
       - db
-    command: sh -c "npm run prisma:db:push && node dist/index.js"
+    command: sh -c "npm run prisma:migrate:deploy && node dist/index.js"
     volumes:
       - uploads_data:/app/uploads
     networks:

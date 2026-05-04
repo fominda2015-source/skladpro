@@ -3,7 +3,11 @@ import { Router } from "express";
 import xlsx from "xlsx";
 import { z } from "zod";
 import type { LimitNodeType, Prisma } from "@prisma/client";
-import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
+import {
+  assertObjectSectionInScope,
+  getRequestDataScope,
+  objectLimitTemplateWhereFromScope
+} from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -200,7 +204,7 @@ limitImportsRouter.post(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, parsed.data.warehouseId);
+      assertObjectSectionInScope(scope, parsed.data.warehouseId, parsed.data.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -275,7 +279,7 @@ limitImportsRouter.patch(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, existing.template.warehouseId);
+      assertObjectSectionInScope(scope, existing.template.warehouseId, existing.template.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -382,7 +386,7 @@ limitImportsRouter.delete(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, existing.template.warehouseId);
+      assertObjectSectionInScope(scope, existing.template.warehouseId, existing.template.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -408,7 +412,7 @@ limitImportsRouter.post(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, tpl.warehouseId);
+      assertObjectSectionInScope(scope, tpl.warehouseId, tpl.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -491,7 +495,7 @@ limitImportsRouter.patch(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, tpl.warehouseId);
+      assertObjectSectionInScope(scope, tpl.warehouseId, tpl.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -519,7 +523,7 @@ limitImportsRouter.delete(
     }
     const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, tpl.warehouseId);
+      assertObjectSectionInScope(scope, tpl.warehouseId, tpl.section);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -537,15 +541,19 @@ limitImportsRouter.get("/", async (req: AuthedRequest, res) => {
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
   if (warehouseId) {
     try {
-      assertWarehouseInScope(scope, warehouseId);
+      if (section) {
+        assertObjectSectionInScope(scope, warehouseId, section);
+      }
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
       throw e;
     }
   }
+  const scopedWhere = objectLimitTemplateWhereFromScope(scope);
   const rows = await prisma.objectLimitTemplate.findMany({
     where: {
+      ...(Object.keys(scopedWhere).length ? { AND: [scopedWhere] } : {}),
       ...(warehouseId ? { warehouseId } : {}),
       ...(section ? { section } : {})
     },

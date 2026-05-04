@@ -8,8 +8,7 @@ export type AuthedRequest = Request & { user?: JwtPayload };
 
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-  const queryToken = typeof req.query.access_token === "string" ? req.query.access_token : undefined;
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : queryToken;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : undefined;
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }

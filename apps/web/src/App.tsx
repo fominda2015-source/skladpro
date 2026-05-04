@@ -59,6 +59,16 @@ type StockMovementRow = {
   operation?: { id: string; type: string; documentNumber: string | null };
   issueRequest?: { id: string; number: string };
 };
+type IssuedSummaryRow = {
+  materialId: string;
+  issuedQty: number;
+};
+type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => {
+  detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
+};
+type WindowWithBarcodeDetector = Window & {
+  BarcodeDetector?: BarcodeDetectorCtor;
+};
 type MeResponse = {
   id: string;
   email: string;
@@ -543,6 +553,8 @@ function App() {
   const [limitSummary, setLimitSummary] = useState<ProjectLimitSummary | null>(null);
   const [limitImportFile, setLimitImportFile] = useState<File | null>(null);
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
+  const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
+  const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
@@ -694,6 +706,7 @@ function App() {
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [reportProjectId, setReportProjectId] = useState("");
+  const [reportsMessage, setReportsMessage] = useState("");
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -984,17 +997,7 @@ function App() {
     return map;
   }, [stockMovements]);
 
-  const issuedTotalsByMaterialId = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const m of stockMovements) {
-      if (activeObjectId && m.warehouseId !== activeObjectId) continue;
-      if (m.direction !== "OUT") continue;
-      const qty = Number(m.quantity);
-      if (!Number.isFinite(qty) || qty <= 0) continue;
-      map.set(m.materialId, (map.get(m.materialId) || 0) + qty);
-    }
-    return map;
-  }, [stockMovements, activeObjectId]);
+  const issuedTotalsByMaterialId = useMemo(() => new Map(Object.entries(limitIssuedTotals)), [limitIssuedTotals]);
 
   const activeObjectName =
     availableObjects.find((o) => o.id === activeObjectId)?.name || activeObjectId || "Без названия";
@@ -1949,20 +1952,45 @@ function App() {
 
   async function loadLimitTemplates() {
     if (!token || !activeObjectId) return;
+    setLimitTemplatesLoading(true);
     const params = new URLSearchParams({
       warehouseId: activeObjectId,
       section: objectSectionFilter
     });
-    const res = await fetch(`${API_URL}/api/limit-imports?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    setLimitTemplates((await res.json()) as LimitImportTemplate[]);
-    setExpandedLimitNodes({});
+    try {
+      const [templatesRes, issuedRes] = await Promise.all([
+        fetch(`${API_URL}/api/limit-imports?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${API_URL}/api/stock-movements/issued-summary?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+      if (!templatesRes.ok) {
+        throw new Error(`HTTP ${templatesRes.status}`);
+      }
+      if (!issuedRes.ok) {
+        throw new Error(`ISSUED_HTTP ${issuedRes.status}`);
+      }
+      setLimitTemplates((await templatesRes.json()) as LimitImportTemplate[]);
+      const issuedRows = (await issuedRes.json()) as IssuedSummaryRow[];
+      setLimitIssuedTotals(Object.fromEntries(issuedRows.map((x) => [x.materialId, Number(x.issuedQty) || 0])));
+      setExpandedLimitNodes({});
+    } catch (e) {
+      setLimitTemplates([]);
+      setLimitIssuedTotals({});
+      setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
+    } finally {
+      setLimitTemplatesLoading(false);
+    }
   }
 
   async function uploadLimitTemplate() {
     if (!token || !activeObjectId || !limitImportFile) return;
+    if (!canWriteLimits) {
+      setLimitsMessage("Недостаточно прав для импорта лимитов");
+      return;
+    }
     const form = new FormData();
     form.append("file", limitImportFile);
     form.append("warehouseId", activeObjectId);
@@ -2458,11 +2486,23 @@ function App() {
       setWaybillsTone("error");
       return;
     }
-    const pdfUrl = `${API_URL}/api/waybills/${waybillId}/pdf?access_token=${encodeURIComponent(token)}&filename=${encodeURIComponent(waybillNumber)}.pdf`;
-    const win = window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    if (!win) {
-      window.location.assign(pdfUrl);
+    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setWaybillsMessage("Не удалось открыть PDF");
+      setWaybillsTone("error");
+      return;
     }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${waybillNumber}.pdf`;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.click();
+    URL.revokeObjectURL(url);
     setWaybillsMessage("Открываю PDF...");
     setWaybillsTone("neutral");
   }
@@ -2950,7 +2990,7 @@ function App() {
         setQrStream(stream);
         setQrScanError("");
 
-        const AnyBarcodeDetector = (window as any).BarcodeDetector;
+        const AnyBarcodeDetector = (window as WindowWithBarcodeDetector).BarcodeDetector;
         if (!AnyBarcodeDetector) {
           setQrScanError("Сканер доступен только в современных браузерах (BarcodeDetector).");
           return;
@@ -5189,22 +5229,49 @@ function App() {
           <p className="muted">Импортируй лимиты из Excel (drag&drop/файл), затем раскрывай разделы до материалов и отслеживай прогресс.</p>
           <div
             className="card"
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={(e) => {
+              if (canWriteLimits) e.preventDefault();
+            }}
             onDrop={(e) => {
               e.preventDefault();
+              if (!canWriteLimits) {
+                setLimitsMessage("Недостаточно прав для импорта лимитов");
+                return;
+              }
               const file = e.dataTransfer.files?.[0];
-              if (file) setLimitImportFile(file);
+              if (!file) return;
+              if (!/\.(xlsx|xls)$/i.test(file.name)) {
+                setLimitsMessage("Выберите Excel-файл .xlsx или .xls");
+                return;
+              }
+              setLimitImportFile(file);
             }}
           >
             <h3>Импорт лимитов (Excel)</h3>
             <div className="toolbar">
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => setLimitImportFile(e.target.files?.[0] || null)} />
-              <button type="button" onClick={() => void uploadLimitTemplate()} disabled={!limitImportFile}>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                disabled={!canWriteLimits}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  if (file && !/\.(xlsx|xls)$/i.test(file.name)) {
+                    setLimitsMessage("Выберите Excel-файл .xlsx или .xls");
+                    return;
+                  }
+                  setLimitImportFile(file);
+                }}
+              />
+              <button type="button" onClick={() => void uploadLimitTemplate()} disabled={!limitImportFile || !canWriteLimits}>
                 Загрузить лимиты
               </button>
             </div>
             {limitImportFile && <p className="muted">Файл: {limitImportFile.name}</p>}
           </div>
+          {limitTemplatesLoading && <LoadingState text="Загрузка лимитов..." />}
+          {!limitTemplatesLoading && !limitTemplates.length && (
+            <EmptyState title="Лимиты не загружены" hint="Импортируйте Excel-файл или создайте дерево лимитов вручную." />
+          )}
           {limitTemplates.map((tpl) => (
             <div key={`limit-tpl-${tpl.id}`} className="card" style={{ marginTop: 10 }}>
               <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
@@ -5266,6 +5333,9 @@ function App() {
                     const arr = childrenByParent.get(key) || [];
                     arr.push(n);
                     childrenByParent.set(key, arr);
+                  }
+                  for (const arr of childrenByParent.values()) {
+                    arr.sort((a, b) => a.orderNo - b.orderNo);
                   }
 
                   const collapseSubtree = (prev: Record<string, boolean>, nodeId: string) => {
@@ -5341,7 +5411,10 @@ function App() {
                               onClick={() => {
                                 const input = document.getElementById(`limit-grp-title-${node.id}`) as HTMLInputElement | null;
                                 const v = (input?.value || "").trim();
-                                if (!v) return;
+                                if (!v) {
+                                  setLimitsMessage("Введите название раздела");
+                                  return;
+                                }
                                 void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
                               }}
                             >
@@ -5622,7 +5695,7 @@ function App() {
               Загрузить сводку
             </button>
           </div>
-          {limitsMessage && <p className="muted">{limitsMessage}</p>}
+          {limitsMessage && <ResultBanner text={limitsMessage} tone={limitsMessage.includes("Не удалось") || limitsMessage.includes("Ошибка") ? "error" : "neutral"} />}
 
           {limitSummary && (
             <table>
@@ -6725,15 +6798,32 @@ function App() {
           <div className="toolbar">
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!token || !reportProjectId) return;
-                const url = `${API_URL}/api/reports/object/${encodeURIComponent(reportProjectId)}/summary.pdf?access_token=${encodeURIComponent(token)}`;
-                window.open(url, "_blank", "noopener,noreferrer");
+                setReportsMessage("");
+                const res = await fetch(`${API_URL}/api/reports/object/${encodeURIComponent(reportProjectId)}/summary.pdf`, {
+                  headers: { Authorization: `Bearer ${token}` }
+                });
+                if (!res.ok) {
+                  setReportsMessage("Не удалось сформировать PDF сводку");
+                  return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "object-summary.pdf";
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.click();
+                URL.revokeObjectURL(url);
+                setReportsMessage("PDF сводка сформирована");
               }}
             >
               Скачать PDF сводку
             </button>
           </div>
+          {reportsMessage && <ResultBanner text={reportsMessage} tone={reportsMessage.includes("Не удалось") ? "error" : "neutral"} />}
         </div>
       )}
 

@@ -6,3 +6,5 @@ release/
 apps/**/node_modules/
 apps/**/dist/
 apps/**/release/
+apps/**/node_modules/.tmp/
+*.tsbuildinfo

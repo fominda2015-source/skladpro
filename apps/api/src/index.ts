@@ -1,6 +1,5 @@
 import cors from "cors";
-import dotenv from "dotenv";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import path from "node:path";
 import { prisma } from "./lib/prisma.js";
 import { config } from "./config.js";
@@ -31,13 +30,12 @@ import { receiptRequestsRouter } from "./routes/receiptRequests.js";
 import { warehousesRouter } from "./routes/warehouses.js";
 import { limitImportsRouter } from "./routes/limitImports.js";
 import { seedBaseData } from "./seed.js";
-
-dotenv.config();
+import { requireAuth, requirePermission } from "./middleware/auth.js";
 
 const app = express();
 const port = config.port;
 
-app.use(cors());
+app.use(config.corsOrigins ? cors({ origin: config.corsOrigins }) : cors());
 app.use(express.json());
 app.use(`/${config.uploadsDir}`, express.static(path.resolve(process.cwd(), config.uploadsDir)));
 
@@ -54,11 +52,15 @@ app.get("/api/health/db", async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ok: true, db: "connected" });
   } catch (error) {
-    res.status(500).json({ ok: false, db: "disconnected", error: String(error) });
+    res.status(500).json({
+      ok: false,
+      db: "disconnected",
+      ...(config.isProduction ? {} : { error: String(error) })
+    });
   }
 });
 
-app.get("/api/catalog/materials", async (_req, res) => {
+app.get("/api/catalog/materials", requireAuth, requirePermission("materials.read"), async (_req, res) => {
   const materials = await prisma.material.findMany({
     orderBy: { createdAt: "desc" },
     take: 50
@@ -93,8 +95,15 @@ app.use("/api/feedback", feedbackRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/contracts", contractsRouter);
 
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err);
+  return res.status(500).json({ error: config.isProduction ? "Internal server error" : String(err) });
+});
+
 async function start() {
-  await seedBaseData();
+  if (config.seedOnStart) {
+    await seedBaseData();
+  }
   app.listen(port, "0.0.0.0", () => {
     console.log(`API running on http://0.0.0.0:${port}`);
   });

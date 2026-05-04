@@ -196,12 +196,39 @@ export function projectLimitWhereFromScope(scope: DataScope): Prisma.ProjectLimi
   return { project: pScope };
 }
 
+export function objectLimitTemplateWhereFromScope(scope: DataScope): Prisma.ObjectLimitTemplateWhereInput {
+  if (scope.unrestricted) {
+    return {};
+  }
+  if (scope.sectionScopes.length) {
+    return {
+      OR: scope.sectionScopes.map((s) => ({ warehouseId: s.warehouseId, section: s.section }))
+    };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds } };
+  }
+  return {};
+}
+
 export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {
   if (scope.unrestricted || !scope.warehouseIds?.length) {
     return;
   }
   if (!scope.warehouseIds.includes(warehouseId)) {
     const err = new Error("FORBIDDEN_WAREHOUSE");
+    (err as Error & { status: number }).status = 403;
+    throw err;
+  }
+}
+
+export function assertObjectSectionInScope(scope: DataScope, warehouseId: string, section: "SS" | "EOM") {
+  assertWarehouseInScope(scope, warehouseId);
+  if (scope.unrestricted || !scope.sectionScopes.length) {
+    return;
+  }
+  if (!scope.sectionScopes.some((s) => s.warehouseId === warehouseId && s.section === section)) {
+    const err = new Error("FORBIDDEN_SECTION");
     (err as Error & { status: number }).status = 403;
     throw err;
   }
