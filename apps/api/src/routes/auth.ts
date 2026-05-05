@@ -2,9 +2,9 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { UserStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../config.js";
-import { seedBaseData } from "../seed.js";
 import { getEffectivePermissions } from "../lib/access.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
@@ -13,6 +13,12 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1)
 });
+
+const loginUserInclude = {
+  role: true,
+  position: true,
+  activeWarehouse: { select: { id: true, name: true, address: true } }
+} as const;
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
@@ -45,35 +51,78 @@ async function getAllowedWarehouses(userId: string, permissions: string[]) {
 
 export const authRouter = Router();
 
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+async function findLoginUser(email: string) {
+  return prisma.user.findFirst({
+    where: { email: { equals: normalizeEmail(email), mode: "insensitive" } },
+    include: loginUserInclude
+  });
+}
+
+async function ensureDefaultAdmin(password: string) {
+  const adminEmail = "admin@skladpro.local";
+  const adminRole = await prisma.role.upsert({
+    where: { name: "ADMIN" },
+    update: { permissions: ["*"] },
+    create: { name: "ADMIN", permissions: ["*"] }
+  });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const existing = await findLoginUser(adminEmail);
+
+  if (existing) {
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        email: adminEmail,
+        fullName: config.adminName,
+        passwordHash,
+        roleId: adminRole.id,
+        status: UserStatus.ACTIVE,
+        customPermissions: []
+      }
+    });
+  } else {
+    await prisma.user.create({
+      data: {
+        email: adminEmail,
+        fullName: config.adminName,
+        passwordHash,
+        roleId: adminRole.id,
+        status: UserStatus.ACTIVE
+      }
+    });
+  }
+
+  return findLoginUser(adminEmail);
+}
+
 authRouter.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
 
-  const findLoginUser = () =>
-    prisma.user.findUnique({
-      where: { email: parsed.data.email },
-      include: { role: true, position: true, activeWarehouse: { select: { id: true, name: true, address: true } } }
-    });
-
-  let user = await findLoginUser();
+  const email = normalizeEmail(parsed.data.email);
+  const password = parsed.data.password;
+  const isDefaultAdminLogin = email === "admin@skladpro.local" && password === "1111";
+  let user = await findLoginUser(email);
 
   if (!user) {
-    if (parsed.data.email === config.adminEmail && parsed.data.password === "1111") {
-      await seedBaseData("1111");
-      user = await findLoginUser();
+    if (isDefaultAdminLogin) {
+      user = await ensureDefaultAdmin("1111");
     }
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
   }
 
-  let passwordOk = await bcrypt.compare(parsed.data.password, user.passwordHash);
-  if (!passwordOk && parsed.data.email === config.adminEmail && parsed.data.password === "1111") {
-    await seedBaseData("1111");
-    user = await findLoginUser();
-    passwordOk = user ? await bcrypt.compare(parsed.data.password, user.passwordHash) : false;
+  let passwordOk = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordOk && isDefaultAdminLogin) {
+    user = await ensureDefaultAdmin("1111");
+    passwordOk = Boolean(user);
   }
   if (!passwordOk) {
     return res.status(401).json({ error: "Invalid credentials" });

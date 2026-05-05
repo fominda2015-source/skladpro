@@ -3151,7 +3151,7 @@ function App() {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password })
       });
       if (!res.ok) {
         throw new Error("Неверный логин или пароль");
