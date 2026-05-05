@@ -125,6 +125,7 @@ type IssueRequest = {
   projectId?: string | null;
   requestedById: string;
   responsibleName?: string | null;
+  actualRecipientName?: string | null;
   note?: string | null;
   basisType?: string;
   basisRef?: string | null;
@@ -231,23 +232,6 @@ type Conversation = {
   kind: "DM" | "FEEDBACK";
   participants: Array<{ user: ChatUser }>;
   messages: ChatMessage[];
-};
-type ProjectLimitSummaryItem = {
-  materialId: string;
-  materialName: string;
-  plannedQty: number;
-  issuedQty: number;
-  reservedQty: number;
-  remainingQty: number;
-  isOver: boolean;
-};
-type ProjectLimitSummary = {
-  id: string;
-  name: string;
-  version: number;
-  projectId: string;
-  projectName: string;
-  items: ProjectLimitSummaryItem[];
 };
 type DocumentFile = {
   id: string;
@@ -385,6 +369,7 @@ type ReceiptRequestItem = {
   quantity: string | number;
   mappedMaterialId?: string | null;
   acceptedQty?: string | number | null;
+  mappedMaterial?: { id: string; name: string; unit: string } | null;
 };
 type ReceiptRequestRow = {
   id: string;
@@ -395,6 +380,13 @@ type ReceiptRequestRow = {
   sourceFileName?: string | null;
   items: ReceiptRequestItem[];
   createdAt: string;
+};
+type MaterialMappingRow = {
+  id: string;
+  sourceName: string;
+  sourceUnit?: string | null;
+  targetMaterialId: string;
+  targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
@@ -534,6 +526,7 @@ function App() {
   const [issueMaterialId, setIssueMaterialId] = useState("");
   const [issueQuantity, setIssueQuantity] = useState(1);
   const [issueResponsible, setIssueResponsible] = useState("");
+  const [issueActualRecipient, setIssueActualRecipient] = useState("");
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [issueSelectedMaterialIds, setIssueSelectedMaterialIds] = useState<string[]>([]);
   const [issueQuantitiesByMaterial, setIssueQuantitiesByMaterial] = useState<Record<string, number>>({});
@@ -541,26 +534,18 @@ function App() {
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
-  const [projectName, setProjectName] = useState("Проект 1");
-  const [projectCode, setProjectCode] = useState("PRJ-001");
-  const [projectWarehouseId, setProjectWarehouseId] = useState("");
-  const [projectSection, setProjectSection] = useState<"SS" | "EOM">("SS");
-  const [limitProjectId, setLimitProjectId] = useState("");
-  const [limitName, setLimitName] = useState("Лимит основного этапа");
-  const [limitMaterialId, setLimitMaterialId] = useState("");
-  const [limitPlannedQty, setLimitPlannedQty] = useState(100);
-  const [limitIdForSummary, setLimitIdForSummary] = useState("");
-  const [limitSummary, setLimitSummary] = useState<ProjectLimitSummary | null>(null);
   const [limitImportFile, setLimitImportFile] = useState<File | null>(null);
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
   const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
+  const [limitEditMode, setLimitEditMode] = useState(false);
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
-  const [docEntityType, setDocEntityType] = useState<"operation" | "issue">("issue");
+  const [docEntityType, setDocEntityType] = useState<"operation" | "issue" | "receipt">("issue");
   const [docEntityId, setDocEntityId] = useState("");
   const [docType, setDocType] = useState("photo");
   const [docTypeFilter, setDocTypeFilter] = useState("");
@@ -568,7 +553,7 @@ function App() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [docDragOver, setDocDragOver] = useState(false);
-  const [docLinkTargetType, setDocLinkTargetType] = useState<"operation" | "issue">("issue");
+  const [docLinkTargetType, setDocLinkTargetType] = useState<"operation" | "issue" | "receipt">("issue");
   const [docLinkTargetId, setDocLinkTargetId] = useState("");
   const [showStockSku, setShowStockSku] = useState(() => {
     const saved = localStorage.getItem(STOCK_VIEW_KEY);
@@ -719,7 +704,7 @@ function App() {
     { id: "warehouse", label: "Склад", permissions: ["stocks.read"] },
     { id: "operations", label: "Приходы", permissions: ["operations.read", "operations.write"] },
     { id: "issues", label: "Выдачи", permissions: ["issues.read", "issues.write"] },
-    { id: "approvals", label: "Согласования", permissions: ["issues.approve"] },
+    { id: "approvals", label: "Заявки", permissions: ["issues.approve"] },
     { id: "waybills", label: "Перемещения", permissions: ["waybills.read", "waybills.write"] },
     { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
     { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.write"] },
@@ -756,8 +741,8 @@ function App() {
   const issueStatusLabel = (status: string) =>
     ({
       DRAFT: "Черновик",
-      ON_APPROVAL: "На согласовании",
-      APPROVED: "Согласовано",
+      ON_APPROVAL: "На рассмотрении",
+      APPROVED: "Одобрено",
       REJECTED: "Отклонено",
       ISSUED: "Выдано",
       CANCELLED: "Отменено"
@@ -799,8 +784,8 @@ function App() {
     })[basisType] ?? basisType;
   const issueActionLabel = (action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue") =>
     ({
-      "send-for-approval": "Отправить на согласование",
-      approve: "Согласовать",
+      "send-for-approval": "Отправить в заявки",
+      approve: "Одобрить",
       reject: "Отклонить",
       cancel: "Отменить",
       issue: "Выдать"
@@ -808,7 +793,7 @@ function App() {
   const issueProcessStep = (status: string) =>
     ({
       DRAFT: "Черновик заявки",
-      ON_APPROVAL: "Согласование",
+      ON_APPROVAL: "Рассмотрение заявки",
       APPROVED: "Готова к выдаче",
       ISSUED: "Завершено",
       REJECTED: "Отклонена",
@@ -999,9 +984,6 @@ function App() {
 
   const issuedTotalsByMaterialId = useMemo(() => new Map(Object.entries(limitIssuedTotals)), [limitIssuedTotals]);
 
-  const activeObjectName =
-    availableObjects.find((o) => o.id === activeObjectId)?.name || activeObjectId || "Без названия";
-
   const limitMaterialCandidates = useMemo(() => {
     const out: Array<{
       nodeId: string;
@@ -1037,68 +1019,7 @@ function App() {
     return new Set(limitMaterialCandidates.map((c) => normalize(c.materialName)).filter(Boolean));
   }, [limitMaterialCandidates]);
 
-  const stockMaterialIdSet = useMemo(() => new Set(stocks.map((s) => s.materialId)), [stocks]);
-  const stockMaterialNameSet = useMemo(() => {
-    const normalize = (v: string) => v.trim().toLowerCase();
-    return new Set(stocks.map((s) => normalize(s.materialName)).filter(Boolean));
-  }, [stocks]);
-
   const limitFilterEnabled = limitTemplates.length > 0 && (limitMaterialIdSet.size > 0 || limitMaterialNameSet.size > 0);
-
-  const virtualLimitRows = useMemo(() => {
-    if (!limitFilterEnabled) return [];
-
-    const normalize = (v: string) => v.trim().toLowerCase();
-    const qNorm = q.trim().toLowerCase();
-    const seen = new Set<string>();
-
-    const warehouseId = activeObjectId || stocks[0]?.warehouseId || "";
-    const warehouseName = activeObjectName;
-
-    const out: StockRow[] = [];
-    for (const c of limitMaterialCandidates) {
-      if (qNorm && !c.materialName.toLowerCase().includes(qNorm)) continue;
-
-      const exists = c.materialId
-        ? stockMaterialIdSet.has(c.materialId)
-        : stockMaterialNameSet.has(normalize(c.materialName));
-      if (exists) continue;
-
-      const key = c.materialId ? `id:${c.materialId}` : `name:${normalize(c.materialName)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      out.push({
-        id: `limit-virtual-${c.nodeId}`,
-        warehouseId,
-        warehouseName,
-        section: objectSectionFilter,
-        materialId: c.materialId || `virtual-${c.nodeId}`,
-        materialName: c.materialName,
-        materialSku: null,
-        materialUnit: c.unit,
-        quantity: 0,
-        reserved: 0,
-        storageRoom: null,
-        storageCell: null,
-        available: 0,
-        isLow: true,
-        updatedAt: new Date().toISOString()
-      });
-    }
-
-    return out;
-  }, [
-    limitFilterEnabled,
-    limitMaterialCandidates,
-    q,
-    stockMaterialIdSet,
-    stockMaterialNameSet,
-    activeObjectId,
-    activeObjectName,
-    objectSectionFilter,
-    stocks
-  ]);
 
   const warehouseVisibleRows = useMemo(() => {
     if (!limitFilterEnabled) return stocks;
@@ -1107,16 +1028,24 @@ function App() {
     const isLimitRow = (row: StockRow) =>
       limitMaterialIdSet.has(row.materialId) || limitMaterialNameSet.has(normalize(row.materialName));
 
-    const baseStocks = showAttachedMaterials ? stocks : stocks.filter(isLimitRow);
-    return [...baseStocks, ...virtualLimitRows];
+    return showAttachedMaterials ? stocks : stocks.filter(isLimitRow);
   }, [
     limitFilterEnabled,
     stocks,
     showAttachedMaterials,
     limitMaterialIdSet,
-    limitMaterialNameSet,
-    virtualLimitRows
+    limitMaterialNameSet
   ]);
+
+  const materialMappingsByTargetId = useMemo(() => {
+    const map = new Map<string, MaterialMappingRow[]>();
+    for (const row of materialMappings) {
+      const arr = map.get(row.targetMaterialId) || [];
+      arr.push(row);
+      map.set(row.targetMaterialId, arr);
+    }
+    return map;
+  }, [materialMappings]);
 
   const stockOptionsForIssue = useMemo(
     () =>
@@ -1157,7 +1086,7 @@ function App() {
     operations: "Приходы",
     issues: "Заявки на выдачу",
     limits: "Лимиты проекта",
-    approvals: "Очередь согласований",
+    approvals: "Заявки",
     documents: "Документы",
     waybills: "Транспортные накладные",
     qr: "QR-сканирование",
@@ -1923,14 +1852,8 @@ function App() {
     if (warehousesData.length && !issueWarehouseId) {
       setIssueWarehouseId(warehousesData[0].id);
     }
-    if (warehousesData.length && !projectWarehouseId) {
-      setProjectWarehouseId(warehousesData[0].id);
-    }
     if (materialsData.length && !issueMaterialId) {
       setIssueMaterialId(materialsData[0].id);
-    }
-    if (materialsData.length && !limitMaterialId) {
-      setLimitMaterialId(materialsData[0].id);
     }
   }
 
@@ -1942,9 +1865,6 @@ function App() {
     if (!res.ok) return;
     const data = (await res.json()) as Project[];
     setProjects(data);
-    if (data.length && !limitProjectId) {
-      setLimitProjectId(data[0].id);
-    }
     if (data.length && !reportProjectId) {
       setReportProjectId(data[0].id);
     }
@@ -2116,6 +2036,19 @@ function App() {
     setReceiptRequests((await res.json()) as ReceiptRequestRow[]);
   }
 
+  async function loadMaterialMappings() {
+    if (!token || !activeObjectId) return;
+    const params = new URLSearchParams({
+      warehouseId: activeObjectId,
+      section: objectSectionFilter
+    });
+    const res = await fetch(`${API_URL}/api/material-mappings?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    setMaterialMappings((await res.json()) as MaterialMappingRow[]);
+  }
+
   async function uploadReceiptRequest() {
     if (!token || !activeObjectId || !receiptRequestFile) return;
     const form = new FormData();
@@ -2163,6 +2096,7 @@ function App() {
     }
     setOpsMessage("Заявка принята и оприходована");
     await loadReceiptRequests();
+    await loadMaterialMappings();
     await loadStocks(q);
     await loadOperations();
   }
@@ -2204,15 +2138,32 @@ function App() {
   async function executeIssueAction(
     issueId: string,
     action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue",
-    opts?: { fromApprovals?: boolean; closeDrawer?: boolean }
+    opts?: { fromApprovals?: boolean; closeDrawer?: boolean; actualRecipientName?: string }
   ) {
     if (!token) return;
     const actionText = issueActionLabel(action).toLowerCase();
+    let actualRecipientName = opts?.actualRecipientName?.trim();
+    if (action === "issue" && !actualRecipientName) {
+      const issue = issues.find((x) => x.id === issueId) || approvalQueue.find((x) => x.id === issueId) || selectedIssue;
+      const fallback = issue?.actualRecipientName || issue?.responsibleName || "";
+      const prompted = window.prompt("Кто фактически получает материалы? Это ФИО попадёт в акт выдачи.", fallback);
+      if (prompted === null) return;
+      actualRecipientName = prompted.trim();
+      if (!actualRecipientName) {
+        setIssuesMessage("Укажи фактического получателя материалов");
+        setIssuesTone("error");
+        return;
+      }
+    }
     const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
     if (!ok) return;
     const res = await fetch(`${API_URL}/api/issues/${issueId}/${action}`, {
       method: "PATCH",
-      headers: { Authorization: `Bearer ${token}` }
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(action === "issue" ? { "Content-Type": "application/json" } : {})
+      },
+      ...(action === "issue" ? { body: JSON.stringify({ actualRecipientName }) } : {})
     });
     if (!res.ok) {
       setIssuesMessage(`Не удалось выполнить действие: ${issueActionLabel(action)}`);
@@ -2690,7 +2641,7 @@ function App() {
     await loadDocuments();
   }
 
-  function openDocumentsForEntity(entityType: "issue" | "operation", entityId: string) {
+  function openDocumentsForEntity(entityType: "issue" | "operation" | "receipt", entityId: string) {
     setDocEntityType(entityType);
     setDocEntityId(entityId);
     setActiveTab("documents");
@@ -2952,6 +2903,7 @@ function App() {
       if (activeTab === "operations") {
         void loadOperations();
         void loadReceiptRequests();
+        void loadMaterialMappings();
       }
     }
   }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter]);
@@ -3107,6 +3059,7 @@ function App() {
   useEffect(() => {
     if (token && activeTab === "approvals") {
       void loadApprovalQueue();
+      void loadReceiptRequests();
     }
   }, [token, activeTab]);
 
@@ -3122,8 +3075,8 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "warehouse") {
-      // Для вкладки "Склад" нужны материалы из лимитов, даже если остатки по ним сейчас 0
       void loadLimitTemplates();
+      void loadMaterialMappings();
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
@@ -3335,7 +3288,7 @@ function App() {
         {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
         {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
-        {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Согласования</button>}
+        {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
         {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
 
         <p className="navSectionTitle">Контроль</p>
@@ -3446,7 +3399,7 @@ function App() {
                 Выдано заявок сегодня: <strong>{dashboard.warehouse.issuesRequestsIssuedToday}</strong>
               </button>
               <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("approvals")}>
-                На согласовании: <strong>{dashboard.warehouse.pendingApprovals}</strong>
+                Заявок в работе: <strong>{dashboard.warehouse.pendingApprovals}</strong>
               </button>
               <button
                 type="button"
@@ -3564,7 +3517,7 @@ function App() {
               <div className="kpiRow">
                 <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Поступления</span><strong>{dashboard?.warehouse.receiptsToday ?? stocks.length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("warehouse"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
-                <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>На согласовании</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
+                <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>Заявки в работе</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
                 <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Перемещения</span><strong>{dashboard?.warehouse.transfersToday ?? waybills.length}</strong></button>
                 {showLegacyMatching ? (
                   <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
@@ -3595,7 +3548,7 @@ function App() {
                   <h3>Проблемные остатки</h3>
                   <ul className="plainList">
                     <li>Критичных остатков: <strong>{stocks.filter((x) => x.isLow).length}</strong></li>
-                    <li>На согласовании: <strong>{approvalQueue.length}</strong></li>
+                    <li>На рассмотрении: <strong>{approvalQueue.length}</strong></li>
                     <li>Заявки в работе: <strong>{issues.filter((x) => x.status !== "ISSUED" && x.status !== "REJECTED").length}</strong></li>
                   </ul>
                 </div>
@@ -3633,7 +3586,7 @@ function App() {
                 </div>
               </div>
               <div className="card approvalCard">
-                <h3>Карточка согласования</h3>
+                <h3>Карточка заявки</h3>
                 {approvalQueue.length ? (
                   <>
                     <p className="muted">
@@ -3660,7 +3613,7 @@ function App() {
                     </div>
                   </>
                 ) : (
-                  <p className="muted">Нет заявок на согласование.</p>
+                  <p className="muted">Нет заявок на рассмотрении.</p>
                 )}
               </div>
               <div className="card">
@@ -3850,9 +3803,14 @@ function App() {
               type="button"
               onClick={() => setShowAttachedMaterials((v) => !v)}
             >
-              {showAttachedMaterials ? "− Прикрепленные материалы" : "+ Прикрепленные материалы"}
+              {showAttachedMaterials ? "Показать только лимитные остатки" : "Показать все материалы"}
             </button>
           </div>
+          {limitFilterEnabled && (
+            <p className="muted">
+              В списке показаны только материалы лимитов, которые реально есть на складе. Нулевые позиции из лимитов скрыты.
+            </p>
+          )}
           {loadingStocks && <p>Загрузка остатков...</p>}
           {stocksError && <p className="error">{stocksError}</p>}
           {!loadingStocks && !stocksError && (
@@ -3887,6 +3845,9 @@ function App() {
                           {expandedStockRowId === row.id ? "+" : "−"}
                         </button>{" "}
                         {safeName(row.materialName)}
+                        {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
+                          <span className="muted"> · фактических названий: {materialMappingsByTargetId.get(row.materialId)?.length}</span>
+                        ) : null}
                       </td>
                       {showStockSku && <td>{row.materialSku || "-"}</td>}
                       <td>{row.materialUnit}</td>
@@ -3900,6 +3861,18 @@ function App() {
                       <tr>
                         <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
                           <div className="card">
+                            {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
+                              <>
+                                <h4>Фактические названия из приходных заявок</h4>
+                                <ul className="plainList">
+                                  {(materialMappingsByTargetId.get(row.materialId) || []).map((m) => (
+                                    <li key={`actual-${row.id}-${m.id}`}>
+                                      {m.sourceName} ({m.sourceUnit || row.materialUnit}) → {safeName(row.materialName)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            ) : null}
                             <h4>Движения по позиции (куски, возвраты, приходы)</h4>
                             <table>
                               <thead>
@@ -3943,6 +3916,16 @@ function App() {
                   <p><strong>Остаток:</strong> {Math.round(row.quantity)}</p>
                   {showStockReserve ? <p><strong>Резерв:</strong> {Math.round(row.reserved)}</p> : null}
                   <p><strong>Доступно:</strong> {Math.round(row.available)}</p>
+                  {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
+                    <details>
+                      <summary>Фактические названия</summary>
+                      <ul className="plainList">
+                        {(materialMappingsByTargetId.get(row.materialId) || []).map((m) => (
+                          <li key={`m-actual-${row.id}-${m.id}`}>{m.sourceName} ({m.sourceUnit || row.materialUnit})</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -4442,7 +4425,12 @@ function App() {
                       <div className="plainList">
                         {row.items.map((it) => (
                           <div key={it.id} className="toolbar" style={{ marginBottom: 6 }}>
-                            <span>{it.sourceName} ({it.sourceUnit || "шт"}) · {it.quantity}</span>
+                            <span>
+                              {it.sourceName} ({it.sourceUnit || "шт"}) · {it.quantity}
+                              {it.mappedMaterial?.name ? (
+                                <span className="muted"> → {safeName(it.mappedMaterial.name)}</span>
+                              ) : null}
+                            </span>
                             <select
                               value={it.mappedMaterialId || ""}
                               onChange={(e) =>
@@ -4472,13 +4460,18 @@ function App() {
                       </div>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        onClick={() => void acceptReceiptRequest(row)}
-                        disabled={row.status === "RECEIVED"}
-                      >
-                        Принять и оприходовать
-                      </button>
+                      <div className="toolbar">
+                        <button
+                          type="button"
+                          onClick={() => void acceptReceiptRequest(row)}
+                          disabled={row.status === "RECEIVED"}
+                        >
+                          Принять и оприходовать
+                        </button>
+                        <button type="button" onClick={() => openDocumentsForEntity("receipt", row.id)}>
+                          Документы
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -4768,8 +4761,21 @@ function App() {
                   Ответственное лицо (свободный ввод)
                   <input
                     value={issueResponsible}
-                    onChange={(e) => setIssueResponsible(e.target.value)}
-                    placeholder="ФИО или любое название"
+                    onChange={(e) => {
+                      setIssueResponsible(e.target.value);
+                      if (!issueActualRecipient.trim()) {
+                        setIssueActualRecipient(e.target.value);
+                      }
+                    }}
+                    placeholder="Кто отвечает за потребность"
+                  />
+                </label>
+                <label>
+                  Фактически получает
+                  <input
+                    value={issueActualRecipient}
+                    onChange={(e) => setIssueActualRecipient(e.target.value)}
+                    placeholder="ФИО для акта выдачи"
                   />
                 </label>
                 <label>
@@ -4853,8 +4859,8 @@ function App() {
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!token || !issueWarehouseId || !issueResponsible.trim()) {
-                      setIssuesMessage("Укажи склад, материалы и ответственное лицо");
+                    if (!token || !issueWarehouseId || !issueResponsible.trim() || !issueActualRecipient.trim()) {
+                      setIssuesMessage("Укажи склад, ответственное лицо и фактического получателя");
                       setIssuesTone("error");
                       return;
                     }
@@ -4915,7 +4921,8 @@ function App() {
                     const created = (await createRes.json()) as { id: string; number: string };
                     const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
                       method: "PATCH",
-                      headers: { Authorization: `Bearer ${token}` }
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ actualRecipientName: issueActualRecipient.trim() })
                     });
                     if (!issueRes.ok) {
                       const text = await issueRes.text();
@@ -4926,6 +4933,7 @@ function App() {
                     }
                     setIssuesMessage(`Материалы выданы: ${created.number}`);
                     setIssuesTone("success");
+                    setIssueActualRecipient("");
                     await loadIssues();
                     await loadStocks(q);
                     await loadStockMovements();
@@ -4959,6 +4967,7 @@ function App() {
                     <th>Статус</th>
                     <th>Поток</th>
                     <th>Ответственный</th>
+                    <th>Получил</th>
                     <th>Дата</th>
                   </tr>
                 </thead>
@@ -4969,6 +4978,7 @@ function App() {
                       <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
                       <td><span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span></td>
                       <td>{i.responsibleName || "—"}</td>
+                      <td>{i.actualRecipientName || "—"}</td>
                       <td>{new Date(i.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}
@@ -4985,6 +4995,7 @@ function App() {
                       <strong>Поток:</strong> <span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span>
                     </p>
                     <p><strong>Ответственный:</strong> {i.responsibleName || "—"}</p>
+                    <p><strong>Фактически получил:</strong> {i.actualRecipientName || "—"}</p>
                     <p><strong>Дата:</strong> {new Date(i.createdAt).toLocaleString()}</p>
                   </article>
                 ))}
@@ -5093,7 +5104,7 @@ function App() {
                   await loadIssues();
                 }}
               >
-                Массово: на согласование
+                Массово: в заявки
               </button>
             )}
             <button
@@ -5166,7 +5177,7 @@ function App() {
                     <div className="toolbar">
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       {i.status === "DRAFT" && (
-                        <button onClick={() => void executeIssueAction(i.id, "send-for-approval")}>На согласование</button>
+                        <button onClick={() => void executeIssueAction(i.id, "send-for-approval")}>В заявки</button>
                       )}
                       {i.status === "ON_APPROVAL" && (
                         <>
@@ -5213,9 +5224,9 @@ function App() {
             </div>
           )}
           <div className="actionBar">
-            <button onClick={() => setActiveTab("approvals")}>Открыть согласования</button>
+            <button onClick={() => setActiveTab("approvals")}>Открыть заявки</button>
             <button onClick={() => setIssueStatusFilter("DRAFT")}>Показать черновики</button>
-            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать на согласовании</button>
+            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать на рассмотрении</button>
             <button onClick={() => setIssueStatusFilter("")}>Сбросить фильтр</button>
           </div>
           </>
@@ -5224,11 +5235,43 @@ function App() {
       )}
 
       {activeTab === "limits" && (
-        <div className="card">
-          <h2>Лимиты по проектам</h2>
-          <p className="muted">Импортируй лимиты из Excel (drag&drop/файл), затем раскрывай разделы до материалов и отслеживай прогресс.</p>
+        <div className="card limitsWorkspace">
+          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <h2>Лимиты</h2>
+              <p className="muted">Импортированные лимиты по выбранному объекту и разделу. В обычном режиме показываем только структуру и выполнение.</p>
+            </div>
+            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="ghostBtn" onClick={() => void loadLimitTemplates()}>
+                Обновить
+              </button>
+              <button
+                type="button"
+                className={limitEditMode ? "" : "ghostBtn"}
+                disabled={!canWriteLimits}
+                onClick={() => setLimitEditMode((v) => !v)}
+              >
+                {limitEditMode ? "Завершить правку" : "Редактировать"}
+              </button>
+            </div>
+          </div>
+
+          {limitsMessage && (
+            <ResultBanner
+              text={limitsMessage}
+              tone={
+                limitsMessage.includes("Не удалось") ||
+                limitsMessage.includes("Ошибка") ||
+                limitsMessage.includes("Недостаточно") ||
+                limitsMessage.includes("Некоррект")
+                  ? "error"
+                  : "neutral"
+              }
+            />
+          )}
+
           <div
-            className="card"
+            className="card limitImportCard"
             onDragOver={(e) => {
               if (canWriteLimits) e.preventDefault();
             }}
@@ -5247,8 +5290,14 @@ function App() {
               setLimitImportFile(file);
             }}
           >
-            <h3>Импорт лимитов (Excel)</h3>
-            <div className="toolbar">
+            <div className="rightCardHeader" style={{ gap: 12 }}>
+              <div>
+                <h3>Загрузить Excel</h3>
+                <p className="muted">Перетащи файл сюда или выбери вручную. Поддерживаются .xlsx и .xls.</p>
+              </div>
+              {limitImportFile && <span className="badge ok">Выбран файл</span>}
+            </div>
+            <div className="toolbar" style={{ marginTop: 8 }}>
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -5263,70 +5312,20 @@ function App() {
                 }}
               />
               <button type="button" onClick={() => void uploadLimitTemplate()} disabled={!limitImportFile || !canWriteLimits}>
-                Загрузить лимиты
+                Импортировать
               </button>
             </div>
             {limitImportFile && <p className="muted">Файл: {limitImportFile.name}</p>}
           </div>
+
           {limitTemplatesLoading && <LoadingState text="Загрузка лимитов..." />}
           {!limitTemplatesLoading && !limitTemplates.length && (
-            <EmptyState title="Лимиты не загружены" hint="Импортируйте Excel-файл или создайте дерево лимитов вручную." />
+            <EmptyState title="Лимиты не загружены" hint="Импортируйте Excel-файл, чтобы увидеть дерево разделов и материалов." />
           )}
+
           {limitTemplates.map((tpl) => (
-            <div key={`limit-tpl-${tpl.id}`} className="card" style={{ marginTop: 10 }}>
-              <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
-                  <div className="toolbar" style={{ flexWrap: "wrap" }}>
-                    <input
-                      id={`limit-tpl-title-${tpl.id}`}
-                      key={`tpl-title-${tpl.id}-${tpl.title}`}
-                      defaultValue={tpl.title}
-                      aria-label="Название шаблона лимитов"
-                      style={{ minWidth: 220, flex: "1 1 220px" }}
-                      disabled={!canWriteLimits}
-                    />
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      disabled={!canWriteLimits}
-                      onClick={() => {
-                        const input = document.getElementById(`limit-tpl-title-${tpl.id}`) as HTMLInputElement | null;
-                        const v = input?.value || "";
-                        void patchLimitTemplateTitle(tpl.id, v);
-                      }}
-                    >
-                      Переименовать
-                    </button>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      disabled={!canWriteLimits}
-                      onClick={() => void deleteLimitTemplate(tpl.id)}
-                    >
-                      Удалить шаблон
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canWriteLimits}
-                      onClick={() =>
-                        void createLimitImportNode(tpl.id, {
-                          parentId: null,
-                          nodeType: "GROUP",
-                          title: "Новый раздел"
-                        })
-                      }
-                    >
-                      + Раздел
-                    </button>
-                  </div>
-                </div>
-                <span className="muted" style={{ whiteSpace: "nowrap" }}>
-                  {tpl.section} · {new Date(tpl.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <div className="plainList">
-                {(() => {
+            <div key={`limit-tpl-${tpl.id}`} className="card limitTemplateCard" style={{ marginTop: 12 }}>
+              {(() => {
                   const childrenByParent = new Map<string, LimitImportNode[]>();
                   for (const n of tpl.nodes) {
                     const key = n.parentId || "__root__";
@@ -5337,6 +5336,19 @@ function App() {
                   for (const arr of childrenByParent.values()) {
                     arr.sort((a, b) => a.orderNo - b.orderNo);
                   }
+                  const materialNodes = tpl.nodes.filter((n) => n.nodeType === "MATERIAL");
+                  const totalPlanned = materialNodes.reduce((sum, n) => sum + Number(n.plannedQty || 0), 0);
+                  const totalIssued = materialNodes.reduce(
+                    (sum, n) => sum + (n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0),
+                    0
+                  );
+                  const overallPct =
+                    totalPlanned > 0 ? Math.min(100, Math.round((totalIssued / totalPlanned) * 100)) : 0;
+                  const overCount = materialNodes.filter((n) => {
+                    const planned = Number(n.plannedQty || 0);
+                    const issued = n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0;
+                    return planned > 0 && issued > planned;
+                  }).length;
 
                   const collapseSubtree = (prev: Record<string, boolean>, nodeId: string) => {
                     const next = { ...prev };
@@ -5358,15 +5370,17 @@ function App() {
                     const issued = node.materialId ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0) : 0;
                     const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
                     const isOver = planned > 0 && issued > planned;
+                    const nodeTitle = String(node.materialName || node.title || "");
+                    const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
 
                     return (
-                      <div key={node.id} style={{ marginLeft: depth * 18 }}>
+                      <div key={node.id} style={{ marginLeft: depth * 16 }}>
                         {isGroup ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px", flexWrap: "wrap" }}>
+                          <div className="limitGroupRow">
                             <button
                               type="button"
                               className="ghostBtn"
-                              style={{ width: 34, minWidth: 34, height: 34, borderRadius: 10 }}
+                              style={{ width: 32, minWidth: 32, height: 32, borderRadius: 10 }}
                               aria-label={isExpanded ? "Свернуть" : "Раскрыть"}
                               onClick={() =>
                                 setExpandedLimitNodes((prev) => {
@@ -5396,112 +5410,116 @@ function App() {
                             >
                               {children.length ? (isExpanded ? "▾" : "▸") : "•"}
                             </button>
-                            <input
-                              id={`limit-grp-title-${node.id}`}
-                              key={`grp-${node.id}-${node.title}`}
-                              defaultValue={node.title}
-                              aria-label="Название раздела"
-                              style={{ fontWeight: 700, color: "#243656", flex: "1 1 200px", minWidth: 120 }}
-                              disabled={!canWriteLimits}
-                            />
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              disabled={!canWriteLimits}
-                              onClick={() => {
-                                const input = document.getElementById(`limit-grp-title-${node.id}`) as HTMLInputElement | null;
-                                const v = (input?.value || "").trim();
-                                if (!v) {
-                                  setLimitsMessage("Введите название раздела");
-                                  return;
-                                }
-                                void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
-                              }}
-                            >
-                              Сохранить
-                            </button>
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              disabled={!canWriteLimits}
-                              onClick={() =>
-                                void createLimitImportNode(tpl.id, {
-                                  parentId: node.id,
-                                  nodeType: "GROUP",
-                                  title: "Новый подраздел"
-                                })
-                              }
-                            >
-                              + Подраздел
-                            </button>
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              disabled={!canWriteLimits}
-                              onClick={() =>
-                                void createLimitImportNode(tpl.id, {
-                                  parentId: node.id,
-                                  nodeType: "MATERIAL",
-                                  title: "Новый материал",
-                                  materialName: "Новый материал",
-                                  unit: "шт",
-                                  plannedQty: 0
-                                })
-                              }
-                            >
-                              + Материал
-                            </button>
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              disabled={!canWriteLimits}
-                              onClick={() => void deleteLimitImportNode(node.id)}
-                            >
-                              Удалить
-                            </button>
+                            {limitEditMode ? (
+                              <>
+                                <input
+                                  id={`limit-grp-title-${node.id}`}
+                                  key={`grp-${node.id}-${node.title}`}
+                                  defaultValue={node.title}
+                                  aria-label="Название раздела"
+                                  style={{ fontWeight: 700, color: "#243656", flex: "1 1 220px", minWidth: 120 }}
+                                  disabled={!canWriteLimits}
+                                />
+                                <button
+                                  type="button"
+                                  className="ghostBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() => {
+                                    const input = document.getElementById(`limit-grp-title-${node.id}`) as HTMLInputElement | null;
+                                    const v = (input?.value || "").trim();
+                                    if (!v) {
+                                      setLimitsMessage("Введите название раздела");
+                                      return;
+                                    }
+                                    void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
+                                  }}
+                                >
+                                  Сохранить
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghostBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() =>
+                                    void createLimitImportNode(tpl.id, {
+                                      parentId: node.id,
+                                      nodeType: "GROUP",
+                                      title: "Новый подраздел"
+                                    })
+                                  }
+                                >
+                                  + Подраздел
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghostBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() =>
+                                    void createLimitImportNode(tpl.id, {
+                                      parentId: node.id,
+                                      nodeType: "MATERIAL",
+                                      title: "Новый материал",
+                                      materialName: "Новый материал",
+                                      unit: "шт",
+                                      plannedQty: 0
+                                    })
+                                  }
+                                >
+                                  + Материал
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghostBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() => void deleteLimitImportNode(node.id)}
+                                >
+                                  Удалить
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <strong style={{ color: "#243656" }}>{node.title}</strong>
+                                {children.length ? <span className="muted">{children.length} поз.</span> : null}
+                              </>
+                            )}
                           </div>
                         ) : (
-                          <div className="card" style={{ padding: 10, marginTop: 6 }}>
-                            <div className="rightCardHeader" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
-                              <div style={{ flex: 1, minWidth: 0 }} className="form" data-compact-limit-form>
-                                <label style={{ marginBottom: 6 }}>
-                                  Наименование
-                                  <input
-                                    id={`limit-mat-name-${node.id}`}
-                                    key={`mat-name-${node.id}-${node.materialName || node.title}`}
-                                    defaultValue={String(node.materialName || node.title || "")}
-                                    disabled={!canWriteLimits}
-                                  />
-                                </label>
-                                <div className="grid2" style={{ gap: 8 }}>
-                                  <label style={{ marginBottom: 0 }}>
-                                    Ед.
+                          <div className={`limitMaterialRow ${isOver ? "low" : ""}`}>
+                            {limitEditMode ? (
+                              <div className="rightCardHeader" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ flex: 1, minWidth: 0 }} className="form" data-compact-limit-form>
+                                  <label style={{ marginBottom: 6 }}>
+                                    Наименование
                                     <input
-                                      id={`limit-mat-unit-${node.id}`}
-                                      key={`mat-unit-${node.id}-${node.unit || ""}`}
-                                      defaultValue={String(node.unit || "шт")}
+                                      id={`limit-mat-name-${node.id}`}
+                                      key={`mat-name-${node.id}-${node.materialName || node.title}`}
+                                      defaultValue={nodeTitle}
                                       disabled={!canWriteLimits}
                                     />
                                   </label>
-                                  <label style={{ marginBottom: 0 }}>
-                                    План
-                                    <input
-                                      id={`limit-mat-plan-${node.id}`}
-                                      key={`mat-plan-${node.id}-${String(node.plannedQty ?? "")}`}
-                                      type="number"
-                                      step={0.001}
-                                      defaultValue={Number.isFinite(planned) ? planned : 0}
-                                      disabled={!canWriteLimits}
-                                    />
-                                  </label>
+                                  <div className="grid2" style={{ gap: 8 }}>
+                                    <label style={{ marginBottom: 0 }}>
+                                      Ед.
+                                      <input
+                                        id={`limit-mat-unit-${node.id}`}
+                                        key={`mat-unit-${node.id}-${node.unit || ""}`}
+                                        defaultValue={String(node.unit || "шт")}
+                                        disabled={!canWriteLimits}
+                                      />
+                                    </label>
+                                    <label style={{ marginBottom: 0 }}>
+                                      План
+                                      <input
+                                        id={`limit-mat-plan-${node.id}`}
+                                        key={`mat-plan-${node.id}-${String(node.plannedQty ?? "")}`}
+                                        type="number"
+                                        step={0.001}
+                                        defaultValue={Number.isFinite(planned) ? planned : 0}
+                                        disabled={!canWriteLimits}
+                                      />
+                                    </label>
+                                  </div>
                                 </div>
-                              </div>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                                <span className="muted" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                                  Выдано: {Math.round(issued)} / {Number.isFinite(planned) ? planned : 0}{" "}
-                                  {node.unit || "шт"}
-                                  {!node.materialId ? " · не сопоставлено" : ""}
-                                </span>
                                 <div className="toolbar" style={{ justifyContent: "flex-end" }}>
                                   <button
                                     type="button"
@@ -5542,7 +5560,15 @@ function App() {
                                   </button>
                                 </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="rightCardHeader" style={{ marginBottom: 8, gap: 10 }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <strong style={{ fontSize: 13 }}>{nodeTitle}</strong>
+                                  <div className="muted">{node.unit || "шт"}{!node.materialId ? " · не сопоставлено" : ""}</div>
+                                </div>
+                                <span className={`badge ${isOver ? "bad" : "ok"}`}>{qtyText}</span>
+                              </div>
+                            )}
                             <div className="progressWrap" style={{ width: "100%" }}>
                               <div className={`progressBar ${isOver ? "bad" : ""}`} style={{ width: `${pct}%` }} />
                             </div>
@@ -5557,192 +5583,106 @@ function App() {
                   };
 
                   const roots = childrenByParent.get("__root__") || [];
-                  return roots.map((r) => renderNode(r, 0));
+                  return (
+                    <>
+                      <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {limitEditMode ? (
+                            <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                              <input
+                                id={`limit-tpl-title-${tpl.id}`}
+                                key={`tpl-title-${tpl.id}-${tpl.title}`}
+                                defaultValue={tpl.title}
+                                aria-label="Название шаблона лимитов"
+                                style={{ minWidth: 220, flex: "1 1 220px" }}
+                                disabled={!canWriteLimits}
+                              />
+                              <button
+                                type="button"
+                                className="ghostBtn"
+                                disabled={!canWriteLimits}
+                                onClick={() => {
+                                  const input = document.getElementById(`limit-tpl-title-${tpl.id}`) as HTMLInputElement | null;
+                                  const v = input?.value || "";
+                                  void patchLimitTemplateTitle(tpl.id, v);
+                                }}
+                              >
+                                Сохранить название
+                              </button>
+                              <button
+                                type="button"
+                                className="ghostBtn"
+                                disabled={!canWriteLimits}
+                                onClick={() =>
+                                  void createLimitImportNode(tpl.id, {
+                                    parentId: null,
+                                    nodeType: "GROUP",
+                                    title: "Новый раздел"
+                                  })
+                                }
+                              >
+                                + Раздел
+                              </button>
+                              <button
+                                type="button"
+                                className="ghostBtn"
+                                disabled={!canWriteLimits}
+                                onClick={() => void deleteLimitTemplate(tpl.id)}
+                              >
+                                Удалить шаблон
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
+                              <p className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</p>
+                            </>
+                          )}
+                        </div>
+                        <div className="kpiRow" style={{ margin: 0 }}>
+                          <div className="kpi">
+                            <span>Материалов</span>
+                            <strong>{materialNodes.length}</strong>
+                          </div>
+                          <div className="kpi">
+                            <span>Выполнение</span>
+                            <strong>{overallPct}%</strong>
+                          </div>
+                          <div className="kpi">
+                            <span>Перерасход</span>
+                            <strong>{overCount}</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="progressWrap" style={{ width: "100%", margin: "10px 0 14px" }}>
+                        <div className={`progressBar ${overCount ? "bad" : ""}`} style={{ width: `${overallPct}%` }} />
+                      </div>
+                      <div className="plainList limitTree">
+                        {roots.map((r) => renderNode(r, 0))}
+                      </div>
+                    </>
+                  );
                 })()}
-              </div>
             </div>
           ))}
-          <div className="grid2">
-            <div>
-              <h3>Создать проект</h3>
-              <div className="form">
-                <label>
-                  Название проекта
-                  <input value={projectName} onChange={(e) => setProjectName(e.target.value)} />
-                </label>
-                <label>
-                  Код проекта
-                  <input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
-                </label>
-                <label>
-                  Объект (склад)
-                  <select value={projectWarehouseId} onChange={(e) => setProjectWarehouseId(e.target.value)}>
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Раздел объекта
-                  <select value={projectSection} onChange={(e) => setProjectSection(e.target.value as "SS" | "EOM")}>
-                    <option value="SS">СС</option>
-                    <option value="EOM">ЭОМ</option>
-                  </select>
-                </label>
-                <button
-                  disabled={!canWriteLimits}
-                  onClick={async () => {
-                    if (!token) return;
-                    const res = await fetch(`${API_URL}/api/projects`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        name: projectName,
-                        code: projectCode,
-                        warehouseId: projectWarehouseId || undefined,
-                        section: projectSection
-                      })
-                    });
-                    if (!res.ok) {
-                      setLimitsMessage("Ошибка создания проекта");
-                      return;
-                    }
-                    setLimitsMessage("Проект создан");
-                    await loadProjects();
-                  }}
-                >
-                  Создать проект
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <h3>Создать лимит</h3>
-              <div className="form">
-                <label>
-                  Проект
-                  <select value={limitProjectId} onChange={(e) => setLimitProjectId(e.target.value)}>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {safeName(p.name)} {p.section ? `(${p.section})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Название лимита
-                  <input value={limitName} onChange={(e) => setLimitName(e.target.value)} />
-                </label>
-                <label>
-                  Материал
-                  <select value={limitMaterialId} onChange={(e) => setLimitMaterialId(e.target.value)}>
-                    {materials.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  План, количество
-                  <input type="number" min={0.001} step={0.001} value={limitPlannedQty} onChange={(e) => setLimitPlannedQty(Number(e.target.value))} />
-                </label>
-                <button
-                  disabled={!canWriteLimits}
-                  onClick={async () => {
-                    if (!token || !limitProjectId || !limitMaterialId) return;
-                    const res = await fetch(`${API_URL}/api/project-limits`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        projectId: limitProjectId,
-                        name: limitName,
-                        items: [{ materialId: limitMaterialId, plannedQty: limitPlannedQty }]
-                      })
-                    });
-                    if (!res.ok) {
-                      setLimitsMessage("Ошибка создания лимита");
-                      return;
-                    }
-                    const data = await res.json();
-                    setLimitIdForSummary(data.id);
-                    setLimitsMessage("Лимит создан");
-                  }}
-                >
-                  Создать лимит
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="toolbar">
-            <input
-              placeholder="ID лимита для сводки"
-              value={limitIdForSummary}
-              onChange={(e) => setLimitIdForSummary(e.target.value)}
-            />
-            <button
-              onClick={async () => {
-                if (!token || !limitIdForSummary) return;
-                const res = await fetch(`${API_URL}/api/project-limits/${limitIdForSummary}/summary`, {
-                  headers: { Authorization: `Bearer ${token}` }
-                });
-                if (!res.ok) {
-                  setLimitsMessage("Ошибка загрузки сводки лимита");
-                  return;
-                }
-                setLimitSummary((await res.json()) as ProjectLimitSummary);
-              }}
-            >
-              Загрузить сводку
-            </button>
-          </div>
-          {limitsMessage && <ResultBanner text={limitsMessage} tone={limitsMessage.includes("Не удалось") || limitsMessage.includes("Ошибка") ? "error" : "neutral"} />}
-
-          {limitSummary && (
-            <table>
-              <thead>
-                <tr>
-                  <th>Материал</th>
-                  <th>План</th>
-                  <th>Выдано</th>
-                  <th>Резерв</th>
-                  <th>Остаток</th>
-                  <th>Использование</th>
-                </tr>
-              </thead>
-              <tbody>
-                {limitSummary.items.map((item) => (
-                  <tr key={item.materialId} className={item.isOver ? "low" : ""}>
-                    <td>{item.materialName}</td>
-                    <td>{item.plannedQty}</td>
-                    <td>{item.issuedQty}</td>
-                    <td>{item.reservedQty}</td>
-                    <td>{item.remainingQty}</td>
-                    <td>
-                      <div className="progressWrap">
-                        <div
-                          className={`progressBar ${item.isOver ? "bad" : ""}`}
-                          style={{ width: `${Math.min(100, Math.round(((item.issuedQty + item.reservedQty) / Math.max(1, item.plannedQty)) * 100))}%` }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
         </div>
       )}
 
       {activeTab === "approvals" && (
         <div className="card">
-          <h2>Очередь согласований</h2>
+          <h2>Заявки</h2>
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           <div className="kpiRow">
             <div className="kpi">
-              <span>На согласовании</span>
+              <span>На рассмотрении</span>
               <strong>{approvalQueue.length}</strong>
             </div>
+            <div className="kpi">
+              <span>Приходные заявки</span>
+              <strong>{receiptRequests.length}</strong>
+            </div>
           </div>
+          <h3>Заявки на выдачу</h3>
           <table>
             <thead>
               <tr>
@@ -5772,6 +5712,35 @@ function App() {
               ))}
             </tbody>
           </table>
+          <h3 style={{ marginTop: 18 }}>Приходные заявки</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Номер</th>
+                <th>Файл</th>
+                <th>Статус</th>
+                <th>Позиции</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {receiptRequests.map((row) => (
+                <tr key={`approval-receipt-${row.id}`}>
+                  <td>{row.number}</td>
+                  <td>{row.sourceFileName || "—"}</td>
+                  <td><span className={`badge ${row.status === "RECEIVED" ? "ok" : "warn"}`}>{row.status}</span></td>
+                  <td>{row.items.length}</td>
+                  <td>
+                    <div className="toolbar">
+                      <button type="button" onClick={() => setActiveTab("operations")}>Открыть приемку</button>
+                      <button type="button" onClick={() => openDocumentsForEntity("receipt", row.id)}>Документы</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!receiptRequests.length && <p className="muted">Приходных заявок пока нет.</p>}
         </div>
       )}
 
@@ -5798,13 +5767,14 @@ function App() {
               <select
                 value={docEntityType}
                 onChange={(e) => {
-                  const nextType = e.target.value as "operation" | "issue";
+                  const nextType = e.target.value as "operation" | "issue" | "receipt";
                   setDocEntityType(nextType);
                   setDocEntityId("");
                 }}
               >
                 <option value="issue">Заявка</option>
                 <option value="operation">Операция</option>
+                <option value="receipt">Приходная заявка</option>
               </select>
             </label>
             <label>
@@ -5818,12 +5788,21 @@ function App() {
                     </option>
                   ))}
                 </select>
-              ) : (
+              ) : docEntityType === "operation" ? (
                 <select value={docEntityId} onChange={(e) => setDocEntityId(e.target.value)}>
                   <option value="">Выбери операцию</option>
                   {operations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {(o.documentNumber || o.id.slice(0, 8))} [{o.type}]
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select value={docEntityId} onChange={(e) => setDocEntityId(e.target.value)}>
+                  <option value="">Выбери приходную заявку</option>
+                  {receiptRequests.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.number} ({r.status})
                     </option>
                   ))}
                 </select>
@@ -5858,18 +5837,19 @@ function App() {
             <button onClick={() => void loadDocuments()}>Обновить список</button>
           </div>
           <div className="form docCenterForm">
-            <p className="muted">Доп. привязка: один файл в списке можно связать с другой заявкой/операцией без повторной загрузки.</p>
+            <p className="muted">Доп. привязка: один файл в списке можно связать с заявкой, приходной заявкой или операцией без повторной загрузки.</p>
             <label>
               Тип цели привязки
               <select
                 value={docLinkTargetType}
                 onChange={(e) => {
-                  setDocLinkTargetType(e.target.value as "issue" | "operation");
+                  setDocLinkTargetType(e.target.value as "issue" | "operation" | "receipt");
                   setDocLinkTargetId("");
                 }}
               >
                 <option value="issue">Заявка</option>
                 <option value="operation">Операция</option>
+                <option value="receipt">Приходная заявка</option>
               </select>
             </label>
             <label>
@@ -5883,12 +5863,21 @@ function App() {
                     </option>
                   ))}
                 </select>
-              ) : (
+              ) : docLinkTargetType === "operation" ? (
                 <select value={docLinkTargetId} onChange={(e) => setDocLinkTargetId(e.target.value)}>
                   <option value="">Выбери операцию</option>
                   {operations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {(o.documentNumber || o.id.slice(0, 8))} [{o.type}]
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select value={docLinkTargetId} onChange={(e) => setDocLinkTargetId(e.target.value)}>
+                  <option value="">Выбери приходную заявку</option>
+                  {receiptRequests.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.number} ({r.status})
                     </option>
                   ))}
                 </select>
@@ -6187,12 +6176,12 @@ function App() {
             <div className="toolbar">
               {selectedIssue.status === "DRAFT" && (
                 <button onClick={() => void executeIssueAction(selectedIssue.id, "send-for-approval", { closeDrawer: true })}>
-                  На согласование
+                  В заявки
                 </button>
               )}
               {selectedIssue.status === "ON_APPROVAL" && (
                 <>
-                  <button onClick={() => void executeIssueAction(selectedIssue.id, "approve", { closeDrawer: true })}>Согласовать</button>
+                  <button onClick={() => void executeIssueAction(selectedIssue.id, "approve", { closeDrawer: true })}>Одобрить</button>
                   <button className="dangerBtn" onClick={() => void executeIssueAction(selectedIssue.id, "reject", { closeDrawer: true })}>Отклонить</button>
                 </>
               )}
@@ -6212,9 +6201,11 @@ function App() {
           <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
           <p><strong>Основание:</strong> {basisTypeLabel(selectedIssue.basisType || "OTHER")}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
           {selectedIssue.note ? <p><strong>Примечание:</strong> {selectedIssue.note}</p> : null}
+          <p><strong>Ответственный:</strong> {selectedIssue.responsibleName || "—"}</p>
+          <p><strong>Фактически получил:</strong> {selectedIssue.actualRecipientName || "—"}</p>
           <p><strong>Инициатор:</strong> {selectedIssue.requestedBy?.fullName || selectedIssue.requestedById}</p>
           {selectedIssue.approvedBy ? (
-            <p><strong>Согласовал:</strong> {selectedIssue.approvedBy.fullName}</p>
+            <p><strong>Одобрил:</strong> {selectedIssue.approvedBy.fullName}</p>
           ) : null}
           <p><strong>Создана:</strong> {new Date(selectedIssue.createdAt).toLocaleString()}</p>
           {selectedIssue.items && selectedIssue.items.length > 0 ? (

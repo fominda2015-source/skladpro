@@ -149,6 +149,7 @@ contractsRouter.get("/openapi.json", (_req, res) => {
             basisRef: { type: ["string", "null"] },
             note: { type: ["string", "null"] },
             responsibleName: { type: ["string", "null"] },
+            actualRecipientName: { type: ["string", "null"] },
             flowType: { type: "string", enum: ["REQUEST", "DIRECT_ISSUE"] },
             warehouseId: { type: "string" },
             projectId: { type: ["string", "null"] },

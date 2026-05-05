@@ -5,8 +5,13 @@ import {
   OperationType,
   StockMovementDirection
 } from "@prisma/client";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { Router } from "express";
+import PDFDocument from "pdfkit";
 import { z } from "zod";
+import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertProjectInScope,
@@ -37,6 +42,15 @@ const createIssueSchema = z.object({
     .min(1)
 });
 
+const issueActionSchema = z.object({
+  actualRecipientName: z.string().trim().min(1).max(160).optional()
+});
+
+const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
+if (!fs.existsSync(uploadDirAbs)) {
+  fs.mkdirSync(uploadDirAbs, { recursive: true });
+}
+
 async function getLatestProjectLimit(projectId: string) {
   return prisma.projectLimit.findFirst({
     where: { projectId },
@@ -51,6 +65,115 @@ async function safeNotify(params: Parameters<typeof notifyUser>[0]) {
   } catch {
     // Best-effort side effect: notification failure must not break core flow.
   }
+}
+
+function writePdfToFile(doc: PDFKit.PDFDocument, filePath: string) {
+  return new Promise<void>((resolve, reject) => {
+    const stream = fs.createWriteStream(filePath);
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+    doc.on("error", reject);
+    doc.pipe(stream);
+    doc.end();
+  });
+}
+
+async function createIssueActDocument(params: {
+  issueId: string;
+  operationId: string;
+  storekeeperId: string;
+  actualRecipientName: string;
+}) {
+  const issue = await prisma.issueRequest.findUnique({
+    where: { id: params.issueId },
+    include: {
+      warehouse: true,
+      project: true,
+      requestedBy: true,
+      approvedBy: true,
+      items: { include: { material: true } }
+    }
+  });
+  if (!issue) {
+    throw new Error("Issue not found for act generation");
+  }
+  const storekeeper = await prisma.user.findUnique({ where: { id: params.storekeeperId } });
+  const safeNumber = issue.number.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `issue-act-${safeNumber}.pdf`;
+  const storedFileName = `${Date.now()}_${fileName}`;
+  const absPath = path.join(uploadDirAbs, storedFileName);
+  const fontPath = path.resolve(process.cwd(), "node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
+
+  const doc = new PDFDocument({ size: "A4", margin: 32 });
+  doc.font(fontPath);
+  doc.fontSize(17).text(`Акт выдачи материалов ${issue.number}`, { align: "center" });
+  doc.moveDown(0.6);
+  doc.fontSize(10);
+  doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
+  doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
+  doc.text(`Раздел: ${issue.section}`);
+  doc.text(`Проект: ${issue.project?.name || "-"}`);
+  doc.text(`Основание: ${issue.basisRef || issue.basisType}`);
+  doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
+  doc.text(`Фактически получил: ${params.actualRecipientName}`);
+  doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
+  doc.moveDown(0.8);
+
+  doc.fontSize(12).text("Позиции", { underline: true });
+  doc.moveDown(0.3);
+  doc.fontSize(9);
+  doc.text("№ | Материал | Ед. | Количество");
+  doc.moveDown(0.2);
+  issue.items.forEach((item, idx) => {
+    doc.text(`${idx + 1} | ${item.material.name} | ${item.material.unit} | ${String(item.quantity)}`);
+  });
+
+  doc.moveDown(1.2);
+  if (issue.note) {
+    doc.fontSize(10).text(`Примечание: ${issue.note}`);
+    doc.moveDown(0.8);
+  }
+  doc.text("Материалы выданы и приняты по указанному количеству.");
+  doc.moveDown(2);
+  doc.text(`Ответственное лицо / получил: ${params.actualRecipientName}`);
+  doc.moveDown(1);
+  doc.text("Подпись: ______________________________");
+  doc.moveDown(1.2);
+  doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || ""}`);
+  doc.moveDown(1);
+  doc.text("Подпись: ______________________________");
+
+  await writePdfToFile(doc, absPath);
+  const fileBuffer = await fs.promises.readFile(absPath);
+  const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+  const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
+
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.documentFile.create({
+      data: {
+        groupId: crypto.randomUUID(),
+        version: 1,
+        entityType: "issue",
+        entityId: issue.id,
+        type: "issue-act",
+        fileName,
+        filePath,
+        mimeType: "application/pdf",
+        size: fileBuffer.length,
+        checksumSha256,
+        createdBy: params.storekeeperId
+      }
+    });
+    await tx.documentLink.create({
+      data: {
+        documentFileId: created.id,
+        entityType: "operation",
+        entityId: params.operationId,
+        createdById: params.storekeeperId
+      }
+    });
+    return created;
+  });
 }
 
 export const issueRequestsRouter = Router();
@@ -371,6 +494,10 @@ issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), asyn
 
 issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  const parsed = issueActionSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
   const scope = await getRequestDataScope(req);
   const issueRow = await prisma.issueRequest.findFirst({
     where: mergeIssueWhere(scope, { id }),
@@ -387,6 +514,10 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
     issueRow.status !== IssueRequestStatus.DRAFT
   ) {
     return res.status(409).json({ error: `Wrong status: ${issueRow.status}` });
+  }
+  const actualRecipientName = parsed.data.actualRecipientName || issueRow.responsibleName || "";
+  if (!actualRecipientName.trim()) {
+    return res.status(400).json({ error: "actualRecipientName is required" });
   }
 
   try {
@@ -487,20 +618,34 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
 
       const updatedIssue = await tx.issueRequest.update({
         where: { id: issueRow.id },
-        data: { status: IssueRequestStatus.ISSUED }
+        data: {
+          status: IssueRequestStatus.ISSUED,
+          actualRecipientName: actualRecipientName.trim()
+        }
       });
 
       return { operation, issue: updatedIssue };
     });
 
     const { operation, issue } = result;
+    let document: Awaited<ReturnType<typeof createIssueActDocument>> | null = null;
+    try {
+      document = await createIssueActDocument({
+        issueId: issue.id,
+        operationId: operation.id,
+        storekeeperId: req.user!.userId,
+        actualRecipientName: actualRecipientName.trim()
+      });
+    } catch (documentError) {
+      console.error("Failed to generate issue act", documentError);
+    }
     await recordAudit({
       userId: req.user!.userId,
       action: "ISSUE_REQUEST_ISSUE",
       entityType: "IssueRequest",
       entityId: id,
       before: { status: prevStatus as IssueRequestStatus },
-      after: { status: issue.status, operationId: operation.id }
+      after: { status: issue.status, operationId: operation.id, documentId: document?.id ?? null }
     });
     await safeNotify({
       userId: issue.requestedById,
@@ -510,7 +655,7 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       entityId: issue.id
     });
 
-    return res.json({ operation, issue });
+    return res.json({ operation, issue, document });
   } catch (error) {
     if (error instanceof Error && error.message === "LIMIT_EXCEEDED_NEEDS_APPROVAL") {
       return res.status(409).json({ error: "Limit exceeded. Send request for approval." });

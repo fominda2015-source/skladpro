@@ -625,6 +625,7 @@ model IssueRequest {
   basisType     IssueBasisType     @default(OTHER)
   basisRef      String?
   responsibleName String?
+  actualRecipientName String?
   warehouseId   String
   section       ObjectSection   @default(SS)
   projectId     String?

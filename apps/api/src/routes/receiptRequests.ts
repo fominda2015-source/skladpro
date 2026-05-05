@@ -1,14 +1,22 @@
 import { NotificationLevel, OperationType, StockMovementDirection } from "@prisma/client";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import multer from "multer";
 import { Router } from "express";
 import xlsx from "xlsx";
 import { z } from "zod";
+import { config } from "../config.js";
 import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
 import { notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
+if (!fs.existsSync(uploadDirAbs)) {
+  fs.mkdirSync(uploadDirAbs, { recursive: true });
+}
 
 const uploadRequestSchema = z.object({
   warehouseId: z.string().min(1),
@@ -68,22 +76,45 @@ receiptRequestsRouter.post(
     if (!items.length) return res.status(400).json({ error: "No valid rows found in xlsx" });
     const count = await prisma.receiptRequest.count();
     const number = `ORD-${String(count + 1).padStart(5, "0")}`;
-    const created = await prisma.receiptRequest.create({
-      data: {
-        number,
-        warehouseId: parsed.data.warehouseId,
-        section: parsed.data.section,
-        sourceFileName: req.file.originalname,
-        createdById: req.user!.userId,
-        items: {
-          create: items.map((i) => ({
-            sourceName: i.name,
-            sourceUnit: i.unit,
-            quantity: i.quantity
-          }))
+    const created = await prisma.$transaction(async (tx) => {
+      const receipt = await tx.receiptRequest.create({
+        data: {
+          number,
+          warehouseId: parsed.data.warehouseId,
+          section: parsed.data.section,
+          sourceFileName: req.file!.originalname,
+          createdById: req.user!.userId,
+          items: {
+            create: items.map((i) => ({
+              sourceName: i.name,
+              sourceUnit: i.unit,
+              quantity: i.quantity
+            }))
+          }
+        },
+        include: { items: true }
+      });
+
+      const safe = req.file!.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storedFileName = `${Date.now()}_${safe}`;
+      await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), req.file!.buffer);
+      await tx.documentFile.create({
+        data: {
+          groupId: crypto.randomUUID(),
+          version: 1,
+          entityType: "receipt",
+          entityId: receipt.id,
+          type: "receipt-request",
+          fileName: req.file!.originalname,
+          filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
+          mimeType: req.file!.mimetype,
+          size: req.file!.size,
+          checksumSha256: crypto.createHash("sha256").update(req.file!.buffer).digest("hex"),
+          createdBy: req.user!.userId
         }
-      },
-      include: { items: true }
+      });
+
+      return receipt;
     });
     return res.status(201).json(created);
   }

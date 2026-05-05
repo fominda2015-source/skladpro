@@ -7,7 +7,6 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "admin:reset-password": "node dist/scripts/resetAdminPassword.js",
     "backfill:issue-responsible": "tsx src/scripts/backfillIssueResponsibleName.ts",
     "prisma:generate": "prisma generate",
     "prisma:db:push": "prisma db push",
