@@ -101,12 +101,24 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function start() {
-  if (config.seedOnStart) {
-    await seedBaseData();
-  }
   app.listen(port, "0.0.0.0", () => {
     console.log(`API running on http://0.0.0.0:${port}`);
   });
+  if (config.seedOnStart) {
+    try {
+      await seedBaseData();
+      console.log("Seed completed");
+    } catch (err) {
+      console.error("Seed failed (continuing without it):", err);
+    }
+  }
 }
+
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err);
+});
 
 void start();

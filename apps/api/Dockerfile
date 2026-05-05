@@ -18,4 +18,4 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 EXPOSE 4000
-CMD ["sh", "-c", "npm run prisma:migrate:deploy && node dist/index.js"]
+CMD ["sh", "-c", "(npm run prisma:migrate:deploy || echo 'migrate:deploy failed, trying db push' && npx prisma db push --skip-generate || echo 'db push failed, continuing'); node dist/index.js"]
