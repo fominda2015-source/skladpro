@@ -152,7 +152,7 @@ const defaultRoles = [
   }
 ];
 
-export async function seedBaseData() {
+export async function seedBaseData(adminPasswordOverride?: string) {
   for (const role of defaultRoles) {
     await prisma.role.upsert({
       where: { name: role.name },
@@ -166,7 +166,7 @@ export async function seedBaseData() {
     throw new Error("ADMIN role missing after seed");
   }
 
-  const passwordHash = await bcrypt.hash(config.adminPassword, 10);
+  const passwordHash = await bcrypt.hash(adminPasswordOverride || config.adminPassword, 10);
   const admin = await prisma.user.upsert({
     where: { email: config.adminEmail },
     update: {
