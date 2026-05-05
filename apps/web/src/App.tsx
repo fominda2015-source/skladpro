@@ -3154,7 +3154,18 @@ function App() {
         body: JSON.stringify({ email: email.trim().toLowerCase(), password })
       });
       if (!res.ok) {
-        throw new Error("Неверный логин или пароль");
+        let serverError = "";
+        try {
+          const body = await res.json();
+          serverError = typeof body?.error === "string" ? body.error : "";
+        } catch {
+          try {
+            serverError = await res.text();
+          } catch {
+            serverError = "";
+          }
+        }
+        throw new Error(serverError || `Ошибка входа (HTTP ${res.status})`);
       }
       const data = (await res.json()) as LoginResponse;
       localStorage.setItem(TOKEN_KEY, data.token);
