@@ -2877,6 +2877,12 @@ function App() {
   }, [token, activeTab, canReadTeam]);
 
   useEffect(() => {
+    if (!token || activeTab !== "issues" || !canReadTeam) return;
+    if (teamEmployees.length) return;
+    void loadTeamData();
+  }, [token, activeTab, canReadTeam, teamEmployees.length]);
+
+  useEffect(() => {
     if (!dashboardWarehouseId && warehouses.length) {
       setDashboardWarehouseId(activeObjectId || warehouses[0].id);
     }
@@ -4865,6 +4871,8 @@ function App() {
               <label>
                 Ответственное лицо
                 <input
+                  list="issueResponsibleSuggest"
+                  autoComplete="off"
                   value={issueResponsible}
                   onChange={(e) => {
                     setIssueResponsible(e.target.value);
@@ -4872,17 +4880,26 @@ function App() {
                       setIssueActualRecipient(e.target.value);
                     }
                   }}
-                  placeholder="ФИО, кто отвечает за потребность"
+                  placeholder="Начните вводить ФИО — выберите из списка"
                 />
               </label>
               <label>
                 Фактическое лицо
                 <input
+                  list="issueResponsibleSuggest"
+                  autoComplete="off"
                   value={issueActualRecipient}
                   onChange={(e) => setIssueActualRecipient(e.target.value)}
-                  placeholder="ФИО, кто получает (попадет в акт)"
+                  placeholder="ФИО получателя (попадёт в акт)"
                 />
               </label>
+              <datalist id="issueResponsibleSuggest">
+                {teamEmployees.map((emp) => (
+                  <option key={`emp-suggest-${emp.id}`} value={emp.fullName}>
+                    {emp.role}{emp.email ? ` · ${emp.email}` : ""}
+                  </option>
+                ))}
+              </datalist>
             </div>
 
             <div className="issuePicker">
@@ -6642,8 +6659,6 @@ function App() {
             </div>
           </div>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
-          <p><strong>Проект:</strong> {selectedIssue.project?.name || "—"}</p>
-          <p><strong>Основание:</strong> {basisTypeLabel(selectedIssue.basisType || "OTHER")}{selectedIssue.basisRef ? ` · ${selectedIssue.basisRef}` : ""}</p>
           {selectedIssue.note ? <p><strong>Примечание:</strong> {selectedIssue.note}</p> : null}
           <p><strong>Ответственный:</strong> {selectedIssue.responsibleName || "—"}</p>
           <p><strong>Фактически получил:</strong> {selectedIssue.actualRecipientName || "—"}</p>
