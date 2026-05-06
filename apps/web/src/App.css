@@ -1319,3 +1319,225 @@ tr.low {
     font-size: 24px;
   }
 }
+
+.issuesWorkspace {
+  display: grid;
+  gap: 16px;
+}
+.issueComposer {
+  display: grid;
+  gap: 16px;
+}
+.issueRecipients label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #1e2a44;
+}
+.issueRecipients input {
+  font-size: 15px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #d8dde7;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.issueRecipients input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+.issuePicker {
+  display: grid;
+  gap: 10px;
+}
+.issueSearchInput {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+  border-radius: 12px;
+  border: 1px solid #d8dde7;
+  background: #fff;
+}
+.issueSearchInput:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+.issueMaterialList {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid #e5e9f0;
+  border-radius: 12px;
+  background: #fafbfd;
+}
+.issueMaterialRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid #e5e9f0;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.issueMaterialRow:hover {
+  border-color: #b9c5d8;
+  background: #f5f8fd;
+}
+.issueMaterialRow.selected {
+  border-color: #2563eb;
+  background: #eef4ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+.issueMaterialInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.issueMaterialInfo strong {
+  font-size: 14px;
+  color: #1e2a44;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.issueMaterialMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.issueCart {
+  display: grid;
+  gap: 8px;
+  background: #f8fafc;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed #cbd5e1;
+}
+.issueCart h3 {
+  margin: 0 0 4px;
+  color: #1e2a44;
+}
+.issueCartList {
+  display: grid;
+  gap: 8px;
+}
+.issueCartRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e5e9f0;
+  flex-wrap: wrap;
+}
+.issueCartRow.warn {
+  border-color: #f59e0b;
+  background: #fffaf0;
+}
+.issueCartName {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  flex: 1 1 220px;
+}
+.issueCartName strong {
+  color: #1e2a44;
+}
+.issueCartControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.issueCartControls input {
+  width: 96px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #d8dde7;
+  font-size: 14px;
+  text-align: center;
+}
+.issueCartControls input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+.issueActionBar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.issueActionBar .primaryBtn {
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #fff;
+  border: none;
+  padding: 12px 22px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+}
+.issueActionBar .primaryBtn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.issueActionBar .ghostBtn {
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid #d8dde7;
+  background: #fff;
+  font-weight: 600;
+  color: #1e2a44;
+  cursor: pointer;
+}
+.issueActionBar .ghostBtn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+.iconBtn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  padding: 0;
+  border-radius: 10px;
+}
+.issueHistoryTable th,
+.issueHistoryTable td {
+  vertical-align: middle;
+}
+@media (max-width: 720px) {
+  .issueRecipients {
+    grid-template-columns: 1fr;
+  }
+  .issueMaterialList {
+    max-height: 280px;
+  }
+  .issueCartControls input {
+    width: 80px;
+  }
+  .issueActionBar {
+    flex-direction: column-reverse;
+  }
+  .issueActionBar .primaryBtn,
+  .issueActionBar .ghostBtn {
+    width: 100%;
+  }
+}
+ 
