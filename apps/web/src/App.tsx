@@ -542,6 +542,11 @@ function App() {
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
   const [limitEditMode, setLimitEditMode] = useState(false);
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
+  // Локальные «черновики» правки строк лимита: ключ — id узла шаблона.
+  const [limitNodeDrafts, setLimitNodeDrafts] = useState<
+    Record<string, { title?: string; unit?: string; plannedQty?: string }>
+  >({});
+  const [limitTemplateTitleDrafts, setLimitTemplateTitleDrafts] = useState<Record<string, string>>({});
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
@@ -1897,7 +1902,6 @@ function App() {
       setLimitTemplates((await templatesRes.json()) as LimitImportTemplate[]);
       const issuedRows = (await issuedRes.json()) as IssuedSummaryRow[];
       setLimitIssuedTotals(Object.fromEntries(issuedRows.map((x) => [x.materialId, Number(x.issuedQty) || 0])));
-      setExpandedLimitNodes({});
     } catch (e) {
       setLimitTemplates([]);
       setLimitIssuedTotals({});
@@ -1932,12 +1936,12 @@ function App() {
     await loadLimitTemplates();
   }
 
-  async function patchLimitTemplateTitle(templateId: string, title: string) {
-    if (!token) return;
+  async function patchLimitTemplateTitle(templateId: string, title: string): Promise<boolean> {
+    if (!token) return false;
     const trimmed = title.trim();
     if (!trimmed) {
       setLimitsMessage("Введите название шаблона лимитов");
-      return;
+      return false;
     }
     const res = await fetch(`${API_URL}/api/limit-imports/${templateId}`, {
       method: "PATCH",
@@ -1946,10 +1950,17 @@ function App() {
     });
     if (!res.ok) {
       setLimitsMessage("Не удалось сохранить название шаблона лимитов");
-      return;
+      return false;
     }
     setLimitsMessage("Шаблон лимитов обновлён");
+    setLimitTemplateTitleDrafts((prev) => {
+      if (!(templateId in prev)) return prev;
+      const next = { ...prev };
+      delete next[templateId];
+      return next;
+    });
     await loadLimitTemplates();
+    return true;
   }
 
   async function deleteLimitTemplate(templateId: string) {
@@ -1995,8 +2006,8 @@ function App() {
   async function patchLimitImportNode(
     nodeId: string,
     body: Record<string, unknown>
-  ) {
-    if (!token) return;
+  ): Promise<boolean> {
+    if (!token) return false;
     const res = await fetch(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -2004,10 +2015,17 @@ function App() {
     });
     if (!res.ok) {
       setLimitsMessage("Не удалось сохранить изменения в лимите");
-      return;
+      return false;
     }
     setLimitsMessage("Изменения сохранены");
+    setLimitNodeDrafts((prev) => {
+      if (!prev[nodeId]) return prev;
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
+    });
     await loadLimitTemplates();
+    return true;
   }
 
   async function deleteLimitImportNode(nodeId: string) {
@@ -2022,6 +2040,12 @@ function App() {
       return;
     }
     setLimitsMessage("Строка удалена");
+    setLimitNodeDrafts((prev) => {
+      if (!prev[nodeId]) return prev;
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
+    });
     await loadLimitTemplates();
   }
 
@@ -3193,8 +3217,17 @@ function App() {
       void loadLimitTemplates();
       void loadStockMovements();
       setExpandedLimitNodes({});
+      setLimitNodeDrafts({});
+      setLimitTemplateTitleDrafts({});
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
+
+  useEffect(() => {
+    if (!limitEditMode) {
+      setLimitNodeDrafts({});
+      setLimitTemplateTitleDrafts({});
+    }
+  }, [limitEditMode]);
 
   useEffect(() => {
     if (token && activeTab === "warehouse") {
@@ -5878,145 +5911,102 @@ function App() {
                             >
                               {children.length ? (isExpanded ? "▾" : "▸") : "•"}
                             </button>
-                            {limitEditMode ? (
-                              <>
-                                <input
-                                  id={`limit-grp-title-${node.id}`}
-                                  key={`grp-${node.id}-${node.title}`}
-                                  defaultValue={node.title}
-                                  aria-label="Название раздела"
-                                  style={{ fontWeight: 700, color: "#243656", flex: "1 1 220px", minWidth: 120 }}
-                                  disabled={!canWriteLimits}
-                                />
-                                <button
-                                  type="button"
-                                  className="ghostBtn"
-                                  disabled={!canWriteLimits}
-                                  onClick={() => {
-                                    const input = document.getElementById(`limit-grp-title-${node.id}`) as HTMLInputElement | null;
-                                    const v = (input?.value || "").trim();
-                                    if (!v) {
-                                      setLimitsMessage("Введите название раздела");
-                                      return;
+                            {limitEditMode ? (() => {
+                              const draft = limitNodeDrafts[node.id] || {};
+                              const titleValue = draft.title ?? node.title;
+                              const dirty = draft.title !== undefined && draft.title !== node.title;
+                              const saveTitle = () => {
+                                const v = (titleValue || "").trim();
+                                if (!v) {
+                                  setLimitsMessage("Введите название раздела");
+                                  return;
+                                }
+                                if (v === node.title) {
+                                  setLimitNodeDrafts((prev) => {
+                                    if (!prev[node.id]) return prev;
+                                    const next = { ...prev };
+                                    delete next[node.id];
+                                    return next;
+                                  });
+                                  return;
+                                }
+                                void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
+                              };
+                              return (
+                                <>
+                                  <input
+                                    value={titleValue}
+                                    aria-label="Название раздела"
+                                    style={{
+                                      fontWeight: 700,
+                                      color: "#243656",
+                                      flex: "1 1 220px",
+                                      minWidth: 120,
+                                      borderColor: dirty ? "#ff9f1c" : undefined
+                                    }}
+                                    disabled={!canWriteLimits}
+                                    onChange={(e) =>
+                                      setLimitNodeDrafts((prev) => ({
+                                        ...prev,
+                                        [node.id]: { ...prev[node.id], title: e.target.value }
+                                      }))
                                     }
-                                    void patchLimitImportNode(node.id, { title: v, nodeType: "GROUP" });
-                                  }}
-                                >
-                                  Сохранить
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ghostBtn"
-                                  disabled={!canWriteLimits}
-                                  onClick={() =>
-                                    void createLimitImportNode(tpl.id, {
-                                      parentId: node.id,
-                                      nodeType: "GROUP",
-                                      title: "Новый подраздел"
-                                    })
-                                  }
-                                >
-                                  + Подраздел
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ghostBtn"
-                                  disabled={!canWriteLimits}
-                                  onClick={() =>
-                                    void createLimitImportNode(tpl.id, {
-                                      parentId: node.id,
-                                      nodeType: "MATERIAL",
-                                      title: "Новый материал",
-                                      materialName: "Новый материал",
-                                      unit: "шт",
-                                      plannedQty: 0
-                                    })
-                                  }
-                                >
-                                  + Материал
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ghostBtn"
-                                  disabled={!canWriteLimits}
-                                  onClick={() => void deleteLimitImportNode(node.id)}
-                                >
-                                  Удалить
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <strong style={{ color: "#243656" }}>{node.title}</strong>
-                                {children.length ? <span className="muted">{children.length} поз.</span> : null}
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <div className={`limitMaterialRow ${isOver ? "low" : ""}`}>
-                            {limitEditMode ? (
-                              <div className="rightCardHeader" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
-                                <div style={{ flex: 1, minWidth: 0 }} className="form" data-compact-limit-form>
-                                  <label style={{ marginBottom: 6 }}>
-                                    Наименование
-                                    <input
-                                      id={`limit-mat-name-${node.id}`}
-                                      key={`mat-name-${node.id}-${node.materialName || node.title}`}
-                                      defaultValue={nodeTitle}
-                                      disabled={!canWriteLimits}
-                                    />
-                                  </label>
-                                  <div className="grid2" style={{ gap: 8 }}>
-                                    <label style={{ marginBottom: 0 }}>
-                                      Ед.
-                                      <input
-                                        id={`limit-mat-unit-${node.id}`}
-                                        key={`mat-unit-${node.id}-${node.unit || ""}`}
-                                        defaultValue={String(node.unit || "шт")}
-                                        disabled={!canWriteLimits}
-                                      />
-                                    </label>
-                                    <label style={{ marginBottom: 0 }}>
-                                      План
-                                      <input
-                                        id={`limit-mat-plan-${node.id}`}
-                                        key={`mat-plan-${node.id}-${String(node.plannedQty ?? "")}`}
-                                        type="number"
-                                        step={0.001}
-                                        defaultValue={Number.isFinite(planned) ? planned : 0}
-                                        disabled={!canWriteLimits}
-                                      />
-                                    </label>
-                                  </div>
-                                </div>
-                                <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        saveTitle();
+                                      } else if (e.key === "Escape") {
+                                        e.preventDefault();
+                                        setLimitNodeDrafts((prev) => {
+                                          if (!prev[node.id]) return prev;
+                                          const next = { ...prev };
+                                          delete next[node.id];
+                                          return next;
+                                        });
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    className={dirty ? "" : "ghostBtn"}
+                                    disabled={!canWriteLimits || !dirty}
+                                    title="Enter — сохранить, Esc — отменить"
+                                    onClick={saveTitle}
+                                  >
+                                    {dirty ? "Сохранить" : "Сохранено"}
+                                  </button>
                                   <button
                                     type="button"
                                     className="ghostBtn"
                                     disabled={!canWriteLimits}
                                     onClick={() => {
-                                      const nameInput = document.getElementById(`limit-mat-name-${node.id}`) as HTMLInputElement | null;
-                                      const unitInput = document.getElementById(`limit-mat-unit-${node.id}`) as HTMLInputElement | null;
-                                      const planInput = document.getElementById(`limit-mat-plan-${node.id}`) as HTMLInputElement | null;
-                                      const name =
-                                        nameInput?.value.trim() ||
-                                        String(node.materialName || node.title || "").trim();
-                                      const unit = (unitInput?.value || "шт").trim() || "шт";
-                                      const planRaw = planInput?.value;
-                                      const planNum = planRaw === "" || planRaw === undefined ? null : Number(planRaw);
-                                      if (planNum !== null && !Number.isFinite(planNum)) {
-                                        setLimitsMessage("Некорректное плановое количество");
-                                        return;
-                                      }
-                                      void patchLimitImportNode(node.id, {
-                                        nodeType: "MATERIAL",
-                                        title: name,
-                                        materialName: name,
-                                        unit,
-                                        plannedQty: planNum
+                                      setExpandedLimitNodes((prev) => ({ ...prev, [node.id]: true }));
+                                      void createLimitImportNode(tpl.id, {
+                                        parentId: node.id,
+                                        nodeType: "GROUP",
+                                        title: "Новый подраздел"
                                       });
                                     }}
                                   >
-                                    Сохранить
+                                    + Подраздел
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ghostBtn"
+                                    disabled={!canWriteLimits}
+                                    onClick={() => {
+                                      setExpandedLimitNodes((prev) => ({ ...prev, [node.id]: true }));
+                                      void createLimitImportNode(tpl.id, {
+                                        parentId: node.id,
+                                        nodeType: "MATERIAL",
+                                        title: "Новый материал",
+                                        materialName: "Новый материал",
+                                        unit: "шт",
+                                        plannedQty: 0
+                                      });
+                                    }}
+                                  >
+                                    + Материал
                                   </button>
                                   <button
                                     type="button"
@@ -6026,9 +6016,159 @@ function App() {
                                   >
                                     Удалить
                                   </button>
+                                </>
+                              );
+                            })() : (
+                              <>
+                                <strong style={{ color: "#243656" }}>{node.title}</strong>
+                                {children.length ? <span className="muted">{children.length} поз.</span> : null}
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className={`limitMaterialRow ${isOver ? "low" : ""}`}>
+                            {limitEditMode ? (() => {
+                              const draft = limitNodeDrafts[node.id] || {};
+                              const originalName = String(node.materialName || node.title || "");
+                              const originalUnit = String(node.unit || "шт");
+                              const originalPlan = Number.isFinite(planned) ? String(planned) : "";
+                              const nameValue = draft.title ?? originalName;
+                              const unitValue = draft.unit ?? originalUnit;
+                              const planValue = draft.plannedQty ?? originalPlan;
+                              const dirty =
+                                (draft.title !== undefined && draft.title !== originalName) ||
+                                (draft.unit !== undefined && draft.unit !== originalUnit) ||
+                                (draft.plannedQty !== undefined && draft.plannedQty !== originalPlan);
+                              const reset = () =>
+                                setLimitNodeDrafts((prev) => {
+                                  if (!prev[node.id]) return prev;
+                                  const next = { ...prev };
+                                  delete next[node.id];
+                                  return next;
+                                });
+                              const save = () => {
+                                const name = (nameValue || "").trim() || originalName.trim();
+                                if (!name) {
+                                  setLimitsMessage("Введите наименование материала");
+                                  return;
+                                }
+                                const unit = (unitValue || "шт").trim() || "шт";
+                                const planRaw = (planValue ?? "").toString().trim().replace(",", ".");
+                                const planNum = planRaw === "" ? null : Number(planRaw);
+                                if (planNum !== null && !Number.isFinite(planNum)) {
+                                  setLimitsMessage("Некорректное плановое количество");
+                                  return;
+                                }
+                                if (
+                                  name === originalName.trim() &&
+                                  unit === originalUnit.trim() &&
+                                  String(planNum ?? "") === String(node.plannedQty ?? "")
+                                ) {
+                                  reset();
+                                  return;
+                                }
+                                void patchLimitImportNode(node.id, {
+                                  nodeType: "MATERIAL",
+                                  title: name,
+                                  materialName: name,
+                                  unit,
+                                  plannedQty: planNum
+                                });
+                              };
+                              const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  save();
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  reset();
+                                }
+                              };
+                              return (
+                                <div className="rightCardHeader" style={{ marginBottom: 6, alignItems: "flex-start", gap: 10 }}>
+                                  <div style={{ flex: 1, minWidth: 0 }} className="form" data-compact-limit-form>
+                                    <label style={{ marginBottom: 6 }}>
+                                      Наименование
+                                      <input
+                                        value={nameValue}
+                                        disabled={!canWriteLimits}
+                                        style={{ borderColor: draft.title !== undefined && draft.title !== originalName ? "#ff9f1c" : undefined }}
+                                        onChange={(e) =>
+                                          setLimitNodeDrafts((prev) => ({
+                                            ...prev,
+                                            [node.id]: { ...prev[node.id], title: e.target.value }
+                                          }))
+                                        }
+                                        onKeyDown={handleKey}
+                                      />
+                                    </label>
+                                    <div className="grid2" style={{ gap: 8 }}>
+                                      <label style={{ marginBottom: 0 }}>
+                                        Ед.
+                                        <input
+                                          value={unitValue}
+                                          disabled={!canWriteLimits}
+                                          style={{ borderColor: draft.unit !== undefined && draft.unit !== originalUnit ? "#ff9f1c" : undefined }}
+                                          onChange={(e) =>
+                                            setLimitNodeDrafts((prev) => ({
+                                              ...prev,
+                                              [node.id]: { ...prev[node.id], unit: e.target.value }
+                                            }))
+                                          }
+                                          onKeyDown={handleKey}
+                                        />
+                                      </label>
+                                      <label style={{ marginBottom: 0 }}>
+                                        План
+                                        <input
+                                          type="number"
+                                          step={0.001}
+                                          value={planValue}
+                                          disabled={!canWriteLimits}
+                                          style={{ borderColor: draft.plannedQty !== undefined && draft.plannedQty !== originalPlan ? "#ff9f1c" : undefined }}
+                                          onChange={(e) =>
+                                            setLimitNodeDrafts((prev) => ({
+                                              ...prev,
+                                              [node.id]: { ...prev[node.id], plannedQty: e.target.value }
+                                            }))
+                                          }
+                                          onKeyDown={handleKey}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                  <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+                                    <button
+                                      type="button"
+                                      className={dirty ? "" : "ghostBtn"}
+                                      disabled={!canWriteLimits || !dirty}
+                                      title="Enter — сохранить, Esc — отменить"
+                                      onClick={save}
+                                    >
+                                      {dirty ? "Сохранить" : "Сохранено"}
+                                    </button>
+                                    {dirty && (
+                                      <button
+                                        type="button"
+                                        className="ghostBtn"
+                                        disabled={!canWriteLimits}
+                                        onClick={reset}
+                                      >
+                                        Отменить
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="ghostBtn"
+                                      disabled={!canWriteLimits}
+                                      onClick={() => void deleteLimitImportNode(node.id)}
+                                    >
+                                      Удалить
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
+                              );
+                            })() : (
                               <div className="rightCardHeader" style={{ marginBottom: 8, gap: 10 }}>
                                 <div style={{ minWidth: 0 }}>
                                   <strong style={{ fontSize: 13 }}>{nodeTitle}</strong>
@@ -6055,52 +6195,86 @@ function App() {
                     <>
                       <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          {limitEditMode ? (
-                            <div className="toolbar" style={{ flexWrap: "wrap" }}>
-                              <input
-                                id={`limit-tpl-title-${tpl.id}`}
-                                key={`tpl-title-${tpl.id}-${tpl.title}`}
-                                defaultValue={tpl.title}
-                                aria-label="Название шаблона лимитов"
-                                style={{ minWidth: 220, flex: "1 1 220px" }}
-                                disabled={!canWriteLimits}
-                              />
-                              <button
-                                type="button"
-                                className="ghostBtn"
-                                disabled={!canWriteLimits}
-                                onClick={() => {
-                                  const input = document.getElementById(`limit-tpl-title-${tpl.id}`) as HTMLInputElement | null;
-                                  const v = input?.value || "";
-                                  void patchLimitTemplateTitle(tpl.id, v);
-                                }}
-                              >
-                                Сохранить название
-                              </button>
-                              <button
-                                type="button"
-                                className="ghostBtn"
-                                disabled={!canWriteLimits}
-                                onClick={() =>
-                                  void createLimitImportNode(tpl.id, {
-                                    parentId: null,
-                                    nodeType: "GROUP",
-                                    title: "Новый раздел"
-                                  })
-                                }
-                              >
-                                + Раздел
-                              </button>
-                              <button
-                                type="button"
-                                className="ghostBtn"
-                                disabled={!canWriteLimits}
-                                onClick={() => void deleteLimitTemplate(tpl.id)}
-                              >
-                                Удалить шаблон
-                              </button>
-                            </div>
-                          ) : (
+                          {limitEditMode ? (() => {
+                            const titleDraft = limitTemplateTitleDrafts[tpl.id];
+                            const titleValue = titleDraft ?? tpl.title;
+                            const titleDirty = titleDraft !== undefined && titleDraft !== tpl.title;
+                            const saveTitle = () => void patchLimitTemplateTitle(tpl.id, titleValue);
+                            const resetTitle = () =>
+                              setLimitTemplateTitleDrafts((prev) => {
+                                if (!(tpl.id in prev)) return prev;
+                                const next = { ...prev };
+                                delete next[tpl.id];
+                                return next;
+                              });
+                            return (
+                              <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                                <input
+                                  value={titleValue}
+                                  aria-label="Название шаблона лимитов"
+                                  style={{
+                                    minWidth: 220,
+                                    flex: "1 1 220px",
+                                    borderColor: titleDirty ? "#ff9f1c" : undefined
+                                  }}
+                                  disabled={!canWriteLimits}
+                                  onChange={(e) =>
+                                    setLimitTemplateTitleDrafts((prev) => ({ ...prev, [tpl.id]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      saveTitle();
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      resetTitle();
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className={titleDirty ? "" : "ghostBtn"}
+                                  disabled={!canWriteLimits || !titleDirty}
+                                  title="Enter — сохранить, Esc — отменить"
+                                  onClick={saveTitle}
+                                >
+                                  {titleDirty ? "Сохранить" : "Сохранено"}
+                                </button>
+                                {titleDirty && (
+                                  <button
+                                    type="button"
+                                    className="ghostBtn"
+                                    disabled={!canWriteLimits}
+                                    onClick={resetTitle}
+                                  >
+                                    Отменить
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="ghostBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() =>
+                                    void createLimitImportNode(tpl.id, {
+                                      parentId: null,
+                                      nodeType: "GROUP",
+                                      title: "Новый раздел"
+                                    })
+                                  }
+                                >
+                                  + Раздел
+                                </button>
+                                <button
+                                  type="button"
+                                  className="dangerBtn"
+                                  disabled={!canWriteLimits}
+                                  onClick={() => void deleteLimitTemplate(tpl.id)}
+                                >
+                                  Удалить шаблон
+                                </button>
+                              </div>
+                            );
+                          })() : (
                             <>
                               <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
                               <p className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</p>
