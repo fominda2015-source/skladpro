@@ -2742,18 +2742,39 @@ function App() {
     if (campStatusFilter) parts.push(`status=${encodeURIComponent(campStatusFilter)}`);
     if (campSearch.trim()) parts.push(`q=${encodeURIComponent(campSearch.trim())}`);
     const query = parts.length ? `?${parts.join("&")}` : "";
-    const res = await fetch(`${API_URL}/api/camp-items${query}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      setCampMessage("Не удалось загрузить городок");
-      return;
-    }
-    const data = (await res.json()) as CampItemRow[];
-    setCampItems(data);
-    if (campSelected) {
-      const fresh = data.find((x) => x.id === campSelected.id) || null;
-      setCampSelected(fresh);
+    try {
+      const res = await fetch(`${API_URL}/api/camp-items${query}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const body = await res.json();
+          detail = typeof body?.error === "string" ? `: ${body.error}` : "";
+        } catch {
+          // ignore
+        }
+        setCampItems([]);
+        setCampMessage(
+          res.status === 404
+            ? "API «Городок» ещё не задеплоен. Сделайте `docker compose build api && docker compose up -d api`."
+            : res.status === 500
+            ? "Ошибка сервера. Возможно, не накатилась миграция CampItem. Запустите `docker compose exec api npm run prisma:migrate:deploy`." +
+              detail
+            : `Не удалось загрузить городок (HTTP ${res.status})${detail}`
+        );
+        return;
+      }
+      const data = (await res.json()) as CampItemRow[];
+      setCampItems(Array.isArray(data) ? data : []);
+      setCampMessage("");
+      if (campSelected) {
+        const fresh = (Array.isArray(data) ? data : []).find((x) => x.id === campSelected.id) || null;
+        setCampSelected(fresh);
+      }
+    } catch (err) {
+      setCampItems([]);
+      setCampMessage(`Сеть/JS: ${(err as Error).message || "неизвестная ошибка"}`);
     }
   }
 
@@ -3529,6 +3550,7 @@ function App() {
         <p className="navSectionTitle">Операции</p>
         {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
         {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
+        <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
         {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
         {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
@@ -3537,7 +3559,6 @@ function App() {
         <p className="navSectionTitle">Контроль</p>
         {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
-        <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
         {showLegacyMatching && canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
