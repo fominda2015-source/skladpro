@@ -144,10 +144,11 @@ type Material = {
 };
 type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
 type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
+type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type IssueRequest = {
   id: string;
   number: string;
-  status: string;
+  status: IssueStatus;
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
@@ -181,7 +182,6 @@ type IssuePickCartLine = {
   available: number;
   acceptedQty?: number;
 };
-type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
@@ -1231,7 +1231,7 @@ function App() {
     const order: IssueStatus[] = ["DRAFT", "ON_APPROVAL", "APPROVED", "ISSUED", "REJECTED", "CANCELLED"];
     const counts: Partial<Record<IssueStatus, number>> = {};
     for (const i of issues) {
-      counts[i.status] = (counts[i.status] || 0) + 1;
+      counts[i.status] = (counts[i.status] ?? 0) + 1;
     }
     const total = Math.max(1, issues.length);
     return order
