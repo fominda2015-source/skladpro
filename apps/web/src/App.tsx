@@ -4215,6 +4215,7 @@ function App() {
       )}
 
       {activeTab === "camp" && (() => {
+        try {
         const categoryLabel: Record<CampItemCategory, string> = {
           CONTAINER: "Контейнер",
           EQUIPMENT: "Техника",
@@ -4241,6 +4242,7 @@ function App() {
           TOOL: "🔧",
           OTHER: "•"
         };
+        const safeItems: CampItemRow[] = Array.isArray(campItems) ? campItems : [];
         const filtersActive =
           Boolean(campSearch.trim()) || Boolean(campCategoryFilter) || Boolean(campStatusFilter);
         return (
@@ -4257,11 +4259,11 @@ function App() {
                 <div className="kpiRow" style={{ margin: 0 }}>
                   <div className="kpi">
                     <span>Всего позиций</span>
-                    <strong>{campItems.length}</strong>
+                    <strong>{safeItems.length}</strong>
                   </div>
                   <div className="kpi">
                     <span>В эксплуатации</span>
-                    <strong>{campItems.filter((c) => c.status === "IN_USE").length}</strong>
+                    <strong>{safeItems.filter((c) => c.status === "IN_USE").length}</strong>
                   </div>
                 </div>
               </div>
@@ -4446,7 +4448,7 @@ function App() {
               )}
             </div>
 
-            {!campItems.length ? (
+            {!safeItems.length ? (
               <EmptyState
                 title="Городок пока пуст"
                 hint="Нажми «+ Добавить позицию», заполни инв.№ и приложи фото — карточка появится здесь."
@@ -4460,8 +4462,10 @@ function App() {
                   marginTop: 12
                 }}
               >
-                {campItems.map((c) => {
-                  const cover = c.photos[0];
+                {safeItems.map((c) => {
+                  const photos = Array.isArray(c.photos) ? c.photos : [];
+                  const documents = Array.isArray(c.documents) ? c.documents : [];
+                  const cover = photos[0];
                   return (
                     <button
                       key={c.id}
@@ -4513,7 +4517,7 @@ function App() {
                           {c.inventoryNumber ? ` · ${c.inventoryNumber}` : ""}
                         </div>
                         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                          📷 {c.photos.length} · 📎 {c.documents.length}
+                          📷 {photos.length} · 📎 {documents.length}
                         </div>
                       </div>
                     </button>
@@ -4524,6 +4528,8 @@ function App() {
 
             {campSelected && (() => {
               const sel = campSelected;
+              const selPhotos = Array.isArray(sel.photos) ? sel.photos : [];
+              const selDocs = Array.isArray(sel.documents) ? sel.documents : [];
               return (
                 <div
                   role="dialog"
@@ -4576,7 +4582,7 @@ function App() {
                       </div>
                     </div>
 
-                    {sel.photos.length > 0 ? (
+                    {selPhotos.length > 0 ? (
                       <div
                         style={{
                           display: "grid",
@@ -4585,7 +4591,7 @@ function App() {
                           marginTop: 8
                         }}
                       >
-                        {sel.photos.map((p) => (
+                        {selPhotos.map((p) => (
                           <div key={p.id} style={{ position: "relative" }}>
                             <a href={`${API_URL}/${p.filePath}`} target="_blank" rel="noreferrer">
                               <img
@@ -4698,11 +4704,11 @@ function App() {
                     </p>
 
                     <h4 style={{ marginTop: 16 }}>Документы</h4>
-                    {sel.documents.length === 0 ? (
+                    {selDocs.length === 0 ? (
                       <p className="muted">Документов пока нет.</p>
                     ) : (
                       <ul className="plainList">
-                        {sel.documents.map((d) => (
+                        {selDocs.map((d) => (
                           <li
                             key={d.id}
                             style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}
@@ -4760,6 +4766,19 @@ function App() {
             })()}
           </>
         );
+        } catch (err) {
+          return (
+            <div className="card">
+              <h2>Городок</h2>
+              <p className="error">
+                Не удалось отрисовать вкладку: {(err as Error)?.message || String(err)}
+              </p>
+              <p className="muted">
+                Открой консоль браузера (F12 → Console) и пришли скрин — там будет точная ошибка.
+              </p>
+            </div>
+          );
+        }
       })()}
 
       {activeTab === "audit" && canReadAudit && (
