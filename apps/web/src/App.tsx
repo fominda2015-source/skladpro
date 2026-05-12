@@ -1183,6 +1183,16 @@ function App() {
       { name: "Расход", count: expense }
     ];
   }, [warehouseSnapshot]);
+  /** Список объектов для «Сводки»: из /api/warehouses если уже загружали справочник; иначе те же объекты, что в шапке (availableObjects из /auth/me). */
+  const reportWarehouseOptions = useMemo((): Warehouse[] => {
+    if (warehouses.length > 0) return warehouses;
+    return availableObjects.map((o) => ({
+      id: o.id,
+      name: o.name,
+      address: o.address ?? null,
+      isActive: true
+    }));
+  }, [warehouses, availableObjects]);
   const tabTitleMap: Record<string, string> = {
     stocks: "Главная",
     warehouse: "Склад",
@@ -3044,6 +3054,22 @@ function App() {
     if (!token || activeTab !== "feedback") return;
     void loadFeedbackMessages();
   }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "reports") return;
+    void loadCatalogData().catch(() => undefined);
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "reports") return;
+    if (!reportWarehouseOptions.length) return;
+    if (reportWarehouseId && reportWarehouseOptions.some((w) => w.id === reportWarehouseId)) return;
+    const next =
+      (activeObjectId && reportWarehouseOptions.some((w) => w.id === activeObjectId)
+        ? activeObjectId
+        : reportWarehouseOptions[0]?.id) || "";
+    if (next) setReportWarehouseId(next);
+  }, [activeTab, activeObjectId, reportWarehouseId, reportWarehouseOptions]);
 
   useEffect(() => {
     if (activeTab !== "feedback") return;
@@ -8136,13 +8162,18 @@ function App() {
                   setReportsMessage("");
                 }}
               >
-                {warehouses.map((w) => (
+                {reportWarehouseOptions.map((w) => (
                   <option key={w.id} value={w.id}>
                     {safeName(w.name)}
                   </option>
                 ))}
               </select>
             </label>
+            {!reportWarehouseOptions.length ? (
+              <p className="muted">
+                Доступных объектов нет — проверьте права или назначение на склад в разделе «Доступы».
+              </p>
+            ) : null}
           </div>
           <div className="toolbar">
             <button type="button" disabled={!token || !reportWarehouseId || reportsSnapshotLoading} onClick={() => void loadWarehouseSummarySnapshot()}>
