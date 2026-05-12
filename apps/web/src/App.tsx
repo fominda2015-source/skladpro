@@ -579,8 +579,8 @@ function App() {
   const [issuesTone, setIssuesTone] = useState<ResultTone>("neutral");
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issuesError, setIssuesError] = useState("");
-  const [issuesSort, setIssuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
-  const [issueFlowFilter, setIssueFlowFilter] = useState<IssueFlowType | "">("DIRECT_ISSUE");
+  const [issuesSort] = useState<"created_desc" | "status" | "number">("created_desc");
+  const [issueFlowFilter] = useState<IssueFlowType | "">("DIRECT_ISSUE");
   const [issuesPage, setIssuesPage] = useState(1);
   const [issuesPageSize, setIssuesPageSize] = useState<ListPageSize>(() => {
     try {
@@ -596,16 +596,11 @@ function App() {
     return (saved as "" | IssueStatus) || "";
   });
   const [issueSearch, setIssueSearch] = useState("");
-  const [issueBasisFilter, setIssueBasisFilter] = useState<"" | IssueBasisType>("");
-  const [issueProjectId, setIssueProjectId] = useState("");
+  const [issueBasisFilter] = useState<"" | IssueBasisType>("");
   const [issueNote, setIssueNote] = useState("");
-  const [issueBasisType, setIssueBasisType] = useState<IssueBasisType>("OTHER");
-  const [issueBasisRef, setIssueBasisRef] = useState("");
-  const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
-  const [issueQuantity, setIssueQuantity] = useState(1);
   const [issueResponsible, setIssueResponsible] = useState("");
   const [issueActualRecipient, setIssueActualRecipient] = useState("");
   const [issueMaterialSearch, setIssueMaterialSearch] = useState("");
@@ -613,7 +608,6 @@ function App() {
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
-  const [issueLimitMappingByMaterial, setIssueLimitMappingByMaterial] = useState<Record<string, string>>({});
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
@@ -882,13 +876,6 @@ function App() {
       MARK_DISPUTED: "Спор",
       WRITE_OFF: "Списание"
     })[action] ?? action;
-  const basisTypeLabel = (basisType: string) =>
-    ({
-      PROJECT_WORK: "Работы по проекту",
-      INTERNAL_NEED: "Внутренняя потребность",
-      EMERGENCY: "Аварийная потребность",
-      OTHER: "Другое"
-    })[basisType] ?? basisType;
   const issueActionLabel = (action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue") =>
     ({
       "send-for-approval": "Отправить в заявки",
@@ -1238,16 +1225,6 @@ function App() {
     });
   }, []);
 
-  const issueFlowCounters = useMemo(() => {
-    return issues.reduce(
-      (acc, row) => {
-        if (row.flowType === "REQUEST") acc.request += 1;
-        else acc.direct += 1;
-        return acc;
-      },
-      { direct: 0, request: 0 }
-    );
-  }, [issues]);
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
     return /\?{3,}/.test(value) ? "Без названия" : value;
@@ -3033,14 +3010,6 @@ function App() {
     if (["ON_APPROVAL", "SHIPPED", "ISSUED", "IN_REPAIR"].includes(s)) return "warn";
     if (["REJECTED", "LOST", "DAMAGED", "WRITTEN_OFF", "DISPUTED"].includes(s)) return "bad";
     return "neutral";
-  }
-
-  function issueFlowLabel(flowType?: string) {
-    return flowType === "REQUEST" ? "Заявка" : "Прямая";
-  }
-
-  function issueFlowBadgeClass(flowType?: string) {
-    return flowType === "REQUEST" ? "neutral" : "warn";
   }
 
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
