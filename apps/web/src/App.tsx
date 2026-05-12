@@ -6645,6 +6645,7 @@ function App() {
             </div>
 
             {issueIssuesDomain === "MATERIALS" && (
+              <>
             <div className="issuePicker">
               <div className="rightCardHeader" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div>
@@ -6820,6 +6821,7 @@ function App() {
                 {issueSubmitting ? "Выдача..." : "Выдать материал"}
               </button>
             </div>
+              </>
             )}
             {issueIssuesDomain === "TOOLS" && (
               <div className="issueToolComposer">
@@ -6915,6 +6917,8 @@ function App() {
               </div>
             )}
           </div>
+
+          <div className="card issueHistory">
             <div className="rightCardHeader" style={{ alignItems: "center", gap: 8 }}>
               <h3 style={{ margin: 0 }}>История выдачи</h3>
               <input
