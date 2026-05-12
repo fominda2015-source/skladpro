@@ -548,6 +548,12 @@ function App() {
   const [stockOnlyAvailable, setStockOnlyAvailable] = useState(false);
   const [stockOnlyLow, setStockOnlyLow] = useState(false);
   const [stockOnlyWithFactNames, setStockOnlyWithFactNames] = useState(false);
+  const [manualStockWarehouseOverride, setManualStockWarehouseOverride] = useState("");
+  const [manualStockName, setManualStockName] = useState("");
+  const [manualStockQty, setManualStockQty] = useState("1");
+  const [manualStockUnit, setManualStockUnit] = useState("шт");
+  const [manualStockBusy, setManualStockBusy] = useState(false);
+  const [manualStockMessage, setManualStockMessage] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
@@ -2100,9 +2106,9 @@ function App() {
     await loadMaterialMergeHistory();
   }
 
-  async function loadAdminData() {
+  async function loadAdminData(): Promise<AdminUser[] | undefined> {
     if (!token || !canManageUsers) {
-      return;
+      return undefined;
     }
     const [usersRes, rolesRes, positionsRes, objectsRes] = await Promise.all([
       fetch(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -2129,6 +2135,7 @@ function App() {
       const pos = positionsData.find((p) => p.name === usersData[0].position);
       setSelectedPositionId(pos?.id || "");
     }
+    return usersData;
   }
 
   async function loadCatalogData() {
@@ -4957,6 +4964,106 @@ function App() {
               <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
             </label>
           </div>
+          {canWriteOperations && warehouses.length > 0 && (
+            <div className="card warehouseManualStockCard" style={{ marginTop: 12 }}>
+              <h4 style={{ margin: "0 0 6px" }}>Добавить материал вручную</h4>
+              <p className="muted" style={{ margin: "0 0 10px" }}>
+                Создаётся новая карточка номенклатуры только с названием и единицей и сразу увеличивается остаток по текущему разделу (
+                {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}) без сопоставления и без объединения с другими позициями.
+              </p>
+              {manualStockMessage ? <p className="muted">{manualStockMessage}</p> : null}
+              <div className="form grid2">
+                <label>
+                  Объект (склад)
+                  <select
+                    value={(manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id) ?? ""}
+                    onChange={(e) => setManualStockWarehouseOverride(e.target.value)}
+                  >
+                    {warehouses.map((w) => (
+                      <option key={`man-wh-${w.id}`} value={w.id}>
+                        {safeName(w.name)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Количество
+                  <input
+                    type="number"
+                    min={0.001}
+                    step="any"
+                    value={manualStockQty}
+                    onChange={(e) => setManualStockQty(e.target.value)}
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Название материала
+                  <input
+                    value={manualStockName}
+                    onChange={(e) => setManualStockName(e.target.value)}
+                    placeholder="Например: Перфоратор (аренда)"
+                  />
+                </label>
+                <label>
+                  Ед. измерения
+                  <input value={manualStockUnit} onChange={(e) => setManualStockUnit(e.target.value)} placeholder="шт" />
+                </label>
+              </div>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="primaryBtn"
+                  disabled={manualStockBusy || !manualStockName.trim()}
+                  onClick={async () => {
+                    if (!token) return;
+                    const wid = manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id;
+                    if (!wid) return;
+                    const qty = Number(String(manualStockQty).trim().replace(",", "."));
+                    if (!Number.isFinite(qty) || qty <= 0) {
+                      setManualStockMessage("Укажи положительное количество.");
+                      return;
+                    }
+                    setManualStockBusy(true);
+                    setManualStockMessage("");
+                    try {
+                      const res = await fetch(`${API_URL}/api/stocks/manual-line`, {
+                        method: "POST",
+                        headers: {
+                          Authorization: `Bearer ${token}`,
+                          "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                          warehouseId: wid,
+                          section: objectSectionFilter,
+                          materialName: manualStockName.trim(),
+                          quantity: qty,
+                          unit: (manualStockUnit.trim() || "шт").slice(0, 64)
+                        })
+                      });
+                      const data = (await res.json().catch(() => ({}))) as { error?: string };
+                      if (res.status === 403) {
+                        setManualStockMessage("Нет прав на этот объект или раздел.");
+                        return;
+                      }
+                      if (!res.ok) {
+                        setManualStockMessage(data.error || `Ошибка ${res.status}`);
+                        return;
+                      }
+                      setManualStockMessage("Строка добавлена.");
+                      setManualStockName("");
+                      setManualStockQty("1");
+                      await loadCatalogData();
+                      await loadStocks(q);
+                    } finally {
+                      setManualStockBusy(false);
+                    }
+                  }}
+                >
+                  {manualStockBusy ? "Сохранение…" : "Добавить на склад"}
+                </button>
+              </div>
+            </div>
+          )}
           {limitFilterEnabled && (
             <p className="muted">
               В списке показаны только материалы лимитов, которые реально есть на складе. Нулевые позиции из лимитов скрыты.
@@ -8555,6 +8662,60 @@ function App() {
               Сбросить пароль
             </button>
           </div>
+          {me?.id !== adminDrawerUser.id ? (
+            <div className="toolbar" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="dangerBtn"
+                disabled={!token}
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      `Удалить пользователя «${adminDrawerUser.fullName}»? Это нельзя откатить. Не получится удалить автора заявок или креатора связей с файлами.`
+                    )
+                  ) {
+                    return;
+                  }
+                  if (!token) return;
+                  setAdminMessage("");
+                  const res = await fetch(`${API_URL}/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
+                    method: "DELETE",
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  const body = (await res.json().catch(() => ({}))) as {
+                    error?: string;
+                    issuesAsAuthor?: number;
+                    documentLinks?: number;
+                  };
+                  if (res.status === 400 && body.error === "SELF_DELETE_FORBIDDEN") {
+                    setAdminMessage("Нельзя удалить собственную учётную запись.");
+                    return;
+                  }
+                  if (res.status === 409 && body.error === "USER_HAS_REFERENCES") {
+                    setAdminMessage(
+                      `Пользователь связан с данными: заявок как автор ${body.issuesAsAuthor ?? 0}, связей с файлами ${body.documentLinks ?? 0}. Сначала переоформи или удали их.`
+                    );
+                    return;
+                  }
+                  if (!res.ok) {
+                    setAdminMessage(body.error || "Не удалось удалить пользователя");
+                    return;
+                  }
+                  setAdminMessage("Пользователь удалён");
+                  const delId = selectedUserId;
+                  setDrawerMode("");
+                  const refreshedList = await loadAdminData();
+                  setSelectedUserId(refreshedList?.find((u) => u.id !== delId)?.id ?? refreshedList?.[0]?.id ?? "");
+                }}
+              >
+                Удалить пользователя
+              </button>
+            </div>
+          ) : (
+            <p className="muted" style={{ marginTop: 12 }}>
+              Свою учётную запись здесь удалить нельзя.
+            </p>
+          )}
         </aside>
       )}
 
@@ -9632,6 +9793,48 @@ function App() {
                         </div>
                       </div>
                     ) : null}
+                    <div className="toolbar">
+                      <button
+                        type="button"
+                        className="dangerBtn"
+                        disabled={!token}
+                        onClick={async () => {
+                          const okCf = window.confirm(
+                            `Удалить объект «${obj.name}»? Это сработает только если нет связанных операций, движений остатков и заявок. Очисти историю или перенеси данные на другой объект.`
+                          );
+                          if (!okCf || !token) return;
+                          setAdminMessage("");
+                          const res = await fetch(`${API_URL}/api/admin/objects/${encodeURIComponent(obj.id)}`, {
+                            method: "DELETE",
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          const body = (await res.json().catch(() => ({}))) as {
+                            error?: string;
+                            operations?: number;
+                            stockMovements?: number;
+                            issues?: number;
+                          };
+                          if (res.status === 409 && body.error === "WAREHOUSE_NOT_EMPTY") {
+                            setAdminMessage(
+                              `Нельзя удалить: операций ${body.operations ?? 0}, движений ${body.stockMovements ?? 0}, заявок ${body.issues ?? 0}.`
+                            );
+                            return;
+                          }
+                          if (!res.ok) {
+                            setAdminMessage(body.error || "Не удалось удалить объект");
+                            return;
+                          }
+                          setAdminMessage("Объект удалён");
+                          if (expandedAdminObjectId === obj.id) setExpandedAdminObjectId("");
+                          await loadAdminData();
+                          await loadCatalogData();
+                          await loadStocks(q);
+                          if (activeObjectId === obj.id) setActiveObjectId("");
+                        }}
+                      >
+                        Удалить объект
+                      </button>
+                    </div>
                   </div>
                 );
               })}

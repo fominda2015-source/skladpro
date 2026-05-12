@@ -499,6 +499,82 @@ adminRouter.put("/objects/:id/sections/:section/users", async (req: AuthedReques
   return res.json({ ok: true });
 });
 
+adminRouter.delete("/users/:id", async (req: AuthedRequest, res) => {
+  const userId = String(req.params.id);
+  if (userId === req.user!.userId) {
+    return res.status(400).json({ error: "SELF_DELETE_FORBIDDEN" });
+  }
+
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, fullName: true }
+  });
+  if (!target) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  const [issueCount, docLinkCount] = await Promise.all([
+    prisma.issueRequest.count({ where: { requestedById: userId } }),
+    prisma.documentLink.count({ where: { createdById: userId } })
+  ]);
+
+  if (issueCount > 0 || docLinkCount > 0) {
+    return res.status(409).json({
+      error: "USER_HAS_REFERENCES",
+      issuesAsAuthor: issueCount,
+      documentLinks: docLinkCount
+    });
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "USER_DELETE",
+    entityType: "User",
+    entityId: userId,
+    summary: `Удалён пользователь ${target.fullName || target.email}`,
+    before: { email: target.email, fullName: target.fullName }
+  });
+  return res.json({ ok: true });
+});
+
+adminRouter.delete("/objects/:id", async (req: AuthedRequest, res) => {
+  const warehouseId = String(req.params.id);
+  const wh = await prisma.warehouse.findUnique({
+    where: { id: warehouseId },
+    select: { id: true, name: true }
+  });
+  if (!wh) {
+    return res.status(404).json({ error: "Object not found" });
+  }
+
+  const [opCnt, mvCnt, issCnt] = await Promise.all([
+    prisma.operation.count({ where: { warehouseId } }),
+    prisma.stockMovement.count({ where: { warehouseId } }),
+    prisma.issueRequest.count({ where: { warehouseId } })
+  ]);
+
+  if (opCnt > 0 || mvCnt > 0 || issCnt > 0) {
+    return res.status(409).json({
+      error: "WAREHOUSE_NOT_EMPTY",
+      operations: opCnt,
+      stockMovements: mvCnt,
+      issues: issCnt
+    });
+  }
+
+  await prisma.warehouse.delete({ where: { id: warehouseId } });
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_DELETE",
+    entityType: "Warehouse",
+    entityId: warehouseId,
+    summary: `Удалён объект (склад) ${wh.name}`,
+    before: { name: wh.name }
+  });
+  return res.json({ ok: true });
+});
+
 adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
   const parsed = bindObjectUsersSchema.safeParse(req.body);
   if (!parsed.success) {
