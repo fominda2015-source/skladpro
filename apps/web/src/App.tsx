@@ -783,7 +783,6 @@ function App() {
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [reportWarehouseId, setReportWarehouseId] = useState("");
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
   const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
@@ -1183,16 +1182,6 @@ function App() {
       { name: "Расход", count: expense }
     ];
   }, [warehouseSnapshot]);
-  /** Список объектов для «Сводки»: из /api/warehouses если уже загружали справочник; иначе те же объекты, что в шапке (availableObjects из /auth/me). */
-  const reportWarehouseOptions = useMemo((): Warehouse[] => {
-    if (warehouses.length > 0) return warehouses;
-    return availableObjects.map((o) => ({
-      id: o.id,
-      name: o.name,
-      address: o.address ?? null,
-      isActive: true
-    }));
-  }, [warehouses, availableObjects]);
   const tabTitleMap: Record<string, string> = {
     stocks: "Главная",
     warehouse: "Склад",
@@ -1906,9 +1895,6 @@ function App() {
     if (materialsData.length && !issueMaterialId) {
       setIssueMaterialId(materialsData[0].id);
     }
-    if (warehousesData.length && !reportWarehouseId) {
-      setReportWarehouseId(warehousesData[0].id);
-    }
   }
 
   async function loadProjects() {
@@ -1922,12 +1908,12 @@ function App() {
   }
 
   async function loadWarehouseSummarySnapshot() {
-    if (!token || !reportWarehouseId) return;
+    if (!token || !activeObjectId) return;
     setReportsSnapshotLoading(true);
     setReportsMessage("");
     try {
       const res = await fetch(
-        `${API_URL}/api/reports/warehouse/${encodeURIComponent(reportWarehouseId)}/snapshot`,
+        `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/snapshot`,
         {
           headers: { Authorization: `Bearer ${token}` }
         }
@@ -3056,20 +3042,10 @@ function App() {
   }, [token, activeTab]);
 
   useEffect(() => {
-    if (!token || activeTab !== "reports") return;
-    void loadCatalogData().catch(() => undefined);
-  }, [token, activeTab]);
-
-  useEffect(() => {
     if (activeTab !== "reports") return;
-    if (!reportWarehouseOptions.length) return;
-    if (reportWarehouseId && reportWarehouseOptions.some((w) => w.id === reportWarehouseId)) return;
-    const next =
-      (activeObjectId && reportWarehouseOptions.some((w) => w.id === activeObjectId)
-        ? activeObjectId
-        : reportWarehouseOptions[0]?.id) || "";
-    if (next) setReportWarehouseId(next);
-  }, [activeTab, activeObjectId, reportWarehouseId, reportWarehouseOptions]);
+    setWarehouseSnapshot(null);
+    setReportsMessage("");
+  }, [activeTab, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (activeTab !== "feedback") return;
@@ -8148,45 +8124,42 @@ function App() {
         <div className="card">
           <h2>Сводка по объекту</h2>
           <p className="muted">
-            Выберите склад и сформируйте отчёт: остатки по разделам, заявки, операции за 30 дней, открытые ТН, приходные заявки,
-            лимиты привязанных проектов с графиками загрузки и таблицами по позициям.
+            Сводка объединяет все учётные данные по <strong>выбранному в шапке объекту</strong> (в базе это склад площадки: остатки, заявки, операции, ТН, лимиты связанных проектов).
+            Раздел СС/ЭОМ в шапке задаёт контур видимости данных — смените объект или раздел там, затем обновите отчёт.
           </p>
-          <div className="form">
-            <label>
-              Объект (склад)
-              <select
-                value={reportWarehouseId}
-                onChange={(e) => {
-                  setReportWarehouseId(e.target.value);
-                  setWarehouseSnapshot(null);
-                  setReportsMessage("");
-                }}
-              >
-                {reportWarehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {safeName(w.name)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {!reportWarehouseOptions.length ? (
-              <p className="muted">
-                Доступных объектов нет — проверьте права или назначение на склад в разделе «Доступы».
-              </p>
-            ) : null}
+          <div className="form" style={{ marginBottom: 8 }}>
+            {!activeObjectId ? (
+              <p className="muted">Выберите объект в верхней панели, затем сформируйте сводку.</p>
+            ) : (
+              <div>
+                <strong>Текущий объект:</strong>{" "}
+                {safeName(
+                  availableObjects.find((o) => o.id === activeObjectId)?.name ||
+                    warehouses.find((w) => w.id === activeObjectId)?.name
+                )}
+                <span className="muted">
+                  {" "}
+                  · Раздел в шапке: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}
+                </span>
+              </div>
+            )}
           </div>
           <div className="toolbar">
-            <button type="button" disabled={!token || !reportWarehouseId || reportsSnapshotLoading} onClick={() => void loadWarehouseSummarySnapshot()}>
+            <button
+              type="button"
+              disabled={!token || !activeObjectId || reportsSnapshotLoading}
+              onClick={() => void loadWarehouseSummarySnapshot()}
+            >
               {reportsSnapshotLoading ? "Загрузка…" : "Сформировать сводку"}
             </button>
             <button
               type="button"
-              disabled={!token || !reportWarehouseId}
+              disabled={!token || !activeObjectId}
               onClick={async () => {
-                if (!token || !reportWarehouseId) return;
+                if (!token || !activeObjectId) return;
                 setReportsMessage("");
                 const res = await fetch(
-                  `${API_URL}/api/reports/warehouse/${encodeURIComponent(reportWarehouseId)}/summary.pdf`,
+                  `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/summary.pdf`,
                   {
                     headers: { Authorization: `Bearer ${token}` }
                   }
