@@ -36,7 +36,8 @@ const createIssueSchema = z.object({
     .array(
       z.object({
         materialId: z.string().min(1),
-        quantity: z.number().positive()
+        quantity: z.number().positive(),
+        factLabel: z.string().max(500).optional().nullable()
       })
     )
     .min(1)
@@ -125,7 +126,8 @@ async function createIssueActDocument(params: {
   doc.text("№ | Материал | Ед. | Количество");
   doc.moveDown(0.2);
   issue.items.forEach((item, idx) => {
-    doc.text(`${idx + 1} | ${item.material.name} | ${item.material.unit} | ${String(item.quantity)}`);
+    const label = item.factLabel?.trim() || item.material.name;
+    doc.text(`${idx + 1} | ${label} | ${item.material.unit} | ${String(item.quantity)}`);
   });
 
   doc.moveDown(1.2);
@@ -308,10 +310,11 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
       items: {
         create: parsed.data.items.map((item) => ({
           materialId: item.materialId,
-          quantity: item.quantity
+          quantity: item.quantity,
+          factLabel: item.factLabel?.trim() || null
         }))
       }
-    } as any,
+    },
     include: { items: true }
   });
 

@@ -731,6 +731,8 @@ model IssueRequestItem {
   id             String       @id @default(cuid())
   issueRequestId String
   materialId     String
+  /** Подпись в акте/печати: как в УПД/фактическая номенклатура; если null — номенклатура карточки материала */
+  factLabel      String?
   quantity       Decimal      @db.Decimal(14, 3)
   issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
   material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)

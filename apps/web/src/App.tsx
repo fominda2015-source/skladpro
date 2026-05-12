@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Bar,
@@ -163,12 +163,23 @@ type IssueRequest = {
     id: string;
     materialId: string;
     quantity: string | number;
+    factLabel?: string | null;
     material?: { name: string; sku?: string | null };
   }>;
   warehouse?: { name: string };
   project?: { id: string; name: string; code?: string | null } | null;
   requestedBy?: { fullName: string };
   approvedBy?: { fullName: string } | null;
+};
+type IssuePickCartLine = {
+  pickKey: string;
+  materialId: string;
+  factLabel: string | null;
+  canonName: string;
+  unit: string;
+  sku: string | null;
+  available: number;
+  acceptedQty?: number;
 };
 type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type OperationRow = {
@@ -481,6 +492,10 @@ function App() {
   const [stockMovementsError, setStockMovementsError] = useState("");
   const [expandedStockRowId, setExpandedStockRowId] = useState("");
   const [showAttachedMaterials, setShowAttachedMaterials] = useState(false);
+  const [stockFilterWarehouseId, setStockFilterWarehouseId] = useState("");
+  const [stockOnlyAvailable, setStockOnlyAvailable] = useState(false);
+  const [stockOnlyLow, setStockOnlyLow] = useState(false);
+  const [stockOnlyWithFactNames, setStockOnlyWithFactNames] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
@@ -596,8 +611,8 @@ function App() {
   const [issueMaterialSearch, setIssueMaterialSearch] = useState("");
   const [issueSubmitting, setIssueSubmitting] = useState(false);
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
-  const [issueSelectedMaterialIds, setIssueSelectedMaterialIds] = useState<string[]>([]);
-  const [issueQuantitiesByMaterial, setIssueQuantitiesByMaterial] = useState<Record<string, number>>({});
+  const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
+  const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
   const [issueLimitMappingByMaterial, setIssueLimitMappingByMaterial] = useState<Record<string, string>>({});
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1098,6 +1113,107 @@ function App() {
     return map;
   }, [receiptRequests]);
 
+  const warehouseDisplayRows = useMemo(() => {
+    let rows = warehouseVisibleRows;
+    if (stockFilterWarehouseId) {
+      rows = rows.filter((r) => r.warehouseId === stockFilterWarehouseId);
+    }
+    if (stockOnlyAvailable) {
+      rows = rows.filter((r) => Number(r.available) > 0);
+    }
+    if (stockOnlyLow) {
+      rows = rows.filter((r) => r.isLow);
+    }
+    if (stockOnlyWithFactNames) {
+      rows = rows.filter(
+        (r) =>
+          (materialMappingsByTargetId.get(r.materialId)?.length ?? 0) > 0 ||
+          (acceptedBySourceByTargetId.get(r.materialId)?.size ?? 0) > 0
+      );
+    }
+    return rows;
+  }, [
+    warehouseVisibleRows,
+    stockFilterWarehouseId,
+    stockOnlyAvailable,
+    stockOnlyLow,
+    stockOnlyWithFactNames,
+    materialMappingsByTargetId,
+    acceptedBySourceByTargetId
+  ]);
+
+  const stockWarehouseIdsInView = useMemo(() => [...new Set(stocks.map((s) => s.warehouseId))], [stocks]);
+
+  const issueFacingRows = useMemo((): IssuePickCartLine[] => {
+    const out: IssuePickCartLine[] = [];
+    if (!activeObjectId) return out;
+    for (const s of stocks) {
+      if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
+      const mid = s.materialId;
+      const bucket = acceptedBySourceByTargetId.get(mid);
+      const maps = materialMappingsByTargetId.get(mid) ?? [];
+      const consumedUk = new Set<string>();
+      const av = Number(s.available);
+      const pushRow = (partial: Omit<IssuePickCartLine, "pickKey"> & { pickKey: string }) => {
+        out.push(partial);
+      };
+
+      if (bucket?.size) {
+        for (const v of bucket.values()) {
+          const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
+          consumedUk.add(uk);
+          pushRow({
+            pickKey: `${mid}::a:${encodeURIComponent(uk)}`,
+            materialId: mid,
+            factLabel: v.sourceName,
+            canonName: s.materialName,
+            unit: v.sourceUnit || s.materialUnit,
+            sku: s.materialSku,
+            available: av,
+            acceptedQty: v.quantity
+          });
+        }
+      }
+      for (const m of maps) {
+        const uk = `${m.sourceName}|${m.sourceUnit || ""}`;
+        if (consumedUk.has(uk)) continue;
+        consumedUk.add(uk);
+        pushRow({
+          pickKey: `${mid}::m:${m.id}`,
+          materialId: mid,
+          factLabel: m.sourceName,
+          canonName: s.materialName,
+          unit: m.sourceUnit || s.materialUnit,
+          sku: s.materialSku,
+          available: av
+        });
+      }
+      if (consumedUk.size === 0) {
+        pushRow({
+          pickKey: `${mid}::nom`,
+          materialId: mid,
+          factLabel: null,
+          canonName: s.materialName,
+          unit: s.materialUnit,
+          sku: s.materialSku,
+          available: av
+        });
+      }
+    }
+    return out.sort((a, b) =>
+      (a.factLabel || a.canonName).localeCompare(b.factLabel || b.canonName, "ru", { sensitivity: "base" })
+    );
+  }, [stocks, activeObjectId, acceptedBySourceByTargetId, materialMappingsByTargetId]);
+
+  const issueFacingRowsFiltered = useMemo(() => {
+    const qLower = issueMaterialSearch.trim().toLowerCase();
+    if (!qLower) return issueFacingRows;
+    return issueFacingRows.filter((r) => {
+      const hay = `${r.factLabel || ""} ${r.canonName} ${r.sku || ""} ${r.unit}`.toLowerCase();
+      return hay.includes(qLower);
+    });
+  }, [issueFacingRows, issueMaterialSearch]);
+
   const stockOptionsForIssue = useMemo(
     () =>
       stocks
@@ -1105,6 +1221,23 @@ function App() {
         .map((s) => ({ materialId: s.materialId, label: `${s.materialName} · доступно ${s.available} ${s.materialUnit}` })),
     [stocks, issueWarehouseId]
   );
+
+  const toggleIssuePickRow = useCallback((row: IssuePickCartLine) => {
+    setIssuePickCart((prev) => {
+      const exists = prev.some((p) => p.pickKey === row.pickKey);
+      if (exists) {
+        setIssuePickQtyByKey((qty) => {
+          const next = { ...qty };
+          delete next[row.pickKey];
+          return next;
+        });
+        return prev.filter((p) => p.pickKey !== row.pickKey);
+      }
+      setIssuePickQtyByKey((qty) => ({ ...qty, [row.pickKey]: qty[row.pickKey] ?? 1 }));
+      return [...prev, row];
+    });
+  }, []);
+
   const issueFlowCounters = useMemo(() => {
     return issues.reduce(
       (acc, row) => {
@@ -2393,10 +2526,11 @@ function App() {
       setIssuesTone("error");
       return;
     }
-    const lines = issueSelectedMaterialIds
-      .map((materialId) => ({
-        materialId,
-        quantity: Number(issueQuantitiesByMaterial[materialId] || 0)
+    const lines = issuePickCart
+      .map((row) => ({
+        materialId: row.materialId,
+        quantity: Number(issuePickQtyByKey[row.pickKey] ?? 1),
+        factLabel: row.factLabel?.trim() ? row.factLabel.trim() : undefined
       }))
       .filter((line) => line.materialId && line.quantity > 0);
     if (!lines.length) {
@@ -2404,11 +2538,17 @@ function App() {
       setIssuesTone("error");
       return;
     }
+    const qtySumByMaterial = new Map<string, number>();
     for (const line of lines) {
-      const stockRow = stocks.find((s) => s.materialId === line.materialId && s.warehouseId === activeObjectId);
+      qtySumByMaterial.set(line.materialId, (qtySumByMaterial.get(line.materialId) || 0) + line.quantity);
+    }
+    for (const [materialId, sumQty] of qtySumByMaterial) {
+      const stockRow = stocks.find((s) => s.materialId === materialId && s.warehouseId === activeObjectId);
       if (!stockRow) continue;
-      if (line.quantity > stockRow.available) {
-        setIssuesMessage(`Недостаточно остатка: ${stockRow.materialName}`);
+      if (sumQty > stockRow.available) {
+        const label =
+          issuePickCart.find((c) => c.materialId === materialId && c.factLabel)?.factLabel || stockRow.materialName;
+        setIssuesMessage(`Недостаточно остатка по «${label}» (итого по номенклатуре превышает доступно)`);
         setIssuesTone("error");
         return;
       }
@@ -2460,8 +2600,8 @@ function App() {
       }
       setIssuesMessage(`Выдача ${created.number} проведена. Акт сформирован автоматически.`);
       setIssuesTone("success");
-      setIssueSelectedMaterialIds([]);
-      setIssueQuantitiesByMaterial({});
+      setIssuePickCart([]);
+      setIssuePickQtyByKey({});
       setIssueMaterialSearch("");
       setIssueNote("");
       await loadIssues();
@@ -3134,12 +3274,26 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "issues") {
-      void loadCatalogData();
-      void loadProjects();
+      void loadCatalogData().catch(() => undefined);
+      void loadProjects().catch(() => undefined);
       void loadIssues();
       void loadStocks(q);
+      void loadMaterialMappings();
+      void loadReceiptRequests();
     }
-  }, [token, activeTab, issueStatusFilter, issueBasisFilter, issueFlowFilter, issueSearch, issuesSort, issuesPage, issuesPageSize, objectSectionFilter]);
+  }, [
+    token,
+    activeTab,
+    issueStatusFilter,
+    issueBasisFilter,
+    issueFlowFilter,
+    issueSearch,
+    issuesSort,
+    issuesPage,
+    issuesPageSize,
+    objectSectionFilter,
+    activeObjectId
+  ]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -3310,6 +3464,7 @@ function App() {
     if (token && activeTab === "warehouse") {
       void loadLimitTemplates();
       void loadMaterialMappings();
+      void loadReceiptRequests().catch(() => undefined);
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
@@ -4040,25 +4195,81 @@ function App() {
       )}
 
       {activeTab === "warehouse" && (
-        <div className="card">
-          <h2>Склад: материалы и остатки</h2>
-          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
-          <div className="toolbar">
+        <div className="card stockPanel">
+          <div className="stockPanelHead">
+            <div>
+              <h2>Склад: материалы и остатки</h2>
+              <p className="muted" style={{ margin: "6px 0 0" }}>
+                Раздел <strong>{objectSectionFilter === "SS" ? "СС" : "ЭОМ"}</strong>
+                {" · "}
+                Показано <strong>{warehouseDisplayRows.length}</strong> из {warehouseVisibleRows.length} строк в текущей выборке
+              </p>
+            </div>
+          </div>
+          <div className="toolbar stockToolbarPrimary">
             <input
-              placeholder="Поиск по материалу, sku, синониму"
+              className="stockSearchWide"
+              placeholder="Поиск по материалу, SKU, синониму…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <label><input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU</label>
-            <label><input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв</label>
-            <button onClick={() => void loadStocks(q)}>Найти</button>
-            <button type="button" onClick={() => void loadStockMovements()}>Журнал движений</button>
+            <button type="button" className="primaryBtn" onClick={() => void loadStocks(q)}>
+              Найти
+            </button>
+            <button type="button" onClick={() => void loadStockMovements()}>
+              Журнал движений
+            </button>
             <button
               type="button"
+              className={showAttachedMaterials ? "secondaryBtn" : "ghostBtn"}
               onClick={() => setShowAttachedMaterials((v) => !v)}
             >
-              {showAttachedMaterials ? "Показать только лимитные остатки" : "Показать все материалы"}
+              {showAttachedMaterials ? "Только лимитные" : "Все материалы"}
             </button>
+          </div>
+          <div className="stockFiltersStrip">
+            <label>
+              Склад
+              <select value={stockFilterWarehouseId} onChange={(e) => setStockFilterWarehouseId(e.target.value)}>
+                <option value="">Все из ответа</option>
+                {stockWarehouseIdsInView.map((wid) => {
+                  const nm =
+                    warehouses.find((w) => w.id === wid)?.name ||
+                    stocks.find((s) => s.warehouseId === wid)?.warehouseName;
+                  return (
+                    <option key={wid} value={wid}>
+                      {safeName(nm || wid.slice(0, 8))}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="toggleLine">
+              <input
+                type="checkbox"
+                checked={stockOnlyAvailable}
+                onChange={(e) => setStockOnlyAvailable(e.target.checked)}
+              />
+              Только с остатком
+            </label>
+            <label className="toggleLine">
+              <input type="checkbox" checked={stockOnlyLow} onChange={(e) => setStockOnlyLow(e.target.checked)} />
+              Низкий остаток
+            </label>
+            <label className="toggleLine">
+              <input
+                type="checkbox"
+                checked={stockOnlyWithFactNames}
+                onChange={(e) => setStockOnlyWithFactNames(e.target.checked)}
+              />
+              Есть фактические названия
+            </label>
+            <label className="toggleLine">
+              <input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU колонкой
+            </label>
+            <label className="toggleLine">
+              <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
+            </label>
           </div>
           {limitFilterEnabled && (
             <p className="muted">
@@ -4083,7 +4294,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {warehouseVisibleRows.map((row) => (
+                {warehouseDisplayRows.map((row) => (
                   <Fragment key={row.id}>
                     <tr className={row.isLow ? "low" : ""}>
                       <td>{safeName(row.warehouseName)}</td>
@@ -4107,9 +4318,11 @@ function App() {
                       <td>{row.materialUnit}</td>
                       <td>{row.storageRoom || "—"}</td>
                       <td>{row.storageCell || "—"}</td>
-                      <td>{Math.round(row.quantity)}</td>
-                      {showStockReserve && <td>{Math.round(row.reserved)}</td>}
-                      <td>{Math.round(row.available)}</td>
+                      <td>
+                        {(Number(row.quantity)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                      </td>
+                      {showStockReserve && <td>{(Number(row.reserved)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>}
+                      <td>{(Number(row.available)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
                     </tr>
                     {expandedStockRowId === row.id && (
                       <tr>
@@ -4118,7 +4331,10 @@ function App() {
                             {((acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ||
                               (materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0) ? (
                               <>
-                                <h4>Фактические названия (из приходов по заявкам)</h4>
+                                <h4>Фактические названия</h4>
+                                <p className="muted" style={{ margin: "0 0 8px" }}>
+                                  По каждой строке — как в УПД / сопоставлении; суммарный складской остаток см. в основной строке таблицы.
+                                </p>
                                 <ul className="plainList">
                                   {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
                                     <li key={`actual-q-${row.id}-${i}`}>
@@ -4173,7 +4389,7 @@ function App() {
           )}
           {!loadingStocks && !stocksError && (
             <div className="mobileCards">
-              {warehouseVisibleRows.map((row) => (
+              {warehouseDisplayRows.map((row) => (
                 <article key={`m-stock-${row.id}`} className={`mobileCard ${row.isLow ? "low" : ""}`}>
                   <h4>{safeName(row.materialName)}</h4>
                   <p><strong>Склад:</strong> {safeName(row.warehouseName)}</p>
@@ -4181,16 +4397,37 @@ function App() {
                   <p><strong>Ед.:</strong> {row.materialUnit}</p>
                   <p><strong>Помещение:</strong> {row.storageRoom || "—"}</p>
                   <p><strong>Ячейка:</strong> {row.storageCell || "—"}</p>
-                  <p><strong>Остаток:</strong> {Math.round(row.quantity)}</p>
-                  {showStockReserve ? <p><strong>Резерв:</strong> {Math.round(row.reserved)}</p> : null}
-                  <p><strong>Доступно:</strong> {Math.round(row.available)}</p>
-                  {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
+                  <p><strong>Остаток:</strong> {Number(row.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</p>
+                  {showStockReserve ? (
+                    <p>
+                      <strong>Резерв:</strong> {Number(row.reserved).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                    </p>
+                  ) : null}
+                  <p>
+                    <strong>Доступно:</strong> {Number(row.available).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                  </p>
+                  {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ||
+                  (acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ? (
                     <details>
-                      <summary>Фактические названия</summary>
+                      <summary>Фактические названия и принятые количества</summary>
                       <ul className="plainList">
-                        {(materialMappingsByTargetId.get(row.materialId) || []).map((m) => (
-                          <li key={`m-actual-${row.id}-${m.id}`}>{m.sourceName} ({m.sourceUnit || row.materialUnit})</li>
+                        {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
+                          <li key={`m-acc-${row.id}-${i}`}>
+                            <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) — принято{" "}
+                            {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                          </li>
                         ))}
+                        {(materialMappingsByTargetId.get(row.materialId) || [])
+                          .filter((m) => {
+                            const bk = `${m.sourceName}|${m.sourceUnit || ""}`;
+                            return !acceptedBySourceByTargetId.get(row.materialId)?.has(bk);
+                          })
+                          .map((m) => (
+                            <li key={`m-map-${row.id}-${m.id}`}>
+                              {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
+                              <span className="muted">пока не принято</span>
+                            </li>
+                          ))}
                       </ul>
                     </details>
                   ) : null}
@@ -5517,7 +5754,11 @@ function App() {
               <div className="kpiRow" style={{ margin: 0 }}>
                 <div className="kpi">
                   <span>В корзине</span>
-                  <strong>{issueSelectedMaterialIds.length}</strong>
+                  <strong>{issuePickCart.length}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Вариантов на складе</span>
+                  <strong>{issueFacingRows.length}</strong>
                 </div>
                 <div className="kpi">
                   <span>Всего выдач</span>
@@ -5565,58 +5806,68 @@ function App() {
             </div>
 
             <div className="issuePicker">
-              <div className="rightCardHeader" style={{ alignItems: "center", gap: 8 }}>
-                <h3 style={{ margin: 0 }}>Что выдавать</h3>
+              <div className="rightCardHeader" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>Что выдавать</h3>
+                  <p className="muted" style={{ margin: "4px 0 0" }}>
+                    Сначала строки из <strong>фактических названий</strong> (УПД/сопоставления). Если названий несколько —
+                    они развёрнуты отдельно; остаток один на номенклатуру карточки.
+                  </p>
+                </div>
                 <span className="muted">
-                  Доступно позиций: {stocks.filter((s) => s.warehouseId === activeObjectId && s.available > 0).length}
+                  Строк:{issueFacingRowsFiltered.length}/{issueFacingRows.length}
                 </span>
               </div>
               <input
                 className="issueSearchInput"
-                placeholder="Поиск по названию материала, ед.изм..."
+                placeholder="Поиск по фактическому названию, карточке, SKU, ед. изм…"
                 value={issueMaterialSearch}
                 onChange={(e) => setIssueMaterialSearch(e.target.value)}
               />
               <div className="issueMaterialList">
                 {(() => {
-                  const qLower = issueMaterialSearch.trim().toLowerCase();
-                  const rows = stocks
-                    .filter((s) => s.warehouseId === activeObjectId && s.available > 0)
-                    .filter((s) =>
-                      qLower
-                        ? `${s.materialName} ${s.materialSku || ""} ${s.materialUnit}`.toLowerCase().includes(qLower)
-                        : true
-                    )
-                    .slice(0, 200);
+                  const rows = issueFacingRowsFiltered.slice(0, 250);
                   if (!rows.length) {
-                    return <p className="muted">Нет материалов в наличии. Проверьте остатки и поиск.</p>;
+                    return (
+                      <p className="muted">
+                        Нет позиций с остатком или нет совпадений по поиску. Загрузите остатки и убедитесь, что есть
+                        сопоставления/приходы по заявкам.
+                      </p>
+                    );
                   }
-                  return rows.map((s) => {
-                    const selected = issueSelectedMaterialIds.includes(s.materialId);
+                  return rows.map((r) => {
+                    const selected = issuePickCart.some((p) => p.pickKey === r.pickKey);
+                    const title = r.factLabel ? safeName(r.factLabel) : safeName(r.canonName);
                     return (
                       <button
                         type="button"
-                        key={`pick-${s.materialId}`}
+                        key={r.pickKey}
                         className={`issueMaterialRow ${selected ? "selected" : ""}`}
-                        onClick={() => {
-                          setIssueSelectedMaterialIds((prev) =>
-                            selected ? prev.filter((id) => id !== s.materialId) : [...prev, s.materialId]
-                          );
-                          setIssueQuantitiesByMaterial((prev) => ({
-                            ...prev,
-                            [s.materialId]: prev[s.materialId] || 1
-                          }));
-                        }}
+                        onClick={() => toggleIssuePickRow(r)}
                       >
                         <div className="issueMaterialInfo">
-                          <strong>{safeName(s.materialName)}</strong>
+                          <strong>{title}</strong>
                           <span className="muted">
-                            {s.materialUnit}
-                            {s.materialSku ? ` · ${s.materialSku}` : ""}
+                            {r.unit}
+                            {r.sku ? ` · ${r.sku}` : ""}
+                            {r.factLabel && safeName(r.factLabel) !== safeName(r.canonName)
+                              ? ` · карточка: ${safeName(r.canonName)}`
+                              : ""}
                           </span>
+                          {typeof r.acceptedQty === "number" && r.acceptedQty > 0 ? (
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              принято под этим названием:{" "}
+                              {r.acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="issueMaterialMeta">
-                          <span className="badge ok">{Math.round(s.available)} {s.materialUnit}</span>
+                          <span className="badge ok">
+                            {r.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}{" "}
+                            <span className="muted" style={{ fontWeight: 400 }}>
+                              на карточку
+                            </span>
+                          </span>
                           <span className="muted">{selected ? "В корзине" : "Добавить"}</span>
                         </div>
                       </button>
@@ -5626,22 +5877,28 @@ function App() {
               </div>
             </div>
 
-            {issueSelectedMaterialIds.length > 0 && (
+            {issuePickCart.length > 0 && (
               <div className="issueCart">
                 <h3>Подобрано к выдаче</h3>
                 <div className="issueCartList">
-                  {issueSelectedMaterialIds.map((materialId) => {
+                  {issuePickCart.map((row) => {
+                    const qty = Number(issuePickQtyByKey[row.pickKey] ?? 1);
                     const stockRow = stocks.find(
-                      (s) => s.materialId === materialId && s.warehouseId === activeObjectId
+                      (s) => s.materialId === row.materialId && s.warehouseId === activeObjectId
                     );
-                    const qty = Number(issueQuantitiesByMaterial[materialId] || 1);
-                    const exceeds = stockRow ? qty > stockRow.available : false;
+                    const totalSameMaterial = issuePickCart
+                      .filter((c) => c.materialId === row.materialId)
+                      .reduce((acc, c) => acc + Number(issuePickQtyByKey[c.pickKey] ?? 1), 0);
+                    const exceeds = stockRow ? totalSameMaterial > stockRow.available : false;
+                    const lineTitle = row.factLabel ? safeName(row.factLabel) : safeName(row.canonName);
                     return (
-                      <div key={`cart-${materialId}`} className={`issueCartRow ${exceeds ? "warn" : ""}`}>
+                      <div key={`cart-${row.pickKey}`} className={`issueCartRow ${exceeds ? "warn" : ""}`}>
                         <div className="issueCartName">
-                          <strong>{safeName(stockRow?.materialName || materialId)}</strong>
+                          <strong>{lineTitle}</strong>
                           <span className="muted">
-                            {stockRow?.materialUnit || "шт"} · доступно {Math.round(stockRow?.available || 0)}
+                            {row.unit} · доступно по карточке{" "}
+                            {stockRow?.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) ?? "—"}
+                            {row.factLabel ? ` · номенклатура: ${safeName(row.canonName)}` : ""}
                           </span>
                         </div>
                         <div className="issueCartControls">
@@ -5649,9 +5906,9 @@ function App() {
                             type="button"
                             className="ghostBtn iconBtn"
                             onClick={() =>
-                              setIssueQuantitiesByMaterial((prev) => ({
+                              setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [materialId]: Math.max(0.001, Number((qty - 1).toFixed(3)))
+                                [row.pickKey]: Math.max(0.001, Number((qty - 1).toFixed(3)))
                               }))
                             }
                             aria-label="Уменьшить"
@@ -5664,9 +5921,9 @@ function App() {
                             step={0.001}
                             value={qty}
                             onChange={(e) =>
-                              setIssueQuantitiesByMaterial((prev) => ({
+                              setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [materialId]: Number(e.target.value)
+                                [row.pickKey]: Number(e.target.value)
                               }))
                             }
                           />
@@ -5674,9 +5931,9 @@ function App() {
                             type="button"
                             className="ghostBtn iconBtn"
                             onClick={() =>
-                              setIssueQuantitiesByMaterial((prev) => ({
+                              setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [materialId]: Number((qty + 1).toFixed(3))
+                                [row.pickKey]: Number((qty + 1).toFixed(3))
                               }))
                             }
                             aria-label="Увеличить"
@@ -5687,10 +5944,10 @@ function App() {
                             type="button"
                             className="ghostBtn"
                             onClick={() => {
-                              setIssueSelectedMaterialIds((prev) => prev.filter((id) => id !== materialId));
-                              setIssueQuantitiesByMaterial((prev) => {
+                              setIssuePickCart((prev) => prev.filter((p) => p.pickKey !== row.pickKey));
+                              setIssuePickQtyByKey((prev) => {
                                 const next = { ...prev };
-                                delete next[materialId];
+                                delete next[row.pickKey];
                                 return next;
                               });
                             }}
@@ -5833,529 +6090,6 @@ function App() {
         </div>
       )}
 
-      {/* legacy issues block disabled */}
-      {false && (
-        <div className="card">
-          <h2>Выдача материалов</h2>
-          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
-          {isStorekeeperMode ? (
-            <>
-              <p className="muted">
-                Выбери материалы со склада, количество и укажи ответственное лицо. Система сразу проводит выдачу.
-              </p>
-              <div className="kpiRow">
-                <button
-                  type="button"
-                  className={`kpi kpiBtn ${issueFlowFilter === "" ? "activeKpi" : ""}`}
-                  onClick={() => setIssueFlowFilter("")}
-                >
-                  <span>Все потоки</span>
-                  <strong>{issues.length}</strong>
-                </button>
-                <button
-                  type="button"
-                  className={`kpi kpiBtn ${issueFlowFilter === "DIRECT_ISSUE" ? "activeKpi" : ""}`}
-                  onClick={() => setIssueFlowFilter("DIRECT_ISSUE")}
-                >
-                  <span>Прямые выдачи</span>
-                  <strong>{issueFlowCounters.direct}</strong>
-                </button>
-                <button
-                  type="button"
-                  className={`kpi kpiBtn ${issueFlowFilter === "REQUEST" ? "activeKpi" : ""}`}
-                  onClick={() => setIssueFlowFilter("REQUEST")}
-                >
-                  <span>Заявки</span>
-                  <strong>{issueFlowCounters.request}</strong>
-                </button>
-              </div>
-              <div className="form">
-                <label>
-                  Склад
-                  <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)} disabled>
-                    {warehouses
-                      .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
-                      .map((w) => (
-                        <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                      ))}
-                  </select>
-                </label>
-                <label>
-                  Ответственное лицо (свободный ввод)
-                  <input
-                    value={issueResponsible}
-                    onChange={(e) => {
-                      setIssueResponsible(e.target.value);
-                      if (!issueActualRecipient.trim()) {
-                        setIssueActualRecipient(e.target.value);
-                      }
-                    }}
-                    placeholder="Кто отвечает за потребность"
-                  />
-                </label>
-                <label>
-                  Фактически получает
-                  <input
-                    value={issueActualRecipient}
-                    onChange={(e) => setIssueActualRecipient(e.target.value)}
-                    placeholder="ФИО для акта выдачи"
-                  />
-                </label>
-                <label>
-                  Комментарий
-                  <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder="Необязательно" />
-                </label>
-              </div>
-              <h3>Позиции на выдачу</h3>
-              <div className="grid2">
-                <div className="card">
-                  <h4>1) Выбор со склада</h4>
-                  <div className="plainList">
-                    {stocks
-                      .filter((s) => s.warehouseId === issueWarehouseId && s.available > 0)
-                      .map((s) => (
-                        <label key={`pick-${s.materialId}`} style={{ display: "block" }}>
-                          <input
-                            type="checkbox"
-                            checked={issueSelectedMaterialIds.includes(s.materialId)}
-                            onChange={(e) => {
-                              setIssueSelectedMaterialIds((prev) =>
-                                e.target.checked ? [...prev, s.materialId] : prev.filter((id) => id !== s.materialId)
-                              );
-                              setIssueQuantitiesByMaterial((prev) => ({
-                                ...prev,
-                                [s.materialId]: prev[s.materialId] || 1
-                              }));
-                            }}
-                          />{" "}
-                          {s.materialName} · доступно {s.available} {s.materialUnit}
-                          {issueSelectedMaterialIds.includes(s.materialId) && (
-                            <input
-                              style={{ marginLeft: 8, width: 96 }}
-                              type="number"
-                              min={0.001}
-                              step={0.001}
-                              value={issueQuantitiesByMaterial[s.materialId] || 1}
-                              onChange={(e) =>
-                                setIssueQuantitiesByMaterial((prev) => ({
-                                  ...prev,
-                                  [s.materialId]: Number(e.target.value)
-                                }))
-                              }
-                            />
-                          )}
-                        </label>
-                      ))}
-                  </div>
-                </div>
-                <div className="card">
-                  <h4>2) Привязка к лимитам</h4>
-                  <div className="plainList">
-                    {issueSelectedMaterialIds.map((materialId) => {
-                      const stockRow = stocks.find((s) => s.materialId === materialId && s.warehouseId === issueWarehouseId);
-                      return (
-                        <label key={`map-issue-${materialId}`} style={{ display: "block" }}>
-                          <span>{stockRow?.materialName || materialId}</span>
-                          <select
-                            value={issueLimitMappingByMaterial[materialId] || ""}
-                            onChange={(e) =>
-                              setIssueLimitMappingByMaterial((prev) => ({
-                                ...prev,
-                                [materialId]: e.target.value
-                              }))
-                            }
-                          >
-                            <option value="">Сопоставить с материалом лимита</option>
-                            {materials.map((m) => (
-                              <option key={`issue-map-to-${materialId}-${m.id}`} value={m.id}>
-                                {safeName(m.name)} ({m.unit})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!token || !issueWarehouseId || !issueResponsible.trim() || !issueActualRecipient.trim()) {
-                      setIssuesMessage("Укажи склад, ответственное лицо и фактического получателя");
-                      setIssuesTone("error");
-                      return;
-                    }
-                    const validLines = issueSelectedMaterialIds
-                      .map((materialId) => ({
-                        materialId,
-                        quantity: issueQuantitiesByMaterial[materialId] || 1
-                      }))
-                      .filter((x) => x.materialId && x.quantity > 0);
-                    if (!validLines.length) {
-                      setIssuesMessage("Добавь хотя бы одну позицию для выдачи");
-                      setIssuesTone("error");
-                      return;
-                    }
-                    const allMapped = validLines.every((x) => Boolean(issueLimitMappingByMaterial[x.materialId]));
-                    if (!allMapped) {
-                      setIssuesMessage("Сопоставь все выбранные позиции с материалами лимитов");
-                      setIssuesTone("conflict");
-                      return;
-                    }
-                    if (activeObjectId) {
-                      for (const line of validLines) {
-                        const stockRow = stocks.find(
-                          (s) => s.warehouseId === issueWarehouseId && s.materialId === line.materialId
-                        );
-                        await fetch(`${API_URL}/api/material-mappings`, {
-                          method: "PUT",
-                          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            warehouseId: activeObjectId,
-                            section: objectSectionFilter,
-                            sourceName: stockRow?.materialName || line.materialId,
-                            sourceUnit: stockRow?.materialUnit || null,
-                            targetMaterialId: issueLimitMappingByMaterial[line.materialId]
-                          })
-                        });
-                      }
-                    }
-                    setIssuesMessage("");
-                    const createRes = await fetch(`${API_URL}/api/issues`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        warehouseId: issueWarehouseId,
-                        section: objectSectionFilter,
-                        note: issueNote.trim() || undefined,
-                        responsibleName: issueResponsible.trim(),
-                        flowType: "DIRECT_ISSUE",
-                        basisType: "OTHER",
-                        items: validLines.map((x) => ({ materialId: x.materialId, quantity: x.quantity }))
-                      })
-                    });
-                    if (!createRes.ok) {
-                      setIssuesMessage("Не удалось создать выдачу");
-                      setIssuesTone(createRes.status === 409 ? "conflict" : "error");
-                      return;
-                    }
-                    const created = (await createRes.json()) as { id: string; number: string };
-                    const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
-                      method: "PATCH",
-                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({ actualRecipientName: issueActualRecipient.trim() })
-                    });
-                    if (!issueRes.ok) {
-                      const text = await issueRes.text();
-                      setIssuesMessage(`Выдача создана, но не проведена: ${text}`);
-                      setIssuesTone("conflict");
-                      await loadIssues();
-                      return;
-                    }
-                    setIssuesMessage(`Материалы выданы: ${created.number}`);
-                    setIssuesTone("success");
-                    setIssueActualRecipient("");
-                    await loadIssues();
-                    await loadStocks(q);
-                    await loadStockMovements();
-                  }}
-                >
-                  Выдать материалы
-                </button>
-              </div>
-              {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
-              <div className="toolbar">
-                <label>
-                  Поток
-                  <select
-                    value={issueFlowFilter}
-                    onChange={(e) => setIssueFlowFilter((e.target.value || "") as "" | IssueFlowType)}
-                  >
-                    <option value="">Все потоки</option>
-                    <option value="DIRECT_ISSUE">Прямые выдачи</option>
-                    <option value="REQUEST">Заявки</option>
-                  </select>
-                </label>
-              </div>
-              <p className="muted">
-                По текущему списку: Прямые {issueFlowCounters.direct} · Заявки {issueFlowCounters.request}
-              </p>
-              <h3>Последние выдачи</h3>
-              <table className="desktopTable">
-                <thead>
-                  <tr>
-                    <th>Номер</th>
-                    <th>Статус</th>
-                    <th>Поток</th>
-                    <th>Ответственный</th>
-                    <th>Получил</th>
-                    <th>Дата</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {issues.slice(0, 20).map((i) => (
-                    <tr key={i.id}>
-                      <td>{i.number}</td>
-                      <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                      <td><span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span></td>
-                      <td>{i.responsibleName || "—"}</td>
-                      <td>{i.actualRecipientName || "—"}</td>
-                      <td>{new Date(i.createdAt).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="mobileCards">
-                {issues.slice(0, 20).map((i) => (
-                  <article key={`m-issue-${i.id}`} className="mobileCard">
-                    <h4>{i.number}</h4>
-                    <p>
-                      <strong>Статус:</strong> <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
-                    </p>
-                    <p>
-                      <strong>Поток:</strong> <span className={`badge ${issueFlowBadgeClass(i.flowType)}`}>{issueFlowLabel(i.flowType)}</span>
-                    </p>
-                    <p><strong>Ответственный:</strong> {i.responsibleName || "—"}</p>
-                    <p><strong>Фактически получил:</strong> {i.actualRecipientName || "—"}</p>
-                    <p><strong>Дата:</strong> {new Date(i.createdAt).toLocaleString()}</p>
-                  </article>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-          <div className="form">
-            <label>
-              Склад
-              <select value={issueWarehouseId} onChange={(e) => setIssueWarehouseId(e.target.value)}>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Проект (необязательно)
-              <select value={issueProjectId} onChange={(e) => setIssueProjectId(e.target.value)}>
-                <option value="">— без проекта —</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{safeName(p.name)}{p.code ? ` (${p.code})` : ""}</option>
-                ))}
-              </select>
-            </label>
-            {!isStorekeeperMode && (
-              <>
-                <label>
-                  Тип основания
-                  <select
-                    value={issueBasisType}
-                    onChange={(e) => setIssueBasisType(e.target.value as IssueBasisType)}
-                  >
-                    <option value="OTHER">Прочее</option>
-                    <option value="PROJECT_WORK">Работы по проекту</option>
-                    <option value="INTERNAL_NEED">Внутренняя потребность</option>
-                    <option value="EMERGENCY">Срочно / аварийно</option>
-                  </select>
-                </label>
-                <label>
-                  Ссылка на основание (номер договора, наряд…)
-                  <input value={issueBasisRef} onChange={(e) => setIssueBasisRef(e.target.value)} placeholder="Необязательно" />
-                </label>
-              </>
-            )}
-            <label>
-              Примечание
-              <input value={issueNote} onChange={(e) => setIssueNote(e.target.value)} placeholder={isStorekeeperMode ? "Кратко: кому/куда" : "Необязательно"} />
-            </label>
-            <label>
-              Материал
-              <select value={issueMaterialId} onChange={(e) => setIssueMaterialId(e.target.value)}>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name} {m.sku ? `(${m.sku})` : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Количество
-              <input type="number" min={0.001} step={0.001} value={issueQuantity} onChange={(e) => setIssueQuantity(Number(e.target.value))} />
-            </label>
-          </div>
-          <div className="toolbar">
-            <input placeholder="Поиск заявки (номер/статус)" value={issueSearch} onChange={(e) => setIssueSearch(e.target.value)} />
-            <select value={issueStatusFilter} onChange={(e) => setIssueStatusFilter((e.target.value || "") as "" | IssueStatus)}>
-              <option value="">Все статусы заявок</option>
-              <option value="DRAFT">{issueStatusLabel("DRAFT")}</option>
-              <option value="ON_APPROVAL">{issueStatusLabel("ON_APPROVAL")}</option>
-              <option value="APPROVED">{issueStatusLabel("APPROVED")}</option>
-              <option value="REJECTED">{issueStatusLabel("REJECTED")}</option>
-              <option value="ISSUED">{issueStatusLabel("ISSUED")}</option>
-              <option value="CANCELLED">{issueStatusLabel("CANCELLED")}</option>
-            </select>
-            <select
-              value={issueBasisFilter}
-              onChange={(e) => setIssueBasisFilter((e.target.value || "") as "" | IssueBasisType)}
-            >
-              <option value="">Все типы основания</option>
-              <option value="PROJECT_WORK">{basisTypeLabel("PROJECT_WORK")}</option>
-              <option value="INTERNAL_NEED">{basisTypeLabel("INTERNAL_NEED")}</option>
-              <option value="EMERGENCY">{basisTypeLabel("EMERGENCY")}</option>
-              <option value="OTHER">{basisTypeLabel("OTHER")}</option>
-            </select>
-            <select
-              value={issueFlowFilter}
-              onChange={(e) => setIssueFlowFilter((e.target.value || "") as "" | IssueFlowType)}
-            >
-              <option value="">Все потоки</option>
-              <option value="DIRECT_ISSUE">Прямые выдачи</option>
-              <option value="REQUEST">Заявки</option>
-            </select>
-            <select value={issuesSort} onChange={(e) => setIssuesSort(e.target.value as typeof issuesSort)}>
-              <option value="created_desc">Сначала новые</option>
-              <option value="status">По статусу</option>
-              <option value="number">По номеру</option>
-            </select>
-            <button onClick={() => void loadIssues()}>Обновить список</button>
-            {!isStorekeeperMode && (
-              <button
-                onClick={async () => {
-                  if (!token || !selectedIssueIds.length) return;
-                  for (const id of selectedIssueIds) {
-                    await executeIssueAction(id, "send-for-approval");
-                  }
-                  setSelectedIssueIds([]);
-                  await loadIssues();
-                }}
-              >
-                Массово: в заявки
-              </button>
-            )}
-            <button
-              onClick={async () => {
-                if (!token || !issueWarehouseId || !issueMaterialId) return;
-                const res = await fetch(`${API_URL}/api/issues`, {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    warehouseId: issueWarehouseId,
-                    projectId: issueProjectId || undefined,
-                    note: issueNote.trim() || undefined,
-                    basisType: issueBasisType,
-                    basisRef: issueBasisRef.trim() || undefined,
-                    items: [{ materialId: issueMaterialId, quantity: issueQuantity }]
-                  })
-                });
-                if (!res.ok) {
-                  setIssuesMessage("Ошибка создания заявки");
-                  setIssuesTone(res.status === 409 ? "conflict" : "error");
-                  return;
-                }
-                setIssuesMessage("Заявка создана");
-                setIssuesTone("success");
-                await loadIssues();
-              }}
-            >
-              Создать заявку
-            </button>
-          </div>
-          {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
-          {issuesLoading && <LoadingState text="Загрузка заявок..." />}
-          {issuesError && <ErrorState text={issuesError} />}
-          {!issuesLoading && !issuesError && !issues.length && (
-            <EmptyState title="Заявок не найдено" hint="Смени фильтры или создай новую заявку." />
-          )}
-          {!issuesLoading && !issuesError && issues.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Номер</th>
-                <th>Проект</th>
-                <th>Основание</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {issues.map((i) => (
-                <tr key={i.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedIssueIds.includes(i.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedIssueIds((prev) => [...prev, i.id]);
-                        else setSelectedIssueIds((prev) => prev.filter((x) => x !== i.id));
-                      }}
-                    />
-                    {" "}
-                    {i.number}
-                  </td>
-                  <td>{i.project?.name || "—"}</td>
-                  <td className="muted">
-                    {basisTypeLabel(i.basisType || "OTHER")}
-                    {i.basisRef ? ` · ${i.basisRef}` : ""}
-                  </td>
-                  <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                  <td>
-                    <div className="toolbar">
-                      <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
-                      {i.status === "DRAFT" && (
-                        <button onClick={() => void executeIssueAction(i.id, "send-for-approval")}>В заявки</button>
-                      )}
-                      {i.status === "ON_APPROVAL" && (
-                        <>
-                          <button onClick={() => void executeIssueAction(i.id, "approve")}>Одобрить</button>
-                          <button onClick={() => void executeIssueAction(i.id, "reject")}>Отклонить</button>
-                        </>
-                      )}
-                      {(i.status === "DRAFT" || i.status === "ON_APPROVAL") && (
-                        <button onClick={() => void executeIssueAction(i.id, "cancel")}>Отменить</button>
-                      )}
-                      {(i.status === "DRAFT" || i.status === "APPROVED") && (
-                        <button onClick={() => void executeIssueAction(i.id, "issue")}>Выдать</button>
-                      )}
-                      <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          )}
-          {!issuesLoading && !issuesError && issues.length > 0 && (
-            <div className="toolbar">
-              <span className="muted">
-                Показано {Math.min((issuesPage - 1) * issuesPageSize + 1, issuesTotal)}-
-                {Math.min(issuesPage * issuesPageSize, issuesTotal)} из {issuesTotal}
-              </span>
-              <select
-                value={issuesPageSize}
-                onChange={(e) => setIssuesPageSize(Number(e.target.value) as ListPageSize)}
-                aria-label="Размер страницы заявок"
-              >
-                <option value={20}>20 на стр.</option>
-                <option value={50}>50 на стр.</option>
-                <option value={100}>100 на стр.</option>
-              </select>
-              <button type="button" onClick={() => setIssuesPage((p) => Math.max(1, p - 1))} disabled={issuesPage <= 1}>
-                Назад
-              </button>
-              <span className="muted">Стр. {issuesPage} / {issuesTotalPages}</span>
-              <button type="button" onClick={() => setIssuesPage((p) => Math.min(issuesTotalPages, p + 1))} disabled={issuesPage >= issuesTotalPages}>
-                Вперед
-              </button>
-            </div>
-          )}
-          <div className="actionBar">
-            <button onClick={() => setActiveTab("approvals")}>Открыть заявки</button>
-            <button onClick={() => setIssueStatusFilter("DRAFT")}>Показать черновики</button>
-            <button onClick={() => setIssueStatusFilter("ON_APPROVAL")}>Показать на рассмотрении</button>
-            <button onClick={() => setIssueStatusFilter("")}>Сбросить фильтр</button>
-          </div>
-          </>
-          )}
-        </div>
-      )}
 
       {activeTab === "limits" && (
         <div className="card limitsWorkspace">
@@ -7565,7 +7299,7 @@ function App() {
                 <tbody>
                   {selectedIssue.items.map((line) => (
                     <tr key={line.id}>
-                      <td>{line.material?.name || line.materialId}</td>
+                      <td>{safeName(line.factLabel?.trim() || line.material?.name || line.materialId)}</td>
                       <td>{String(line.quantity)}</td>
                     </tr>
                   ))}
