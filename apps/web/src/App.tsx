@@ -1,5 +1,18 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import "./App.css";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
@@ -207,6 +220,46 @@ type PagedResponse<T> = {
 };
 type ListPageSize = 20 | 50 | 100;
 type Project = { id: string; name: string; code?: string | null; warehouseId?: string | null; section?: "SS" | "EOM" };
+
+type WarehouseSnapshotReport = {
+  generatedAt: string;
+  warehouse: { id: string; name: string; address: string | null; isActive: boolean };
+  counts: {
+    stockLines: number;
+    totalStockQty: number;
+    issuesTotal: number;
+    issuesByStatus: Record<string, number>;
+    operationsLast30d: { income: number; expense: number };
+    waybillsOpen: number;
+    tools: number;
+    campItems: number;
+    receiptRequests: { total: number; byStatus: Record<string, number> };
+    limitTemplates: number;
+    linkedProjects: number;
+  };
+  stocksBySection: Array<{ section: string; lines: number; quantity: number }>;
+  topMaterials: Array<{ materialId: string; name: string; unit: string; quantity: number; ss: number; eom: number }>;
+  projectLimits: Array<{
+    projectId: string;
+    projectName: string;
+    projectCode: string | null;
+    limitId: string;
+    limitName: string;
+    version: number;
+    items: Array<{
+      materialId: string;
+      materialName: string;
+      unit: string;
+      planned: number;
+      issued: number;
+      reserved: number;
+      onStock: number;
+      usagePercent: number;
+      remainingPlan: number;
+    }>;
+  }>;
+  limitUsageTop: Array<{ name: string; issued: number; planned: number; percent: number; projectName: string }>;
+};
 type ChatUser = { id: string; fullName: string; avatarUrl?: string | null; role: string; position?: string | null };
 type ChatAttachment = { id: string; fileName: string; mimeType?: string | null; dataUrl: string };
 type ChatMessage = { id: string; text: string; createdAt: string; senderId: string; sender: { id: string; fullName: string }; attachments: ChatAttachment[] };
@@ -714,8 +767,10 @@ function App() {
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [reportProjectId, setReportProjectId] = useState("");
+  const [reportWarehouseId, setReportWarehouseId] = useState("");
   const [reportsMessage, setReportsMessage] = useState("");
+  const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
+  const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1058,6 +1113,60 @@ function App() {
     }
     return date.toLocaleDateString();
   };
+  const reportChartPalette = ["#5b8def", "#3cb88d", "#e8b44c", "#e76b8a", "#9b82e8", "#5ec5cf", "#94a3b8"];
+  const reportsIssuePieRows = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    return Object.entries(warehouseSnapshot.counts.issuesByStatus).map(([status, value]) => ({
+      name: issueStatusLabel(status),
+      value
+    }));
+  }, [warehouseSnapshot]);
+  const reportsReceiptPieRows = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    const labels: Record<string, string> = {
+      NEW: "Новая",
+      IN_PROGRESS: "В работе",
+      RECEIVED: "Получена",
+      CANCELLED: "Отменено"
+    };
+    return Object.entries(warehouseSnapshot.counts.receiptRequests.byStatus).map(([status, value]) => ({
+      name: labels[status] ?? status,
+      value
+    }));
+  }, [warehouseSnapshot]);
+  const reportsStockSectionRows = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    return warehouseSnapshot.stocksBySection.map((r) => ({
+      name: r.section === "SS" ? "СС" : r.section === "EOM" ? "ЭОМ" : r.section,
+      quantity: Number(r.quantity) || 0,
+      lines: r.lines
+    }));
+  }, [warehouseSnapshot]);
+  const reportsTopMaterialsRows = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    return warehouseSnapshot.topMaterials.slice(0, 14).map((m) => ({
+      name: m.name.length > 36 ? `${m.name.slice(0, 34)}…` : m.name,
+      quantity: Number(m.quantity) || 0
+    }));
+  }, [warehouseSnapshot]);
+  const reportsLimitUsageRows = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    return warehouseSnapshot.limitUsageTop.map((r) => ({
+      label: r.name.length > 44 ? `${r.name.slice(0, 42)}…` : r.name,
+      project: r.projectName,
+      percent: r.percent,
+      issued: r.issued,
+      planned: r.planned
+    }));
+  }, [warehouseSnapshot]);
+  const reportsOpsBars = useMemo(() => {
+    if (!warehouseSnapshot) return [];
+    const { income, expense } = warehouseSnapshot.counts.operationsLast30d;
+    return [
+      { name: "Приход", count: income },
+      { name: "Расход", count: expense }
+    ];
+  }, [warehouseSnapshot]);
   const tabTitleMap: Record<string, string> = {
     stocks: "Главная",
     warehouse: "Склад",
@@ -1075,7 +1184,7 @@ function App() {
     integrations: "Интеграции и уведомления",
     chat: "Личные сообщения",
     feedback: "Обратная связь",
-    reports: "PDF сводка по объекту",
+    reports: "Сводка по объекту",
     profile: "Мой профиль",
     settings: "Настройки интерфейса",
     admin: "Управление доступами",
@@ -1771,6 +1880,9 @@ function App() {
     if (materialsData.length && !issueMaterialId) {
       setIssueMaterialId(materialsData[0].id);
     }
+    if (warehousesData.length && !reportWarehouseId) {
+      setReportWarehouseId(warehousesData[0].id);
+    }
   }
 
   async function loadProjects() {
@@ -1781,8 +1893,29 @@ function App() {
     if (!res.ok) return;
     const data = (await res.json()) as Project[];
     setProjects(data);
-    if (data.length && !reportProjectId) {
-      setReportProjectId(data[0].id);
+  }
+
+  async function loadWarehouseSummarySnapshot() {
+    if (!token || !reportWarehouseId) return;
+    setReportsSnapshotLoading(true);
+    setReportsMessage("");
+    try {
+      const res = await fetch(
+        `${API_URL}/api/reports/warehouse/${encodeURIComponent(reportWarehouseId)}/snapshot`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setWarehouseSnapshot(null);
+        setReportsMessage(typeof err.error === "string" ? err.error : "Не удалось загрузить сводку");
+        return;
+      }
+      const data = (await res.json()) as WarehouseSnapshotReport;
+      setWarehouseSnapshot(data);
+    } finally {
+      setReportsSnapshotLoading(false);
     }
   }
 
@@ -3391,7 +3524,7 @@ function App() {
 
 
         <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
-        <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка PDF</button>
+        <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка</button>
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
 
         <p className="navSectionTitle">Сервис</p>
@@ -7971,46 +8104,278 @@ function App() {
 
       {activeTab === "reports" && (
         <div className="card">
-          <h2>Сводка по объекту в PDF</h2>
+          <h2>Сводка по объекту</h2>
+          <p className="muted">
+            Выберите склад и сформируйте отчёт: остатки по разделам, заявки, операции за 30 дней, открытые ТН, приходные заявки,
+            лимиты привязанных проектов с графиками загрузки и таблицами по позициям.
+          </p>
           <div className="form">
             <label>
-              Объект (проект)
-              <select value={reportProjectId} onChange={(e) => setReportProjectId(e.target.value)}>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{safeName(p.name)}</option>
+              Объект (склад)
+              <select
+                value={reportWarehouseId}
+                onChange={(e) => {
+                  setReportWarehouseId(e.target.value);
+                  setWarehouseSnapshot(null);
+                  setReportsMessage("");
+                }}
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {safeName(w.name)}
+                  </option>
                 ))}
               </select>
             </label>
           </div>
           <div className="toolbar">
+            <button type="button" disabled={!token || !reportWarehouseId || reportsSnapshotLoading} onClick={() => void loadWarehouseSummarySnapshot()}>
+              {reportsSnapshotLoading ? "Загрузка…" : "Сформировать сводку"}
+            </button>
             <button
               type="button"
+              disabled={!token || !reportWarehouseId}
               onClick={async () => {
-                if (!token || !reportProjectId) return;
+                if (!token || !reportWarehouseId) return;
                 setReportsMessage("");
-                const res = await fetch(`${API_URL}/api/reports/object/${encodeURIComponent(reportProjectId)}/summary.pdf`, {
-                  headers: { Authorization: `Bearer ${token}` }
-                });
+                const res = await fetch(
+                  `${API_URL}/api/reports/warehouse/${encodeURIComponent(reportWarehouseId)}/summary.pdf`,
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
                 if (!res.ok) {
-                  setReportsMessage("Не удалось сформировать PDF сводку");
+                  setReportsMessage("Не удалось сформировать PDF");
                   return;
                 }
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = "object-summary.pdf";
+                a.download = "warehouse-summary.pdf";
                 a.target = "_blank";
                 a.rel = "noopener noreferrer";
                 a.click();
                 URL.revokeObjectURL(url);
-                setReportsMessage("PDF сводка сформирована");
+                setReportsMessage("PDF сформирован");
               }}
             >
-              Скачать PDF сводку
+              Скачать PDF
             </button>
           </div>
           {reportsMessage && <ResultBanner text={reportsMessage} tone={reportsMessage.includes("Не удалось") ? "error" : "neutral"} />}
+
+          {reportsSnapshotLoading && !warehouseSnapshot ? <LoadingState text="Загружаем сводку…" /> : null}
+
+          {warehouseSnapshot ? (
+            <div style={{ marginTop: 16, display: "grid", gap: 16 }}>
+              <div>
+                <h3 style={{ margin: "0 0 6px" }}>{safeName(warehouseSnapshot.warehouse.name)}</h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  {warehouseSnapshot.warehouse.address || "Адрес не указан"}
+                  {" · "}
+                  Сформировано: {new Date(warehouseSnapshot.generatedAt).toLocaleString()}
+                </p>
+              </div>
+
+              <div className="kpiRow" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(148px, 1fr))" }}>
+                <div className="kpi">
+                  <span>Строк остатков</span>
+                  <strong>{warehouseSnapshot.counts.stockLines}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Суммарно по количеству</span>
+                  <strong>{warehouseSnapshot.counts.totalStockQty.toFixed(2)}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Заявки на выдачу</span>
+                  <strong>{warehouseSnapshot.counts.issuesTotal}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Открытые ТН</span>
+                  <strong>{warehouseSnapshot.counts.waybillsOpen}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Инструменты</span>
+                  <strong>{warehouseSnapshot.counts.tools}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Городок</span>
+                  <strong>{warehouseSnapshot.counts.campItems}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Заявки на приход</span>
+                  <strong>{warehouseSnapshot.counts.receiptRequests.total}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Шаблоны лимитов</span>
+                  <strong>{warehouseSnapshot.counts.limitTemplates}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Проектов на объекте</span>
+                  <strong>{warehouseSnapshot.counts.linkedProjects}</strong>
+                </div>
+              </div>
+
+              <div className="grid2">
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Остатки по разделам (количество)</h4>
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={reportsStockSectionRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(v: number) => [v.toFixed(3), "Кол-во"]} />
+                        <Bar dataKey="quantity" name="Количество" fill="#5b8def" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Операции за 30 дней</h4>
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={reportsOpsBars} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(v: number) => [v, "Операций"]} />
+                        <Bar dataKey="count" name="Операций" fill="#3cb88d" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid2">
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Заявки на выдачу по статусам</h4>
+                  <div style={{ width: "100%", height: 280 }}>
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={reportsIssuePieRows} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                          {reportsIssuePieRows.map((_, i) => (
+                            <Cell key={`issue-cell-${i}`} fill={reportChartPalette[i % reportChartPalette.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Заявки на приход по статусам</h4>
+                  <div style={{ width: "100%", height: 280 }}>
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={reportsReceiptPieRows} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                          {reportsReceiptPieRows.map((_, i) => (
+                            <Cell key={`rcpt-cell-${i}`} fill={reportChartPalette[(i + 2) % reportChartPalette.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid2">
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Топ материалов на складе</h4>
+                  <div style={{ width: "100%", height: 320 }}>
+                    <ResponsiveContainer>
+                      <BarChart layout="vertical" data={reportsTopMaterialsRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} />
+                        <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => [v.toFixed(3), "Кол-во"]} />
+                        <Bar dataKey="quantity" name="Количество" fill="#9b82e8" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="card" style={{ padding: 14 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Лимиты: загрузка по плану (топ позиций)</h4>
+                  <div style={{ width: "100%", height: 320 }}>
+                    <ResponsiveContainer>
+                      <BarChart layout="vertical" data={reportsLimitUsageRows} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
+                        <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
+                        <YAxis type="category" dataKey="label" width={150} tick={{ fontSize: 10 }} />
+                        <Tooltip
+                          formatter={(v: number) => [`${v}%`, "Загрузка"]}
+                          labelFormatter={(_, payload) => {
+                            const p = payload?.[0]?.payload as { project?: string; issued?: number; planned?: number } | undefined;
+                            return p ? `${p.project ?? ""} · выдано ${p.issued ?? 0} из ${p.planned ?? 0}` : "";
+                          }}
+                        />
+                        <Bar dataKey="percent" name="Загрузка %" fill="#e76b8a" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {warehouseSnapshot.projectLimits.length ? (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <h3 style={{ margin: 0 }}>Детализация лимитов по проектам</h3>
+                  {warehouseSnapshot.projectLimits.map((pl) => (
+                    <div key={pl.limitId} className="card" style={{ overflow: "auto" }}>
+                      <h4 style={{ margin: "0 0 6px" }}>
+                        {safeName(pl.projectName)}
+                        {pl.projectCode ? ` · ${pl.projectCode}` : ""}
+                      </h4>
+                      <p className="muted" style={{ margin: "0 0 12px" }}>
+                        {pl.limitName} · версия {pl.version}
+                      </p>
+                      <table className="desktopTable">
+                        <thead>
+                          <tr>
+                            <th>Материал</th>
+                            <th>План</th>
+                            <th>Выдано</th>
+                            <th>Резерв</th>
+                            <th>На складе</th>
+                            <th>Остаток к плану</th>
+                            <th>Загрузка</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pl.items.map((it) => (
+                            <tr key={it.materialId}>
+                              <td>
+                                {it.materialName} <span className="muted">({it.unit})</span>
+                              </td>
+                              <td>{it.planned}</td>
+                              <td>{it.issued}</td>
+                              <td>{it.reserved}</td>
+                              <td>{Number(it.onStock).toFixed(3)}</td>
+                              <td>{it.remainingPlan}</td>
+                              <td>
+                                <span className={it.usagePercent > 90 ? "bad" : it.usagePercent > 70 ? "warnText" : "ok"}>
+                                  {it.usagePercent}%
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">Нет активных лимитов по проектам, привязанным к этому складу.</p>
+              )}
+            </div>
+          ) : !reportsSnapshotLoading ? (
+            <p className="muted" style={{ marginTop: 12 }}>
+              Нажмите «Сформировать сводку», чтобы загрузить данные и графики.
+            </p>
+          ) : null}
         </div>
       )}
 

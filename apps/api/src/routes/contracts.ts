@@ -19,7 +19,9 @@ contractsRouter.get("/meta", (_req, res) => {
       tools: "/api/tools",
       chat: "/api/chat/conversations",
       feedback: "/api/feedback/messages",
-      reports: "/api/reports/object/:projectId/summary.pdf",
+      reports: "/api/reports/warehouse/:warehouseId/snapshot",
+      reportsWarehousePdf: "/api/reports/warehouse/:warehouseId/summary.pdf",
+      reportsObjectPdf: "/api/reports/object/:projectId/summary.pdf",
       operations: "/api/operations",
       authContext: "/api/auth/context",
       materialMappings: "/api/material-mappings",
@@ -650,10 +652,28 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           responses: { "201": { description: "Feedback message created" } }
         }
       },
+      "/api/reports/warehouse/{warehouseId}/snapshot": {
+        get: {
+          tags: ["reports"],
+          summary: "Warehouse summary snapshot (JSON)",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "warehouseId", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Aggregated warehouse report" } }
+        }
+      },
+      "/api/reports/warehouse/{warehouseId}/summary.pdf": {
+        get: {
+          tags: ["reports"],
+          summary: "Download warehouse summary PDF",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "warehouseId", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "PDF document (application/pdf)" } }
+        }
+      },
       "/api/reports/object/{projectId}/summary.pdf": {
         get: {
           tags: ["reports"],
-          summary: "Download object summary PDF",
+          summary: "Download legacy project-linked object summary PDF",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "projectId", in: "path", required: true, schema: { type: "string" } }],
           responses: { "200": { description: "PDF document (application/pdf)" } }
