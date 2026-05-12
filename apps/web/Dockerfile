@@ -4,6 +4,8 @@ COPY package.json ./
 RUN npm install
 FROM node:22-alpine AS build
 WORKDIR /app
+ARG VITE_API_URL=
+ENV VITE_API_URL=$VITE_API_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
 COPY index.html ./
