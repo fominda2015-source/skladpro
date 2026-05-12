@@ -135,6 +135,7 @@ model User {
   limitTemplates   ObjectLimitTemplate[] @relation("LimitTemplateCreator")
   materialMappings MaterialMappingLibrary[]
   receiptRequests  ReceiptRequest[]      @relation("ReceiptRequestCreator")
+  campItems        CampItem[]            @relation("CampItemCreator")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -230,6 +231,7 @@ model Warehouse {
   limitTemplates ObjectLimitTemplate[]
   materialMappings MaterialMappingLibrary[]
   receiptRequests ReceiptRequest[]
+  campItems   CampItem[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -791,4 +793,42 @@ model TransportWaybillEvent {
   comment            String?
   createdAt          DateTime          @default(now())
   transportWaybill   TransportWaybill  @relation(fields: [transportWaybillId], references: [id], onDelete: Cascade)
+}
+
+enum CampItemCategory {
+  CONTAINER
+  EQUIPMENT
+  CABIN
+  TOOL
+  OTHER
+}
+
+enum CampItemStatus {
+  IN_USE
+  STORAGE
+  REPAIR
+  WRITTEN_OFF
+}
+
+model CampItem {
+  id              String            @id @default(cuid())
+  name            String
+  category        CampItemCategory  @default(OTHER)
+  inventoryNumber String?
+  serialNumber    String?
+  manufacturer    String?
+  location        String?
+  description     String?
+  warehouseId     String?
+  section         ObjectSection     @default(SS)
+  status          CampItemStatus    @default(IN_USE)
+  acquiredAt      DateTime?
+  createdById     String?
+  warehouse       Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  createdBy       User?             @relation("CampItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([warehouseId, section])
+  @@index([inventoryNumber])
 }

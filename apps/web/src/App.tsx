@@ -376,6 +376,37 @@ type MaterialMappingRow = {
   targetMaterialId: string;
   targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
+type CampItemCategory = "CONTAINER" | "EQUIPMENT" | "CABIN" | "TOOL" | "OTHER";
+type CampItemStatus = "IN_USE" | "STORAGE" | "REPAIR" | "WRITTEN_OFF";
+type CampItemFile = {
+  id: string;
+  fileName: string;
+  filePath: string;
+  size?: number | null;
+  mimeType?: string | null;
+  type?: string | null;
+  createdAt: string;
+};
+type CampItemRow = {
+  id: string;
+  name: string;
+  category: CampItemCategory;
+  inventoryNumber?: string | null;
+  serialNumber?: string | null;
+  manufacturer?: string | null;
+  location?: string | null;
+  description?: string | null;
+  warehouseId?: string | null;
+  section: "SS" | "EOM";
+  status: CampItemStatus;
+  acquiredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  warehouse?: { id: string; name: string } | null;
+  createdBy?: { id: string; fullName: string } | null;
+  photos: CampItemFile[];
+  documents: CampItemFile[];
+};
 function App() {
   const [email, setEmail] = useState("admin@skladpro.local");
   const [password, setPassword] = useState("1111");
@@ -416,6 +447,7 @@ function App() {
     | "tools"
     | "waybills"
     | "matching"
+    | "camp"
     | "audit"
     | "integrations"
     | "settings"
@@ -543,6 +575,26 @@ function App() {
   const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
   const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
+  // Городок: список + UI-состояния.
+  const [campItems, setCampItems] = useState<CampItemRow[]>([]);
+  const [campMessage, setCampMessage] = useState("");
+  const [campSearch, setCampSearch] = useState("");
+  const [campCategoryFilter, setCampCategoryFilter] = useState<"" | CampItemCategory>("");
+  const [campStatusFilter, setCampStatusFilter] = useState<"" | CampItemStatus>("");
+  const [campSelected, setCampSelected] = useState<CampItemRow | null>(null);
+  const [campShowAddForm, setCampShowAddForm] = useState(false);
+  const [campCreateName, setCampCreateName] = useState("");
+  const [campCreateCategory, setCampCreateCategory] = useState<CampItemCategory>("CONTAINER");
+  const [campCreateInv, setCampCreateInv] = useState("");
+  const [campCreateSerial, setCampCreateSerial] = useState("");
+  const [campCreateManufacturer, setCampCreateManufacturer] = useState("");
+  const [campCreateLocation, setCampCreateLocation] = useState("");
+  const [campCreateDescription, setCampCreateDescription] = useState("");
+  const [campCreateStatus, setCampCreateStatus] = useState<CampItemStatus>("IN_USE");
+  const [campCreateFiles, setCampCreateFiles] = useState<File[]>([]);
+  const [campCreating, setCampCreating] = useState(false);
+  const [campDetailFiles, setCampDetailFiles] = useState<File[]>([]);
+  const [campDetailUploading, setCampDetailUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage] = useState("");
   const [docSearchQuery, setDocSearchQuery] = useState("");
@@ -2681,6 +2733,153 @@ function App() {
     setActiveTab("documents");
   }
 
+  async function loadCampItems() {
+    if (!token) return;
+    const parts: string[] = [];
+    if (objectSectionFilter) parts.push(`section=${encodeURIComponent(objectSectionFilter)}`);
+    if (activeObjectId) parts.push(`warehouseId=${encodeURIComponent(activeObjectId)}`);
+    if (campCategoryFilter) parts.push(`category=${encodeURIComponent(campCategoryFilter)}`);
+    if (campStatusFilter) parts.push(`status=${encodeURIComponent(campStatusFilter)}`);
+    if (campSearch.trim()) parts.push(`q=${encodeURIComponent(campSearch.trim())}`);
+    const query = parts.length ? `?${parts.join("&")}` : "";
+    const res = await fetch(`${API_URL}/api/camp-items${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setCampMessage("Не удалось загрузить городок");
+      return;
+    }
+    const data = (await res.json()) as CampItemRow[];
+    setCampItems(data);
+    if (campSelected) {
+      const fresh = data.find((x) => x.id === campSelected.id) || null;
+      setCampSelected(fresh);
+    }
+  }
+
+  function resetCampCreateForm() {
+    setCampCreateName("");
+    setCampCreateCategory("CONTAINER");
+    setCampCreateInv("");
+    setCampCreateSerial("");
+    setCampCreateManufacturer("");
+    setCampCreateLocation("");
+    setCampCreateDescription("");
+    setCampCreateStatus("IN_USE");
+    setCampCreateFiles([]);
+  }
+
+  async function createCampItem() {
+    if (!token) return;
+    const name = campCreateName.trim();
+    if (!name) {
+      setCampMessage("Укажи название");
+      return;
+    }
+    setCampCreating(true);
+    try {
+      const form = new FormData();
+      form.append(
+        "payload",
+        JSON.stringify({
+          name,
+          category: campCreateCategory,
+          inventoryNumber: campCreateInv.trim() || null,
+          serialNumber: campCreateSerial.trim() || null,
+          manufacturer: campCreateManufacturer.trim() || null,
+          location: campCreateLocation.trim() || null,
+          description: campCreateDescription.trim() || null,
+          warehouseId: activeObjectId || null,
+          section: objectSectionFilter,
+          status: campCreateStatus
+        })
+      );
+      for (const f of campCreateFiles) form.append("files", f);
+      const res = await fetch(`${API_URL}/api/camp-items`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setCampMessage(typeof err.error === "string" ? err.error : "Не удалось создать запись");
+        return;
+      }
+      setCampMessage(`Создано: ${name}`);
+      resetCampCreateForm();
+      setCampShowAddForm(false);
+      await loadCampItems();
+    } finally {
+      setCampCreating(false);
+    }
+  }
+
+  async function deleteCampItem(id: string) {
+    if (!token) return;
+    if (!window.confirm("Удалить позицию городка?")) return;
+    const res = await fetch(`${API_URL}/api/camp-items/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setCampMessage("Не удалось удалить");
+      return;
+    }
+    if (campSelected?.id === id) setCampSelected(null);
+    setCampMessage("Удалено");
+    await loadCampItems();
+  }
+
+  async function updateCampItem(id: string, patch: Partial<CampItemRow>) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/camp-items/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    if (!res.ok) {
+      setCampMessage("Не удалось обновить");
+      return;
+    }
+    await loadCampItems();
+  }
+
+  async function uploadCampItemFiles(id: string, files: File[]) {
+    if (!token || !files.length) return;
+    setCampDetailUploading(true);
+    try {
+      const form = new FormData();
+      for (const f of files) form.append("files", f);
+      const res = await fetch(`${API_URL}/api/camp-items/${id}/files`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        setCampMessage("Не удалось загрузить файлы");
+        return;
+      }
+      setCampDetailFiles([]);
+      await loadCampItems();
+    } finally {
+      setCampDetailUploading(false);
+    }
+  }
+
+  async function deleteCampItemFile(itemId: string, fileId: string) {
+    if (!token) return;
+    if (!window.confirm("Удалить файл?")) return;
+    const res = await fetch(`${API_URL}/api/camp-items/${itemId}/files/${fileId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setCampMessage("Не удалось удалить файл");
+      return;
+    }
+    await loadCampItems();
+  }
+
   function statusClass(status: string) {
     const s = status.toUpperCase();
     if (["APPROVED", "ISSUED", "FORMED", "RECEIVED", "CLOSED", "IN_STOCK"].includes(s)) return "ok";
@@ -3122,6 +3321,12 @@ function App() {
   }, [token, activeTab, docTypeFilter, docEntityType, docEntityId]);
 
   useEffect(() => {
+    if (token && activeTab === "camp") {
+      void loadCampItems();
+    }
+  }, [token, activeTab, objectSectionFilter, activeObjectId, campCategoryFilter, campStatusFilter, campSearch]);
+
+  useEffect(() => {
     if (token && activeTab === "qr") {
       void loadTools();
     }
@@ -3332,6 +3537,7 @@ function App() {
         <p className="navSectionTitle">Контроль</p>
         {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+        <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
         {showLegacyMatching && canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
         {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
@@ -3986,6 +4192,554 @@ function App() {
           {stockMovementsError && <p className="error">{stockMovementsError}</p>}
         </div>
       )}
+
+      {activeTab === "camp" && (() => {
+        const categoryLabel: Record<CampItemCategory, string> = {
+          CONTAINER: "Контейнер",
+          EQUIPMENT: "Техника",
+          CABIN: "Бытовка",
+          TOOL: "Инструмент",
+          OTHER: "Прочее"
+        };
+        const statusLabel: Record<CampItemStatus, string> = {
+          IN_USE: "В эксплуатации",
+          STORAGE: "На хранении",
+          REPAIR: "В ремонте",
+          WRITTEN_OFF: "Списан"
+        };
+        const statusTone: Record<CampItemStatus, string> = {
+          IN_USE: "ok",
+          STORAGE: "neutral",
+          REPAIR: "warn",
+          WRITTEN_OFF: "bad"
+        };
+        const categoryIcon: Record<CampItemCategory, string> = {
+          CONTAINER: "▣",
+          EQUIPMENT: "⚙",
+          CABIN: "⌂",
+          TOOL: "🔧",
+          OTHER: "•"
+        };
+        const filtersActive =
+          Boolean(campSearch.trim()) || Boolean(campCategoryFilter) || Boolean(campStatusFilter);
+        return (
+          <>
+            <div className="card">
+              <div className="rightCardHeader" style={{ flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Городок</h2>
+                  <p className="muted">
+                    Контейнеры, бытовки, техника и прочее имущество городка. Карточки с фото — нажми на карточку,
+                    чтобы посмотреть полную информацию, добавить документы и фотографии.
+                  </p>
+                </div>
+                <div className="kpiRow" style={{ margin: 0 }}>
+                  <div className="kpi">
+                    <span>Всего позиций</span>
+                    <strong>{campItems.length}</strong>
+                  </div>
+                  <div className="kpi">
+                    <span>В эксплуатации</span>
+                    <strong>{campItems.filter((c) => c.status === "IN_USE").length}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {campMessage && (
+                <ResultBanner
+                  text={campMessage}
+                  tone={campMessage.includes("Не удалось") ? "error" : "neutral"}
+                />
+              )}
+
+              <div className="form docCenterForm" style={{ marginTop: 8 }}>
+                <label>
+                  Поиск
+                  <input
+                    value={campSearch}
+                    onChange={(e) => setCampSearch(e.target.value)}
+                    placeholder="название, инв.№, серийный…"
+                  />
+                </label>
+                <label>
+                  Категория
+                  <select
+                    value={campCategoryFilter}
+                    onChange={(e) => setCampCategoryFilter(e.target.value as "" | CampItemCategory)}
+                  >
+                    <option value="">Все категории</option>
+                    {(Object.keys(categoryLabel) as CampItemCategory[]).map((c) => (
+                      <option key={c} value={c}>{categoryLabel[c]}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Статус
+                  <select
+                    value={campStatusFilter}
+                    onChange={(e) => setCampStatusFilter(e.target.value as "" | CampItemStatus)}
+                  >
+                    <option value="">Все статусы</option>
+                    {(Object.keys(statusLabel) as CampItemStatus[]).map((s) => (
+                      <option key={s} value={s}>{statusLabel[s]}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetCampCreateForm();
+                    setCampShowAddForm((s) => !s);
+                  }}
+                >
+                  {campShowAddForm ? "Скрыть форму" : "+ Добавить позицию"}
+                </button>
+                <button type="button" className="ghostBtn" onClick={() => void loadCampItems()}>
+                  Обновить
+                </button>
+                {filtersActive && (
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    onClick={() => {
+                      setCampSearch("");
+                      setCampCategoryFilter("");
+                      setCampStatusFilter("");
+                    }}
+                  >
+                    Сбросить фильтры
+                  </button>
+                )}
+              </div>
+
+              {campShowAddForm && (
+                <div className="card" style={{ marginTop: 12 }}>
+                  <h3 style={{ marginTop: 0 }}>Новая позиция</h3>
+                  <div className="form docCenterForm">
+                    <label>
+                      Название*
+                      <input
+                        value={campCreateName}
+                        onChange={(e) => setCampCreateName(e.target.value)}
+                        placeholder="Контейнер №3, бытовка-вагончик…"
+                      />
+                    </label>
+                    <label>
+                      Категория
+                      <select
+                        value={campCreateCategory}
+                        onChange={(e) => setCampCreateCategory(e.target.value as CampItemCategory)}
+                      >
+                        {(Object.keys(categoryLabel) as CampItemCategory[]).map((c) => (
+                          <option key={c} value={c}>{categoryLabel[c]}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Инвентаризационный №
+                      <input
+                        value={campCreateInv}
+                        onChange={(e) => setCampCreateInv(e.target.value)}
+                        placeholder="INV-001"
+                      />
+                    </label>
+                    <label>
+                      Серийный №
+                      <input
+                        value={campCreateSerial}
+                        onChange={(e) => setCampCreateSerial(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Производитель
+                      <input
+                        value={campCreateManufacturer}
+                        onChange={(e) => setCampCreateManufacturer(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Размещение
+                      <input
+                        value={campCreateLocation}
+                        onChange={(e) => setCampCreateLocation(e.target.value)}
+                        placeholder="напр. площадка №2"
+                      />
+                    </label>
+                    <label>
+                      Статус
+                      <select
+                        value={campCreateStatus}
+                        onChange={(e) => setCampCreateStatus(e.target.value as CampItemStatus)}
+                      >
+                        {(Object.keys(statusLabel) as CampItemStatus[]).map((s) => (
+                          <option key={s} value={s}>{statusLabel[s]}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Фото и документы (можно несколько)
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,application/pdf"
+                        onChange={(e) => setCampCreateFiles(Array.from(e.target.files || []))}
+                      />
+                      {campCreateFiles.length > 0 && (
+                        <span className="muted">
+                          Выбрано файлов: {campCreateFiles.length}
+                        </span>
+                      )}
+                    </label>
+                    <label style={{ gridColumn: "1 / -1" }}>
+                      Описание / заметки
+                      <textarea
+                        rows={3}
+                        value={campCreateDescription}
+                        onChange={(e) => setCampCreateDescription(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => void createCampItem()}
+                      disabled={campCreating || !campCreateName.trim()}
+                    >
+                      {campCreating ? "Сохраняем…" : "Сохранить"}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() => {
+                        resetCampCreateForm();
+                        setCampShowAddForm(false);
+                      }}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {!campItems.length ? (
+              <EmptyState
+                title="Городок пока пуст"
+                hint="Нажми «+ Добавить позицию», заполни инв.№ и приложи фото — карточка появится здесь."
+              />
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+                  gap: 14,
+                  marginTop: 12
+                }}
+              >
+                {campItems.map((c) => {
+                  const cover = c.photos[0];
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="card"
+                      style={{
+                        padding: 0,
+                        overflow: "hidden",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        border: "1px solid #e5e7eb",
+                        background: "var(--card-bg, #fff)"
+                      }}
+                      onClick={() => setCampSelected(c)}
+                    >
+                      <div
+                        style={{
+                          height: 150,
+                          background: "linear-gradient(135deg,#f1f5f9,#e2e8f0)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          overflow: "hidden",
+                          position: "relative"
+                        }}
+                      >
+                        {cover ? (
+                          <img
+                            src={`${API_URL}/${cover.filePath}`}
+                            alt={c.name}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          <div style={{ fontSize: 48, color: "#94a3b8" }}>
+                            {categoryIcon[c.category]}
+                          </div>
+                        )}
+                        <span
+                          className={`statusBadge ${statusTone[c.status]}`}
+                          style={{ position: "absolute", top: 8, right: 8 }}
+                        >
+                          {statusLabel[c.status]}
+                        </span>
+                      </div>
+                      <div style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 2 }}>{c.name}</div>
+                        <div className="muted" style={{ fontSize: 13 }}>
+                          {categoryLabel[c.category]}
+                          {c.inventoryNumber ? ` · ${c.inventoryNumber}` : ""}
+                        </div>
+                        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                          📷 {c.photos.length} · 📎 {c.documents.length}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {campSelected && (() => {
+              const sel = campSelected;
+              return (
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(15, 23, 42, 0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 60,
+                    padding: 16
+                  }}
+                  onClick={() => setCampSelected(null)}
+                >
+                  <div
+                    className="card"
+                    style={{ maxWidth: 880, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                      <div>
+                        <h3 style={{ marginTop: 0 }}>{sel.name}</h3>
+                        <p className="muted" style={{ margin: 0 }}>
+                          {categoryLabel[sel.category]}
+                          {sel.inventoryNumber ? ` · инв.№ ${sel.inventoryNumber}` : ""}
+                          {sel.serialNumber ? ` · S/N ${sel.serialNumber}` : ""}
+                        </p>
+                      </div>
+                      <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                        <select
+                          value={sel.status}
+                          onChange={(e) => void updateCampItem(sel.id, { status: e.target.value as CampItemStatus })}
+                        >
+                          {(Object.keys(statusLabel) as CampItemStatus[]).map((s) => (
+                            <option key={s} value={s}>{statusLabel[s]}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="dangerBtn"
+                          onClick={() => void deleteCampItem(sel.id)}
+                        >
+                          Удалить
+                        </button>
+                        <button type="button" className="ghostBtn" onClick={() => setCampSelected(null)}>
+                          Закрыть
+                        </button>
+                      </div>
+                    </div>
+
+                    {sel.photos.length > 0 ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                          gap: 8,
+                          marginTop: 8
+                        }}
+                      >
+                        {sel.photos.map((p) => (
+                          <div key={p.id} style={{ position: "relative" }}>
+                            <a href={`${API_URL}/${p.filePath}`} target="_blank" rel="noreferrer">
+                              <img
+                                src={`${API_URL}/${p.filePath}`}
+                                alt={p.fileName}
+                                style={{
+                                  width: "100%",
+                                  height: 110,
+                                  objectFit: "cover",
+                                  borderRadius: 8,
+                                  border: "1px solid #e5e7eb"
+                                }}
+                              />
+                            </a>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              style={{ position: "absolute", top: 4, right: 4, padding: "2px 6px" }}
+                              onClick={() => void deleteCampItemFile(sel.id, p.id)}
+                              title="Удалить фото"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">Фото пока нет.</p>
+                    )}
+
+                    <h4 style={{ marginTop: 16 }}>Информация</h4>
+                    <div className="form docCenterForm">
+                      <label>
+                        Название
+                        <input
+                          defaultValue={sel.name}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v && v !== sel.name) void updateCampItem(sel.id, { name: v });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Категория
+                        <select
+                          value={sel.category}
+                          onChange={(e) =>
+                            void updateCampItem(sel.id, { category: e.target.value as CampItemCategory })
+                          }
+                        >
+                          {(Object.keys(categoryLabel) as CampItemCategory[]).map((c) => (
+                            <option key={c} value={c}>{categoryLabel[c]}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Инвентаризационный №
+                        <input
+                          defaultValue={sel.inventoryNumber || ""}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (sel.inventoryNumber || "")) void updateCampItem(sel.id, { inventoryNumber: v });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Серийный №
+                        <input
+                          defaultValue={sel.serialNumber || ""}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (sel.serialNumber || "")) void updateCampItem(sel.id, { serialNumber: v });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Производитель
+                        <input
+                          defaultValue={sel.manufacturer || ""}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (sel.manufacturer || "")) void updateCampItem(sel.id, { manufacturer: v });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Размещение
+                        <input
+                          defaultValue={sel.location || ""}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (sel.location || "")) void updateCampItem(sel.id, { location: v });
+                          }}
+                        />
+                      </label>
+                      <label style={{ gridColumn: "1 / -1" }}>
+                        Описание / заметки
+                        <textarea
+                          rows={3}
+                          defaultValue={sel.description || ""}
+                          onBlur={(e) => {
+                            const v = e.target.value;
+                            if (v !== (sel.description || "")) void updateCampItem(sel.id, { description: v });
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                      Изменения сохраняются автоматически при потере фокуса полем.
+                    </p>
+
+                    <h4 style={{ marginTop: 16 }}>Документы</h4>
+                    {sel.documents.length === 0 ? (
+                      <p className="muted">Документов пока нет.</p>
+                    ) : (
+                      <ul className="plainList">
+                        {sel.documents.map((d) => (
+                          <li
+                            key={d.id}
+                            style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}
+                          >
+                            <span>
+                              📎{" "}
+                              <a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">
+                                {d.fileName}
+                              </a>{" "}
+                              <span className="muted">
+                                ({d.size ? `${Math.max(1, Math.ceil(d.size / 1024))} КБ` : "—"})
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() => void deleteCampItemFile(sel.id, d.id)}
+                            >
+                              Удалить
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <h4 style={{ marginTop: 16 }}>Добавить фото / документы</h4>
+                    <div className="toolbar" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,application/pdf"
+                        onChange={(e) => setCampDetailFiles(Array.from(e.target.files || []))}
+                      />
+                      <button
+                        type="button"
+                        disabled={campDetailUploading || !campDetailFiles.length}
+                        onClick={() => void uploadCampItemFiles(sel.id, campDetailFiles)}
+                      >
+                        {campDetailUploading
+                          ? "Загружаем…"
+                          : campDetailFiles.length
+                          ? `Загрузить (${campDetailFiles.length})`
+                          : "Загрузить"}
+                      </button>
+                    </div>
+
+                    <p className="muted" style={{ marginTop: 12, fontSize: 12 }}>
+                      Создано: {new Date(sel.createdAt).toLocaleString()}
+                      {sel.createdBy ? ` · ${sel.createdBy.fullName}` : ""}
+                      {sel.warehouse ? ` · объект: ${sel.warehouse.name}` : ""}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        );
+      })()}
 
       {activeTab === "audit" && canReadAudit && (
         <div className="card">
