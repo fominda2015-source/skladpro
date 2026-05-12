@@ -410,6 +410,7 @@ issueRequestsRouter.patch("/:id/approve", requirePermission("issues.approve"), a
     action: "ISSUE_REQUEST_APPROVE",
     entityType: "IssueRequest",
     entityId: id,
+    summary: `Заявка ${updated.number} согласована`,
     before: { status: prev.status, approvedById: prev.approvedById },
     after: { status: updated.status, approvedById: updated.approvedById }
   });
@@ -442,8 +443,9 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
     action: "ISSUE_REQUEST_REJECT",
     entityType: "IssueRequest",
     entityId: id,
-    before: { status: prev.status },
-    after: { status: updated.status }
+    summary: `Заявка ${updated.number} отклонена`,
+    before: { status: prev.status, approvedById: prev.approvedById },
+    after: { status: updated.status, approvedById: updated.approvedById }
   });
   await safeNotify({
     userId: updated.requestedById,
@@ -478,6 +480,7 @@ issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), asyn
     action: "ISSUE_REQUEST_CANCEL",
     entityType: "IssueRequest",
     entityId: id,
+    summary: `Заявка ${updated.number} отменена`,
     before: { status: prev.status },
     after: { status: updated.status }
   });
@@ -573,7 +576,8 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
               quantity: item.quantity
             }))
           }
-        }
+        },
+        include: { items: true }
       });
 
       for (const item of issueRow.items) {
@@ -644,8 +648,21 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       action: "ISSUE_REQUEST_ISSUE",
       entityType: "IssueRequest",
       entityId: id,
+      summary: `Выдача по заявке ${issue.number} (позиций: ${operation.items?.length ?? 0})`,
       before: { status: prevStatus as IssueRequestStatus },
-      after: { status: issue.status, operationId: operation.id, documentId: document?.id ?? null }
+      after: {
+        status: issue.status,
+        operationId: operation.id,
+        warehouseId: operation.warehouseId,
+        section: operation.section,
+        projectId: operation.projectId,
+        items:
+          operation.items?.map((i) => ({
+            materialId: i.materialId,
+            quantity: Number(i.quantity)
+          })) ?? [],
+        documentId: document?.id ?? null
+      }
     });
     await safeNotify({
       userId: issue.requestedById,

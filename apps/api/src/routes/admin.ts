@@ -118,6 +118,15 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: "User not found" });
   }
 
+  const [prevWh, prevPj, prevSec] = await Promise.all([
+    prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
+    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
+    prisma.userWarehouseSectionScope.findMany({
+      where: { userId },
+      select: { warehouseId: true, section: true }
+    })
+  ]);
+
   await prisma.$transaction(async (tx) => {
     const linkedWarehouses = parsed.data.projectIds.length
       ? await tx.project.findMany({
@@ -166,6 +175,12 @@ adminRouter.put("/users/:id/scopes", async (req: AuthedRequest, res) => {
     action: "USER_SCOPES_SET",
     entityType: "User",
     entityId: userId,
+    summary: `Изменены области доступа: ${target.fullName || target.email}`,
+    before: {
+      warehouseIds: prevWh.map((x) => x.warehouseId),
+      projectIds: prevPj.map((x) => x.projectId),
+      sectionScopes: prevSec
+    },
     after: {
       warehouseIds: parsed.data.warehouseIds,
       projectIds: parsed.data.projectIds,
@@ -416,6 +431,12 @@ adminRouter.post("/objects/:id/users", async (req: AuthedRequest, res) => {
   const warehouseId = String(req.params.id);
   const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
   if (!object) return res.status(404).json({ error: "Object not found" });
+  const before = await prisma.userWarehouseScope.findMany({
+    where: { warehouseId },
+    select: { userId: true }
+  });
+  const beforeIds = before.map((x) => x.userId);
+  const newlyAdded = parsed.data.userIds.filter((id) => !beforeIds.includes(id));
   if (parsed.data.userIds.length) {
     await prisma.userWarehouseScope.createMany({
       data: parsed.data.userIds.map((userId) => ({ userId, warehouseId })),
@@ -427,6 +448,8 @@ adminRouter.post("/objects/:id/users", async (req: AuthedRequest, res) => {
     action: "OBJECT_USERS_ADD",
     entityType: "Warehouse",
     entityId: warehouseId,
+    summary: `Добавлено пользователей: ${newlyAdded.length} (объект ${object.name})`,
+    before: { userIds: beforeIds, addedIds: newlyAdded },
     after: { userIds: parsed.data.userIds }
   });
   return res.json({ ok: true });
@@ -445,6 +468,10 @@ adminRouter.put("/objects/:id/sections/:section/users", async (req: AuthedReques
   const section = sectionRaw as "SS" | "EOM";
   const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
   if (!object) return res.status(404).json({ error: "Object not found" });
+  const beforeSection = await prisma.userWarehouseSectionScope.findMany({
+    where: { warehouseId, section },
+    select: { userId: true }
+  });
   await prisma.$transaction(async (tx) => {
     await tx.userWarehouseSectionScope.deleteMany({
       where: {
@@ -465,6 +492,8 @@ adminRouter.put("/objects/:id/sections/:section/users", async (req: AuthedReques
     action: "OBJECT_SECTION_USERS_SYNC",
     entityType: "Warehouse",
     entityId: warehouseId,
+    summary: `Обновлены доступы по разделу ${section} объекта ${object.name}`,
+    before: { section, userIds: beforeSection.map((x) => x.userId) },
     after: { section, userIds: parsed.data.userIds }
   });
   return res.json({ ok: true });
@@ -478,6 +507,10 @@ adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
   const warehouseId = String(req.params.id);
   const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
   if (!object) return res.status(404).json({ error: "Object not found" });
+  const beforeUsers = await prisma.userWarehouseScope.findMany({
+    where: { warehouseId },
+    select: { userId: true }
+  });
   await prisma.$transaction(async (tx) => {
     await tx.userWarehouseScope.deleteMany({
       where: {
@@ -497,6 +530,8 @@ adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
     action: "OBJECT_USERS_SYNC",
     entityType: "Warehouse",
     entityId: warehouseId,
+    summary: `Обновлён список пользователей объекта ${object.name}`,
+    before: { userIds: beforeUsers.map((x) => x.userId) },
     after: { userIds: parsed.data.userIds }
   });
   return res.json({ ok: true });

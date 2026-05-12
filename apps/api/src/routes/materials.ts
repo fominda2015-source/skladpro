@@ -274,6 +274,7 @@ materialsRouter.post("/merge", requirePermission("materials.write"), async (req:
     action: "MATERIAL_MERGE",
     entityType: "Material",
     entityId: sourceMaterialId,
+    summary: `Слияние материала ${source.name || sourceMaterialId} → ${targetMaterialId}`,
     before: { mergedIntoId: source.mergedIntoId, sourceMaterialId, targetMaterialId: null },
     after: { mergedIntoId: targetMaterialId, targetMaterialId, historyId: mergeResult.id, reason: reason || null }
   });

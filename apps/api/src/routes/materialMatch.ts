@@ -150,7 +150,8 @@ materialMatchRouter.patch("/queue/:id/resolve", requirePermission("materials.mat
     action: "MATERIAL_MATCH_RESOLVE",
     entityType: "MaterialMatchQueue",
     entityId: id,
-    before: { status: q.status, suggestedMaterialId: q.suggestedMaterialId },
+    summary: `Соответствие материала разрешено: ${q.rawName || id}`,
+    before: { status: q.status, suggestedMaterialId: q.suggestedMaterialId, resolvedMaterialId: q.resolvedMaterialId },
     after: { status: "RESOLVED", resolvedMaterialId: body.data.materialId }
   });
 
@@ -172,7 +173,8 @@ materialMatchRouter.patch("/queue/:id/reject", requirePermission("materials.matc
     action: "MATERIAL_MATCH_REJECT",
     entityType: "MaterialMatchQueue",
     entityId: id,
-    before: { status: q.status },
+    summary: `Соответствие материала отклонено: ${q.rawName || id}`,
+    before: { status: q.status, suggestedMaterialId: q.suggestedMaterialId, resolvedMaterialId: q.resolvedMaterialId },
     after: { status: "REJECTED" }
   });
   return res.json(updated);

@@ -7,6 +7,7 @@ import { Router } from "express";
 import xlsx from "xlsx";
 import { z } from "zod";
 import { config } from "../config.js";
+import { recordAudit } from "../lib/audit.js";
 import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
 import { notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
@@ -527,7 +528,31 @@ receiptRequestsRouter.post(
         }
       });
 
-      return operation;
+      return {
+        operation,
+        acceptedItems: resolved.map((r) => ({
+          materialId: r.materialId,
+          quantity: r.acceptedQty,
+          receiptRequestItemId: r.item.id,
+          sourceName: r.item.sourceName,
+          sourceUnit: r.item.sourceUnit
+        }))
+      };
+    });
+
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "RECEIPT_REQUEST_ACCEPT",
+      entityType: "ReceiptRequest",
+      entityId: row.id,
+      summary: `Приёмка по заявке ${row.number}: позиций ${op.acceptedItems.length}`,
+      after: {
+        requestId: row.id,
+        operationId: op.operation.id,
+        warehouseId: row.warehouseId,
+        section: row.section,
+        items: op.acceptedItems
+      }
     });
 
     if (row.createdById && row.createdById !== req.user!.userId) {
@@ -540,6 +565,6 @@ receiptRequestsRouter.post(
         entityId: row.id
       }).catch(() => undefined);
     }
-    return res.json({ ok: true, operationId: op.id });
+    return res.json({ ok: true, operationId: op.operation.id });
   }
 );
