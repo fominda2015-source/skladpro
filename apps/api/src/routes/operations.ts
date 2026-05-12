@@ -176,16 +176,27 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
       return operation;
     });
 
+    const itemsForLog = created.items?.map((i) => ({
+      materialId: i.materialId,
+      quantity: Number(i.quantity)
+    }));
+    const totalQty = (itemsForLog || []).reduce((s, x) => s + (Number(x.quantity) || 0), 0);
     await recordAudit({
       userId: req.user!.userId,
       action: "OPERATION_CREATE",
       entityType: "Operation",
       entityId: created.id,
+      summary:
+        `${created.type === "INCOME" ? "Приход" : "Расход"} № ${created.documentNumber || created.id.slice(0, 8)}` +
+        ` · позиций ${itemsForLog?.length || 0} · всего ${totalQty}`,
       after: {
         type: created.type,
         warehouseId: created.warehouseId,
+        section: created.section,
         projectId: created.projectId,
-        items: created.items?.map((i) => ({ materialId: i.materialId, quantity: i.quantity }))
+        documentNumber: created.documentNumber,
+        operationDate: created.operationDate,
+        items: itemsForLog
       }
     });
 

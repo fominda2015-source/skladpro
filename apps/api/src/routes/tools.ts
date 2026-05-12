@@ -147,6 +147,14 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedReques
         status: created.status
       }
     });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_CREATE",
+      entityType: "Tool",
+      entityId: created.id,
+      summary: `Создан инструмент: ${created.name}${created.inventoryNumber ? ` (инв. ${created.inventoryNumber})` : ""}`,
+      after: { id: created.id, name: created.name, inventoryNumber: created.inventoryNumber, status: created.status }
+    });
     return res.status(201).json(created);
   } catch (error) {
     const err = error as Error & { status?: number };
@@ -233,11 +241,21 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
       });
       return tool;
     });
+    const actionRu: Record<string, string> = {
+      ISSUE: "выдан",
+      RETURN: "возвращён",
+      SEND_TO_REPAIR: "отправлен в ремонт",
+      MARK_DAMAGED: "помечен повреждённым",
+      MARK_LOST: "помечен утерянным",
+      MARK_DISPUTED: "помечен спорным",
+      WRITE_OFF: "списан"
+    };
     await recordAudit({
       userId: req.user!.userId,
       action: `TOOL_${parsed.data.action}`,
       entityType: "Tool",
       entityId: id,
+      summary: `Инструмент ${beforeTool.name}${beforeTool.inventoryNumber ? ` (инв. ${beforeTool.inventoryNumber})` : ""} — ${actionRu[parsed.data.action] || parsed.data.action.toLowerCase()}`,
       before: { status: beforeTool.status, responsible: beforeTool.responsible },
       after: { status: updated.status, responsible: updated.responsible }
     });

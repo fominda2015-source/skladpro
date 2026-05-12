@@ -6,6 +6,7 @@ export async function recordAudit(opts: {
   action: string;
   entityType: string;
   entityId: string;
+  summary?: string | null;
   before?: unknown;
   after?: unknown;
   ip?: string | null;
@@ -19,6 +20,7 @@ export async function recordAudit(opts: {
       action: opts.action,
       entityType: opts.entityType,
       entityId: opts.entityId,
+      summary: opts.summary ?? undefined,
       beforeData: opts.before === undefined ? undefined : (opts.before as Prisma.InputJsonValue),
       afterData: opts.after === undefined ? undefined : (opts.after as Prisma.InputJsonValue),
       ip: opts.ip ?? undefined,

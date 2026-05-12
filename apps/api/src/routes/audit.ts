@@ -1,4 +1,10 @@
-import { Prisma, CampItemCategory, CampItemStatus, ObjectSection } from "@prisma/client";
+import {
+  Prisma,
+  CampItemCategory,
+  CampItemStatus,
+  ObjectSection,
+  ToolStatus
+} from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -42,7 +48,17 @@ const ACTION_LABELS: Record<string, string> = {
 const REVERTABLE_ACTIONS = new Set<string>([
   "CAMP_ITEM_CREATE",
   "CAMP_ITEM_UPDATE",
-  "CAMP_ITEM_DELETE"
+  "CAMP_ITEM_DELETE",
+  "OPERATION_CREATE",
+  "TOOL_CREATE",
+  "TOOL_ISSUE",
+  "TOOL_RETURN",
+  "TOOL_SEND_TO_REPAIR",
+  "TOOL_MARK_DAMAGED",
+  "TOOL_MARK_LOST",
+  "TOOL_MARK_DISPUTED",
+  "TOOL_WRITE_OFF",
+  "OBJECT_CREATE"
 ]);
 
 function isRevertable(action: string): boolean {
@@ -194,6 +210,170 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
         where: { entityType: "camp", entityId: log.entityId, isDeleted: true },
         data: { isDeleted: false }
       });
+      return { ok: true };
+    }
+    case "OPERATION_CREATE": {
+      const after = log.afterData as
+        | {
+            type?: "INCOME" | "EXPENSE";
+            warehouseId?: string;
+            section?: "SS" | "EOM";
+            items?: Array<{ materialId: string; quantity: number }>;
+          }
+        | null;
+      const op = await prisma.operation.findUnique({
+        where: { id: log.entityId },
+        include: { items: true }
+      });
+      if (!op) return { ok: false, error: "Операция уже удалена" };
+      const type = (after?.type as "INCOME" | "EXPENSE") || (op.type as "INCOME" | "EXPENSE");
+      const warehouseId = after?.warehouseId || op.warehouseId;
+      const section = (after?.section as ObjectSection) || op.section;
+      const items =
+        after?.items && after.items.length
+          ? after.items
+          : op.items.map((i) => ({ materialId: i.materialId, quantity: Number(i.quantity) }));
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          for (const it of items) {
+            const stock = await tx.stock.findUnique({
+              where: {
+                warehouseId_materialId_section: {
+                  warehouseId,
+                  materialId: it.materialId,
+                  section
+                }
+              }
+            });
+            if (type === "INCOME") {
+              if (!stock || Number(stock.quantity) < it.quantity - 1e-6) {
+                throw new Error(
+                  `INSUFFICIENT_STOCK_FOR_REVERT:${it.materialId}`
+                );
+              }
+              await tx.stock.update({
+                where: {
+                  warehouseId_materialId_section: { warehouseId, materialId: it.materialId, section }
+                },
+                data: { quantity: { decrement: it.quantity } }
+              });
+            } else if (type === "EXPENSE") {
+              if (stock) {
+                await tx.stock.update({
+                  where: {
+                    warehouseId_materialId_section: { warehouseId, materialId: it.materialId, section }
+                  },
+                  data: { quantity: { increment: it.quantity } }
+                });
+              } else {
+                await tx.stock.create({
+                  data: {
+                    warehouseId,
+                    materialId: it.materialId,
+                    section,
+                    quantity: it.quantity,
+                    reserved: 0
+                  }
+                });
+              }
+            }
+          }
+          await tx.stockMovement.deleteMany({ where: { operationId: op.id } });
+          await tx.operationItem.deleteMany({ where: { operationId: op.id } });
+          await tx.documentFile.updateMany({
+            where: { entityType: "operation", entityId: op.id, isDeleted: false },
+            data: { isDeleted: true }
+          });
+          await tx.operation.delete({ where: { id: op.id } });
+        });
+        return { ok: true };
+      } catch (err) {
+        const msg = (err as Error).message || "";
+        if (msg.startsWith("INSUFFICIENT_STOCK_FOR_REVERT:")) {
+          return {
+            ok: false,
+            error: "Недостаточно остатка для отката прихода — часть уже выдана. Сначала откатите выдачи."
+          };
+        }
+        throw err;
+      }
+    }
+    case "TOOL_CREATE": {
+      const tool = await prisma.tool.findUnique({ where: { id: log.entityId } });
+      if (!tool) return { ok: true };
+      await prisma.$transaction(async (tx) => {
+        await tx.toolEvent.deleteMany({ where: { toolId: log.entityId } });
+        await tx.tool.delete({ where: { id: log.entityId } });
+      });
+      return { ok: true };
+    }
+    case "TOOL_ISSUE":
+    case "TOOL_RETURN":
+    case "TOOL_SEND_TO_REPAIR":
+    case "TOOL_MARK_DAMAGED":
+    case "TOOL_MARK_LOST":
+    case "TOOL_MARK_DISPUTED":
+    case "TOOL_WRITE_OFF": {
+      const before = log.beforeData as
+        | { status?: ToolStatus; responsible?: string | null }
+        | null;
+      if (!before || !before.status) {
+        return { ok: false, error: "Нет данных до изменения" };
+      }
+      const tool = await prisma.tool.findUnique({ where: { id: log.entityId } });
+      if (!tool) return { ok: false, error: "Инструмент не найден" };
+      await prisma.tool.update({
+        where: { id: log.entityId },
+        data: {
+          status: before.status,
+          responsible: before.responsible ?? null
+        }
+      });
+      await prisma.toolEvent.create({
+        data: {
+          toolId: log.entityId,
+          action: "REVERT",
+          status: before.status,
+          comment: `Откат: ${log.action}`
+        }
+      });
+      return { ok: true };
+    }
+    case "OBJECT_CREATE": {
+      const wh = await prisma.warehouse.findUnique({
+        where: { id: log.entityId },
+        include: {
+          _count: {
+            select: {
+              stocks: true,
+              operations: true,
+              issues: true,
+              tools: true,
+              limitTemplates: true,
+              receiptRequests: true,
+              campItems: true
+            }
+          }
+        }
+      });
+      if (!wh) return { ok: true };
+      const c = wh._count;
+      const total =
+        c.stocks +
+        c.operations +
+        c.issues +
+        c.tools +
+        c.limitTemplates +
+        c.receiptRequests +
+        c.campItems;
+      if (total > 0) {
+        return {
+          ok: false,
+          error: `На объекте уже есть данные (остатки/операции/инструменты и т.п.) — откат отменён. Удалите данные вручную.`
+        };
+      }
+      await prisma.warehouse.delete({ where: { id: log.entityId } });
       return { ok: true };
     }
     default:

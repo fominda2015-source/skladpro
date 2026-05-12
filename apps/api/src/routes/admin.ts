@@ -402,6 +402,7 @@ adminRouter.post("/objects", async (req: AuthedRequest, res) => {
     action: "OBJECT_CREATE",
     entityType: "Warehouse",
     entityId: created.id,
+    summary: `Создан объект: ${created.name}`,
     after: { name: created.name, address: created.address, userIds: parsed.data.userIds }
   });
   return res.status(201).json(created);
