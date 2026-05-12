@@ -1870,16 +1870,205 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   background: #eef2ff;
 }
 
+/* Главная — Recharts */
+.homeChartsLead {
+  margin: 0 0 14px;
+  max-width: 52rem;
+}
+
+.homeChartsGridTwo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.homeChartsBottomRow {
+  margin-top: 14px;
+}
+
+.homeChartSheet {
+  position: relative;
+  padding: 16px 16px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 246, 0.95);
+  background: radial-gradient(120% 80% at 10% -10%, #f8faff 0%, #ffffff 55%, #f6f9ff 100%);
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.homeChartSheet::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  pointer-events: none;
+  opacity: 0.45;
+  background: radial-gradient(circle at 88% 6%, rgba(99, 102, 241, 0.12), transparent 42%);
+}
+
+.homeChartSheet > * {
+  position: relative;
+  z-index: 1;
+}
+
+.homeChartSheetHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.homeChartSheetHead h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.homeChartSheetHead .muted {
+  font-size: 12px;
+}
+
+.homePieFrame {
+  position: relative;
+  min-height: 280px;
+}
+
+.homePieEmpty {
+  margin: 3rem auto;
+  max-width: 18rem;
+  text-align: center;
+}
+
+.homePieFloatingLabel {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+  color: #0f172a;
+}
+
+.homePieFloatingLabel strong {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.homePieFloatingLabel span:last-child {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.homeRingLayout {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.homeRingPieWrap {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  margin: 0 auto;
+}
+
+.homeRingCenterStack {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: none;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  padding: 12px 16px;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  box-shadow: 0 4px 22px rgba(15, 23, 42, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.homeRingCenterStack:hover:not(:disabled) {
+  transform: translate(-50%, -52%);
+  box-shadow: 0 8px 28px rgba(79, 70, 229, 0.12);
+}
+
+.homeRingCenterStack:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.homeRingPct {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #312e81;
+}
+
+.homeRingCenterStack .muted.tiny {
+  font-size: 12px;
+}
+
+.homeRingLinkHint {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4f46e5;
+  margin-top: 2px;
+}
+
+.recharts-legend-wrapper {
+  padding-top: 4px !important;
+}
+
+@media (max-width: 1180px) {
+  .homeChartsGridTwo {
+    grid-template-columns: 1fr;
+  }
+
+  .homeChartSheetWide .recharts-responsive-container {
+    min-height: 260px;
+  }
+}
+
 @media (max-width: 1024px) {
   .homeSplit {
     grid-template-columns: 1fr;
   }
+
   .homeSplitAside {
     position: static;
   }
 }
 
 @media (max-width: 640px) {
+  .homeChartSheet {
+    padding: 12px 12px 8px;
+  }
+
+  .homePieFloatingLabel strong {
+    font-size: 1.6rem;
+  }
+
   .homeHeroActions {
     width: 100%;
   }

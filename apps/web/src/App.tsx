@@ -182,6 +182,30 @@ type IssuePickCartLine = {
   available: number;
   acceptedQty?: number;
 };
+const HOME_ISSUE_CHART_FILL: Record<IssueStatus, string> = {
+  DRAFT: "#94a3b8",
+  ON_APPROVAL: "#f97316",
+  APPROVED: "#22c55e",
+  REJECTED: "#ef4444",
+  ISSUED: "#3b82f6",
+  CANCELLED: "#cbd5e1"
+};
+const HOME_ISSUE_CHART_LABEL: Record<IssueStatus, string> = {
+  DRAFT: "Черновик",
+  ON_APPROVAL: "На рассмотрении",
+  APPROVED: "Одобрено",
+  REJECTED: "Отклонено",
+  ISSUED: "Выдано",
+  CANCELLED: "Отменено"
+};
+/** Верхние столбцы «день»: градиенты для столбца i. */
+const HOME_TODAY_COLUMN_GRADIENTS: ReadonlyArray<readonly [string, string]> = [
+  ["#38bdf8", "#1d4ed8"],
+  ["#c084fc", "#6d28d9"],
+  ["#34d399", "#047857"],
+  ["#fbbf24", "#d97706"]
+];
+const HOME_ATTENTION_BAR_FILLS = ["#ea580c", "#ca8a04", "#e11d48", "#0284c7", "#6366f1", "#14b8a6", "#8b5cf6", "#dc2626", "#ea580c"] as const;
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
@@ -1238,6 +1262,74 @@ function App() {
       .filter((s) => (counts[s] ?? 0) > 0)
       .map((s) => ({ status: s, count: counts[s]!, pct: ((counts[s] ?? 0) / total) * 100 }));
   }, [issues]);
+
+  const homeIssuePieChartData = useMemo(
+    () =>
+      homeIssueStatusSummary.map((s) => ({
+        name: HOME_ISSUE_CHART_LABEL[s.status],
+        value: s.count,
+        status: s.status,
+        fill: HOME_ISSUE_CHART_FILL[s.status]
+      })),
+    [homeIssueStatusSummary]
+  );
+
+  const homeTodayOpsBarRows = useMemo(() => {
+    if (!dashboard) return [];
+    const w = dashboard.warehouse;
+    return [
+      {
+        label: "Приходы (операции)",
+        hint: "Проведено сегодня (UTC)",
+        value: w.receiptsToday
+      },
+      {
+        label: "Расходы (операции)",
+        hint: "",
+        value: w.issuesOperationsToday
+      },
+      {
+        label: "Выдачи заявок",
+        hint: "Статус «Выдано» сегодня",
+        value: w.issuesRequestsIssuedToday
+      },
+      {
+        label: "Трансферы",
+        hint: "Тип перемещение",
+        value: w.transfersToday
+      }
+    ];
+  }, [dashboard]);
+
+  /** Все ключевые ряды показателей контроля (включая нули — для узнаваемости масштаба). */
+  const homeAttentionBarsFull = useMemo(() => {
+    if (!dashboard) return [];
+    const w = dashboard.warehouse;
+    const rows = [
+      { label: "На согласовании", value: w.pendingApprovals },
+      { label: "Долго ≥7 дн.", value: w.staleOpenIssues },
+      { label: "Остаток <5 ед.", value: w.lowStockLines },
+      { label: "ТТН открыты", value: w.waybillsOpen },
+      { label: "Инстр. ремонт", value: w.toolsInRepair }
+    ];
+    rows.push(
+      { label: "Сопоставление", value: w.matchQueuePending },
+      { label: "Уведомления", value: w.unreadNotifications },
+      { label: "Алерты 24ч", value: w.errorNotifications24h },
+      { label: "Интеграции 24ч", value: w.failedIntegrations24h }
+    );
+    return rows;
+  }, [dashboard]);
+
+  const homeLimitRingData = useMemo(() => {
+    if (!dashboard) return [{ name: "rest", value: 100, fill: "#eef2ff" }];
+    const u = Math.max(0, Math.min(100, dashboard.object?.usagePercent ?? 0));
+    const fill = u >= 92 ? "#ef4444" : u >= 75 ? "#f59e0b" : "#4f46e5";
+    return [
+      { name: "prog", value: u, fill },
+      { name: "rest", value: Math.max(0, 100 - u), fill: "#e8edf6" }
+    ];
+  }, [dashboard]);
 
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
@@ -4036,6 +4128,193 @@ function App() {
                         </span>
                       </button>
                     ) : null}
+                  </div>
+                </section>
+
+                <section className="homeSectionBlock">
+                  <h3 className="homeSectionTitle">Графики</h3>
+                  <p className="muted homeChartsLead">
+                    Визуализация данных сводки и текущего списка заявок. Клик по сектору кольца отправляет в раздел выдачи с
+                    нужным фильтром; кольцо лимитов — переход к лимитам.
+                  </p>
+                  <div className="homeChartsGridTwo">
+                    <div className="homeChartSheet homeChartSheetPie">
+                      <div className="homeChartSheetHead">
+                        <h4>Заявки по статусам</h4>
+                        <span className="muted">Пончик · список в памяти</span>
+                      </div>
+                      <div className="homePieFrame">
+                        {homeIssuePieChartData.length ? (
+                          <ResponsiveContainer width="100%" height={280}>
+                            <PieChart margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
+                              <Tooltip formatter={(value: unknown, name?: string) => [`${value} шт.`, String(name ?? "")]} />
+                              <Pie
+                                data={homeIssuePieChartData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={74}
+                                outerRadius={106}
+                                paddingAngle={3}
+                                cornerRadius={6}
+                                stroke="#fff"
+                                strokeWidth={2}
+                                animationDuration={600}
+                                cursor="pointer"
+                                onClick={(d: unknown) => {
+                                  const pay =
+                                    typeof d === "object" && d !== null && "payload" in d
+                                      ? (d as { payload?: { status?: IssueStatus } }).payload
+                                      : undefined;
+                                  const st = pay?.status;
+                                  if (!st) return;
+                                  setIssueStatusFilter(st);
+                                  setActiveTab("issues");
+                                }}
+                              >
+                                {homeIssuePieChartData.map((entry) => (
+                                  <Cell key={entry.status} fill={entry.fill} strokeOpacity={0.94} />
+                                ))}
+                              </Pie>
+                              <Legend layout="horizontal" verticalAlign="bottom" align="center" iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <p className="muted homePieEmpty">Нет заявок в текущей выборке — откройте «Выдачи».</p>
+                        )}
+                        {homeIssuePieChartData.length ? (
+                          <div className="homePieFloatingLabel" aria-hidden>
+                            <strong>{issues.length}</strong>
+                            <span>Всего</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="homeChartSheet">
+                      <div className="homeChartSheetHead">
+                        <h4>Опер. день — UTC</h4>
+                        <span className="muted">Сверка со сводкой API</span>
+                      </div>
+                      <ResponsiveContainer width="100%" height={homeTodayOpsBarRows.length ? 296 : 120}>
+                        <BarChart data={homeTodayOpsBarRows} margin={{ top: 18, right: 12, left: 0, bottom: 6 }}>
+                          <defs>
+                            {HOME_TODAY_COLUMN_GRADIENTS.map(([a, b], i) => (
+                              <linearGradient key={i} id={`homeTodayColGrad${i}`} x1="0" y1="1" x2="0" y2="0">
+                                <stop offset="0%" stopColor={a} stopOpacity={0.88} />
+                                <stop offset="100%" stopColor={b} stopOpacity={1} />
+                              </linearGradient>
+                            ))}
+                          </defs>
+                          <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e8edf5" />
+                          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} interval={0} tickMargin={10} axisLine={{ stroke: "#dfe7f5" }} />
+                          <YAxis width={44} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={{ stroke: "#dfe7f5" }} allowDecimals={false} />
+                          <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), "Количество"]} />
+                          {homeTodayOpsBarRows.length ? (
+                            <Bar dataKey="value" radius={[10, 10, 6, 6]} barSize={40} animationDuration={700}>
+                              {homeTodayOpsBarRows.map((_, i) => (
+                                <Cell key={i} fill={`url(#homeTodayColGrad${i % HOME_TODAY_COLUMN_GRADIENTS.length})`} />
+                              ))}
+                            </Bar>
+                          ) : null}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="homeChartsGridTwo homeChartsBottomRow">
+                    <div className="homeChartSheet homeChartSheetRing">
+                      <div className="homeChartSheetHead">
+                        <h4>Ход лимитов</h4>
+                        <span className="muted">Выдано / план объекта</span>
+                      </div>
+                      <div className="homeRingLayout">
+                        <div className="homeRingPieWrap">
+                          <ResponsiveContainer width="100%" height={220}>
+                            <PieChart>
+                              <Pie
+                                data={homeLimitRingData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                startAngle={100}
+                                endAngle={-260}
+                                innerRadius={74}
+                                outerRadius={104}
+                                paddingAngle={0}
+                                stroke="none"
+                                animationDuration={800}
+                              >
+                                {homeLimitRingData.map((slice) => (
+                                  <Cell key={slice.name} fill={slice.fill} stroke={slice.name === "rest" ? "#f1f5f9" : "none"} />
+                                ))}
+                              </Pie>
+                              <Tooltip formatter={(v: unknown) => [`${Number(v)}%`, "Частка"]} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <button
+                            type="button"
+                            className="homeRingCenterStack"
+                            disabled={!canReadLimits}
+                            onClick={() => setActiveTab("limits")}
+                          >
+                            <strong className="homeRingPct">{dashboard.object?.usagePercent ?? 0}%</strong>
+                            <span className="muted tiny">
+                              {dashboard.object
+                                ? `${dashboard.object.issuedQty.toLocaleString("ru-RU")} / ${dashboard.object.plannedQty.toLocaleString("ru-RU")}`
+                                : "—"}
+                            </span>
+                            {canReadLimits ? <span className="homeRingLinkHint">Лимиты →</span> : null}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="homeChartSheet homeChartSheetWide">
+                      <div className="homeChartSheetHead">
+                        <h4>Пульс контроля и сигналов</h4>
+                        <span className="muted">Очередь, склад, перевозки, уведомления</span>
+                      </div>
+                      <ResponsiveContainer
+                        width="100%"
+                        height={Math.min(620, Math.max(240, 28 + homeAttentionBarsFull.length * 36))}
+                      >
+                        <BarChart layout="vertical" data={homeAttentionBarsFull} margin={{ top: 8, right: 28, left: 4, bottom: 8 }}>
+                          <defs>
+                            {HOME_ATTENTION_BAR_FILLS.map((c, idx) => (
+                              <linearGradient key={idx} id={`homeAttnBar${idx}`} x1="0" y1="0.5" x2="1" y2="0.5">
+                                <stop offset="0%" stopColor={c} stopOpacity={0.82} />
+                                <stop offset="100%" stopColor={c} stopOpacity={0.35} />
+                              </linearGradient>
+                            ))}
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#eaeef6" />
+                          <XAxis
+                            type="number"
+                            tick={{ fontSize: 11, fill: "#64748b" }}
+                            axisLine={{ stroke: "#dfe7f5" }}
+                            tickLine={{ stroke: "#dfe7f5" }}
+                            allowDecimals={false}
+                          />
+                          <YAxis
+                            type="category"
+                            width={148}
+                            dataKey="label"
+                            tick={{ fontSize: 12, fill: "#334155" }}
+                            interval={0}
+                            axisLine={{ stroke: "#dfe7f5" }}
+                          />
+                          <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), ""]} />
+                          <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={18} animationDuration={750}>
+                            {homeAttentionBarsFull.map((_, i) => (
+                              <Cell key={i} fill={`url(#homeAttnBar${i % HOME_ATTENTION_BAR_FILLS.length})`} stroke="#fff" strokeWidth={1} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </section>
               </>
