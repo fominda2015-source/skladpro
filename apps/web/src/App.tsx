@@ -5754,7 +5754,14 @@ function App() {
             <div className="rightCardHeader" style={{ gap: 12 }}>
               <div>
                 <h3>Загрузить Excel</h3>
-                <p className="muted">Перетащи файл сюда или выбери вручную. Поддерживаются .xlsx и .xls.</p>
+                <p className="muted">
+                  Перетащи файл сюда или выбери вручную. Поддерживаются .xlsx и .xls.
+                </p>
+                <p className="muted" style={{ marginTop: 4 }}>
+                  Формат: жёлтым выделены заголовки разделов (можно «Раздел#Подраздел»),
+                  материалы — без заливки. Колонки: B — наименование, F — ед. изм.,
+                  G — кол-во по бюджету (если пусто — берём I).
+                </p>
               </div>
               {limitImportFile && <span className="badge ok">Выбран файл</span>}
             </div>

@@ -29,34 +29,145 @@ type FlatNode = {
   plannedQty?: number;
 };
 
-function parseLimitSheet(file: Buffer): FlatNode[] {
-  const wb = xlsx.read(file, { type: "buffer", cellStyles: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
+// Признак "жёлтой" заливки заголовка раздела.
+// Excel/SheetJS отдаёт цвет либо как RGB ("FFFF00"), либо как ARGB ("FFFFFF00").
+// Также допускаем небольшие отклонения по альфе/прозрачности.
+function isYellowFill(cell: unknown): boolean {
+  if (!cell || typeof cell !== "object") return false;
+  const style = (cell as { s?: Record<string, unknown> }).s;
+  if (!style) return false;
+  const candidates = [
+    (style.fgColor as { rgb?: string } | undefined)?.rgb,
+    (style.bgColor as { rgb?: string } | undefined)?.rgb,
+    ((style.patternFill as Record<string, unknown> | undefined)?.fgColor as { rgb?: string } | undefined)?.rgb,
+    ((style.patternFill as Record<string, unknown> | undefined)?.bgColor as { rgb?: string } | undefined)?.rgb
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const rgb = String(raw).toUpperCase();
+    // Нормализуем ARGB → RGB
+    const normalized = rgb.length === 8 ? rgb.slice(2) : rgb;
+    if (normalized === "FFFF00" || normalized === "FFFE00" || normalized === "FEFE00") return true;
+    // На некоторых шаблонах SheetJS может вернуть индексный цвет theme — игнорируем.
+  }
+  return false;
+}
+
+const norm = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+
+const looksLikeWork = (nameRaw: string) => {
+  const s = nameRaw.trim().toLowerCase();
+  if (!s) return false;
+  return (
+    s.startsWith("монтаж ") ||
+    s.startsWith("прокладка ") ||
+    s.startsWith("демонтаж ") ||
+    s.includes("пуско-налад") ||
+    s.includes("пуско налад") ||
+    s.includes("наладоч") ||
+    s.includes("испытан") ||
+    s.includes("настройк")
+  );
+};
+
+// Основной формат, который сейчас грузит пользователь:
+// колонка B = "Название раздела / название товара" (жёлтые ячейки — заголовки разделов / подразделов,
+// строки без заливки — материалы), F = ед. измерения, G = кол-во по бюджету, I = кол-во по факту.
+// Иерархия в заголовках с разделителем "#": "Раздел#Подраздел".
+// Служебные жёлтые строки "ИТОГО" пропускаем.
+function parseYellowLimitSheet(ws: xlsx.WorkSheet): FlatNode[] | null {
+  if (!ws || !ws["!ref"]) return null;
+  const range = xlsx.utils.decode_range(ws["!ref"]);
+  const out: FlatNode[] = [];
+
+  let foundYellow = false;
+  let currentRoot = "";
+  let hasCurrentSub = false;
+
+  const headerSignals = [
+    "название раздела",
+    "наименование",
+    "ед.",
+    "единица измерения",
+    "цена продажи",
+    "итого факт",
+    "кол-во"
+  ];
+
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    const cellB = ws[xlsx.utils.encode_cell({ r, c: 1 })];
+    const name = norm(cellB?.v);
+    if (!name) continue;
+    const yellow = isYellowFill(cellB);
+    if (yellow) foundYellow = true;
+    const lower = name.toLowerCase();
+    if (yellow) {
+      // Жёлтая шапка/итог
+      if (lower === "итого" || lower.startsWith("итого ") || lower.startsWith("итого:")) {
+        continue;
+      }
+      if (headerSignals.some((s) => lower.includes(s)) && !name.includes("#")) {
+        // Это не заголовок раздела, а строка шапки таблицы
+        continue;
+      }
+      if (name.includes("#")) {
+        const [rootPartRaw, ...rest] = name.split("#");
+        const rootPart = norm(rootPartRaw);
+        const subPart = norm(rest.join("#"));
+        if (rootPart && rootPart !== currentRoot) {
+          out.push({ level: 0, title: rootPart, nodeType: "GROUP" });
+          currentRoot = rootPart;
+          hasCurrentSub = false;
+        }
+        if (subPart) {
+          out.push({ level: 1, title: subPart, indexLabel: rootPart, nodeType: "GROUP" });
+          hasCurrentSub = true;
+        }
+        continue;
+      }
+      // Простой заголовок без "#"
+      out.push({ level: 0, title: name, nodeType: "GROUP" });
+      currentRoot = name;
+      hasCurrentSub = false;
+      continue;
+    }
+
+    // Не жёлтая строка → возможный материал. Пропускаем строки шапки.
+    if (headerSignals.some((s) => lower.includes(s))) continue;
+    if (looksLikeWork(name)) continue;
+
+    const unit = norm(ws[xlsx.utils.encode_cell({ r, c: 5 })]?.v); // F
+    const qtyBudget = norm(ws[xlsx.utils.encode_cell({ r, c: 6 })]?.v).replace(",", "."); // G
+    const qtyFact = norm(ws[xlsx.utils.encode_cell({ r, c: 8 })]?.v).replace(",", "."); // I
+    const qtyRaw = qtyBudget || qtyFact;
+    const qty = qtyRaw ? Number(qtyRaw) : Number.NaN;
+    // Если у строки нет ни ед.изм., ни количества, ни описания материала — скорее всего служебная.
+    if (!unit && !Number.isFinite(qty)) continue;
+
+    const level = hasCurrentSub ? 2 : currentRoot ? 1 : 0;
+    out.push({
+      level,
+      title: name,
+      nodeType: "MATERIAL",
+      materialName: name,
+      unit: unit || undefined,
+      plannedQty: Number.isFinite(qty) ? qty : undefined
+    });
+  }
+
+  if (!foundYellow || !out.some((n) => n.nodeType === "MATERIAL")) return null;
+  return out;
+}
+
+// Старый парсер для ТКП/эталона — оставлен как fallback, если пользователь загрузил
+// файл прежнего формата (без жёлтой заливки заголовков).
+function parseLegacyLimitSheet(ws: xlsx.WorkSheet): FlatNode[] {
   const rows = xlsx.utils.sheet_to_json<Array<string | number | null>>(ws, {
     header: 1,
     raw: false,
     blankrows: false
   });
-  const norm = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
-  const looksLikeWork = (nameRaw: string) => {
-    const s = nameRaw.trim().toLowerCase();
-    if (!s) return false;
-    // В ТКП встречаются строки работ (монтаж/прокладка/наладка/испытания) — их исключаем из лимитов.
-    return (
-      s.startsWith("монтаж ") ||
-      s.startsWith("прокладка ") ||
-      s.startsWith("демонтаж ") ||
-      s.includes("пуско-налад") ||
-      s.includes("пуско налад") ||
-      s.includes("наладоч") ||
-      s.includes("испытан") ||
-      s.includes("настройк")
-    );
-  };
 
-  // Поддерживаем 2 формата:
-  // 1) "эталон" (как в файле "материалы_и_заголовки"): A=№, B=Тип, C=Наименование, E=Ед.изм, F=Коэф.расхода
-  // 2) "боевой ТКП": B=номер п/п, C=Наименование затрат, E=Ед. изм., F=Коэф.расхода
   let format: "ETALON" | "TKP" = "ETALON";
   for (let i = 0; i < Math.min(rows.length, 20); i += 1) {
     const r = rows[i] || [];
@@ -69,7 +180,12 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
       format = "ETALON";
       break;
     }
-    if (b.toLowerCase().includes("номер") && c.toLowerCase().includes("наимен") && e.toLowerCase().includes("ед") && f.toLowerCase().includes("коэф")) {
+    if (
+      b.toLowerCase().includes("номер") &&
+      c.toLowerCase().includes("наимен") &&
+      e.toLowerCase().includes("ед") &&
+      f.toLowerCase().includes("коэф")
+    ) {
       format = "TKP";
       break;
     }
@@ -84,20 +200,15 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
     const type = format === "ETALON" ? norm(row[1]) : "";
     const name = format === "ETALON" ? norm(row[2]) : norm(row[2]);
     const unit = format === "ETALON" ? norm(row[4]) : norm(row[4]);
-    // В эталонном файле план берем из F (Коэф. расхода).
-    // В боевом ТКП плановое количество лежит в G (Кол-во).
     const qtyRaw = (format === "ETALON" ? norm(row[5]) : norm(row[6])).replace(",", ".");
     const qty = qtyRaw ? Number(qtyRaw) : Number.NaN;
 
     if (!name) continue;
-
-    // Пропускаем служебные строки шапки
     const nameLower = name.toLowerCase();
     if (nameLower.includes("технико-коммерческое предложение") || nameLower.includes("указать название организации")) {
       continue;
     }
 
-    // Явная типизация из эталонного файла
     if (format === "ETALON") {
       if (type.toLowerCase().includes("заголовок")) {
         out.push({ level: idx.includes(".") ? 1 : 0, title: name, indexLabel: idx, nodeType: "GROUP" });
@@ -122,7 +233,6 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
       }
     }
 
-    // Не-эталон (боевой ТКП) — определяем по заполненности unit/qty и номеру
     if (idx && idx !== "" && unit === "" && Number.isNaN(qty)) {
       activeTop = idx;
       out.push({ level: 0, title: name, indexLabel: idx, nodeType: "GROUP" });
@@ -132,9 +242,7 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
       out.push({ level: activeTop ? 1 : 0, title: name, indexLabel: activeTop || undefined, nodeType: "GROUP" });
       continue;
     }
-    if (looksLikeWork(name)) {
-      continue;
-    }
+    if (looksLikeWork(name)) continue;
     out.push({
       level: activeTop ? 2 : 1,
       title: name,
@@ -145,6 +253,17 @@ function parseLimitSheet(file: Buffer): FlatNode[] {
     });
   }
   return out;
+}
+
+function parseLimitSheet(file: Buffer): FlatNode[] {
+  const wb = xlsx.read(file, { type: "buffer", cellStyles: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+  // Сначала пробуем «жёлтый» формат (основной — как просил пользователь).
+  const yellow = parseYellowLimitSheet(ws);
+  if (yellow && yellow.length) return yellow;
+  // Иначе — старая логика.
+  return parseLegacyLimitSheet(ws);
 }
 
 async function findOrCreateMaterialId(
