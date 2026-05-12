@@ -123,6 +123,7 @@ type AdminUser = {
   customPermissions?: string[];
   warehouseScopeIds?: string[];
   projectScopeIds?: string[];
+  sectionScopes?: Array<{ warehouseId: string; section: string }>;
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Position = { id: string; name: string };
@@ -147,6 +148,13 @@ type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
 type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type IssueRequestDomainApi = "MATERIALS" | "TOOLS";
 
+function userObjectBindingKind(u: Pick<AdminUser, "warehouseScopeIds" | "projectScopeIds">): "free" | "projects" | "objects" {
+  const wh = u.warehouseScopeIds?.length ?? 0;
+  const pj = u.projectScopeIds?.length ?? 0;
+  if (wh > 0) return "objects";
+  if (pj > 0) return "projects";
+  return "free";
+}
 function effectiveIssueDomain(row: {
   domain?: IssueRequestDomainApi;
   items?: unknown[] | null;
@@ -578,8 +586,6 @@ function App() {
   const [newObjectName, setNewObjectName] = useState("");
   const [newObjectAddress, setNewObjectAddress] = useState("");
   const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
-  const [selectedObjectId, setSelectedObjectId] = useState("");
-  const [bindObjectUserIds, setBindObjectUserIds] = useState<string[]>([]);
   const [selectedObjectSection, setSelectedObjectSection] = useState<"SS" | "EOM">("SS");
   const [bindObjectSectionUserIds, setBindObjectSectionUserIds] = useState<string[]>([]);
   const [objectQuickUserIds, setObjectQuickUserIds] = useState<Record<string, string>>({});
@@ -594,6 +600,9 @@ function App() {
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
   const [newPassword, setNewPassword] = useState("1111");
   const [adminMessage, setAdminMessage] = useState("");
+  const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects">("users");
+  const [adminUserFilter, setAdminUserFilter] = useState("");
+  const [expandedAdminObjectId, setExpandedAdminObjectId] = useState("");
   const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
   const [selectedProjectScopes, setSelectedProjectScopes] = useState<string[]>([]);
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -811,7 +820,7 @@ function App() {
   const [waybillQty, setWaybillQty] = useState(1);
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
-  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill">("");
+  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser">("");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [dashboardError, setDashboardError] = useState("");
   const [matchQueue, setMatchQueue] = useState<MatchQueueRow[]>([]);
@@ -2112,11 +2121,6 @@ function App() {
     setRoles(rolesData);
     setPositions(positionsData);
     setAdminObjects(objectsData);
-    if (objectsData.length && !selectedObjectId) {
-      setSelectedObjectId(objectsData[0].id);
-      setBindObjectUserIds(objectsData[0].userIds || []);
-      setBindObjectSectionUserIds(objectsData[0].sectionUsers?.[selectedObjectSection] || []);
-    }
     if (usersData.length && !selectedUserId) {
       setSelectedUserId(usersData[0].id);
       setSelectedRoleName(usersData[0].role);
@@ -3482,6 +3486,8 @@ function App() {
     if (u) {
       setSelectedWarehouseScopes(u.warehouseScopeIds ?? []);
       setSelectedProjectScopes(u.projectScopeIds ?? []);
+      setSelectedRoleName(u.role);
+      setSelectedStatus(u.status);
       setSelectedPermissions(u.customPermissions || u.permissions || []);
       const pos = positions.find((p) => p.name === u.position);
       setSelectedPositionId(pos?.id || "");
@@ -3941,6 +3947,8 @@ function App() {
       </main>
     );
   }
+
+  const adminDrawerUser = users.find((u) => u.id === selectedUserId);
 
   return (
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
@@ -8361,6 +8369,195 @@ function App() {
         </aside>
       )}
 
+      {drawerMode === "adminUser" && adminDrawerUser && (
+        <aside className="detailDrawer detailDrawerAdminUser">
+          <div className="detailDrawerHeader">
+            <h3>{adminDrawerUser.fullName}</h3>
+            <button type="button" onClick={() => setDrawerMode("")}>
+              Закрыть
+            </button>
+          </div>
+          <p className="muted">{adminDrawerUser.email}</p>
+          <div className="form">
+            <label>
+              Роль
+              <select value={selectedRoleName} onChange={(e) => setSelectedRoleName(e.target.value)}>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.name}>
+                    {roleLabel(r.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Статус
+              <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value as "ACTIVE" | "BLOCKED")}>
+                <option value="ACTIVE">{statusLabel("ACTIVE")}</option>
+                <option value="BLOCKED">{statusLabel("BLOCKED")}</option>
+              </select>
+            </label>
+            <label>
+              Новый пароль (сброс)
+              <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </label>
+            <label>
+              Должность
+              <select value={selectedPositionId} onChange={(e) => setSelectedPositionId(e.target.value)}>
+                <option value="">Не выбрана</option>
+                {positions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div>
+              <h4>Склады (scope)</h4>
+              <p className="muted">Пусто — без фильтра по складу, пользователь переключает объект сам.</p>
+              <div className="plainList">
+                {warehouses.map((w) => (
+                  <label key={`adm-drawer-wh-${w.id}`} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedWarehouseScopes.includes(w.id)}
+                      onChange={(e) => {
+                        setSelectedWarehouseScopes((prev) =>
+                          e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
+                        );
+                      }}
+                    />{" "}
+                    {safeName(w.name)}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4>Проекты (scope)</h4>
+              <p className="muted">Пусто — без ограничения по проекту.</p>
+              <div className="plainList">
+                {projects.map((p) => (
+                  <label key={`adm-drawer-pr-${p.id}`} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedProjectScopes.includes(p.id)}
+                      onChange={(e) => {
+                        setSelectedProjectScopes((prev) =>
+                          e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                        );
+                      }}
+                    />{" "}
+                    {safeName(p.name)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!token || !selectedUserId) return;
+                setAdminMessage("");
+                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/scopes`, {
+                  method: "PUT",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    warehouseIds: selectedWarehouseScopes,
+                    projectIds: selectedProjectScopes
+                  })
+                });
+                if (!res.ok) {
+                  setAdminMessage("Ошибка сохранения scope");
+                  return;
+                }
+                setAdminMessage("Области (склады/проекты) сохранены");
+                await loadAdminData();
+              }}
+            >
+              Сохранить scope
+            </button>
+          </div>
+          <div className="card" style={{ marginTop: 10 }}>
+            <h4>Вкладки и модули</h4>
+            <div className="plainList">
+              {sidebarAccessOptions.map((opt) => (
+                <label key={`adm-drawer-perm-${opt.id}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
+                      } else {
+                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
+                      }
+                    }}
+                  />{" "}
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!token || !selectedUserId) return;
+                setAdminMessage("");
+                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/access`, {
+                  method: "PATCH",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    roleName: selectedRoleName,
+                    status: selectedStatus,
+                    permissions: selectedPermissions,
+                    positionId: selectedPositionId || null
+                  })
+                });
+                if (!res.ok) {
+                  setAdminMessage("Ошибка сохранения доступа");
+                  return;
+                }
+                setAdminMessage("Доступы обновлены");
+                await loadAdminData();
+              }}
+            >
+              Сохранить доступы
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!token || !selectedUserId) return;
+                setAdminMessage("");
+                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/reset-password`, {
+                  method: "PATCH",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({ newPassword })
+                });
+                if (!res.ok) {
+                  setAdminMessage("Ошибка сброса пароля");
+                  return;
+                }
+                setAdminMessage("Пароль сброшен");
+              }}
+            >
+              Сбросить пароль
+            </button>
+          </div>
+        </aside>
+      )}
+
       {activeTab === "qr" && (
         <div className="card">
           <h2>QR-сканирование</h2>
@@ -9223,13 +9420,35 @@ function App() {
       )}
 
       {activeTab === "admin" && canManageUsers && (
-        <div className="card">
-          <h2>Управление доступами</h2>
-          <h3>Объекты (дом/площадка)</h3>
-          <div className="grid2">
-            <div className="card">
-              <h4>Создать объект</h4>
-              <div className="form">
+        <div className="card adminWorkspace">
+          <div className="adminWorkspaceHead">
+            <h2>Управление доступами</h2>
+            <div className="adminWorkspaceTabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={adminWorkspaceTab === "users"}
+                className={`adminTabBtn${adminWorkspaceTab === "users" ? " adminTabBtnActive" : ""}`}
+                onClick={() => setAdminWorkspaceTab("users")}
+              >
+                Пользователи
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={adminWorkspaceTab === "objects"}
+                className={`adminTabBtn${adminWorkspaceTab === "objects" ? " adminTabBtnActive" : ""}`}
+                onClick={() => setAdminWorkspaceTab("objects")}
+              >
+                Объекты
+              </button>
+            </div>
+          </div>
+          {adminWorkspaceTab === "objects" && (
+            <>
+              <div className="card adminInsetCard">
+                <h4>Создать объект</h4>
+                <div className="form">
                 <label>
                   Название объекта
                   <input value={newObjectName} onChange={(e) => setNewObjectName(e.target.value)} />
@@ -9285,119 +9504,8 @@ function App() {
                   Создать объект
                 </button>
               </div>
-            </div>
-            <div className="card">
-              <h4>Привязать пользователей к объекту</h4>
-              <div className="form">
-                <label>
-                  Объект
-                  <select
-                    value={selectedObjectId}
-                    onChange={(e) => {
-                      setSelectedObjectId(e.target.value);
-                      const obj = adminObjects.find((x) => x.id === e.target.value);
-                      setBindObjectUserIds(obj?.userIds || []);
-                      setBindObjectSectionUserIds(obj?.sectionUsers?.[selectedObjectSection] || []);
-                    }}
-                  >
-                    {adminObjects.map((o) => (
-                      <option key={o.id} value={o.id}>{o.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Раздел для точечного доступа
-                  <select
-                    value={selectedObjectSection}
-                    onChange={(e) => {
-                      const section = e.target.value as "SS" | "EOM";
-                      setSelectedObjectSection(section);
-                      const obj = adminObjects.find((x) => x.id === selectedObjectId);
-                      setBindObjectSectionUserIds(obj?.sectionUsers?.[section] || []);
-                    }}
-                  >
-                    <option value="SS">СС</option>
-                    <option value="EOM">ЭОМ</option>
-                  </select>
-                </label>
-                <div className="plainList">
-                  {users.map((u) => (
-                    <label key={`obj-bind-user-${u.id}`} style={{ display: "block" }}>
-                      <input
-                        type="checkbox"
-                        checked={bindObjectUserIds.includes(u.id)}
-                        onChange={(e) => {
-                          setBindObjectUserIds((prev) =>
-                            e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
-                          );
-                        }}
-                      />{" "}
-                      {u.fullName}
-                    </label>
-                  ))}
-                </div>
-                <h4 style={{ margin: "10px 0 6px" }}>Доступ к разделу {selectedObjectSection}</h4>
-                <div className="plainList">
-                  {users.map((u) => (
-                    <label key={`obj-bind-sec-user-${u.id}`} style={{ display: "block" }}>
-                      <input
-                        type="checkbox"
-                        checked={bindObjectSectionUserIds.includes(u.id)}
-                        onChange={(e) => {
-                          setBindObjectSectionUserIds((prev) =>
-                            e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
-                          );
-                        }}
-                      />{" "}
-                      {u.fullName}
-                    </label>
-                  ))}
-                </div>
               </div>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!token || !selectedObjectId) return;
-                    const res = await fetch(`${API_URL}/api/admin/objects/${selectedObjectId}/users`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({ userIds: bindObjectUserIds })
-                    });
-                    if (!res.ok) {
-                      setAdminMessage("Не удалось привязать пользователей к объекту");
-                      return;
-                    }
-                    setAdminMessage("Пользователи привязаны к объекту");
-                    await loadAdminData();
-                  }}
-                >
-                  Привязать пользователей
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!selectedObjectId) return;
-                    const ok = await syncObjectSectionUsers(
-                      selectedObjectId,
-                      selectedObjectSection,
-                      bindObjectSectionUserIds
-                    );
-                    if (!ok) {
-                      setAdminMessage("Не удалось сохранить доступы по разделу");
-                      return;
-                    }
-                    setAdminMessage(`Доступы к разделу ${selectedObjectSection} сохранены`);
-                  }}
-                >
-                  Сохранить доступ к разделу
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h4>Карточки объектов</h4>
-            <div className="objectCards">
+              <div className="objectCards adminObjectCardGrid">
               {adminObjects.map((obj) => {
                 const assigned = users.filter((u) => obj.userIds.includes(u.id));
                 return (
@@ -9454,12 +9562,87 @@ function App() {
                       >
                         Добавить
                       </button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() => {
+                          if (expandedAdminObjectId === obj.id) {
+                            setExpandedAdminObjectId("");
+                          } else {
+                            setExpandedAdminObjectId(obj.id);
+                            setSelectedObjectSection("SS");
+                            const o = adminObjects.find((x) => x.id === obj.id);
+                            setBindObjectSectionUserIds(o?.sectionUsers?.SS ?? []);
+                          }
+                        }}
+                      >
+                        {expandedAdminObjectId === obj.id ? "Скрыть СС/ЭОМ" : "Доступ СС / ЭОМ"}
+                      </button>
                     </div>
+                    {expandedAdminObjectId === obj.id ? (
+                      <div className="adminObjectSectionPanel">
+                        <label>
+                          Раздел
+                          <select
+                            value={selectedObjectSection}
+                            onChange={(e) => {
+                              const section = e.target.value as "SS" | "EOM";
+                              setSelectedObjectSection(section);
+                              const o = adminObjects.find((x) => x.id === obj.id);
+                              setBindObjectSectionUserIds(o?.sectionUsers?.[section] ?? []);
+                            }}
+                          >
+                            <option value="SS">СС</option>
+                            <option value="EOM">ЭОМ</option>
+                          </select>
+                        </label>
+                        <p className="muted" style={{ margin: "6px 0 8px" }}>
+                          Отметь, кто видит выбранный раздел на этом объекте (дополнительно к привязке к объекту).
+                        </p>
+                        <div className="plainList">
+                          {users.map((u) => (
+                            <label key={`obj-sec-${obj.id}-${u.id}`} style={{ display: "block" }}>
+                              <input
+                                type="checkbox"
+                                checked={bindObjectSectionUserIds.includes(u.id)}
+                                onChange={(e) => {
+                                  setBindObjectSectionUserIds((prev) =>
+                                    e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                                  );
+                                }}
+                              />{" "}
+                              {u.fullName}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="toolbar">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const ok = await syncObjectSectionUsers(obj.id, selectedObjectSection, bindObjectSectionUserIds);
+                              if (!ok) {
+                                setAdminMessage("Не удалось сохранить доступы по разделу");
+                              } else {
+                                setAdminMessage(`Доступы к разделу ${selectedObjectSection} сохранены`);
+                              }
+                            }}
+                          >
+                            Сохранить доступ к разделу
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
             </div>
-          </div>
+            </>
+          )}
+          {adminWorkspaceTab === "users" && (
+          <>
+          <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+            Если не задан scope по складам и проектам, пользователь сам переключает объект в приложении — видимость данных как при полном доступе к списку объектов.
+          </p>
           <h3>Создание пользователя</h3>
           <div className="form">
             <label>
@@ -9605,208 +9788,69 @@ function App() {
               Создать пользователя
             </button>
           </div>
-          <hr />
-          <h3>Редактирование существующего пользователя</h3>
-          <div className="form">
-            <label>
-              Пользователь
-              <select
-                value={selectedUserId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedUserId(id);
-                  const user = users.find((u) => u.id === id);
-                  if (user) {
-                    setSelectedRoleName(user.role);
-                    setSelectedStatus(user.status);
-                    setSelectedPermissions(user.customPermissions || user.permissions || []);
-                    const pos = positions.find((p) => p.name === user.position);
-                    setSelectedPositionId(pos?.id || "");
-                  }
-                }}
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.fullName} ({u.email})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Роль
-              <select value={selectedRoleName} onChange={(e) => setSelectedRoleName(e.target.value)}>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.name}>
-                    {roleLabel(r.name)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Статус
-              <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value as "ACTIVE" | "BLOCKED")}
-              >
-                <option value="ACTIVE">{statusLabel("ACTIVE")}</option>
-                <option value="BLOCKED">{statusLabel("BLOCKED")}</option>
-              </select>
-            </label>
-            <label>
-              Новый пароль (сброс)
-              <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-            </label>
-            <label>
-              Должность
-              <select value={selectedPositionId} onChange={(e) => setSelectedPositionId(e.target.value)}>
-                <option value="">Не выбрана</option>
-                {positions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="grid2" style={{ marginTop: 16 }}>
-              <div>
-                <h3>Склады (scope)</h3>
-                <p className="muted">Пусто = без ограничения по складу. Иначе пользователь видит только отмеченные.</p>
-                <div className="plainList">
-                  {warehouses.map((w) => (
-                    <label key={w.id} style={{ display: "block" }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedWarehouseScopes.includes(w.id)}
-                        onChange={(e) => {
-                          setSelectedWarehouseScopes((prev) =>
-                            e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
-                          );
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span className="muted">Поиск пользователя</span>
+            <input
+              type="search"
+              placeholder="ФИО или email…"
+              value={adminUserFilter}
+              onChange={(e) => setAdminUserFilter(e.target.value)}
+              style={{ width: "100%", maxWidth: 360, marginTop: 6 }}
+            />
+          </label>
+          <div className="adminUsersCardGrid">
+            {users
+              .filter((u) => {
+                const q = adminUserFilter.trim().toLowerCase();
+                if (!q) return true;
+                return `${u.fullName} ${u.email}`.toLowerCase().includes(q);
+              })
+              .map((u) => {
+                const bind = userObjectBindingKind(u);
+                return (
+                  <div key={`admin-u-${u.id}`} className="adminUserCard card">
+                    <div className="adminUserCardTop">
+                      <span className="userAvatar">
+                        {u.avatarUrl ? <img src={u.avatarUrl} alt="" className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                      </span>
+                      <div>
+                        <strong>{u.fullName}</strong>
+                        <div className="muted" style={{ fontSize: 13 }}>{u.email}</div>
+                        <div style={{ marginTop: 8 }}>
+                          <span className={`badge ${u.status === "ACTIVE" ? "ok" : "bad"}`}>{statusLabel(u.status)}</span>{" "}
+                          <span className="muted">{roleLabel(u.role)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                      {bind === "free" ? (
+                        <span className="badge ok">Свободный выбор объекта</span>
+                      ) : bind === "projects" ? (
+                        <span className="badge warn">Только проекты (scope)</span>
+                      ) : (
+                        <span className="badge neutral">Только объекты (scope)</span>
+                      )}
+                      {u.sectionScopes && u.sectionScopes.length > 0 ? (
+                        <span className="muted" style={{ fontSize: 12 }}>+ разделы</span>
+                      ) : null}
+                    </div>
+                    <div className="toolbar" style={{ marginTop: "auto", paddingTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedUserId(u.id);
+                          setDrawerMode("adminUser");
                         }}
-                      />{" "}
-                      {safeName(w.name)}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <h3>Проекты (scope)</h3>
-                <p className="muted">Пусто = без ограничения по проекту.</p>
-                <div className="plainList">
-                  {projects.map((p) => (
-                    <label key={p.id} style={{ display: "block" }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedProjectScopes.includes(p.id)}
-                        onChange={(e) => {
-                          setSelectedProjectScopes((prev) =>
-                            e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
-                          );
-                        }}
-                      />{" "}
-                      {safeName(p.name)}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          <div className="toolbar">
-            <button
-              type="button"
-              onClick={async () => {
-                if (!token || !selectedUserId) return;
-                setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/scopes`, {
-                  method: "PUT",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    warehouseIds: selectedWarehouseScopes,
-                    projectIds: selectedProjectScopes
-                  })
-                });
-                if (!res.ok) {
-                  setAdminMessage("Ошибка сохранения scope");
-                  return;
-                }
-                setAdminMessage("Области (склады/проекты) сохранены");
-                await loadAdminData();
-              }}
-            >
-              Сохранить склады/проекты (scope)
-            </button>
+                      >
+                        Открыть карточку
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Индивидуальные доступы (override)</h3>
-            <div className="plainList">
-              {sidebarAccessOptions.map((opt) => (
-                <label key={`selected-perm-${opt.id}`} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
-                      } else {
-                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
-                      }
-                    }}
-                  />{" "}
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="toolbar">
-            <button
-              onClick={async () => {
-                if (!token || !selectedUserId) return;
-                setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/access`, {
-                  method: "PATCH",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    roleName: selectedRoleName,
-                    status: selectedStatus,
-                    permissions: selectedPermissions,
-                    positionId: selectedPositionId || null
-                  })
-                });
-                if (!res.ok) {
-                  setAdminMessage("Ошибка сохранения доступа");
-                  return;
-                }
-                setAdminMessage("Доступы обновлены");
-                await loadAdminData();
-              }}
-            >
-              Сохранить доступы
-            </button>
-            <button
-              onClick={async () => {
-                if (!token || !selectedUserId) return;
-                setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/reset-password`, {
-                  method: "PATCH",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({ newPassword })
-                });
-                if (!res.ok) {
-                  setAdminMessage("Ошибка сброса пароля");
-                  return;
-                }
-                setAdminMessage("Пароль сброшен");
-              }}
-            >
-              Сбросить пароль
-            </button>
-          </div>
+          </>
+          )}
           {adminMessage && <p className="muted">{adminMessage}</p>}
         </div>
       )}
