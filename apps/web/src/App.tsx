@@ -14,6 +14,7 @@ import {
   YAxis
 } from "recharts";
 import "./App.css";
+import jsQR from "jsqr";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
@@ -3597,37 +3598,81 @@ function App() {
         setQrScanError("");
 
         const AnyBarcodeDetector = (window as WindowWithBarcodeDetector).BarcodeDetector;
-        if (!AnyBarcodeDetector) {
-          setQrScanError("Сканер доступен только в современных браузерах (BarcodeDetector).");
-          return;
-        }
-        const detector = new AnyBarcodeDetector({ formats: ["qr_code"] });
+        const decodeCanvas = document.createElement("canvas");
 
-        const tick = async () => {
-          if (!qrVideoRef.current || cancelled) return;
-          try {
-            const codes = await detector.detect(qrVideoRef.current);
-            if (codes && codes.length) {
-              const value = codes[0].rawValue || "";
-              if (value) {
-                setQrCode(value);
-                stopQrScan();
-                await resolveQrCode();
-                return;
-              }
-            }
-          } catch {
-            // ignore frame errors
+        const tickJsQr = async () => {
+          const video = qrVideoRef.current;
+          if (!video || cancelled) return;
+          if (video.readyState < HTMLMediaElement.HAVE_METADATA || video.videoWidth < 8) {
+            qrDetectTimerRef.current = window.setTimeout(tickJsQr, 250);
+            return;
           }
-          if (!cancelled && qrDetectTimerRef.current !== null) {
-            window.clearTimeout(qrDetectTimerRef.current);
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
+          const maxSide = 720;
+          const scale = vw > maxSide || vh > maxSide ? maxSide / Math.max(vw, vh) : 1;
+          const cw = Math.max(1, Math.round(vw * scale));
+          const ch = Math.max(1, Math.round(vh * scale));
+          decodeCanvas.width = cw;
+          decodeCanvas.height = ch;
+          const ctx = decodeCanvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx) {
+            if (!cancelled) qrDetectTimerRef.current = window.setTimeout(tickJsQr, 500);
+            return;
+          }
+          ctx.drawImage(video, 0, 0, cw, ch);
+          let value = "";
+          try {
+            const imageData = ctx.getImageData(0, 0, cw, ch);
+            const qr = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: "attemptBoth"
+            });
+            if (qr?.data) value = qr.data.trim();
+          } catch {
+            // кадр ещё не готов или чтение пикселей недоступно
+          }
+          if (value) {
+            setQrCode(value);
+            stopQrScan();
+            await resolveQrCode();
+            return;
           }
           if (!cancelled) {
-            qrDetectTimerRef.current = window.setTimeout(tick, 900);
+            qrDetectTimerRef.current = window.setTimeout(tickJsQr, 350);
           }
         };
 
-        qrDetectTimerRef.current = window.setTimeout(tick, 900);
+        if (AnyBarcodeDetector) {
+          const detector = new AnyBarcodeDetector({ formats: ["qr_code"] });
+
+          const tick = async () => {
+            if (!qrVideoRef.current || cancelled) return;
+            try {
+              const codes = await detector.detect(qrVideoRef.current);
+              if (codes && codes.length) {
+                const value = codes[0].rawValue || "";
+                if (value) {
+                  setQrCode(value);
+                  stopQrScan();
+                  await resolveQrCode();
+                  return;
+                }
+              }
+            } catch {
+              // ignore frame errors
+            }
+            if (!cancelled && qrDetectTimerRef.current !== null) {
+              window.clearTimeout(qrDetectTimerRef.current);
+            }
+            if (!cancelled) {
+              qrDetectTimerRef.current = window.setTimeout(tick, 900);
+            }
+          };
+
+          qrDetectTimerRef.current = window.setTimeout(tick, 900);
+        } else {
+          qrDetectTimerRef.current = window.setTimeout(tickJsQr, 300);
+        }
       } catch (e) {
         setQrScanError(`Не удалось открыть камеру: ${String(e)}`);
         setQrScanning(false);
