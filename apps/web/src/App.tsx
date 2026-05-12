@@ -4147,7 +4147,7 @@ function App() {
                         {homeIssuePieChartData.length ? (
                           <ResponsiveContainer width="100%" height={280}>
                             <PieChart margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
-                              <Tooltip formatter={(value: unknown, name?: string) => [`${value} шт.`, String(name ?? "")]} />
+                              <Tooltip formatter={(value, name) => [`${value ?? ""} шт.`, String(name ?? "")]} />
                               <Pie
                                 data={homeIssuePieChartData}
                                 dataKey="value"
