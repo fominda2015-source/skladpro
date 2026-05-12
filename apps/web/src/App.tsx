@@ -23,6 +23,22 @@ import {
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
+/** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
+function warehouseReportTooltipQty(value: unknown): [string, string] {
+  const n = typeof value === "number" ? value : Number(value);
+  return [Number.isFinite(n) ? n.toFixed(3) : "—", "Кол-во"];
+}
+
+function warehouseReportTooltipCount(value: unknown): [number, string] {
+  const n = typeof value === "number" ? value : Number(value);
+  return [Number.isFinite(n) ? n : 0, "Операций"];
+}
+
+function warehouseReportTooltipPct(value: unknown): [string, string] {
+  const n = typeof value === "number" ? value : Number(value);
+  return [Number.isFinite(n) ? `${n}%` : "—", "Загрузка"];
+}
+
 type LoginResponse = {
   token: string;
   user: {
@@ -8226,7 +8242,7 @@ function App() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
                         <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                         <YAxis tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(v: number) => [v.toFixed(3), "Кол-во"]} />
+                        <Tooltip formatter={warehouseReportTooltipQty} />
                         <Bar dataKey="quantity" name="Количество" fill="#5b8def" radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -8240,7 +8256,7 @@ function App() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
                         <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                         <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(v: number) => [v, "Операций"]} />
+                        <Tooltip formatter={warehouseReportTooltipCount} />
                         <Bar dataKey="count" name="Операций" fill="#3cb88d" radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -8292,7 +8308,7 @@ function App() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e8ecf3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: number) => [v.toFixed(3), "Кол-во"]} />
+                        <Tooltip formatter={warehouseReportTooltipQty} />
                         <Bar dataKey="quantity" name="Количество" fill="#9b82e8" radius={[0, 6, 6, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -8307,7 +8323,7 @@ function App() {
                         <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="label" width={150} tick={{ fontSize: 10 }} />
                         <Tooltip
-                          formatter={(v: number) => [`${v}%`, "Загрузка"]}
+                          formatter={warehouseReportTooltipPct}
                           labelFormatter={(_, payload) => {
                             const p = payload?.[0]?.payload as { project?: string; issued?: number; planned?: number } | undefined;
                             return p ? `${p.project ?? ""} · выдано ${p.issued ?? 0} из ${p.planned ?? 0}` : "";
