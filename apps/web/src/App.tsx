@@ -3098,6 +3098,7 @@ function App() {
     }
     if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
+    visibleTabs.add("camp");
     if (canReadIntegrations) visibleTabs.add("integrations");
     if (canReadIntegrations || canReadTeam) visibleTabs.add("inbox");
     if (canReadTeam) visibleTabs.add("team");
