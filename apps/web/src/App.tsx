@@ -149,23 +149,6 @@ type OperationRow = {
   documentNumber?: string | null;
   operationDate?: string;
 };
-type ReceiptLine = {
-  id: string;
-  mode: "existing" | "new";
-  materialId: string;
-  quantity: number;
-  name: string;
-  sku: string;
-  unit: string;
-  category: string;
-};
-type ToolReceiptLine = {
-  id: string;
-  name: string;
-  inventoryNumber: string;
-  serialNumber: string;
-  note: string;
-};
 type IssueLine = {
   id: string;
   materialId: string;
@@ -380,6 +363,11 @@ type ReceiptRequestRow = {
   sourceFileName?: string | null;
   items: ReceiptRequestItem[];
   createdAt: string;
+  fromLimit?: boolean;
+  objectLimitTemplateId?: string | null;
+  limitTemplate?: { id: string; title: string } | null;
+  detectedOrderNumber?: string | null;
+  detectedProjectTitle?: string | null;
 };
 type MaterialMappingRow = {
   id: string;
@@ -483,15 +471,7 @@ function App() {
   const [warehouseAddress, setWarehouseAddress] = useState("Москва");
   const [opWarehouseId, setOpWarehouseId] = useState("");
   const [dashboardWarehouseId, setDashboardWarehouseId] = useState("");
-  const [opStorageRoom, setOpStorageRoom] = useState("");
-  const [opStorageCell, setOpStorageCell] = useState("");
-  const [receiptDocumentNumber, setReceiptDocumentNumber] = useState("");
-  const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
-  const [receiptTools, setReceiptTools] = useState<ToolReceiptLine[]>([]);
-  const [receiptDocs, setReceiptDocs] = useState<File[]>([]);
-  const [returnMaterialId, setReturnMaterialId] = useState("");
-  const [returnQuantity, setReturnQuantity] = useState(1);
-  const [returnDefect, setReturnDefect] = useState(false);
+  // Legacy-состояния прямого прихода удалены — приёмка идёт через заявки.
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [issuesMessage, setIssuesMessage] = useState("");
@@ -549,6 +529,16 @@ function App() {
   const [limitTemplateTitleDrafts, setLimitTemplateTitleDrafts] = useState<Record<string, string>>({});
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  // Модалка «Заявка из лимита?» после загрузки Excel.
+  const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
+  const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
+  // Черновики приёмки: на заявку → на позицию → {newName, newUnit, qty}.
+  type AcceptanceDraftItem = { newName: string; newUnit: string; qty: string };
+  const [acceptanceDrafts, setAcceptanceDrafts] = useState<Record<string, Record<string, AcceptanceDraftItem>>>({});
+  const [acceptanceScans, setAcceptanceScans] = useState<Record<string, File | null>>({});
+  const [acceptanceDocNumbers, setAcceptanceDocNumbers] = useState<Record<string, string>>({});
+  const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
+  const [expandedReceiptIds, setExpandedReceiptIds] = useState<Record<string, boolean>>({});
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
@@ -1053,6 +1043,36 @@ function App() {
     }
     return map;
   }, [materialMappings]);
+
+  // Сколько чего пришло по каждому «фактическому названию», сгруппировано по
+  // материалу-таргету. Заполняется из acceptedQty по позициям заявок.
+  const acceptedBySourceByTargetId = useMemo(() => {
+    const map = new Map<
+      string,
+      Map<string, { sourceName: string; sourceUnit: string; quantity: number }>
+    >();
+    for (const r of receiptRequests) {
+      for (const it of r.items) {
+        if (!it.mappedMaterialId) continue;
+        const accepted = Number(it.acceptedQty || 0);
+        if (!Number.isFinite(accepted) || accepted <= 0) continue;
+        const key = `${it.sourceName}|${it.sourceUnit || ""}`;
+        const bucket = map.get(it.mappedMaterialId) || new Map();
+        const prev = bucket.get(key);
+        if (prev) {
+          prev.quantity += accepted;
+        } else {
+          bucket.set(key, {
+            sourceName: it.sourceName,
+            sourceUnit: it.sourceUnit || "",
+            quantity: accepted
+          });
+        }
+        map.set(it.mappedMaterialId, bucket);
+      }
+    }
+    return map;
+  }, [receiptRequests]);
 
   const stockOptionsForIssue = useMemo(
     () =>
@@ -1853,9 +1873,6 @@ function App() {
     if (warehousesData.length && !opWarehouseId) {
       setOpWarehouseId(warehousesData[0].id);
     }
-    if (materialsData.length && !returnMaterialId) {
-      setReturnMaterialId(materialsData[0].id);
-    }
     if (warehousesData.length && !issueWarehouseId) {
       setIssueWarehouseId(warehousesData[0].id);
     }
@@ -2087,44 +2104,138 @@ function App() {
       body: form
     });
     if (!res.ok) {
-      setOpsMessage("Не удалось загрузить заявку из Excel");
+      let serverMsg = "";
+      try {
+        const body = await res.json();
+        serverMsg = typeof body?.error === "string" ? body.error : "";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(serverMsg || "Не удалось загрузить заявку из Excel");
       return;
     }
-    setOpsMessage("Заявка загружена");
+    const created = (await res.json()) as ReceiptRequestRow;
+    setOpsMessage(`Заявка ${created.number} загружена (${created.items?.length || 0} поз.)`);
     setReceiptRequestFile(null);
+    setLimitPromptTemplateId("");
+    setLimitPromptRequest(created);
+    setExpandedReceiptIds((prev) => ({ ...prev, [created.id]: true }));
     await loadReceiptRequests();
   }
 
-  async function acceptReceiptRequest(row: ReceiptRequestRow) {
+  async function attachReceiptRequestToLimit(requestId: string, templateId: string | null) {
     if (!token) return;
-    const itemMappings = row.items
-      .filter((x) => x.mappedMaterialId)
-      .map((x) => ({
-        itemId: x.id,
-        materialId: x.mappedMaterialId!,
-        acceptedQty: Number(x.acceptedQty || x.quantity)
-      }));
-    if (!itemMappings.length) {
-      setOpsMessage("Для приемки нужно сопоставить хотя бы одну позицию");
-      return;
-    }
-    const res = await fetch(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
-      method: "POST",
+    const res = await fetch(`${API_URL}/api/receipt-requests/${requestId}/limit`, {
+      method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        itemMappings,
-        documentNumber: row.number
-      })
+      body: JSON.stringify({ fromLimit: Boolean(templateId), objectLimitTemplateId: templateId })
     });
     if (!res.ok) {
-      setOpsMessage("Не удалось принять заявку");
+      let serverMsg = "";
+      try {
+        const body = await res.json();
+        serverMsg = typeof body?.error === "string" ? body.error : "";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(serverMsg || "Не удалось привязать заявку к лимиту");
       return;
     }
-    setOpsMessage("Заявка принята и оприходована");
+    setOpsMessage(templateId ? "Заявка привязана к лимиту" : "Заявка отвязана от лимита");
     await loadReceiptRequests();
-    await loadMaterialMappings();
-    await loadStocks(q);
-    await loadOperations();
+  }
+
+  async function submitReceiptAcceptance(row: ReceiptRequestRow) {
+    if (!token) return;
+    const drafts = acceptanceDrafts[row.id] || {};
+    const mappings: Array<{
+      itemId: string;
+      materialId?: string;
+      newMaterialName?: string;
+      newMaterialUnit?: string;
+      acceptedQty: number;
+    }> = [];
+    for (const it of row.items) {
+      const draft = drafts[it.id];
+      const qtyRaw = (draft?.qty ?? "").toString().replace(",", ".").trim();
+      if (!qtyRaw) continue;
+      const qty = Number(qtyRaw);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
+      if (qty - remaining > 1e-6) {
+        setOpsMessage(`По «${it.sourceName}» осталось принять ${remaining}, передали ${qty}`);
+        return;
+      }
+      const explicitName = (draft?.newName ?? "").trim();
+      const explicitUnit = (draft?.newUnit ?? "").trim();
+      // Если есть «новое название» — используем его, иначе берём текущее sourceName.
+      const finalName = explicitName || it.sourceName;
+      mappings.push({
+        itemId: it.id,
+        newMaterialName: finalName,
+        newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
+        acceptedQty: qty
+      });
+    }
+    if (!mappings.length) {
+      setOpsMessage("Заполните количество и название хотя бы одной позиции");
+      return;
+    }
+    const form = new FormData();
+    form.append(
+      "payload",
+      JSON.stringify({
+        itemMappings: mappings,
+        documentNumber: acceptanceDocNumbers[row.id] || undefined
+      })
+    );
+    const scan = acceptanceScans[row.id];
+    if (scan) form.append("scan", scan);
+    setAcceptanceSubmitting((prev) => ({ ...prev, [row.id]: true }));
+    try {
+      const res = await fetch(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        let serverMsg = "";
+        try {
+          const body = await res.json();
+          serverMsg = typeof body?.error === "string" ? body.error : "";
+        } catch {
+          // ignore
+        }
+        setOpsMessage(serverMsg || "Не удалось провести приёмку");
+        return;
+      }
+      setOpsMessage(`Приёмка по заявке ${row.number} проведена`);
+      setAcceptanceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      setAcceptanceScans((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      setAcceptanceDocNumbers((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      await loadReceiptRequests();
+      await loadMaterialMappings();
+      await loadStocks(q);
+      await loadOperations();
+    } finally {
+      setAcceptanceSubmitting((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+    }
   }
 
   async function loadIssues() {
@@ -2368,126 +2479,8 @@ function App() {
     setOperations((await res.json()) as OperationRow[]);
   }
 
-  async function ensureMaterialForReceipt(line: ReceiptLine) {
-    if (!token) return line.materialId;
-    if (line.mode === "existing") return line.materialId;
-    const res = await fetch(`${API_URL}/api/materials`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: line.name.trim(),
-        sku: line.sku.trim() || undefined,
-        unit: line.unit.trim() || "шт",
-        category: line.category.trim() || undefined
-      })
-    });
-    if (!res.ok) {
-      throw new Error(`Не удалось создать материал "${line.name}"`);
-    }
-    const row = (await res.json()) as Material;
-    return row.id;
-  }
-
-  async function uploadOperationDocuments(operationId: string) {
-    if (!token || !receiptDocs.length) return;
-    for (const file of receiptDocs) {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("entityType", "operation");
-      form.append("entityId", operationId);
-      form.append("type", "invoice");
-      await fetch(`${API_URL}/api/documents/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form
-      });
-    }
-  }
-
-  async function submitReceiptOperation() {
-    if (!token || !opWarehouseId) return;
-    const validLines = receiptLines.filter((l) =>
-      l.quantity > 0 && (l.mode === "existing" ? Boolean(l.materialId) : Boolean(l.name.trim()))
-    );
-    if (!validLines.length) {
-      setOpsMessage("Добавь хотя бы одну позицию прихода");
-      return;
-    }
-    setOpsMessage("");
-    try {
-      const materialIds = await Promise.all(validLines.map((line) => ensureMaterialForReceipt(line)));
-      const opRes = await fetch(`${API_URL}/api/operations`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "INCOME",
-          warehouseId: opWarehouseId,
-          section: objectSectionFilter,
-          documentNumber: receiptDocumentNumber.trim() || `IN-${Date.now()}`,
-          storageRoom: opStorageRoom || undefined,
-          storageCell: opStorageCell || undefined,
-          items: validLines.map((line, idx) => ({ materialId: materialIds[idx], quantity: line.quantity }))
-        })
-      });
-      if (!opRes.ok) {
-        const errText = await opRes.text();
-        setOpsMessage(`Ошибка прихода: ${errText}`);
-        return;
-      }
-      const created = (await opRes.json()) as { id: string };
-      await uploadOperationDocuments(created.id);
-      for (const tool of receiptTools.filter((t) => t.name.trim() && t.inventoryNumber.trim())) {
-        await fetch(`${API_URL}/api/tools`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: tool.name.trim(),
-            inventoryNumber: tool.inventoryNumber.trim(),
-            serialNumber: tool.serialNumber.trim() || undefined,
-            warehouseId: opWarehouseId,
-            section: objectSectionFilter,
-            note: tool.note.trim() || undefined
-          })
-        });
-      }
-      setOpsMessage("Приход проведен");
-      setReceiptDocumentNumber("");
-      setReceiptDocs([]);
-      setReceiptTools([]);
-      await loadCatalogData();
-      await loadStocks(q);
-      await loadOperations();
-    } catch (e) {
-      setOpsMessage(String(e));
-    }
-  }
-
-  async function submitMaterialReturn() {
-    if (!token || !opWarehouseId || !returnMaterialId || returnQuantity <= 0) return;
-    setOpsMessage("");
-    const res = await fetch(`${API_URL}/api/operations`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "INCOME",
-        warehouseId: opWarehouseId,
-        section: objectSectionFilter,
-        documentNumber: `${returnDefect ? "RETURN-DEFECT" : "RETURN"}-${Date.now()}`,
-        storageRoom: opStorageRoom || undefined,
-        storageCell: opStorageCell || undefined,
-        items: [{ materialId: returnMaterialId, quantity: returnQuantity }]
-      })
-    });
-    if (!res.ok) {
-      setOpsMessage("Ошибка возврата материала");
-      return;
-    }
-    setOpsMessage("Возврат на склад проведен");
-    setReturnQuantity(1);
-    await loadStocks(q);
-    await loadOperations();
-    await loadStockMovements();
-  }
+  // Прямой приход/возврат через ручную форму удалены —
+  // материал теперь принимается только через заявки (см. submitReceiptAcceptance).
 
   async function loadTools() {
     if (!token) return;
@@ -2911,23 +2904,6 @@ function App() {
       setDashboardWarehouseId(activeObjectId || warehouses[0].id);
     }
   }, [dashboardWarehouseId, warehouses, activeObjectId]);
-
-  useEffect(() => {
-    if (!materials.length || receiptLines.length) return;
-    const first = materials[0];
-    setReceiptLines([
-      {
-        id: `line-${Date.now()}`,
-        mode: "existing",
-        materialId: first.id,
-        quantity: 1,
-        name: "",
-        sku: "",
-        unit: first.unit || "шт",
-        category: ""
-      }
-    ]);
-  }, [materials, receiptLines.length]);
 
   useEffect(() => {
     if (!token || !chatWidgetOpen) return;
@@ -4028,15 +4004,29 @@ function App() {
                       <tr>
                         <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
                           <div className="card">
-                            {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
+                            {((acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ||
+                              (materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0) ? (
                               <>
-                                <h4>Фактические названия из приходных заявок</h4>
+                                <h4>Фактические названия (из приходов по заявкам)</h4>
                                 <ul className="plainList">
-                                  {(materialMappingsByTargetId.get(row.materialId) || []).map((m) => (
-                                    <li key={`actual-${row.id}-${m.id}`}>
-                                      {m.sourceName} ({m.sourceUnit || row.materialUnit}) → {safeName(row.materialName)}
+                                  {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
+                                    <li key={`actual-q-${row.id}-${i}`}>
+                                      <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) —{" "}
+                                      принято {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
                                     </li>
                                   ))}
+                                  {(materialMappingsByTargetId.get(row.materialId) || [])
+                                    .filter((m) => {
+                                      // не дублируем то, что уже показано выше
+                                      const bucket = acceptedBySourceByTargetId.get(row.materialId);
+                                      return !bucket?.has(`${m.sourceName}|${m.sourceUnit || ""}`);
+                                    })
+                                    .map((m) => (
+                                      <li key={`actual-${row.id}-${m.id}`}>
+                                        {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
+                                        <span className="muted">пока не принято</span>
+                                      </li>
+                                    ))}
                                 </ul>
                               </>
                             ) : null}
@@ -4558,322 +4548,437 @@ function App() {
       )}
 
       {activeTab === "operations" && (
-        <div className="card">
-          <h2>Приходы (упрощенно)</h2>
-          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
-          <p className="muted">Один экран: добавляй материалы/инструменты, документы и проводи приход.</p>
-          <h3>Заявки из Excel</h3>
-          <div className="toolbar">
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => setReceiptRequestFile(e.target.files?.[0] || null)}
-            />
-            <button type="button" onClick={() => void uploadReceiptRequest()} disabled={!receiptRequestFile}>
-              Загрузить заявку
-            </button>
+        <div className="receiptsWorkspace">
+          <div className="card">
+            <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Приходы</h2>
+                <p className="muted">
+                  Раздел {objectSectionFilter}. Материал принимается только из заявок: загрузите Excel-заявку (формат ORDER), затем
+                  частично или полностью оприходуйте позиции с сопоставлением «название из заявки → название УПД» и сканом документа.
+                </p>
+              </div>
+              <div className="kpiRow" style={{ margin: 0 }}>
+                <div className="kpi">
+                  <span>Активных заявок</span>
+                  <strong>{receiptRequests.filter((r) => r.status !== "RECEIVED" && r.status !== "CANCELLED").length}</strong>
+                </div>
+                <div className="kpi">
+                  <span>Принято полностью</span>
+                  <strong>{receiptRequests.filter((r) => r.status === "RECEIVED").length}</strong>
+                </div>
+              </div>
+            </div>
+
+            {opsMessage && <ResultBanner text={opsMessage} tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"} />}
+
+            <div
+              className="card"
+              style={{ marginTop: 12 }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const file = e.dataTransfer.files?.[0];
+                if (!file) return;
+                if (!/\.(xlsx|xls)$/i.test(file.name)) {
+                  setOpsMessage("Выберите Excel-файл (.xlsx/.xls)");
+                  return;
+                }
+                setReceiptRequestFile(file);
+              }}
+            >
+              <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
+              <p className="muted">
+                Из файла берутся только позиции (B — наименование, F — количество, G — ед. изм.).
+                После загрузки появится вопрос «Заявка из лимита?» — можно сразу привязать заявку к шаблону лимита.
+              </p>
+              <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(e) => setReceiptRequestFile(e.target.files?.[0] || null)}
+                />
+                <button type="button" onClick={() => void uploadReceiptRequest()} disabled={!receiptRequestFile || !canWriteOperations}>
+                  Загрузить заявку
+                </button>
+                {receiptRequestFile && <span className="muted">{receiptRequestFile.name}</span>}
+              </div>
+            </div>
           </div>
-          {receiptRequests.length > 0 && (
+
+          {!receiptRequests.length && (
+            <EmptyState
+              title="Заявок ещё нет"
+              hint="Загрузите Excel выше — оттуда появятся позиции для приёма на склад."
+            />
+          )}
+
+          {receiptRequests.map((row) => {
+            const isExpanded = expandedReceiptIds[row.id] !== false; // по умолчанию открыты
+            const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
+            const acceptedQty = row.items.reduce((s, it) => s + Number(it.acceptedQty || 0), 0);
+            const donePct = totalQty > 0 ? Math.min(100, Math.round((acceptedQty / totalQty) * 100)) : 0;
+            const finished = row.status === "RECEIVED" || row.status === "CANCELLED";
+            const drafts = acceptanceDrafts[row.id] || {};
+            const linkedTemplate = limitTemplates.find((t) => t.id === row.objectLimitTemplateId);
+            // подсказки по фактическим названиям: список материалов из каталога + материалы из привязанного шаблона лимита
+            const datalistId = `receipt-mat-suggest-${row.id}`;
+            const linkedTplNodes = linkedTemplate?.nodes?.filter((n) => n.nodeType === "MATERIAL") || [];
+            return (
+              <div key={`receipt-${row.id}`} className="card" style={{ marginTop: 12 }}>
+                <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="toolbar" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <h3 style={{ margin: 0 }}>{row.number}</h3>
+                      <span
+                        className={`badge ${row.status === "RECEIVED" ? "ok" : row.status === "CANCELLED" ? "bad" : ""}`}
+                      >
+                        {row.status === "NEW"
+                          ? "Новая"
+                          : row.status === "IN_PROGRESS"
+                          ? "Частично принята"
+                          : row.status === "RECEIVED"
+                          ? "Принята полностью"
+                          : "Отменена"}
+                      </span>
+                      {row.fromLimit && (
+                        <span className="badge ok">
+                          Из лимита{linkedTemplate ? ` · ${safeName(linkedTemplate.title)}` : ""}
+                        </span>
+                      )}
+                    </div>
+                    <p className="muted" style={{ margin: "4px 0 0" }}>
+                      {row.section} · позиций {row.items.length} ·{" "}
+                      принято {acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} из{" "}
+                      {totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} ({donePct}%)
+                      {row.sourceFileName ? ` · файл: ${row.sourceFileName}` : ""}
+                    </p>
+                    <div className="progressWrap" style={{ width: "100%", marginTop: 6 }}>
+                      <div className="progressBar" style={{ width: `${donePct}%` }} />
+                    </div>
+                  </div>
+                  <div className="toolbar" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() => openDocumentsForEntity("receipt", row.id)}
+                    >
+                      Документы
+                    </button>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() => {
+                        setLimitPromptTemplateId(row.objectLimitTemplateId || "");
+                        setLimitPromptRequest(row);
+                      }}
+                    >
+                      {row.fromLimit ? "Изменить лимит" : "Связать с лимитом"}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() =>
+                        setExpandedReceiptIds((prev) => ({ ...prev, [row.id]: !isExpanded }))
+                      }
+                    >
+                      {isExpanded ? "Свернуть" : "Развернуть"}
+                    </button>
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <>
+                    <datalist id={datalistId}>
+                      {materials.map((m) => (
+                        <option key={`m-sug-${row.id}-${m.id}`} value={m.name}>
+                          {m.unit}
+                        </option>
+                      ))}
+                      {linkedTplNodes.map((n) => (
+                        <option key={`lim-sug-${row.id}-${n.id}`} value={String(n.materialName || n.title)}>
+                          {n.unit || ""}
+                        </option>
+                      ))}
+                    </datalist>
+
+                    <div className="form" style={{ marginTop: 10 }}>
+                      <label>
+                        Номер документа УПД / ТН
+                        <input
+                          value={acceptanceDocNumbers[row.id] || ""}
+                          onChange={(e) =>
+                            setAcceptanceDocNumbers((prev) => ({ ...prev, [row.id]: e.target.value }))
+                          }
+                          placeholder={`По умолчанию: ${row.number}`}
+                          disabled={finished}
+                        />
+                      </label>
+                      <label>
+                        Скан/файл документа
+                        <input
+                          type="file"
+                          onChange={(e) =>
+                            setAcceptanceScans((prev) => ({ ...prev, [row.id]: e.target.files?.[0] || null }))
+                          }
+                          disabled={finished}
+                        />
+                        {acceptanceScans[row.id] && (
+                          <span className="muted" style={{ marginTop: 4, display: "inline-block" }}>
+                            {acceptanceScans[row.id]?.name}
+                          </span>
+                        )}
+                      </label>
+                    </div>
+
+                    <div className="desktopTable" style={{ overflowX: "auto", marginTop: 8 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Название из заявки</th>
+                            <th>Кол-во</th>
+                            <th>Принято / план</th>
+                            <th>Название по УПД</th>
+                            <th>Ед. УПД</th>
+                            <th>Принять сейчас</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.items.map((it) => {
+                            const total = Number(it.quantity);
+                            const accepted = Number(it.acceptedQty || 0);
+                            const remaining = Math.max(0, total - accepted);
+                            const draft = drafts[it.id] || { newName: "", newUnit: "", qty: "" };
+                            const defaultName = draft.newName || it.mappedMaterial?.name || it.sourceName;
+                            const defaultUnit = draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                            const fullyAccepted = remaining <= 1e-6;
+                            return (
+                              <tr key={it.id} className={fullyAccepted ? "muted" : ""}>
+                                <td style={{ maxWidth: 280 }}>{it.sourceName}</td>
+                                <td>{total}</td>
+                                <td>
+                                  {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
+                                  {total.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                                </td>
+                                <td>
+                                  <input
+                                    list={datalistId}
+                                    value={defaultName}
+                                    placeholder="Как в УПД…"
+                                    disabled={finished || fullyAccepted}
+                                    onChange={(e) =>
+                                      setAcceptanceDrafts((prev) => ({
+                                        ...prev,
+                                        [row.id]: {
+                                          ...prev[row.id],
+                                          [it.id]: {
+                                            newName: e.target.value,
+                                            newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                            qty: prev[row.id]?.[it.id]?.qty || ""
+                                          }
+                                        }
+                                      }))
+                                    }
+                                  />
+                                </td>
+                                <td style={{ width: 90 }}>
+                                  <input
+                                    value={defaultUnit}
+                                    placeholder={it.sourceUnit || "шт"}
+                                    disabled={finished || fullyAccepted}
+                                    onChange={(e) =>
+                                      setAcceptanceDrafts((prev) => ({
+                                        ...prev,
+                                        [row.id]: {
+                                          ...prev[row.id],
+                                          [it.id]: {
+                                            newName: prev[row.id]?.[it.id]?.newName || "",
+                                            newUnit: e.target.value,
+                                            qty: prev[row.id]?.[it.id]?.qty || ""
+                                          }
+                                        }
+                                      }))
+                                    }
+                                  />
+                                </td>
+                                <td style={{ width: 130 }}>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={0.001}
+                                    max={remaining || undefined}
+                                    value={draft.qty}
+                                    disabled={finished || fullyAccepted}
+                                    placeholder={remaining ? String(remaining) : ""}
+                                    onChange={(e) =>
+                                      setAcceptanceDrafts((prev) => ({
+                                        ...prev,
+                                        [row.id]: {
+                                          ...prev[row.id],
+                                          [it.id]: {
+                                            newName: prev[row.id]?.[it.id]?.newName || "",
+                                            newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                            qty: e.target.value
+                                          }
+                                        }
+                                      }))
+                                    }
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => void submitReceiptAcceptance(row)}
+                        disabled={finished || !canWriteOperations || Boolean(acceptanceSubmitting[row.id])}
+                      >
+                        {acceptanceSubmitting[row.id] ? "Принимаем…" : "Принять выбранные позиции"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() => {
+                          // авто-заполнить «остаток» всем неполностью принятым
+                          const next = { ...(acceptanceDrafts[row.id] || {}) };
+                          for (const it of row.items) {
+                            const remaining = Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
+                            if (remaining > 0) {
+                              next[it.id] = {
+                                newName: next[it.id]?.newName || it.mappedMaterial?.name || it.sourceName,
+                                newUnit: next[it.id]?.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
+                                qty: String(remaining)
+                              };
+                            }
+                          }
+                          setAcceptanceDrafts((prev) => ({ ...prev, [row.id]: next }));
+                        }}
+                        disabled={finished}
+                      >
+                        Принять всё, что осталось
+                      </button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() =>
+                          setAcceptanceDrafts((prev) => {
+                            const next = { ...prev };
+                            delete next[row.id];
+                            return next;
+                          })
+                        }
+                        disabled={finished}
+                      >
+                        Сбросить ввод
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+
+          {limitPromptRequest && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 50,
+                padding: 16
+              }}
+              onClick={() => setLimitPromptRequest(null)}
+            >
+              <div
+                className="card"
+                style={{ maxWidth: 480, width: "100%" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
+                <p className="muted">
+                  Заявка <strong>{limitPromptRequest.number}</strong> загружена.
+                  Можно сразу привязать её к одному из шаблонов лимитов этого объекта/раздела —
+                  тогда при приёмке будут предлагаться материалы из этого лимита.
+                </p>
+                <label>
+                  Шаблон лимита
+                  <select
+                    value={limitPromptTemplateId}
+                    onChange={(e) => setLimitPromptTemplateId(e.target.value)}
+                  >
+                    <option value="">Не из лимита</option>
+                    {limitTemplates.map((t) => (
+                      <option key={`limit-prompt-${t.id}`} value={t.id}>
+                        {safeName(t.title)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    onClick={() => {
+                      void attachReceiptRequestToLimit(limitPromptRequest.id, null);
+                      setLimitPromptRequest(null);
+                    }}
+                  >
+                    Не из лимита
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void attachReceiptRequestToLimit(
+                        limitPromptRequest.id,
+                        limitPromptTemplateId || null
+                      );
+                      setLimitPromptRequest(null);
+                    }}
+                    disabled={!limitPromptTemplateId}
+                  >
+                    Привязать к лимиту
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Последние приходы</h3>
+            <p className="muted">Каждая приёмка по заявке создаёт операцию INCOME — здесь видна история и прикреплённые сканы.</p>
             <table className="desktopTable">
               <thead>
-                <tr>
-                  <th>Заявка</th>
-                  <th>Статус</th>
-                  <th>Позиции и сопоставление</th>
-                  <th>Действие</th>
-                </tr>
+                <tr><th>Документ</th><th>Дата</th><th>Файлы</th></tr>
               </thead>
               <tbody>
-                {receiptRequests.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.number}</td>
-                    <td>{row.status}</td>
-                    <td>
-                      <div className="plainList">
-                        {row.items.map((it) => (
-                          <div key={it.id} className="toolbar" style={{ marginBottom: 6 }}>
-                            <span>
-                              {it.sourceName} ({it.sourceUnit || "шт"}) · {it.quantity}
-                              {it.mappedMaterial?.name ? (
-                                <span className="muted"> → {safeName(it.mappedMaterial.name)}</span>
-                              ) : null}
-                            </span>
-                            <select
-                              value={it.mappedMaterialId || ""}
-                              onChange={(e) =>
-                                setReceiptRequests((prev) =>
-                                  prev.map((r) =>
-                                    r.id !== row.id
-                                      ? r
-                                      : {
-                                          ...r,
-                                          items: r.items.map((x) =>
-                                            x.id === it.id ? { ...x, mappedMaterialId: e.target.value || null } : x
-                                          )
-                                        }
-                                  )
-                                )
-                              }
-                            >
-                              <option value="">Сопоставить с материалом лимита</option>
-                              {materials.map((m) => (
-                                <option key={`rr-map-${row.id}-${it.id}-${m.id}`} value={m.id}>
-                                  {safeName(m.name)} ({m.unit})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="toolbar">
-                        <button
-                          type="button"
-                          onClick={() => void acceptReceiptRequest(row)}
-                          disabled={row.status === "RECEIVED"}
-                        >
-                          Принять и оприходовать
-                        </button>
-                        <button type="button" onClick={() => openDocumentsForEntity("receipt", row.id)}>
-                          Документы
-                        </button>
-                      </div>
-                    </td>
+                {operations.filter((o) => o.type === "INCOME").slice(0, 20).map((o) => (
+                  <tr key={o.id}>
+                    <td>{o.documentNumber || o.id.slice(0, 8)}</td>
+                    <td>{o.operationDate ? new Date(o.operationDate).toLocaleString() : "-"}</td>
+                    <td><button type="button" className="ghostBtn" onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-          <div className="form">
-            <label>
-              Склад
-              <select value={opWarehouseId} onChange={(e) => setOpWarehouseId(e.target.value)} disabled>
-                {warehouses
-                  .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
-                  .map((w) => (
-                    <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Номер документа прихода
-              <input value={receiptDocumentNumber} onChange={(e) => setReceiptDocumentNumber(e.target.value)} placeholder="Напр. ПР-124/26" />
-            </label>
-            <label>
-              Помещение
-              <input value={opStorageRoom} onChange={(e) => setOpStorageRoom(e.target.value)} placeholder="Напр. Подвал" />
-            </label>
-            <label>
-              Ячейка
-              <input value={opStorageCell} onChange={(e) => setOpStorageCell(e.target.value)} placeholder="Напр. A-12" />
-            </label>
-          </div>
-          <h3>Материалы в приходе</h3>
-          <div className="plainList">
-            {receiptLines.map((line, idx) => (
-              <div key={line.id} className="receiptLine">
-                <label>
-                  Режим
-                  <select
-                    value={line.mode}
-                    onChange={(e) => {
-                      const mode = e.target.value as "existing" | "new";
-                      setReceiptLines((prev) =>
-                        prev.map((x, i) =>
-                          i === idx
-                            ? {
-                                ...x,
-                                mode,
-                                materialId: mode === "existing" ? (materials[0]?.id || "") : ""
-                              }
-                            : x
-                        )
-                      );
-                    }}
-                  >
-                    <option value="existing">Из справочника</option>
-                    <option value="new">Новый материал</option>
-                  </select>
-                </label>
-                {line.mode === "existing" ? (
-                  <label>
-                    Материал
-                    <select
-                      value={line.materialId}
-                      onChange={(e) =>
-                        setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, materialId: e.target.value } : x)))
-                      }
-                    >
-                      {materials.map((m) => (
-                        <option key={m.id} value={m.id}>{m.name} {m.sku ? `(${m.sku})` : ""}</option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <>
-                    <label>
-                      Название
-                      <input value={line.name} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} />
-                    </label>
-                    <label>
-                      SKU
-                      <input value={line.sku} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, sku: e.target.value } : x)))} />
-                    </label>
-                    <label>
-                      Ед. изм.
-                      <input value={line.unit} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, unit: e.target.value } : x)))} />
-                    </label>
-                    <label>
-                      Категория
-                      <input value={line.category} onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, category: e.target.value } : x)))} />
-                    </label>
-                  </>
-                )}
-                <label>
-                  Количество
-                  <input
-                    type="number"
-                    min={0.001}
-                    step={0.001}
-                    value={line.quantity}
-                    onChange={(e) => setReceiptLines((prev) => prev.map((x, i) => (i === idx ? { ...x, quantity: Number(e.target.value) } : x)))}
-                  />
-                </label>
-                <button type="button" className="ghostBtn" onClick={() => setReceiptLines((prev) => prev.filter((x) => x.id !== line.id))}>
-                  Убрать позицию
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="toolbar">
-            <button
-              type="button"
-              className="ghostBtn"
-              onClick={() =>
-                setReceiptLines((prev) => [
-                  ...prev,
-                  {
-                    id: `line-${Date.now()}-${Math.random()}`,
-                    mode: "existing",
-                    materialId: materials[0]?.id || "",
-                    quantity: 1,
-                    name: "",
-                    sku: "",
-                    unit: "шт",
-                    category: ""
-                  }
-                ])
-              }
-            >
-              + Материал
-            </button>
-          </div>
-          <h3>Инструменты в приходе</h3>
-          <div className="plainList">
-            {receiptTools.map((tool, idx) => (
-              <div key={tool.id} className="receiptLine">
-                <label>
-                  Название инструмента
-                  <input value={tool.name} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} />
-                </label>
-                <label>
-                  Инвентарный номер
-                  <input value={tool.inventoryNumber} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, inventoryNumber: e.target.value } : x)))} />
-                </label>
-                <label>
-                  Серийный номер
-                  <input value={tool.serialNumber} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, serialNumber: e.target.value } : x)))} />
-                </label>
-                <label>
-                  Примечание
-                  <input value={tool.note} onChange={(e) => setReceiptTools((prev) => prev.map((x, i) => (i === idx ? { ...x, note: e.target.value } : x)))} />
-                </label>
-                <button type="button" className="ghostBtn" onClick={() => setReceiptTools((prev) => prev.filter((x) => x.id !== tool.id))}>
-                  Убрать инструмент
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="toolbar">
-            <button
-              type="button"
-              className="ghostBtn"
-              onClick={() =>
-                setReceiptTools((prev) => [
-                  ...prev,
-                  { id: `tool-${Date.now()}-${Math.random()}`, name: "", inventoryNumber: "", serialNumber: "", note: "" }
-                ])
-              }
-            >
-              + Инструмент
-            </button>
-          </div>
-          <label>
-            Документы к приходу
-            <input
-              type="file"
-              multiple
-              onChange={(e) => setReceiptDocs(Array.from(e.target.files || []))}
-            />
-          </label>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Возврат материала на склад</h3>
-            <div className="form">
-              <label>
-                Материал
-                <select value={returnMaterialId} onChange={(e) => setReturnMaterialId(e.target.value)}>
-                  {materials.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Возврат, кол-во
-                <input type="number" min={0.001} step={0.001} value={returnQuantity} onChange={(e) => setReturnQuantity(Number(e.target.value))} />
-              </label>
-              <label>
-                <span>Возврат брака</span>
-                <input type="checkbox" checked={returnDefect} onChange={(e) => setReturnDefect(e.target.checked)} />
-              </label>
-            </div>
-            <div className="toolbar">
-              <button type="button" onClick={() => void submitMaterialReturn()} disabled={!canWriteOperations}>
-                Провести возврат
-              </button>
-            </div>
-          </div>
-          <div className="toolbar">
-            <button disabled={!canWriteOperations} onClick={() => void submitReceiptOperation()}>
-              Провести приход
-            </button>
-          </div>
-          {opsMessage && <p className="muted">{opsMessage}</p>}
-          <h3>Последние приходы</h3>
-          <table className="desktopTable">
-            <thead>
-              <tr><th>Документ</th><th>Тип</th><th>Дата</th><th>Файлы</th></tr>
-            </thead>
-            <tbody>
-              {operations.filter((o) => o.type === "INCOME").map((o) => (
-                <tr key={o.id}>
-                  <td>{o.documentNumber || o.id.slice(0, 8)}</td>
-                  <td>{o.type}</td>
-                  <td>{o.operationDate ? new Date(o.operationDate).toLocaleString() : "-"}</td>
-                  <td><button onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button></td>
-                </tr>
+            <div className="mobileCards">
+              {operations.filter((o) => o.type === "INCOME").slice(0, 20).map((o) => (
+                <article key={`m-op-${o.id}`} className="mobileCard">
+                  <h4>{o.documentNumber || o.id.slice(0, 8)}</h4>
+                  <p><strong>Дата:</strong> {o.operationDate ? new Date(o.operationDate).toLocaleString() : "-"}</p>
+                  <button type="button" onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button>
+                </article>
               ))}
-            </tbody>
-          </table>
-          <div className="mobileCards">
-            {operations.filter((o) => o.type === "INCOME").map((o) => (
-              <article key={`m-op-${o.id}`} className="mobileCard">
-                <h4>{o.documentNumber || o.id.slice(0, 8)}</h4>
-                <p><strong>Тип:</strong> {o.type}</p>
-                <p><strong>Дата:</strong> {o.operationDate ? new Date(o.operationDate).toLocaleString() : "-"}</p>
-                <button type="button" onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button>
-              </article>
-            ))}
+            </div>
           </div>
         </div>
       )}

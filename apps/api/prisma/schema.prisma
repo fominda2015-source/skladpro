@@ -654,6 +654,7 @@ model ObjectLimitTemplate {
   warehouse    Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   createdBy    User?           @relation("LimitTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
   nodes        ObjectLimitNode[]
+  receiptRequests ReceiptRequest[]
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
@@ -702,21 +703,25 @@ model MaterialMappingLibrary {
 }
 
 model ReceiptRequest {
-  id             String             @id @default(cuid())
-  number         String             @unique
-  warehouseId    String
-  section        ObjectSection
-  status         ReceiptRequestStatus @default(NEW)
-  sourceFileName String?
-  createdById    String?
-  acceptedAt     DateTime?
-  warehouse      Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  createdBy      User?              @relation("ReceiptRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  items          ReceiptRequestItem[]
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id                    String             @id @default(cuid())
+  number                String             @unique
+  warehouseId           String
+  section               ObjectSection
+  status                ReceiptRequestStatus @default(NEW)
+  sourceFileName        String?
+  createdById           String?
+  acceptedAt            DateTime?
+  fromLimit             Boolean            @default(false)
+  objectLimitTemplateId String?
+  warehouse             Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy             User?              @relation("ReceiptRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  limitTemplate         ObjectLimitTemplate? @relation(fields: [objectLimitTemplateId], references: [id], onDelete: SetNull)
+  items                 ReceiptRequestItem[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   @@index([warehouseId, section, status, createdAt])
+  @@index([objectLimitTemplateId])
 }
 
 model ReceiptRequestItem {
