@@ -311,28 +311,6 @@ type AuditMetaResponse = {
   entityTypes: Array<{ entityType: string; label: string; count: number }>;
 };
 type ResultTone = "neutral" | "success" | "error" | "conflict";
-type TeamEmployee = {
-  id: string;
-  fullName: string;
-  email: string;
-  avatarUrl?: string | null;
-  role: string;
-  status: "ACTIVE" | "BLOCKED";
-  warehouses: Array<{ id: string; name: string }>;
-  projects: Array<{ id: string; name: string }>;
-};
-type TeamTask = {
-  id: string;
-  title: string;
-  description?: string | null;
-  status: string;
-  dueAt?: string | null;
-  assignee?: { id: string; fullName: string; role?: { name: string } };
-  createdBy?: { id: string; fullName: string; role?: { name: string } };
-  project?: { id: string; name: string } | null;
-  warehouse?: { id: string; name: string } | null;
-  createdAt: string;
-};
 type LimitImportNode = {
   id: string;
   parentId?: string | null;
@@ -461,8 +439,6 @@ function App() {
     | "integrations"
     | "settings"
     | "profile"
-    | "team"
-    | "inbox"
     | "chat"
     | "feedback"
     | "reports"
@@ -721,24 +697,6 @@ function App() {
   const [integrationMessage, setIntegrationMessage] = useState("");
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
-  const [teamEmployees, setTeamEmployees] = useState<TeamEmployee[]>([]);
-  const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
-  const [teamMessage, setTeamMessage] = useState("");
-  const [teamTone, setTeamTone] = useState<ResultTone>("neutral");
-  const [teamAssigneeId, setTeamAssigneeId] = useState("");
-  const [teamTaskTitle, setTeamTaskTitle] = useState("");
-  const [teamTaskDescription, setTeamTaskDescription] = useState("");
-  const [teamTaskProjectId, setTeamTaskProjectId] = useState("");
-  const [teamTaskWarehouseId, setTeamTaskWarehouseId] = useState("");
-  const [teamTaskDueAt, setTeamTaskDueAt] = useState("");
-  const [myTasks, setMyTasks] = useState<TeamTask[]>([]);
-  const [inboxFilter, setInboxFilter] = useState<"all" | "mine" | "new" | "critical" | "overdue" | "read_today">("all");
-  const [selectedNotificationIds, setSelectedNotificationIds] = useState<string[]>([]);
-  const [focusedTeamTaskId, setFocusedTeamTaskId] = useState("");
-  const [inboxLoading, setInboxLoading] = useState(false);
-  const [inboxError, setInboxError] = useState("");
-  const [teamLoading, setTeamLoading] = useState(false);
-  const [teamError, setTeamError] = useState("");
   const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
   const [chatConversations, setChatConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
@@ -775,12 +733,10 @@ function App() {
     { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
     { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.write"] },
     { id: "matching", label: "Сопоставление", permissions: ["materials.match", "materials.read"] },
-    { id: "inbox", label: "Центр входящих", permissions: ["notifications.read", "team.read"] },
-    { id: "team", label: "Команда и задачи", permissions: ["team.read", "team.tasks.write"] },
     { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read", "materials.write"] },
     { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
     { id: "qr", label: "QR", permissions: ["tools.read"] },
-    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write"] },
+    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write", "notifications.read"] },
     { id: "audit", label: "Логи", permissions: ["audit.read"] },
     { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
   ];
@@ -873,77 +829,6 @@ function App() {
       RECEIVED: "Получена",
       CLOSED: "Закрыта"
     })[status] ?? status;
-  const teamTaskStatusLabel = (status: string) =>
-    ({
-      OPEN: "Новая",
-      IN_PROGRESS: "В работе",
-      DONE: "Выполнена",
-      VERIFIED: "Проверена"
-    })[status] ?? status;
-  const teamTaskNextStatuses = (status: string) =>
-    ({
-      OPEN: ["IN_PROGRESS", "DONE"],
-      IN_PROGRESS: ["DONE"],
-      DONE: ["VERIFIED"],
-      VERIFIED: []
-    })[status] ?? [];
-  const isTaskClosed = (status: string) => status === "DONE" || status === "VERIFIED";
-  const taskSlaKind = (task: TeamTask) => {
-    if (!task.dueAt || isTaskClosed(task.status)) return "normal" as const;
-    const due = new Date(task.dueAt).getTime();
-    const now = Date.now();
-    if (due < now) return "overdue" as const;
-    if (due - now < 24 * 60 * 60 * 1000) return "today" as const;
-    return "week" as const;
-  };
-  const taskSlaLabel = (task: TeamTask) =>
-    ({
-      overdue: "Просрочено",
-      today: "Срок сегодня",
-      week: "На неделе",
-      normal: "Планово"
-    })[taskSlaKind(task)];
-  const taskSlaClass = (task: TeamTask) =>
-    ({
-      overdue: "slaBadge bad",
-      today: "slaBadge warn",
-      week: "slaBadge neutral",
-      normal: "slaBadge ok"
-    })[taskSlaKind(task)];
-  const groupedInboxTasks = useMemo(() => {
-    const source = myTasks.filter((t) => {
-      const overdue = taskSlaKind(t) === "overdue";
-      if (inboxFilter === "new") return t.status === "OPEN";
-      if (inboxFilter === "critical") return overdue;
-      if (inboxFilter === "overdue") return overdue;
-      return true;
-    });
-    return {
-      overdue: source.filter((t) => taskSlaKind(t) === "overdue"),
-      today: source.filter((t) => taskSlaKind(t) === "today"),
-      week: source.filter((t) => taskSlaKind(t) === "week"),
-      later: source.filter((t) => taskSlaKind(t) === "normal")
-    };
-  }, [myTasks, inboxFilter]);
-  const groupedInboxNotifications = useMemo(() => {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const source = notifications.filter((n) => {
-      const isCritical = n.level === "ERROR" || n.level === "WARNING";
-      const readToday = n.isRead && new Date(n.createdAt) >= startOfToday;
-      if (inboxFilter === "new") return !n.isRead;
-      if (inboxFilter === "critical") return isCritical;
-      if (inboxFilter === "read_today") return readToday;
-      if (inboxFilter === "mine") return false;
-      return true;
-    });
-    return {
-      critical: source.filter((n) => n.level === "ERROR" || n.level === "WARNING"),
-      fresh: source.filter((n) => !n.isRead),
-      readToday: source.filter((n) => n.isRead && new Date(n.createdAt) >= startOfToday),
-      other: source.filter((n) => n.isRead && !(new Date(n.createdAt) >= startOfToday) && n.level === "INFO")
-    };
-  }, [notifications, inboxFilter]);
   const dmByUserId = useMemo(() => {
     const map = new Map<string, Conversation>();
     for (const conv of chatConversations) {
@@ -1188,8 +1073,6 @@ function App() {
     qr: "QR-сканирование",
     tools: "Инструменты",
     integrations: "Интеграции и уведомления",
-    inbox: "Центр входящих",
-    team: "Команда и задачи",
     chat: "Личные сообщения",
     feedback: "Обратная связь",
     reports: "PDF сводка по объекту",
@@ -1208,7 +1091,6 @@ function App() {
     documents: "Контроль",
     limits: "Контроль",
     matching: "Контроль",
-    team: "Контроль",
     chat: "Контроль",
     feedback: "Контроль",
     reports: "Контроль",
@@ -1217,7 +1099,6 @@ function App() {
     tools: "Сервис",
     qr: "Сервис",
     integrations: "Сервис",
-    inbox: "Контроль",
     admin: "Администрирование",
     profile: "Аккаунт",
     settings: "Аккаунт",
@@ -1259,9 +1140,8 @@ function App() {
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
-  const canReadTeam = useMemo(() => hasPermission("team.read"), [me]);
+  const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
   const showLegacyMatching = false;
-  const canWriteTeamTasks = useMemo(() => hasPermission("team.tasks.write"), [me]);
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   async function loadStockMovements() {
@@ -1542,31 +1422,6 @@ function App() {
     setNotifications((await r.json()) as NotificationRow[]);
   }
 
-  async function loadMyTasks() {
-    if (!token || !canReadTeam) return;
-    const r = await fetch(`${API_URL}/api/team/tasks?mineOnly=1`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    setMyTasks((await r.json()) as TeamTask[]);
-  }
-
-  async function loadInboxData() {
-    if (!token) return;
-    setInboxError("");
-    setInboxLoading(true);
-    try {
-      const tasks = [];
-      if (canReadIntegrations) tasks.push(loadNotifications());
-      if (canReadTeam) tasks.push(loadMyTasks());
-      await Promise.all(tasks);
-    } catch (e) {
-      setInboxError(`Не удалось загрузить входящие: ${String(e)}`);
-    } finally {
-      setInboxLoading(false);
-    }
-  }
-
   async function markNotificationsRead(ids: string[]) {
     if (!token || !ids.length) return;
     await fetch(`${API_URL}/api/notifications/read`, {
@@ -1574,11 +1429,10 @@ function App() {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ids })
     });
-    setSelectedNotificationIds((prev) => prev.filter((id) => !ids.includes(id)));
     await loadNotifications();
   }
 
-  function openInboxEntity(notification: NotificationRow) {
+  function openNotificationLinkedEntity(notification: NotificationRow) {
     if (!notification.entityType || !notification.entityId) return;
     const entityType = notification.entityType.toLowerCase();
     if (entityType === "issuerequest" || entityType === "issue") {
@@ -1595,11 +1449,8 @@ function App() {
       setActiveTab("waybills");
       return;
     }
-    if (entityType === "stafftask" || entityType === "task") {
-      setActiveTab("team");
-      setFocusedTeamTaskId(notification.entityId);
-      setTeamMessage(`Открыта задача из входящих: ${notification.entityId}`);
-      setTeamTone("neutral");
+    if (entityType === "receiptrequest") {
+      setActiveTab("approvals");
       return;
     }
     if (entityType === "integrationjob") {
@@ -1627,83 +1478,6 @@ function App() {
       return;
     }
     setReadiness((await r.json()) as ReadinessResponse);
-  }
-
-  async function loadTeamData() {
-    if (!token || !canReadTeam) return;
-    setTeamError("");
-    setTeamLoading(true);
-    try {
-      const [employeesRes, tasksRes] = await Promise.all([
-        fetch(`${API_URL}/api/team/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/api/team/tasks`, { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-      if (!employeesRes.ok || !tasksRes.ok) {
-        setTeamError("Не удалось загрузить сотрудников/задачи");
-        return;
-      }
-      const employees = (await employeesRes.json()) as TeamEmployee[];
-      const tasks = (await tasksRes.json()) as TeamTask[];
-      setTeamEmployees(employees);
-      setTeamTasks(tasks);
-      if (employees.length && !teamAssigneeId) setTeamAssigneeId(employees[0].id);
-    } finally {
-      setTeamLoading(false);
-    }
-  }
-
-  async function createTeamTask() {
-    if (!token || !canWriteTeamTasks) return;
-    setTeamMessage("");
-    setTeamTone("neutral");
-    const res = await fetch(`${API_URL}/api/team/tasks`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        assigneeId: teamAssigneeId,
-        title: teamTaskTitle,
-        description: teamTaskDescription || undefined,
-        projectId: teamTaskProjectId || undefined,
-        warehouseId: teamTaskWarehouseId || undefined,
-        dueAt: teamTaskDueAt ? new Date(teamTaskDueAt).toISOString() : undefined
-      })
-    });
-    if (!res.ok) {
-      setTeamMessage("Не удалось поставить задачу");
-      setTeamTone(res.status === 409 ? "conflict" : "error");
-      return;
-    }
-    setTeamMessage("Задача поставлена");
-    setTeamTone("success");
-    setTeamTaskTitle("");
-    setTeamTaskDescription("");
-    setTeamTaskDueAt("");
-    await loadTeamData();
-  }
-
-  async function updateTeamTaskStatus(taskId: string, status: "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED") {
-    if (!token) return;
-    const ok = window.confirm(`Подтвердить перевод задачи в статус "${teamTaskStatusLabel(status)}"?`);
-    if (!ok) return;
-    const res = await fetch(`${API_URL}/api/team/tasks/${taskId}/status`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ status })
-    });
-    if (!res.ok) {
-      setTeamMessage("Не удалось обновить статус задачи");
-      setTeamTone(res.status === 409 ? "conflict" : "error");
-      return;
-    }
-    setTeamMessage(`Статус задачи обновлен: ${teamTaskStatusLabel(status)}`);
-    setTeamTone("success");
-    await loadTeamData();
   }
 
   async function loadChatUsers() {
@@ -3080,23 +2854,14 @@ function App() {
     if (!token || activeTab !== "integrations") {
       return;
     }
-    void loadIntegrationJobs();
-    void loadNotifications();
-    void loadReadiness();
-  }, [token, activeTab]);
-
-  useEffect(() => {
-    if (!token || activeTab !== "team" || !canReadTeam) return;
-    void loadCatalogData();
-    void loadProjects();
-    void loadTeamData();
-  }, [token, activeTab, canReadTeam]);
-
-  useEffect(() => {
-    if (!token || activeTab !== "issues" || !canReadTeam) return;
-    if (teamEmployees.length) return;
-    void loadTeamData();
-  }, [token, activeTab, canReadTeam, teamEmployees.length]);
+    if (canReadIntegrations) {
+      void loadIntegrationJobs();
+      void loadReadiness();
+    }
+    if (canReadIntegrations || canReadNotifications) {
+      void loadNotifications();
+    }
+  }, [token, activeTab, canReadIntegrations, canReadNotifications]);
 
   useEffect(() => {
     if (!dashboardWarehouseId && warehouses.length) {
@@ -3139,19 +2904,6 @@ function App() {
   }, [activeTab, feedbackMessages, feedbackLoading]);
 
   useEffect(() => {
-    if (activeTab !== "team" || !focusedTeamTaskId) return;
-    const row = document.getElementById(`team-task-${focusedTeamTaskId}`);
-    if (row) {
-      row.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [activeTab, focusedTeamTaskId, teamTasks]);
-
-  useEffect(() => {
-    if (!token || activeTab !== "inbox") return;
-    void loadInboxData();
-  }, [token, activeTab, canReadIntegrations, canReadTeam]);
-
-  useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
@@ -3178,9 +2930,7 @@ function App() {
     if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
     visibleTabs.add("camp");
-    if (canReadIntegrations) visibleTabs.add("integrations");
-    if (canReadIntegrations || canReadTeam) visibleTabs.add("inbox");
-    if (canReadTeam) visibleTabs.add("team");
+    if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
     visibleTabs.add("feedback");
     visibleTabs.add("reports");
     if (canReadAudit) visibleTabs.add("audit");
@@ -3204,7 +2954,7 @@ function App() {
     canMaterialMatch,
     canReadLimits,
     canReadIntegrations,
-    canReadTeam,
+    canReadNotifications,
     canReadAudit,
     canManageUsers
   ]);
@@ -3525,8 +3275,6 @@ function App() {
     setStockMovements([]);
     setIntegrationJobs([]);
     setNotifications([]);
-    setSelectedNotificationIds([]);
-    setMyTasks([]);
     setUsers([]);
     setRoles([]);
     setMe(null);
@@ -3640,8 +3388,8 @@ function App() {
         {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
         {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
         {showLegacyMatching && canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
-        {(canReadIntegrations || canReadTeam) && <button className={`navBtn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}><span className="navIcon">✉</span>Центр входящих</button>}
-        {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
+
+
         <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
         <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка PDF</button>
         {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
@@ -3650,7 +3398,7 @@ function App() {
         {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
         {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
         {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
-        {canReadIntegrations && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>Интеграции</button>}
+        {(canReadIntegrations || canReadNotifications) && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>{canReadIntegrations ? "Интеграции" : "Уведомления"}</button>}
 
         <p className="navSectionTitle">Администрирование</p>
         {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
@@ -3718,7 +3466,8 @@ function App() {
             </div>
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
-            {(canReadIntegrations || canReadTeam) && <button className="topIconBtn" onClick={() => setActiveTab("inbox")}>Входящие</button>}
+
+
             <button className="topIconBtn" onClick={() => setActiveTab("profile")}>Профиль</button>
             <button className="topIconBtn" onClick={() => setActiveTab("settings")}>Настройки</button>
             {me ? (
@@ -3793,8 +3542,8 @@ function App() {
                 type="button"
                 className="dashboardFactBtn"
                 onClick={() => {
-                  if (!(canReadIntegrations || canReadTeam)) return;
-                  setActiveTab("inbox");
+                  if (!canReadNotifications && !canReadIntegrations) return;
+                  setActiveTab("integrations");
                 }}
               >
                 Мои непрочитанные уведомления: <strong>{dashboard.warehouse.unreadNotifications}</strong>
@@ -3803,8 +3552,8 @@ function App() {
                 type="button"
                 className="dashboardFactBtn"
                 onClick={() => {
-                  if (!(canReadIntegrations || canReadTeam)) return;
-                  setActiveTab("inbox");
+                  if (!canReadNotifications && !canReadIntegrations) return;
+                  setActiveTab("integrations");
                 }}
               >
                 Критические уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
@@ -3844,8 +3593,8 @@ function App() {
                   type="button"
                   className="dashboardFactBtn"
                   onClick={() => {
-                    if (canReadTeam) setActiveTab("team");
-                    else if (canReadAudit) setActiveTab("audit");
+                    if (canReadAudit) setActiveTab("audit");
+                    else if (canReadIntegrations || canReadNotifications) setActiveTab("integrations");
                   }}
                 >
                   Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
@@ -3867,7 +3616,16 @@ function App() {
                 {showLegacyMatching ? (
                   <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
                 ) : null}
-                <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("integrations")}><span>Интеграции</span><strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong></button>
+                <button
+                  type="button"
+                  className="kpi kpiBtn"
+                  onClick={() => {
+                    if (canReadIntegrations || canReadNotifications) setActiveTab("integrations");
+                  }}
+                >
+                  <span>Уведомления</span>
+                  <strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong>
+                </button>
               </div>
               <div className="card">
                 <h3>Обзор по объекту</h3>
@@ -5073,217 +4831,48 @@ function App() {
         </div>
       )}
 
-      {activeTab === "inbox" && (canReadIntegrations || canReadTeam) && (
+      {activeTab === "integrations" && (canReadIntegrations || canReadNotifications) && (
         <div className="card">
-          <h2>Центр входящих</h2>
-          {inboxLoading && <LoadingState text="Загрузка входящих..." />}
-          {inboxError && <ErrorState text={inboxError} />}
-          <div className="toolbar">
-            <select value={inboxFilter} onChange={(e) => setInboxFilter(e.target.value as typeof inboxFilter)}>
-              <option value="all">Все входящие</option>
-              <option value="new">Новые</option>
-              <option value="critical">Критичные</option>
-              <option value="overdue">Просроченные</option>
-              <option value="read_today">Прочитанные сегодня</option>
-              <option value="mine">Мои задачи</option>
-            </select>
-            {canReadIntegrations && <button type="button" onClick={() => void loadInboxData()}>Обновить уведомления</button>}
-            {canReadTeam && <button type="button" onClick={() => void loadInboxData()}>Обновить задачи</button>}
-            {canReadIntegrations && (
-              <button
-                type="button"
-                onClick={() => void markNotificationsRead(notifications.filter((n) => !n.isRead).map((n) => n.id))}
-              >
-                Прочитать все уведомления
-              </button>
-            )}
-          </div>
-
-          {canReadIntegrations && inboxFilter !== "mine" && !inboxLoading && (
+          <h2>{canReadIntegrations ? "Интеграции и уведомления" : "Уведомления"}</h2>
+          {canReadIntegrations && (
             <>
-              <h3>Уведомления</h3>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  onClick={() => void markNotificationsRead(selectedNotificationIds)}
-                  disabled={!selectedNotificationIds.length}
-                >
-                  Прочитать выбранные ({selectedNotificationIds.length})
-                </button>
-                <button type="button" onClick={() => setSelectedNotificationIds([])} disabled={!selectedNotificationIds.length}>
-                  Сбросить выбор
-                </button>
+              <h3 style={{ marginTop: 0 }}>Интеграционные задания</h3>
+              <div className="form grid2">
+                <label>
+                  Тип задания
+                  <input value={integrationKind} onChange={(e) => setIntegrationKind(e.target.value)} />
+                </label>
+                <label>
+                  Параметры (JSON)
+                  <input value={integrationPayload} onChange={(e) => setIntegrationPayload(e.target.value)} />
+                </label>
               </div>
-              {[
-                { key: "critical", title: "Критичные", rows: groupedInboxNotifications.critical },
-                { key: "fresh", title: "Новые", rows: groupedInboxNotifications.fresh },
-                { key: "readToday", title: "Прочитанные сегодня", rows: groupedInboxNotifications.readToday },
-                { key: "other", title: "Остальные", rows: groupedInboxNotifications.other }
-              ].map((group) => (
-                <div key={group.key} className="card inboxGroupCard">
-                  <div className="rightCardHeader">
-                    <h4>{group.title}</h4>
-                    <span className="muted">{group.rows.length}</span>
-                  </div>
-                  {group.rows.length ? (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th></th>
-                          <th>Время</th>
-                          <th>Уровень</th>
-                          <th>Тема</th>
-                          <th>Статус</th>
-                          <th>Действия</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.rows.map((n: NotificationRow) => (
-                          <tr key={n.id}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={selectedNotificationIds.includes(n.id)}
-                                onChange={(e) => {
-                                  setSelectedNotificationIds((prev) =>
-                                    e.target.checked ? [...prev, n.id] : prev.filter((id) => id !== n.id)
-                                  );
-                                }}
-                              />
-                            </td>
-                            <td>{new Date(n.createdAt).toLocaleString()}</td>
-                            <td>{n.level === "ERROR" ? "Ошибка" : n.level === "WARNING" ? "Предупреждение" : "Инфо"}</td>
-                            <td>{n.title}</td>
-                            <td>{n.isRead ? "Прочитано" : "Новое"}</td>
-                            <td>
-                              <div className="toolbar">
-                                {!n.isRead ? (
-                                  <button type="button" onClick={() => void markNotificationsRead([n.id])}>Прочитать</button>
-                                ) : (
-                                  <span className="muted">—</span>
-                                )}
-                                {n.entityType && n.entityId ? (
-                                  <button type="button" onClick={() => openInboxEntity(n)}>Открыть</button>
-                                ) : null}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="muted">Нет уведомлений в этой группе.</p>
-                  )}
-                </div>
-              ))}
+              <div className="toolbar">
+                <button type="button" onClick={() => void createIntegrationJob()}>Создать задание</button>
+                <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
+                <button type="button" onClick={() => void loadReadiness()}>Проверка готовности</button>
+              </div>
+              {integrationMessage && <ErrorState text={integrationMessage} />}
+              {readiness ? (
+                <ReadinessPanel readiness={readiness} />
+              ) : (
+                <LoadingState text="Проверка готовности еще не загружена." />
+              )}
+              {integrationJobs.length ? (
+                <IntegrationJobsTable
+                  jobs={integrationJobs}
+                  statusClass={statusClass}
+                  onRun={(id) => {
+                    void runIntegrationJob(id);
+                  }}
+                />
+              ) : (
+                <EmptyState title="Заданий пока нет." hint="Создай первую integration job и запусти ее." />
+              )}
             </>
           )}
 
-          {canReadTeam && !inboxLoading && (
-            <>
-              <h3 style={{ marginTop: 14 }}>Мои задачи</h3>
-              {[
-                { key: "overdue", title: "Просроченные", rows: groupedInboxTasks.overdue },
-                { key: "today", title: "На сегодня", rows: groupedInboxTasks.today },
-                { key: "week", title: "На этой неделе", rows: groupedInboxTasks.week },
-                { key: "later", title: "Позже / без срока", rows: groupedInboxTasks.later }
-              ].map((group) => (
-                <div key={group.key} className="card inboxGroupCard">
-                  <div className="rightCardHeader">
-                    <h4>{group.title}</h4>
-                    <span className="muted">{group.rows.length}</span>
-                  </div>
-                  {group.rows.length ? (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Задача</th>
-                          <th>SLA</th>
-                          <th>Срок</th>
-                          <th>Статус</th>
-                          <th>Следующий шаг</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.rows.map((t: TeamTask) => (
-                          <tr key={t.id}>
-                            <td>
-                              {t.title}
-                              {t.description ? <p className="muted">{t.description}</p> : null}
-                            </td>
-                            <td><span className={taskSlaClass(t)}>{taskSlaLabel(t)}</span></td>
-                            <td>{t.dueAt ? new Date(t.dueAt).toLocaleString() : "—"}</td>
-                            <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
-                            <td>
-                              <div className="toolbar">
-                                {teamTaskNextStatuses(t.status).map((next) => (
-                                  <button
-                                    key={`${t.id}-inbox-${next}`}
-                                    type="button"
-                                    onClick={() => void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED")}
-                                  >
-                                    {teamTaskStatusLabel(next)}
-                                  </button>
-                                ))}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="muted">Нет задач в этой группе.</p>
-                  )}
-                </div>
-              ))}
-              {!groupedInboxTasks.overdue.length &&
-                !groupedInboxTasks.today.length &&
-                !groupedInboxTasks.week.length &&
-                !groupedInboxTasks.later.length && (
-                  <EmptyState title="Входящих задач нет" hint="Новые задачи появятся в этом разделе автоматически." />
-                )}
-            </>
-          )}
-        </div>
-      )}
-
-      {activeTab === "integrations" && (
-        <div className="card">
-          <h2>Интеграционные задачи</h2>
-          <div className="form grid2">
-            <label>
-              Тип задачи
-              <input value={integrationKind} onChange={(e) => setIntegrationKind(e.target.value)} />
-            </label>
-            <label>
-              Параметры (JSON)
-              <input value={integrationPayload} onChange={(e) => setIntegrationPayload(e.target.value)} />
-            </label>
-          </div>
-          <div className="toolbar">
-            <button type="button" onClick={() => void createIntegrationJob()}>Создать задачу</button>
-            <button type="button" onClick={() => void loadIntegrationJobs()}>Обновить список</button>
-            <button type="button" onClick={() => void loadReadiness()}>Проверка готовности</button>
-          </div>
-          {integrationMessage && <ErrorState text={integrationMessage} />}
-          {readiness ? (
-            <ReadinessPanel readiness={readiness} />
-          ) : (
-            <LoadingState text="Проверка готовности еще не загружена." />
-          )}
-          {integrationJobs.length ? (
-            <IntegrationJobsTable
-              jobs={integrationJobs}
-              statusClass={statusClass}
-              onRun={(id) => {
-                void runIntegrationJob(id);
-              }}
-            />
-          ) : (
-            <EmptyState title="Задач пока нет." hint="Создай первую integration job и запусти ее." />
-          )}
-
-          <h3 style={{ marginTop: 16 }}>Уведомления</h3>
+          <h3 style={{ marginTop: canReadIntegrations ? 16 : 0 }}>Уведомления</h3>
           <div className="toolbar">
             <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>
             <button
@@ -5294,143 +4883,10 @@ function App() {
             </button>
           </div>
           {notifications.length ? (
-            <NotificationsTable notifications={notifications} />
+            <NotificationsTable notifications={notifications} onOpenLinked={openNotificationLinkedEntity} />
           ) : (
             <EmptyState title="Уведомлений пока нет." />
           )}
-        </div>
-      )}
-
-      {activeTab === "team" && canReadTeam && (
-        <div className="card">
-          <h2>Сотрудники и задачи</h2>
-          {teamLoading && <LoadingState text="Загрузка команды..." />}
-          {teamError && <ErrorState text={teamError} />}
-          {canWriteTeamTasks && (
-            <>
-              <h3>Поставить задачу сотруднику</h3>
-              <div className="form grid2">
-                <label>
-                  Сотрудник
-                  <select value={teamAssigneeId} onChange={(e) => setTeamAssigneeId(e.target.value)}>
-                    {teamEmployees.map((u) => (
-                      <option key={u.id} value={u.id}>{u.fullName} ({roleLabel(u.role)})</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Срок (опционально)
-                  <input type="datetime-local" value={teamTaskDueAt} onChange={(e) => setTeamTaskDueAt(e.target.value)} />
-                </label>
-                <label>
-                  Объект (проект)
-                  <select value={teamTaskProjectId} onChange={(e) => setTeamTaskProjectId(e.target.value)}>
-                    <option value="">Без проекта</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{safeName(p.name)}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Склад (опционально)
-                  <select value={teamTaskWarehouseId} onChange={(e) => setTeamTaskWarehouseId(e.target.value)}>
-                    <option value="">Без склада</option>
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="form">
-                <label>
-                  Заголовок задачи
-                  <input value={teamTaskTitle} onChange={(e) => setTeamTaskTitle(e.target.value)} />
-                </label>
-                <label>
-                  Описание
-                  <textarea value={teamTaskDescription} onChange={(e) => setTeamTaskDescription(e.target.value)} />
-                </label>
-              </div>
-              <div className="toolbar">
-                <button type="button" onClick={() => void createTeamTask()}>Поставить задачу</button>
-                <button type="button" onClick={() => void loadTeamData()}>Обновить</button>
-              </div>
-            </>
-          )}
-
-          <h3>Все сотрудники</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>ФИО</th>
-                <th>Роль</th>
-                <th>Статус</th>
-                <th>Склады</th>
-                <th>Проекты</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teamEmployees.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.fullName} <span className="muted">({u.email})</span></td>
-                  <td>{roleLabel(u.role)}</td>
-                  <td>{statusLabel(u.status)}</td>
-                  <td>{u.warehouses.length ? u.warehouses.map((w) => safeName(w.name)).join(", ") : "Без ограничений"}</td>
-                  <td>{u.projects.length ? u.projects.map((p) => safeName(p.name)).join(", ") : "Без ограничений"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3 style={{ marginTop: 14 }}>Задачи команды</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Задача</th>
-                <th>Кому</th>
-                <th>От кого</th>
-                <th>Объект</th>
-                <th>Статус</th>
-                <th>Следующий шаг</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teamTasks.map((t) => (
-                <tr key={t.id} id={`team-task-${t.id}`} className={focusedTeamTaskId === t.id ? "selectedRow" : ""}>
-                  <td>
-                    {t.title}
-                    {t.description ? <p className="muted">{t.description}</p> : null}
-                  </td>
-                  <td>{t.assignee?.fullName || "-"}</td>
-                  <td>{t.createdBy?.fullName || "-"}</td>
-                  <td>{t.project?.name || t.warehouse?.name || "-"}</td>
-                  <td><span className={`badge ${statusClass(t.status)}`}>{teamTaskStatusLabel(t.status)}</span></td>
-                  <td>
-                    <div className="toolbar">
-                      {teamTaskNextStatuses(t.status).map((next) => (
-                        <button
-                          key={`${t.id}-${next}`}
-                          type="button"
-                          onClick={() => {
-                            setFocusedTeamTaskId(t.id);
-                            void updateTeamTaskStatus(t.id, next as "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED");
-                          }}
-                        >
-                          {teamTaskStatusLabel(next)}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {focusedTeamTaskId && (
-            <div className="toolbar">
-              <button type="button" onClick={() => setFocusedTeamTaskId("")}>Снять фокус с задачи</button>
-            </div>
-          )}
-          {teamMessage && <ResultBanner text={teamMessage} tone={teamTone} />}
         </div>
       )}
 
@@ -5948,9 +5404,10 @@ function App() {
                 />
               </label>
               <datalist id="issueResponsibleSuggest">
-                {teamEmployees.map((emp) => (
+                {chatUsers.map((emp) => (
                   <option key={`emp-suggest-${emp.id}`} value={emp.fullName}>
-                    {emp.role}{emp.email ? ` · ${emp.email}` : ""}
+                    {roleLabel(emp.role)}
+                    {emp.position ? ` · ${emp.position}` : ""}
                   </option>
                 ))}
               </datalist>
@@ -9264,7 +8721,9 @@ function App() {
                 {canReadStocks && <option value="warehouse">Склад</option>}
                 {canReadIssues && <option value="issues">Быстрая выдача</option>}
                 {canReadTools && <option value="tools">Инструменты</option>}
-                {canReadIntegrations && <option value="integrations">Интеграции</option>}
+                {(canReadIntegrations || canReadNotifications) && (
+                  <option value="integrations">{canReadIntegrations ? "Интеграции" : "Уведомления"}</option>
+                )}
               </select>
             </label>
           </div>

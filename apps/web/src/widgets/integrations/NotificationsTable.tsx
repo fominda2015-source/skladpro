@@ -11,7 +11,13 @@ export type NotificationRow = {
   entityId?: string | null;
 };
 
-export function NotificationsTable({ notifications }: { notifications: NotificationRow[] }) {
+export function NotificationsTable({
+  notifications,
+  onOpenLinked
+}: {
+  notifications: NotificationRow[];
+  onOpenLinked?: (n: NotificationRow) => void;
+}) {
   const levelLabel = (level: NotificationRow["level"]) =>
     ({
       INFO: "Инфо",
@@ -19,8 +25,12 @@ export function NotificationsTable({ notifications }: { notifications: Notificat
       ERROR: "Ошибка"
     })[level] ?? level;
 
+  const headers = onOpenLinked
+    ? ["Время", "Уровень", "Тема", "Сообщение", "Статус", "Действия"]
+    : ["Время", "Уровень", "Тема", "Сообщение", "Статус"];
+
   return (
-    <DataTable headers={["Время", "Уровень", "Тема", "Сообщение", "Статус"]}>
+    <DataTable headers={headers}>
       {notifications.map((n) => (
         <tr key={n.id}>
           <td>{new Date(n.createdAt).toLocaleString()}</td>
@@ -28,6 +38,17 @@ export function NotificationsTable({ notifications }: { notifications: Notificat
           <td>{n.title}</td>
           <td>{n.message}</td>
           <td>{n.isRead ? "Прочитано" : "Новое"}</td>
+          {onOpenLinked ? (
+            <td>
+              {n.entityType && n.entityId ? (
+                <button type="button" className="ghostBtn" onClick={() => onOpenLinked(n)}>
+                  Открыть
+                </button>
+              ) : (
+                <span className="muted">—</span>
+              )}
+            </td>
+          ) : null}
         </tr>
       ))}
     </DataTable>

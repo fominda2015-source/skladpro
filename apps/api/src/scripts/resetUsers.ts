@@ -20,7 +20,6 @@ async function main() {
     await tx.userWarehouseSectionScope.deleteMany({});
     await tx.userWarehouseScope.deleteMany({});
     await tx.userProjectScope.deleteMany({});
-    await tx.staffTask.deleteMany({});
     await tx.notification.deleteMany({});
     await tx.user.deleteMany({});
   });
