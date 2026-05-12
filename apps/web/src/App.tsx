@@ -539,6 +539,9 @@ function App() {
   const [acceptanceDocNumbers, setAcceptanceDocNumbers] = useState<Record<string, string>>({});
   const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
   const [expandedReceiptIds, setExpandedReceiptIds] = useState<Record<string, boolean>>({});
+  // Модалка «приложить документы» перед самым приёмом.
+  const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
+  const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
@@ -2145,7 +2148,7 @@ function App() {
     await loadReceiptRequests();
   }
 
-  async function submitReceiptAcceptance(row: ReceiptRequestRow) {
+  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []) {
     if (!token) return;
     const drafts = acceptanceDrafts[row.id] || {};
     const mappings: Array<{
@@ -2168,7 +2171,6 @@ function App() {
       }
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
-      // Если есть «новое название» — используем его, иначе берём текущее sourceName.
       const finalName = explicitName || it.sourceName;
       mappings.push({
         itemId: it.id,
@@ -2178,7 +2180,7 @@ function App() {
       });
     }
     if (!mappings.length) {
-      setOpsMessage("Заполните количество и название хотя бы одной позиции");
+      setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
       return;
     }
     const form = new FormData();
@@ -2189,8 +2191,11 @@ function App() {
         documentNumber: acceptanceDocNumbers[row.id] || undefined
       })
     );
-    const scan = acceptanceScans[row.id];
-    if (scan) form.append("scan", scan);
+    const filesToSend: File[] = [];
+    const legacyScan = acceptanceScans[row.id];
+    if (legacyScan) filesToSend.push(legacyScan);
+    for (const f of extraFiles) filesToSend.push(f);
+    for (const f of filesToSend) form.append("scan", f);
     setAcceptanceSubmitting((prev) => ({ ...prev, [row.id]: true }));
     try {
       const res = await fetch(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
@@ -2209,7 +2214,9 @@ function App() {
         setOpsMessage(serverMsg || "Не удалось провести приёмку");
         return;
       }
-      setOpsMessage(`Приёмка по заявке ${row.number} проведена`);
+      setOpsMessage(
+        `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
+      );
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
         delete next[row.id];
@@ -4554,8 +4561,9 @@ function App() {
               <div>
                 <h2 style={{ margin: 0 }}>Приходы</h2>
                 <p className="muted">
-                  Раздел {objectSectionFilter}. Материал принимается только из заявок: загрузите Excel-заявку (формат ORDER), затем
-                  частично или полностью оприходуйте позиции с сопоставлением «название из заявки → название УПД» и сканом документа.
+                  Раздел {objectSectionFilter}. Материал принимается только из заявок (раздел «Заявки»).
+                  Здесь отметь галочками позиции, которые принимаешь сейчас, проверь количества — после нажатия «Принять отмеченные»
+                  спросим документы (по заявке их может быть несколько приёмок).
                 </p>
               </div>
               <div className="kpiRow" style={{ margin: 0 }}>
@@ -4570,46 +4578,18 @@ function App() {
               </div>
             </div>
 
-            {opsMessage && <ResultBanner text={opsMessage} tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"} />}
-
-            <div
-              className="card"
-              style={{ marginTop: 12 }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const file = e.dataTransfer.files?.[0];
-                if (!file) return;
-                if (!/\.(xlsx|xls)$/i.test(file.name)) {
-                  setOpsMessage("Выберите Excel-файл (.xlsx/.xls)");
-                  return;
-                }
-                setReceiptRequestFile(file);
-              }}
-            >
-              <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
-              <p className="muted">
-                Из файла берутся только позиции (B — наименование, F — количество, G — ед. изм.).
-                После загрузки появится вопрос «Заявка из лимита?» — можно сразу привязать заявку к шаблону лимита.
-              </p>
-              <div className="toolbar" style={{ flexWrap: "wrap" }}>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(e) => setReceiptRequestFile(e.target.files?.[0] || null)}
-                />
-                <button type="button" onClick={() => void uploadReceiptRequest()} disabled={!receiptRequestFile || !canWriteOperations}>
-                  Загрузить заявку
-                </button>
-                {receiptRequestFile && <span className="muted">{receiptRequestFile.name}</span>}
-              </div>
-            </div>
+            {opsMessage && (
+              <ResultBanner
+                text={opsMessage}
+                tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"}
+              />
+            )}
           </div>
 
           {!receiptRequests.length && (
             <EmptyState
               title="Заявок ещё нет"
-              hint="Загрузите Excel выше — оттуда появятся позиции для приёма на склад."
+              hint="Загрузи Excel-заявку во вкладке «Заявки» — позиции появятся здесь для приёма."
             />
           )}
 
@@ -4702,256 +4682,257 @@ function App() {
                       ))}
                     </datalist>
 
-                    <div className="form" style={{ marginTop: 10 }}>
-                      <label>
-                        Номер документа УПД / ТН
-                        <input
-                          value={acceptanceDocNumbers[row.id] || ""}
-                          onChange={(e) =>
-                            setAcceptanceDocNumbers((prev) => ({ ...prev, [row.id]: e.target.value }))
-                          }
-                          placeholder={`По умолчанию: ${row.number}`}
-                          disabled={finished}
-                        />
-                      </label>
-                      <label>
-                        Скан/файл документа
-                        <input
-                          type="file"
-                          onChange={(e) =>
-                            setAcceptanceScans((prev) => ({ ...prev, [row.id]: e.target.files?.[0] || null }))
-                          }
-                          disabled={finished}
-                        />
-                        {acceptanceScans[row.id] && (
-                          <span className="muted" style={{ marginTop: 4, display: "inline-block" }}>
-                            {acceptanceScans[row.id]?.name}
-                          </span>
-                        )}
-                      </label>
-                    </div>
-
-                    <div className="desktopTable" style={{ overflowX: "auto", marginTop: 8 }}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Название из заявки</th>
-                            <th>Кол-во</th>
-                            <th>Принято / план</th>
-                            <th>Название по УПД</th>
-                            <th>Ед. УПД</th>
-                            <th>Принять сейчас</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {row.items.map((it) => {
-                            const total = Number(it.quantity);
-                            const accepted = Number(it.acceptedQty || 0);
-                            const remaining = Math.max(0, total - accepted);
-                            const draft = drafts[it.id] || { newName: "", newUnit: "", qty: "" };
-                            const defaultName = draft.newName || it.mappedMaterial?.name || it.sourceName;
-                            const defaultUnit = draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
-                            const fullyAccepted = remaining <= 1e-6;
-                            return (
-                              <tr key={it.id} className={fullyAccepted ? "muted" : ""}>
-                                <td style={{ maxWidth: 280 }}>{it.sourceName}</td>
-                                <td>{total}</td>
-                                <td>
-                                  {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
-                                  {total.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                                </td>
-                                <td>
-                                  <input
-                                    list={datalistId}
-                                    value={defaultName}
-                                    placeholder="Как в УПД…"
-                                    disabled={finished || fullyAccepted}
-                                    onChange={(e) =>
-                                      setAcceptanceDrafts((prev) => ({
-                                        ...prev,
-                                        [row.id]: {
-                                          ...prev[row.id],
-                                          [it.id]: {
-                                            newName: e.target.value,
-                                            newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                            qty: prev[row.id]?.[it.id]?.qty || ""
-                                          }
-                                        }
-                                      }))
-                                    }
-                                  />
-                                </td>
-                                <td style={{ width: 90 }}>
-                                  <input
-                                    value={defaultUnit}
-                                    placeholder={it.sourceUnit || "шт"}
-                                    disabled={finished || fullyAccepted}
-                                    onChange={(e) =>
-                                      setAcceptanceDrafts((prev) => ({
-                                        ...prev,
-                                        [row.id]: {
-                                          ...prev[row.id],
-                                          [it.id]: {
-                                            newName: prev[row.id]?.[it.id]?.newName || "",
-                                            newUnit: e.target.value,
-                                            qty: prev[row.id]?.[it.id]?.qty || ""
-                                          }
-                                        }
-                                      }))
-                                    }
-                                  />
-                                </td>
-                                <td style={{ width: 130 }}>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step={0.001}
-                                    max={remaining || undefined}
-                                    value={draft.qty}
-                                    disabled={finished || fullyAccepted}
-                                    placeholder={remaining ? String(remaining) : ""}
-                                    onChange={(e) =>
-                                      setAcceptanceDrafts((prev) => ({
-                                        ...prev,
-                                        [row.id]: {
-                                          ...prev[row.id],
-                                          [it.id]: {
-                                            newName: prev[row.id]?.[it.id]?.newName || "",
-                                            newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                            qty: e.target.value
-                                          }
-                                        }
-                                      }))
-                                    }
-                                  />
-                                </td>
-                              </tr>
+                    {(() => {
+                      const itemsLeft = row.items.filter(
+                        (it) => Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0)) > 0
+                      );
+                      const selectedCount = itemsLeft.filter((it) => {
+                        const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
+                        return Number.isFinite(q) && q > 0;
+                      }).length;
+                      const allSelected = itemsLeft.length > 0 && selectedCount === itemsLeft.length;
+                      const someSelected = selectedCount > 0;
+                      const setSelectAll = (checked: boolean) => {
+                        setAcceptanceDrafts((prev) => {
+                          const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
+                          for (const it of itemsLeft) {
+                            const remaining = Math.max(
+                              0,
+                              Number(it.quantity) - Number(it.acceptedQty || 0)
                             );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => void submitReceiptAcceptance(row)}
-                        disabled={finished || !canWriteOperations || Boolean(acceptanceSubmitting[row.id])}
-                      >
-                        {acceptanceSubmitting[row.id] ? "Принимаем…" : "Принять выбранные позиции"}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() => {
-                          // авто-заполнить «остаток» всем неполностью принятым
-                          const next = { ...(acceptanceDrafts[row.id] || {}) };
-                          for (const it of row.items) {
-                            const remaining = Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
-                            if (remaining > 0) {
-                              next[it.id] = {
-                                newName: next[it.id]?.newName || it.mappedMaterial?.name || it.sourceName,
-                                newUnit: next[it.id]?.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
-                                qty: String(remaining)
-                              };
-                            }
+                            const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
+                            next[row.id][it.id] = checked
+                              ? {
+                                  newName: existing.newName || it.mappedMaterial?.name || it.sourceName,
+                                  newUnit:
+                                    existing.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
+                                  qty: existing.qty && Number(existing.qty) > 0 ? existing.qty : String(remaining)
+                                }
+                              : { ...existing, qty: "" };
                           }
-                          setAcceptanceDrafts((prev) => ({ ...prev, [row.id]: next }));
-                        }}
-                        disabled={finished}
-                      >
-                        Принять всё, что осталось
-                      </button>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() =>
-                          setAcceptanceDrafts((prev) => {
-                            const next = { ...prev };
-                            delete next[row.id];
-                            return next;
-                          })
-                        }
-                        disabled={finished}
-                      >
-                        Сбросить ввод
-                      </button>
-                    </div>
+                          return next;
+                        });
+                      };
+
+                      return (
+                        <>
+                          <div className="form" style={{ marginTop: 10 }}>
+                            <label>
+                              Номер документа УПД / ТН (опционально)
+                              <input
+                                value={acceptanceDocNumbers[row.id] || ""}
+                                onChange={(e) =>
+                                  setAcceptanceDocNumbers((prev) => ({ ...prev, [row.id]: e.target.value }))
+                                }
+                                placeholder={`По умолчанию: ${row.number}`}
+                                disabled={finished}
+                              />
+                            </label>
+                          </div>
+
+                          <div className="toolbar" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                            <label
+                              className="toolbar"
+                              style={{ gap: 6, alignItems: "center", padding: 0, cursor: "pointer" }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={allSelected}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = !allSelected && someSelected;
+                                }}
+                                onChange={(e) => setSelectAll(e.target.checked)}
+                                disabled={finished || !itemsLeft.length}
+                              />
+                              <span>
+                                {allSelected
+                                  ? "Снять все"
+                                  : someSelected
+                                  ? `Выбрано ${selectedCount} из ${itemsLeft.length}`
+                                  : "Выбрать все оставшиеся"}
+                              </span>
+                            </label>
+                          </div>
+
+                          <div className="desktopTable" style={{ overflowX: "auto", marginTop: 8 }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: 36 }}>✓</th>
+                                  <th>Название из заявки</th>
+                                  <th>Принято / план</th>
+                                  <th>Название по УПД</th>
+                                  <th>Ед.</th>
+                                  <th>Принять сейчас</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {row.items.map((it) => {
+                                  const total = Number(it.quantity);
+                                  const accepted = Number(it.acceptedQty || 0);
+                                  const remaining = Math.max(0, total - accepted);
+                                  const draft = drafts[it.id] || { newName: "", newUnit: "", qty: "" };
+                                  const defaultName =
+                                    draft.newName || it.mappedMaterial?.name || it.sourceName;
+                                  const defaultUnit =
+                                    draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  const fullyAccepted = remaining <= 1e-6;
+                                  const isPicked =
+                                    Number(draft.qty || 0) > 0 || (draft.qty || "").trim() !== "";
+                                  const toggle = (checked: boolean) =>
+                                    setAcceptanceDrafts((prev) => ({
+                                      ...prev,
+                                      [row.id]: {
+                                        ...prev[row.id],
+                                        [it.id]: checked
+                                          ? {
+                                              newName: prev[row.id]?.[it.id]?.newName || defaultName,
+                                              newUnit: prev[row.id]?.[it.id]?.newUnit || defaultUnit,
+                                              qty:
+                                                prev[row.id]?.[it.id]?.qty &&
+                                                Number(prev[row.id]?.[it.id]?.qty) > 0
+                                                  ? prev[row.id][it.id]!.qty
+                                                  : String(remaining)
+                                            }
+                                          : {
+                                              newName: prev[row.id]?.[it.id]?.newName || "",
+                                              newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                              qty: ""
+                                            }
+                                      }
+                                    }));
+                                  return (
+                                    <tr
+                                      key={it.id}
+                                      style={{
+                                        background: isPicked ? "rgba(34, 197, 94, 0.08)" : undefined,
+                                        opacity: fullyAccepted ? 0.55 : 1
+                                      }}
+                                    >
+                                      <td>
+                                        <input
+                                          type="checkbox"
+                                          checked={isPicked}
+                                          disabled={finished || fullyAccepted}
+                                          onChange={(e) => toggle(e.target.checked)}
+                                        />
+                                      </td>
+                                      <td style={{ maxWidth: 280 }}>{it.sourceName}</td>
+                                      <td>
+                                        {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
+                                        {total.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}{" "}
+                                        <span className="muted">{it.sourceUnit || "шт"}</span>
+                                      </td>
+                                      <td>
+                                        <input
+                                          list={datalistId}
+                                          value={defaultName}
+                                          placeholder="Как в УПД…"
+                                          disabled={finished || fullyAccepted}
+                                          onChange={(e) =>
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: e.target.value,
+                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                                  qty: prev[row.id]?.[it.id]?.qty || ""
+                                                }
+                                              }
+                                            }))
+                                          }
+                                        />
+                                      </td>
+                                      <td style={{ width: 90 }}>
+                                        <input
+                                          value={defaultUnit}
+                                          placeholder={it.sourceUnit || "шт"}
+                                          disabled={finished || fullyAccepted}
+                                          onChange={(e) =>
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: prev[row.id]?.[it.id]?.newName || "",
+                                                  newUnit: e.target.value,
+                                                  qty: prev[row.id]?.[it.id]?.qty || ""
+                                                }
+                                              }
+                                            }))
+                                          }
+                                        />
+                                      </td>
+                                      <td style={{ width: 130 }}>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          step={0.001}
+                                          max={remaining || undefined}
+                                          value={draft.qty}
+                                          disabled={finished || fullyAccepted}
+                                          placeholder={remaining ? String(remaining) : ""}
+                                          onChange={(e) =>
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: prev[row.id]?.[it.id]?.newName || "",
+                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                                  qty: e.target.value
+                                                }
+                                              }
+                                            }))
+                                          }
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPendingAcceptanceFiles([]);
+                                setPendingAcceptanceRequestId(row.id);
+                              }}
+                              disabled={finished || !canWriteOperations || !someSelected || Boolean(acceptanceSubmitting[row.id])}
+                            >
+                              {acceptanceSubmitting[row.id]
+                                ? "Принимаем…"
+                                : someSelected
+                                ? `Принять отмеченные (${selectedCount})`
+                                : "Принять отмеченные"}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() =>
+                                setAcceptanceDrafts((prev) => {
+                                  const next = { ...prev };
+                                  delete next[row.id];
+                                  return next;
+                                })
+                              }
+                              disabled={finished || !someSelected}
+                            >
+                              Снять выбор
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </>
                 )}
               </div>
             );
           })}
-
-          {limitPromptRequest && (
-            <div
-              role="dialog"
-              aria-modal="true"
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(15, 23, 42, 0.45)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 50,
-                padding: 16
-              }}
-              onClick={() => setLimitPromptRequest(null)}
-            >
-              <div
-                className="card"
-                style={{ maxWidth: 480, width: "100%" }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
-                <p className="muted">
-                  Заявка <strong>{limitPromptRequest.number}</strong> загружена.
-                  Можно сразу привязать её к одному из шаблонов лимитов этого объекта/раздела —
-                  тогда при приёмке будут предлагаться материалы из этого лимита.
-                </p>
-                <label>
-                  Шаблон лимита
-                  <select
-                    value={limitPromptTemplateId}
-                    onChange={(e) => setLimitPromptTemplateId(e.target.value)}
-                  >
-                    <option value="">Не из лимита</option>
-                    {limitTemplates.map((t) => (
-                      <option key={`limit-prompt-${t.id}`} value={t.id}>
-                        {safeName(t.title)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="ghostBtn"
-                    onClick={() => {
-                      void attachReceiptRequestToLimit(limitPromptRequest.id, null);
-                      setLimitPromptRequest(null);
-                    }}
-                  >
-                    Не из лимита
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void attachReceiptRequestToLimit(
-                        limitPromptRequest.id,
-                        limitPromptTemplateId || null
-                      );
-                      setLimitPromptRequest(null);
-                    }}
-                    disabled={!limitPromptTemplateId}
-                  >
-                    Привязать к лимиту
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="card" style={{ marginTop: 12 }}>
             <h3 style={{ marginTop: 0 }}>Последние приходы</h3>
@@ -6429,6 +6410,50 @@ function App() {
               <strong>{receiptRequests.length}</strong>
             </div>
           </div>
+
+          <div
+            className="card"
+            style={{ marginTop: 12 }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files?.[0];
+              if (!file) return;
+              if (!/\.(xlsx|xls)$/i.test(file.name)) {
+                setOpsMessage("Выберите Excel-файл (.xlsx/.xls)");
+                return;
+              }
+              setReceiptRequestFile(file);
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
+            <p className="muted">
+              Заявки на приёмку грузим сюда. После загрузки спросим, привязать ли заявку к лимиту.
+              Сами материалы потом принимаем в разделе «Приходы» — там есть чекбоксы и приложение документов.
+            </p>
+            <div className="toolbar" style={{ flexWrap: "wrap" }}>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setReceiptRequestFile(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => void uploadReceiptRequest()}
+                disabled={!receiptRequestFile || !canWriteOperations}
+              >
+                Загрузить заявку
+              </button>
+              {receiptRequestFile && <span className="muted">{receiptRequestFile.name}</span>}
+            </div>
+            {opsMessage && (
+              <ResultBanner
+                text={opsMessage}
+                tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"}
+              />
+            )}
+          </div>
+
           <h3>Заявки на выдачу</h3>
           <table>
             <thead>
@@ -8503,6 +8528,190 @@ function App() {
           )}
         </div>
       )}
+
+      {limitPromptRequest && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 16
+          }}
+          onClick={() => setLimitPromptRequest(null)}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 480, width: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
+            <p className="muted">
+              Заявка <strong>{limitPromptRequest.number}</strong> загружена.
+              Можно привязать её к одному из шаблонов лимита этого объекта/раздела —
+              тогда при приёмке будут предлагаться названия материалов из лимита.
+            </p>
+            <label>
+              Шаблон лимита
+              <select
+                value={limitPromptTemplateId}
+                onChange={(e) => setLimitPromptTemplateId(e.target.value)}
+              >
+                <option value="">Не из лимита</option>
+                {limitTemplates.map((t) => (
+                  <option key={`limit-prompt-${t.id}`} value={t.id}>
+                    {safeName(t.title)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={() => {
+                  void attachReceiptRequestToLimit(limitPromptRequest.id, null);
+                  setLimitPromptRequest(null);
+                }}
+              >
+                Не из лимита
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void attachReceiptRequestToLimit(
+                    limitPromptRequest.id,
+                    limitPromptTemplateId || null
+                  );
+                  setLimitPromptRequest(null);
+                }}
+                disabled={!limitPromptTemplateId}
+              >
+                Привязать к лимиту
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingAcceptanceRequestId && (() => {
+        const row = receiptRequests.find((r) => r.id === pendingAcceptanceRequestId);
+        if (!row) return null;
+        const drafts = acceptanceDrafts[row.id] || {};
+        const pickedItems = row.items.filter((it) => {
+          const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
+          return Number.isFinite(q) && q > 0;
+        });
+        const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 60,
+              padding: 16
+            }}
+            onClick={() => {
+              if (!isSubmitting) {
+                setPendingAcceptanceRequestId(null);
+                setPendingAcceptanceFiles([]);
+              }
+            }}
+          >
+            <div
+              className="card"
+              style={{ maxWidth: 560, width: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ marginTop: 0 }}>Приложите документы к приёмке</h3>
+              <p className="muted">
+                Заявка <strong>{row.number}</strong>. Сейчас принимаем {pickedItems.length}{" "}
+                {pickedItems.length === 1 ? "позицию" : "позиций"}. По одной заявке может быть несколько приёмок —
+                документы прикрепятся именно к этой заявке (и к создаваемому приходу).
+              </p>
+              <ul className="plainList" style={{ maxHeight: 160, overflowY: "auto", marginBottom: 12 }}>
+                {pickedItems.map((it) => (
+                  <li key={`pending-item-${it.id}`}>
+                    {it.sourceName}{" "}
+                    <span className="muted">
+                      — {(drafts[it.id]?.qty || "0")} {drafts[it.id]?.newUnit || it.sourceUnit || "шт"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <label>
+                Сканы документов (УПД, ТН, фото, можно несколько)
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) =>
+                    setPendingAcceptanceFiles(Array.from(e.target.files || []))
+                  }
+                />
+              </label>
+              {pendingAcceptanceFiles.length > 0 && (
+                <ul className="plainList" style={{ marginTop: 6 }}>
+                  {pendingAcceptanceFiles.map((f, i) => (
+                    <li key={`pending-file-${i}`} className="muted">
+                      📎 {f.name} <span>({Math.ceil(f.size / 1024)} КБ)</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setPendingAcceptanceRequestId(null);
+                    setPendingAcceptanceFiles([]);
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  disabled={isSubmitting}
+                  onClick={async () => {
+                    const targetRow = row;
+                    setPendingAcceptanceRequestId(null);
+                    setPendingAcceptanceFiles([]);
+                    await submitReceiptAcceptance(targetRow, []);
+                  }}
+                >
+                  Принять без документов
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting || pendingAcceptanceFiles.length === 0}
+                  onClick={async () => {
+                    const files = [...pendingAcceptanceFiles];
+                    const targetRow = row;
+                    setPendingAcceptanceRequestId(null);
+                    setPendingAcceptanceFiles([]);
+                    await submitReceiptAcceptance(targetRow, files);
+                  }}
+                >
+                  {isSubmitting ? "Принимаем…" : "Принять с документами"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       </section>
     </main>
   );

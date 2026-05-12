@@ -321,11 +321,12 @@ receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
 receiptRequestsRouter.post(
   "/:id/accept",
   requirePermission("operations.write"),
-  upload.single("scan"),
+  upload.array("scan", 20),
   async (req: AuthedRequest, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     // Тело может прийти как JSON (Content-Type: application/json) или как multipart (поле "payload" — JSON-строка).
     let bodyRaw: unknown = req.body;
-    if (req.file && typeof req.body?.payload === "string") {
+    if (typeof req.body?.payload === "string") {
       try {
         bodyRaw = JSON.parse(req.body.payload);
       } catch {
@@ -464,11 +465,14 @@ receiptRequestsRouter.post(
         });
       }
 
-      // Сохраним опциональный скан УПД/ТН и прикрепим его к заявке.
-      if (req.file && req.file.buffer && req.file.size > 0) {
-        const safe = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const storedFileName = `${Date.now()}_${safe}`;
-        await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), req.file.buffer);
+      // Сохраним опциональные сканы УПД/ТН и прикрепим каждый и к заявке, и к операции.
+      for (const f of files) {
+        if (!f.buffer || !f.size) continue;
+        const safe = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+        await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
+        const checksum = crypto.createHash("sha256").update(f.buffer).digest("hex");
+        const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
         await tx.documentFile.create({
           data: {
             groupId: crypto.randomUUID(),
@@ -476,15 +480,14 @@ receiptRequestsRouter.post(
             entityType: "receipt",
             entityId: row.id,
             type: "upd-scan",
-            fileName: req.file.originalname,
-            filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
-            mimeType: req.file.mimetype,
-            size: req.file.size,
-            checksumSha256: crypto.createHash("sha256").update(req.file.buffer).digest("hex"),
+            fileName: f.originalname,
+            filePath,
+            mimeType: f.mimetype,
+            size: f.size,
+            checksumSha256: checksum,
             createdBy: req.user!.userId
           }
         });
-        // и заодно к самой операции, чтобы было видно из истории приходов
         await tx.documentFile.create({
           data: {
             groupId: crypto.randomUUID(),
@@ -492,11 +495,11 @@ receiptRequestsRouter.post(
             entityType: "operation",
             entityId: operation.id,
             type: "upd-scan",
-            fileName: req.file.originalname,
-            filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
-            mimeType: req.file.mimetype,
-            size: req.file.size,
-            checksumSha256: crypto.createHash("sha256").update(req.file.buffer).digest("hex"),
+            fileName: f.originalname,
+            filePath,
+            mimeType: f.mimetype,
+            size: f.size,
+            checksumSha256: checksum,
             createdBy: req.user!.userId
           }
         });
