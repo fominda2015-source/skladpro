@@ -186,6 +186,16 @@ campItemsRouter.post(
           createdById: req.user?.userId ?? null
         }
       });
+      await tx.auditLog.create({
+        data: {
+          userId: req.user!.userId,
+          action: "CAMP_ITEM_CREATE",
+          entityType: "CampItem",
+          entityId: row.id,
+          summary: `Добавлено: ${row.name}${row.inventoryNumber ? ` (инв. ${row.inventoryNumber})` : ""}`,
+          afterData: row as unknown as Prisma.InputJsonValue
+        }
+      });
       for (const f of files) {
         if (!f.buffer || !f.size) continue;
         const safe = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -238,21 +248,35 @@ campItemsRouter.patch(
       }
     }
     const data = parsed.data;
-    const updated = await prisma.campItem.update({
-      where: { id },
-      data: {
-        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-        ...(data.category !== undefined ? { category: data.category } : {}),
-        ...(data.inventoryNumber !== undefined ? { inventoryNumber: data.inventoryNumber?.trim() || null } : {}),
-        ...(data.serialNumber !== undefined ? { serialNumber: data.serialNumber?.trim() || null } : {}),
-        ...(data.manufacturer !== undefined ? { manufacturer: data.manufacturer?.trim() || null } : {}),
-        ...(data.location !== undefined ? { location: data.location?.trim() || null } : {}),
-        ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
-        ...(data.warehouseId !== undefined ? { warehouseId: data.warehouseId || null } : {}),
-        ...(data.section !== undefined ? { section: data.section } : {}),
-        ...(data.status !== undefined ? { status: data.status } : {}),
-        ...(data.acquiredAt !== undefined ? { acquiredAt: data.acquiredAt ? new Date(data.acquiredAt) : null } : {})
-      }
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.campItem.update({
+        where: { id },
+        data: {
+          ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+          ...(data.category !== undefined ? { category: data.category } : {}),
+          ...(data.inventoryNumber !== undefined ? { inventoryNumber: data.inventoryNumber?.trim() || null } : {}),
+          ...(data.serialNumber !== undefined ? { serialNumber: data.serialNumber?.trim() || null } : {}),
+          ...(data.manufacturer !== undefined ? { manufacturer: data.manufacturer?.trim() || null } : {}),
+          ...(data.location !== undefined ? { location: data.location?.trim() || null } : {}),
+          ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
+          ...(data.warehouseId !== undefined ? { warehouseId: data.warehouseId || null } : {}),
+          ...(data.section !== undefined ? { section: data.section } : {}),
+          ...(data.status !== undefined ? { status: data.status } : {}),
+          ...(data.acquiredAt !== undefined ? { acquiredAt: data.acquiredAt ? new Date(data.acquiredAt) : null } : {})
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: req.user!.userId,
+          action: "CAMP_ITEM_UPDATE",
+          entityType: "CampItem",
+          entityId: id,
+          summary: `Изменено: ${next.name}${next.inventoryNumber ? ` (инв. ${next.inventoryNumber})` : ""}`,
+          beforeData: found as unknown as Prisma.InputJsonValue,
+          afterData: next as unknown as Prisma.InputJsonValue
+        }
+      });
+      return next;
     });
     return res.json(updated);
   }
@@ -269,12 +293,21 @@ campItemsRouter.delete(
     });
     if (!found) return res.status(404).json({ error: "Не найдено" });
     await prisma.$transaction(async (tx) => {
-      // Помечаем все привязанные файлы как удалённые (soft).
       await tx.documentFile.updateMany({
         where: { entityType: "camp", entityId: id, isDeleted: false },
         data: { isDeleted: true }
       });
       await tx.campItem.delete({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          userId: req.user!.userId,
+          action: "CAMP_ITEM_DELETE",
+          entityType: "CampItem",
+          entityId: id,
+          summary: `Удалено: ${found.name}${found.inventoryNumber ? ` (инв. ${found.inventoryNumber})` : ""}`,
+          beforeData: found as unknown as Prisma.InputJsonValue
+        }
+      });
     });
     return res.json({ ok: true });
   }

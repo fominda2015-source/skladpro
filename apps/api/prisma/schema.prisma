@@ -136,6 +136,7 @@ model User {
   materialMappings MaterialMappingLibrary[]
   receiptRequests  ReceiptRequest[]      @relation("ReceiptRequestCreator")
   campItems        CampItem[]            @relation("CampItemCreator")
+  revertedAuditLogs AuditLog[]           @relation("AuditRevertedBy")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -495,21 +496,27 @@ model MaterialMatchQueue {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  userId     String
-  action     String
-  entityType String
-  entityId   String
-  beforeData Json?
-  afterData  Json?
-  ip         String?
-  userAgent  String?
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  userId       String
+  action       String
+  entityType   String
+  entityId     String
+  summary      String?
+  beforeData   Json?
+  afterData    Json?
+  ip           String?
+  userAgent    String?
+  reverted     Boolean   @default(false)
+  revertedAt   DateTime?
+  revertedById String?
+  createdAt    DateTime  @default(now())
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revertedBy   User?     @relation("AuditRevertedBy", fields: [revertedById], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
   @@index([userId])
   @@index([createdAt])
+  @@index([reverted])
 }
 
 model IntegrationJob {

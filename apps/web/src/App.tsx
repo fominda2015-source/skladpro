@@ -296,10 +296,19 @@ type AuditLogRow = {
   entityType: string;
   entityLabel?: string;
   entityId: string;
+  summary?: string | null;
   beforeData: unknown;
   afterData: unknown;
   createdAt: string;
-  user?: { email: string; fullName: string };
+  user?: { id?: string; email: string; fullName: string };
+  reverted?: boolean;
+  revertedAt?: string | null;
+  revertedBy?: { id?: string; email?: string; fullName?: string } | null;
+  revertable?: boolean;
+};
+type AuditMetaResponse = {
+  users: Array<{ id: string; fullName: string; email: string }>;
+  entityTypes: Array<{ entityType: string; label: string; count: number }>;
 };
 type ResultTone = "neutral" | "success" | "error" | "conflict";
 type TeamEmployee = {
@@ -697,6 +706,15 @@ function App() {
   const [materialMergeHistory, setMaterialMergeHistory] = useState<MaterialMergeHistoryRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
+  const [auditMeta, setAuditMeta] = useState<AuditMetaResponse>({ users: [], entityTypes: [] });
+  const [auditFilterUserId, setAuditFilterUserId] = useState("");
+  const [auditFilterEntityType, setAuditFilterEntityType] = useState("");
+  const [auditFilterEntityId, setAuditFilterEntityId] = useState("");
+  const [auditFilterQuery, setAuditFilterQuery] = useState("");
+  const [auditFilterFrom, setAuditFilterFrom] = useState("");
+  const [auditFilterTo, setAuditFilterTo] = useState("");
+  const [auditShowReverted, setAuditShowReverted] = useState(false);
+  const [auditReverting, setAuditReverting] = useState<Record<string, boolean>>({});
   const [integrationJobs, setIntegrationJobs] = useState<IntegrationJobRow[]>([]);
   const [integrationKind, setIntegrationKind] = useState("erp-sync");
   const [integrationPayload, setIntegrationPayload] = useState("{\"batch\":1}");
@@ -763,7 +781,7 @@ function App() {
     { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
     { id: "qr", label: "QR", permissions: ["tools.read"] },
     { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write"] },
-    { id: "audit", label: "Аудит", permissions: ["audit.read"] },
+    { id: "audit", label: "Логи", permissions: ["audit.read"] },
     { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
   ];
   const roleLabel = (role: string) =>
@@ -1407,13 +1425,62 @@ function App() {
       return;
     }
     setAuditMessage("");
-    const r = await fetch(`${API_URL}/api/audit?take=150`, {
+    const parts: string[] = ["take=300"];
+    if (auditFilterUserId) parts.push(`userId=${encodeURIComponent(auditFilterUserId)}`);
+    if (auditFilterEntityType) parts.push(`entityType=${encodeURIComponent(auditFilterEntityType)}`);
+    if (auditFilterEntityId.trim()) parts.push(`entityId=${encodeURIComponent(auditFilterEntityId.trim())}`);
+    if (auditFilterQuery.trim()) parts.push(`q=${encodeURIComponent(auditFilterQuery.trim())}`);
+    if (auditFilterFrom) parts.push(`dateFrom=${encodeURIComponent(new Date(auditFilterFrom).toISOString())}`);
+    if (auditFilterTo) parts.push(`dateTo=${encodeURIComponent(new Date(auditFilterTo).toISOString())}`);
+    if (auditShowReverted) parts.push("showReverted=1");
+    const r = await fetch(`${API_URL}/api/audit?${parts.join("&")}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (r.ok) {
       setAuditLogs((await r.json()) as AuditLogRow[]);
     } else {
-      setAuditMessage(`Не удалось загрузить аудит: HTTP ${r.status}`);
+      setAuditMessage(`Не удалось загрузить логи: HTTP ${r.status}`);
+    }
+  }
+
+  async function loadAuditMeta() {
+    if (!token || !canReadAudit) return;
+    const r = await fetch(`${API_URL}/api/audit/meta`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.ok) {
+      setAuditMeta((await r.json()) as AuditMetaResponse);
+    }
+  }
+
+  async function revertAuditLog(id: string) {
+    if (!token) return;
+    if (!window.confirm("Отменить это действие? Изменения будут откачены.")) return;
+    setAuditReverting((prev) => ({ ...prev, [id]: true }));
+    try {
+      const r = await fetch(`${API_URL}/api/audit/${id}/revert`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!r.ok) {
+        let detail = "";
+        try {
+          const body = await r.json();
+          detail = typeof body?.error === "string" ? body.error : "";
+        } catch {
+          // ignore
+        }
+        setAuditMessage(detail || `Не удалось отменить действие (HTTP ${r.status})`);
+        return;
+      }
+      setAuditMessage("Действие отменено");
+      await loadAuditLogs();
+    } finally {
+      setAuditReverting((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     }
   }
 
@@ -2995,7 +3062,19 @@ function App() {
       return;
     }
     void loadAuditLogs();
-  }, [token, activeTab, canReadAudit]);
+    void loadAuditMeta();
+  }, [
+    token,
+    activeTab,
+    canReadAudit,
+    auditFilterUserId,
+    auditFilterEntityType,
+    auditFilterEntityId,
+    auditFilterQuery,
+    auditFilterFrom,
+    auditFilterTo,
+    auditShowReverted
+  ]);
 
   useEffect(() => {
     if (!token || activeTab !== "integrations") {
@@ -3565,7 +3644,7 @@ function App() {
         {canReadTeam && <button className={`navBtn ${activeTab === "team" ? "active" : ""}`} onClick={() => setActiveTab("team")}><span className="navIcon">👥</span>Команда и задачи</button>}
         <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
         <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка PDF</button>
-        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Аудит</button>}
+        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
 
         <p className="navSectionTitle">Сервис</p>
         {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
@@ -4784,40 +4863,213 @@ function App() {
 
       {activeTab === "audit" && canReadAudit && (
         <div className="card">
-          <h2>Журнал аудита</h2>
-          {auditMessage && <p className="error">{auditMessage}</p>}
-          <table>
-            <thead>
-              <tr>
-                <th>Время</th>
-                <th>Пользователь</th>
-                <th>Действие</th>
-                <th>Сущность</th>
-                <th>До / После</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((row) => (
-                <tr key={row.id}>
-                  <td>{new Date(row.createdAt).toLocaleString()}</td>
-                  <td>{row.user?.fullName || row.userId}</td>
-                  <td>{row.actionLabel || row.action}</td>
-                  <td>
-                    {row.entityLabel || row.entityType} / {row.entityId}
-                  </td>
-                  <td>
-                    <details>
-                      <summary>JSON</summary>
-                      <pre className="plainList" style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
-                        {JSON.stringify({ before: row.beforeData, after: row.afterData }, null, 2)}
-                      </pre>
-                    </details>
-                  </td>
+          <div className="rightCardHeader" style={{ flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Логи</h2>
+              <p className="muted">
+                Действия пользователей по всем объектам системы. Доступные действия можно
+                отменить — система автоматически вернёт состояние объекта на момент до изменения.
+              </p>
+            </div>
+            <div className="kpiRow" style={{ margin: 0 }}>
+              <div className="kpi">
+                <span>Записей</span>
+                <strong>{auditLogs.length}</strong>
+              </div>
+              <div className="kpi">
+                <span>Можно отменить</span>
+                <strong>{auditLogs.filter((r) => r.revertable && !r.reverted).length}</strong>
+              </div>
+            </div>
+          </div>
+
+          {auditMessage && (
+            <ResultBanner
+              text={auditMessage}
+              tone={auditMessage.includes("Не удалось") ? "error" : "neutral"}
+            />
+          )}
+
+          <div className="form docCenterForm" style={{ marginTop: 8 }}>
+            <label>
+              Пользователь
+              <select
+                value={auditFilterUserId}
+                onChange={(e) => setAuditFilterUserId(e.target.value)}
+              >
+                <option value="">Все пользователи</option>
+                {auditMeta.users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.fullName || u.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Объект (тип)
+              <select
+                value={auditFilterEntityType}
+                onChange={(e) => setAuditFilterEntityType(e.target.value)}
+              >
+                <option value="">Все типы</option>
+                {auditMeta.entityTypes.map((t) => (
+                  <option key={t.entityType} value={t.entityType}>
+                    {t.label} ({t.count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              ID объекта
+              <input
+                value={auditFilterEntityId}
+                onChange={(e) => setAuditFilterEntityId(e.target.value)}
+                placeholder="точный id…"
+              />
+            </label>
+            <label>
+              Поиск
+              <input
+                value={auditFilterQuery}
+                onChange={(e) => setAuditFilterQuery(e.target.value)}
+                placeholder="по описанию / имени"
+              />
+            </label>
+            <label>
+              С даты
+              <input
+                type="datetime-local"
+                value={auditFilterFrom}
+                onChange={(e) => setAuditFilterFrom(e.target.value)}
+              />
+            </label>
+            <label>
+              По дату
+              <input
+                type="datetime-local"
+                value={auditFilterTo}
+                onChange={(e) => setAuditFilterTo(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="toolbar" style={{ flexWrap: "wrap" }}>
+            <label className="toolbar" style={{ gap: 6, padding: 0, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={auditShowReverted}
+                onChange={(e) => setAuditShowReverted(e.target.checked)}
+              />
+              <span>Показывать уже отменённые</span>
+            </label>
+            <button type="button" className="ghostBtn" onClick={() => void loadAuditLogs()}>
+              Обновить
+            </button>
+            {(auditFilterUserId ||
+              auditFilterEntityType ||
+              auditFilterEntityId ||
+              auditFilterQuery ||
+              auditFilterFrom ||
+              auditFilterTo ||
+              auditShowReverted) && (
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={() => {
+                  setAuditFilterUserId("");
+                  setAuditFilterEntityType("");
+                  setAuditFilterEntityId("");
+                  setAuditFilterQuery("");
+                  setAuditFilterFrom("");
+                  setAuditFilterTo("");
+                  setAuditShowReverted(false);
+                }}
+              >
+                Сбросить фильтры
+              </button>
+            )}
+          </div>
+
+          {!auditLogs.length ? (
+            <EmptyState
+              title="Записей пока нет"
+              hint="Действия пользователей появятся здесь автоматически (создание/изменение/удаление объектов)."
+            />
+          ) : (
+            <table style={{ marginTop: 8 }}>
+              <thead>
+                <tr>
+                  <th>Время</th>
+                  <th>Пользователь</th>
+                  <th>Действие</th>
+                  <th>Объект</th>
+                  <th>Описание</th>
+                  <th>Действия</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {!auditLogs.length && <p className="muted">Записей пока нет.</p>}
+              </thead>
+              <tbody>
+                {auditLogs.map((row) => {
+                  const busy = Boolean(auditReverting[row.id]);
+                  return (
+                    <tr
+                      key={row.id}
+                      style={row.reverted ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
+                    >
+                      <td>{new Date(row.createdAt).toLocaleString()}</td>
+                      <td>{row.user?.fullName || row.userId}</td>
+                      <td>{row.actionLabel || row.action}</td>
+                      <td>
+                        <div>{row.entityLabel || row.entityType}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {row.entityId}
+                        </div>
+                      </td>
+                      <td>
+                        <div>{row.summary || "—"}</div>
+                        {row.reverted && row.revertedAt && (
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            Отменено: {new Date(row.revertedAt).toLocaleString()}
+                            {row.revertedBy?.fullName ? ` · ${row.revertedBy.fullName}` : ""}
+                          </div>
+                        )}
+                        {Boolean(row.beforeData || row.afterData) && (
+                          <details style={{ marginTop: 4 }}>
+                            <summary className="muted" style={{ fontSize: 11, cursor: "pointer" }}>
+                              JSON-снимок
+                            </summary>
+                            <pre
+                              className="plainList"
+                              style={{ whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 200, overflow: "auto" }}
+                            >
+                              {JSON.stringify({ before: row.beforeData, after: row.afterData }, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </td>
+                      <td>
+                        {row.reverted ? (
+                          <span className="muted">отменено</span>
+                        ) : row.revertable ? (
+                          <button
+                            type="button"
+                            className="dangerBtn"
+                            disabled={busy}
+                            onClick={() => void revertAuditLog(row.id)}
+                          >
+                            {busy ? "Отменяем…" : "Отменить"}
+                          </button>
+                        ) : (
+                          <span className="muted" title="Откат этого типа действия пока не поддерживается">
+                            —
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
