@@ -1603,4 +1603,292 @@ tr.low {
   gap: 8px;
   padding-bottom: 2px;
 }
- 
+
+/* Главная — сводка объекта и навигация */
+.homeDashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.homeHeroGrid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.homeHeroKicker {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.homeHeroTitle {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.4vw, 1.85rem);
+  line-height: 1.25;
+  color: #0f172a;
+}
+
+.homeHeroMeta {
+  margin: 6px 0 0;
+  max-width: 52rem;
+}
+
+.homeHeroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.homeAlertBanner {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #854d0e;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.homeSectionBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.homeSectionTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.homeInsightGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+
+.homeInsightCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid #e5e9f2;
+  background: linear-gradient(180deg, #fff 0%, #fafcff 100%);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+  min-height: 96px;
+}
+
+.homeInsightCard:hover:not(:disabled) {
+  border-color: #c7d4f5;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.homeInsightCard:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.homeInsightCard.accentWarn {
+  border-color: #fcd34d;
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
+}
+
+.homeInsightCard.accentBad {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fef2f2 0%, #fff 100%);
+}
+
+.homeInsightCard.mutedCard {
+  background: #f8fafc;
+}
+
+.homeInsightLabel {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.3;
+}
+
+.homeInsightValue {
+  font-size: clamp(22px, 4vw, 30px);
+  font-weight: 700;
+  line-height: 1.05;
+  color: #0f172a;
+}
+
+.homeInsightHint {
+  font-size: 12px;
+}
+
+.homeSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  align-items: start;
+}
+
+.homeSplitPrimary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.homeSplitAside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 88px;
+}
+
+.homeWideCard h3 {
+  margin: 0;
+}
+
+.homeStackBar {
+  display: flex;
+  gap: 2px;
+  height: 40px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e5e9f2;
+}
+
+.homeStackSegment {
+  border: none;
+  min-width: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  opacity: 0.95;
+  transition: opacity 0.15s;
+}
+
+.homeStackSegment:hover {
+  opacity: 1;
+}
+
+.homeStackSegment.status-DRAFT {
+  background: #64748b;
+}
+
+.homeStackSegment.status-ON_APPROVAL {
+  background: #ea580c;
+}
+
+.homeStackSegment.status-APPROVED {
+  background: #059669;
+}
+
+.homeStackSegment.status-ISSUED {
+  background: #2563eb;
+}
+
+.homeStackSegment.status-REJECTED {
+  background: #b91c1c;
+}
+
+.homeStackSegment.status-CANCELLED {
+  background: #94a3b8;
+}
+
+.homeStackLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.homeLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.homeLegendItem:hover {
+  background: #eef2ff;
+}
+
+.homeQuickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.homeQuickBtn {
+  width: auto !important;
+  min-height: 40px;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+}
+
+.compactLine {
+  margin: 2px 0 0 !important;
+  line-height: 1.35;
+}
+
+button.queueItem.homeQueueClick {
+  width: 100%;
+  border: none;
+  background: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.queueItem.homeQueueClick:not(:disabled):hover {
+  background: #eef2ff;
+}
+
+@media (max-width: 1024px) {
+  .homeSplit {
+    grid-template-columns: 1fr;
+  }
+  .homeSplitAside {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .homeHeroActions {
+    width: 100%;
+  }
+  .homeHeroActions .ghostBtn,
+  .homeHeroActions .primaryBtn {
+    flex: 1 1 140px;
+  }
+  .homeInsightGrid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}
+

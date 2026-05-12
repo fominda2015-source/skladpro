@@ -4,6 +4,7 @@ import {
   MaterialMatchQueueStatus,
   NotificationLevel,
   OperationType,
+  ReceiptRequestStatus,
   ToolStatus,
   TransportWaybillStatus,
   UserStatus
@@ -165,6 +166,8 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   let objectSummary: {
     warehouseId: string | null;
     warehouseName: string | null;
+    receiptRequestsOpen: number;
+    campItemsCount: number;
     projectsCount: number;
     limitsCount: number;
     materialsInLimits: number;
@@ -174,6 +177,8 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   } = {
     warehouseId: selectedWarehouseId,
     warehouseName: null,
+    receiptRequestsOpen: 0,
+    campItemsCount: 0,
     projectsCount: 0,
     limitsCount: 0,
     materialsInLimits: 0,
@@ -183,12 +188,32 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   };
   if (selectedWarehouseId) {
     const wh = await prisma.warehouse.findUnique({ where: { id: selectedWarehouseId } });
-    if (wh) objectSummary.warehouseName = wh.name;
-    const projectRows = await prisma.project.findMany({
-      where: { warehouseId: selectedWarehouseId },
-      select: { id: true }
-    });
+    const [receiptRequestsOpen, campItemsCount, projectRows] = await Promise.all([
+      prisma.receiptRequest.count({
+        where: {
+          warehouseId: selectedWarehouseId,
+          status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
+        }
+      }),
+      prisma.campItem.count({ where: { warehouseId: selectedWarehouseId } }),
+      prisma.project.findMany({
+        where: { warehouseId: selectedWarehouseId },
+        select: { id: true }
+      })
+    ]);
     const projectIds = projectRows.map((x) => x.id);
+    objectSummary = {
+      warehouseId: selectedWarehouseId,
+      warehouseName: wh?.name || null,
+      receiptRequestsOpen,
+      campItemsCount,
+      projectsCount: projectIds.length,
+      limitsCount: 0,
+      materialsInLimits: 0,
+      plannedQty: 0,
+      issuedQty: 0,
+      usagePercent: 0
+    };
     if (projectIds.length) {
       const [limitsCount, limItems] = await Promise.all([
         prisma.projectLimit.count({ where: { projectId: { in: projectIds } } }),
@@ -200,9 +225,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
       const plannedQty = limItems.reduce((acc, x) => acc + Number(x.plannedQty), 0);
       const issuedQty = limItems.reduce((acc, x) => acc + Number(x.issuedQty), 0);
       objectSummary = {
-        warehouseId: selectedWarehouseId,
-        warehouseName: wh?.name || null,
-        projectsCount: projectIds.length,
+        ...objectSummary,
         limitsCount,
         materialsInLimits: limItems.length,
         plannedQty,

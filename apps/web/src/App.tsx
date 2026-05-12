@@ -337,6 +337,8 @@ type DashboardSummary = {
   object?: {
     warehouseId: string | null;
     warehouseName: string | null;
+    receiptRequestsOpen: number;
+    campItemsCount: number;
     projectsCount: number;
     limitsCount: number;
     materialsInLimits: number;
@@ -1224,6 +1226,18 @@ function App() {
       return [...prev, row];
     });
   }, []);
+
+  const homeIssueStatusSummary = useMemo(() => {
+    const order: IssueStatus[] = ["DRAFT", "ON_APPROVAL", "APPROVED", "ISSUED", "REJECTED", "CANCELLED"];
+    const counts: Partial<Record<IssueStatus, number>> = {};
+    for (const i of issues) {
+      counts[i.status] = (counts[i.status] || 0) + 1;
+    }
+    const total = Math.max(1, issues.length);
+    return order
+      .filter((s) => (counts[s] ?? 0) > 0)
+      .map((s) => ({ status: s, count: counts[s]!, pct: ((counts[s] ?? 0) / total) * 100 }));
+  }, [issues]);
 
   const safeName = (value?: string | null) => {
     if (!value) return "Без названия";
@@ -3069,6 +3083,15 @@ function App() {
   }, [token, objectSectionFilter, mustPickObject]);
 
   useEffect(() => {
+    if (!token || activeTab !== "stocks" || mustPickObject || !activeObjectId) {
+      return;
+    }
+    if (canReadOperations) {
+      void loadReceiptRequests();
+    }
+  }, [token, activeTab, activeObjectId, objectSectionFilter, mustPickObject, canReadOperations]);
+
+  useEffect(() => {
     if (!token || !canDashboard) {
       setDashboard(null);
       return;
@@ -3755,267 +3778,490 @@ function App() {
             ) : null}
           </div>
         </header>
-        {dashboard && activeTab === "stocks" && (
-          <div className="card dashboardStrip">
-            <div className="toolbar dashboardFacts" style={{ flexWrap: "wrap", gap: 12 }}>
-              <button type="button" className="dashboardFactBtn" onClick={() => canReadOperations && setActiveTab("operations")}>
-                Приходов сегодня: <strong>{dashboard.warehouse.receiptsToday}</strong>
-              </button>
-              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("issues")}>
-                Расходов (операций) сегодня: <strong>{dashboard.warehouse.issuesOperationsToday}</strong>
-              </button>
-              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("issues")}>
-                Выдано заявок сегодня: <strong>{dashboard.warehouse.issuesRequestsIssuedToday}</strong>
-              </button>
-              <button type="button" className="dashboardFactBtn" onClick={() => canReadIssues && setActiveTab("approvals")}>
-                Заявок в работе: <strong>{dashboard.warehouse.pendingApprovals}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadStocks) return;
-                  setQ("low");
-                  void loadStocks("low");
-                  setActiveTab("warehouse");
-                }}
-              >
-                Низкий остаток (&lt;5): <strong>{dashboard.warehouse.lowStockLines}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadTools) return;
-                  setToolStatusFilter("IN_REPAIR");
-                  setActiveTab("tools");
-                }}
-              >
-                Инструмент в ремонте: <strong>{dashboard.warehouse.toolsInRepair}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canMaterialMatch || !showLegacyMatching) return;
-                  setActiveTab("matching");
-                }}
-              >
-                Очередь сопоставления: <strong>{dashboard.warehouse.matchQueuePending}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadIntegrations) return;
-                  setActiveTab("integrations");
-                }}
-              >
-                Сбои интеграций (24ч): <strong>{dashboard.warehouse.failedIntegrations24h}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadNotifications && !canReadIntegrations) return;
-                  setActiveTab("integrations");
-                }}
-              >
-                Мои непрочитанные уведомления: <strong>{dashboard.warehouse.unreadNotifications}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadNotifications && !canReadIntegrations) return;
-                  setActiveTab("integrations");
-                }}
-              >
-                Критические уведомления (24ч): <strong>{dashboard.warehouse.errorNotifications24h}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadStocks) return;
-                  setActiveTab("warehouse");
-                }}
-              >
-                Объект: <strong>{dashboard.object?.warehouseName || "—"}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadLimits) return;
-                  setActiveTab("limits");
-                }}
-              >
-                Проектов: <strong>{dashboard.object?.projectsCount ?? 0}</strong>
-              </button>
-              <button
-                type="button"
-                className="dashboardFactBtn"
-                onClick={() => {
-                  if (!canReadLimits) return;
-                  setActiveTab("limits");
-                }}
-              >
-                Выполнение лимитов: <strong>{dashboard.object?.usagePercent ?? 0}%</strong>
-              </button>
-              {dashboard.admin && (
-                <button
-                  type="button"
-                  className="dashboardFactBtn"
-                  onClick={() => {
-                    if (canReadAudit) setActiveTab("audit");
-                    else if (canReadIntegrations || canReadNotifications) setActiveTab("integrations");
-                  }}
-                >
-                  Активных пользователей: <strong>{dashboard.admin.activeUsers}</strong> · аудит 24ч:{" "}
-                  <strong>{dashboard.admin.auditEvents24h}</strong>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-        {dashboardError && <p className="error">{dashboardError}</p>}
+        {dashboardError && activeTab === "stocks" && <p className="error">{dashboardError}</p>}
         {activeTab === "stocks" && (
-          <div className="dashboardBoard">
-            <section className="dashboardMain">
-              <div className="kpiRow">
-                <button className="kpi kpiBtn" onClick={() => setActiveTab("stocks")}><span>Поступления</span><strong>{dashboard?.warehouse.receiptsToday ?? stocks.length}</strong></button>
-                <button className="kpi kpiBtn" onClick={() => { setQ("low"); void loadStocks("low"); setActiveTab("warehouse"); }}><span>Проблемные</span><strong>{stocks.filter((x) => x.isLow).length}</strong></button>
-                <button className="kpi kpiBtn" onClick={() => { setIssueStatusFilter("ON_APPROVAL"); setActiveTab("issues"); }}><span>Заявки в работе</span><strong>{dashboard?.warehouse.pendingApprovals ?? approvalQueue.length}</strong></button>
-                <button className="kpi kpiBtn" onClick={() => setActiveTab("waybills")}><span>Перемещения</span><strong>{dashboard?.warehouse.transfersToday ?? waybills.length}</strong></button>
-                {showLegacyMatching ? (
-                  <button type="button" className="kpi kpiBtn" onClick={() => setActiveTab("matching")}><span>Сопоставление</span><strong>{dashboard?.warehouse.matchQueuePending ?? matchQueue.length}</strong></button>
-                ) : null}
-                <button
-                  type="button"
-                  className="kpi kpiBtn"
-                  onClick={() => {
-                    if (canReadIntegrations || canReadNotifications) setActiveTab("integrations");
-                  }}
-                >
-                  <span>Уведомления</span>
-                  <strong>{dashboard?.warehouse.unreadNotifications ?? notifications.filter((n) => !n.isRead).length}</strong>
-                </button>
+          <div className="homeDashboard">
+            <section className="card homeHero">
+              <div className="homeHeroGrid">
+                <div>
+                  <p className="homeHeroKicker">
+                    Выбран раздел · <strong>{objectSectionFilter === "SS" ? "СС" : "ЭОМ"}</strong>
+                  </p>
+                  <h2 className="homeHeroTitle">
+                    {safeName(
+                      dashboard?.object?.warehouseName ||
+                        warehouses.find((w) => w.id === (activeObjectId || dashboardWarehouseId))?.name
+                    )}
+                  </h2>
+                  <p className="muted homeHeroMeta">
+                    Детальный склад, лимиты и отчёт открываются отдельно — здесь оперативные цифры и быстрые переходы.
+                  </p>
+                  <p className="muted homeHeroMeta">
+                    {dashboard?.generatedAt
+                      ? `Сводка API: ${new Date(dashboard.generatedAt).toLocaleString()} · строк остатков в выборке: ${stocks.length}`
+                      : "Запрашиваем сводку с сервера…"}
+                  </p>
+                </div>
+                <div className="homeHeroActions">
+                  <button type="button" className="ghostBtn" onClick={() => setActiveTab("reports")}>
+                    Полная сводка
+                  </button>
+                  <button
+                    type="button"
+                    className="primaryBtn"
+                    onClick={() => {
+                      void loadDashboardSummary();
+                      void loadStocks(q);
+                      void loadIssues();
+                      void loadApprovalQueue();
+                      if (activeObjectId && canReadOperations) void loadReceiptRequests();
+                    }}
+                  >
+                    Обновить данные
+                  </button>
+                </div>
               </div>
-              <div className="card">
-                <h3>Обзор по объекту</h3>
-                <p className="muted">
-                  Детальный список материалов и все остатки перенесены в отдельную вкладку `Склад`.
-                </p>
-                <div className="toolbar">
-                  <label>
-                    Объект
-                    <select value={dashboardWarehouseId} onChange={(e) => setDashboardWarehouseId(e.target.value)} disabled>
-                      {warehouses
-                        .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
-                        .map((w) => (
-                          <option key={w.id} value={w.id}>{safeName(w.name)}</option>
+              {dashboard && dashboard.project.overspendLimitLines > 0 && canReadLimits ? (
+                <div className="homeAlertBanner">
+                  <span>
+                    По лимитам обнаружен перерасход в <strong>{dashboard.project.overspendLimitLines}</strong> строках.
+                  </span>
+                  <button type="button" className="miniActionBtn" onClick={() => setActiveTab("limits")}>
+                    Перейти в лимиты
+                  </button>
+                </div>
+              ) : null}
+            </section>
+
+            {!dashboard ? (
+              <p className="muted">Нет данных сводки{dashboardError ? "" : " (ожидание прав или ответа API)"}.</p>
+            ) : (
+              <>
+                <section className="homeSectionBlock">
+                  <h3 className="homeSectionTitle">Объект и ресурсы</h3>
+                  <div className="homeInsightGrid">
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadStocks}
+                      onClick={() => {
+                        setQ("");
+                        void loadStocks("");
+                        setActiveTab("warehouse");
+                      }}
+                    >
+                      <span className="homeInsightLabel">Строк складской выборки</span>
+                      <span className="homeInsightValue">{stocks.length.toLocaleString("ru-RU")}</span>
+                      <span className="homeInsightHint">Открыть склад →</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadLimits}
+                      onClick={() => setActiveTab("limits")}
+                    >
+                      <span className="homeInsightLabel">План по лимитам выполнен на</span>
+                      <span className="homeInsightValue">{dashboard.object?.usagePercent ?? 0}%</span>
+                      <span className="homeInsightHint muted">
+                        {dashboard.object ? `${dashboard.object.issuedQty.toLocaleString("ru-RU")} из ${dashboard.object.plannedQty.toLocaleString("ru-RU")} ед.` : ""}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadLimits}
+                      onClick={() => setActiveTab("limits")}
+                    >
+                      <span className="homeInsightLabel">Проектов / лимитов</span>
+                      <span className="homeInsightValue">
+                        {dashboard.object?.projectsCount ?? 0} · {dashboard.object?.limitsCount ?? 0}
+                      </span>
+                      <span className="homeInsightHint">Карточки лимитов →</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadOperations}
+                      onClick={() => setActiveTab("operations")}
+                    >
+                      <span className="homeInsightLabel">Приёмки Excel в работе</span>
+                      <span className="homeInsightValue">{(dashboard.object?.receiptRequestsOpen ?? 0).toLocaleString("ru-RU")}</span>
+                      <span className="homeInsightHint">Вкладка «Приходы» →</span>
+                    </button>
+                    <button type="button" className="homeInsightCard" onClick={() => setActiveTab("camp")}>
+                      <span className="homeInsightLabel">Единиц в городке</span>
+                      <span className="homeInsightValue">{(dashboard.object?.campItemsCount ?? 0).toLocaleString("ru-RU")}</span>
+                      <span className="homeInsightHint">Жилой фонд и контейнеры →</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section className="homeSectionBlock">
+                  <h3 className="homeSectionTitle">Сегодня (операционный день, UTC)</h3>
+                  <div className="homeInsightGrid">
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadOperations}
+                      onClick={() => setActiveTab("operations")}
+                    >
+                      <span className="homeInsightLabel">Проведённые приходы</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.receiptsToday}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadOperations}
+                      onClick={() => setActiveTab("operations")}
+                    >
+                      <span className="homeInsightLabel">Проведённые расходы (операции)</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.issuesOperationsToday}</span>
+                    </button>
+                    <button type="button" className="homeInsightCard" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
+                      <span className="homeInsightLabel">Заявок закрыто «Выдано»</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.issuesRequestsIssuedToday}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadOperations}
+                      onClick={() => setActiveTab("operations")}
+                    >
+                      <span className="homeInsightLabel">Перемещения (тип трансфера)</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.transfersToday}</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section className="homeSectionBlock">
+                  <h3 className="homeSectionTitle">Заявки и контроль</h3>
+                  <div className="homeInsightGrid">
+                    <button
+                      type="button"
+                      className="homeInsightCard accentWarn"
+                      disabled={!canReadIssues}
+                      onClick={() => {
+                        setIssueStatusFilter("ON_APPROVAL");
+                        setActiveTab("approvals");
+                      }}
+                    >
+                      <span className="homeInsightLabel">На согласовании</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.pendingApprovals}</span>
+                      <span className="homeInsightHint">Открыть лист заявок →</span>
+                    </button>
+                    <button type="button" className="homeInsightCard accentWarn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
+                      <span className="homeInsightLabel">Долго висящие (&gt;7 дней)</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.staleOpenIssues}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadStocks}
+                      onClick={() => {
+                        setQ("low");
+                        void loadStocks("low");
+                        setActiveTab("warehouse");
+                      }}
+                    >
+                      <span className="homeInsightLabel">Позиций с низким остатком</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.lowStockLines}</span>
+                      <span className="homeInsightHint">Фильтр «низкий остаток» →</span>
+                    </button>
+                    <button type="button" className="homeInsightCard" disabled={!canReadWaybills} onClick={() => setActiveTab("waybills")}>
+                      <span className="homeInsightLabel">ТТН не закрыты</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.waybillsOpen}</span>
+                    </button>
+                    {showLegacyMatching ? (
+                      <button
+                        type="button"
+                        className="homeInsightCard"
+                        disabled={!canMaterialMatch}
+                        onClick={() => setActiveTab("matching")}
+                      >
+                        <span className="homeInsightLabel">Очередь сопоставления</span>
+                        <span className="homeInsightValue">{dashboard.warehouse.matchQueuePending}</span>
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadTools}
+                      onClick={() => {
+                        setToolStatusFilter("IN_REPAIR");
+                        setActiveTab("tools");
+                      }}
+                    >
+                      <span className="homeInsightLabel">Инструмент в ремонте</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.toolsInRepair}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadIntegrations}
+                      onClick={() => setActiveTab("integrations")}
+                    >
+                      <span className="homeInsightLabel">Сбои интеграций 24ч</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.failedIntegrations24h}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard"
+                      disabled={!canReadIntegrations && !canReadNotifications}
+                      onClick={() => setActiveTab("integrations")}
+                    >
+                      <span className="homeInsightLabel">Непрочитанные уведомления</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.unreadNotifications}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="homeInsightCard accentBad"
+                      disabled={!canReadIntegrations && !canReadNotifications}
+                      onClick={() => setActiveTab("integrations")}
+                    >
+                      <span className="homeInsightLabel">Критичные алерты 24ч</span>
+                      <span className="homeInsightValue">{dashboard.warehouse.errorNotifications24h}</span>
+                    </button>
+                    {dashboard.admin ? (
+                      <button
+                        type="button"
+                        className="homeInsightCard mutedCard"
+                        onClick={() => {
+                          if (canReadAudit) setActiveTab("audit");
+                          else setActiveTab("integrations");
+                        }}
+                      >
+                        <span className="homeInsightLabel">Админ-срез · пользователей / аудит 24ч</span>
+                        <span className="homeInsightValue">
+                          {dashboard.admin.activeUsers} / {dashboard.admin.auditEvents24h}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
+                </section>
+              </>
+            )}
+
+            <div className="homeSplit">
+              <div className="homeSplitPrimary">
+                <section className="card homeWideCard">
+                  <div className="rightCardHeader">
+                    <h3>Выдачи: доля статусов (текущий список)</h3>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={() => {
+                        setIssueStatusFilter("");
+                        setActiveTab("issues");
+                      }}
+                    >
+                      Все заявки
+                    </button>
+                  </div>
+                  {homeIssueStatusSummary.length ? (
+                    <>
+                      <div className="homeStackBar">
+                        {homeIssueStatusSummary.map((seg) => (
+                          <button
+                            key={seg.status}
+                            type="button"
+                            className={`homeStackSegment status-${seg.status}`}
+                            style={{ flexGrow: Math.max(seg.count, 1) }}
+                            title={`${issueStatusLabel(seg.status)}: ${seg.count}`}
+                            onClick={() => {
+                              setIssueStatusFilter(seg.status);
+                              setActiveTab("issues");
+                            }}
+                          >
+                            <span>{seg.count}</span>
+                          </button>
                         ))}
-                    </select>
-                  </label>
-                  <button type="button" onClick={() => setActiveTab("warehouse")}>Открыть склад</button>
-                </div>
+                      </div>
+                      <div className="homeStackLegend">
+                        {homeIssueStatusSummary.map((seg) => (
+                          <button
+                            key={seg.status}
+                            type="button"
+                            className="homeLegendItem"
+                            onClick={() => {
+                              setIssueStatusFilter(seg.status);
+                              setActiveTab("issues");
+                            }}
+                          >
+                            <span className={`badge ${statusClass(seg.status)}`}>{issueStatusLabel(seg.status)}</span>
+                            <strong>{seg.count}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted">В выборке нет заявок — откройте вкладку «Выдачи», чтобы загрузить историю.</p>
+                  )}
+                </section>
+
+                <section className="card homeWideCard">
+                  <div className="rightCardHeader">
+                    <h3>Быстрые действия</h3>
+                  </div>
+                  <div className="homeQuickActions">
+                    {canWriteOperations ? (
+                      <button type="button" className="secondaryBtn homeQuickBtn" onClick={() => setActiveTab("operations")}>
+                        Поступление / приёмка
+                      </button>
+                    ) : null}
+                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
+                      Новая выдача
+                    </button>
+                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadDocuments} onClick={() => setActiveTab("documents")}>
+                      Документы объекта
+                    </button>
+                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadWaybills} onClick={() => setActiveTab("waybills")}>
+                      Перемещения ТТН
+                    </button>
+                    <button type="button" className="ghostBtn homeQuickBtn" onClick={() => setActiveTab("camp")}>
+                      Городок
+                    </button>
+                  </div>
+                </section>
               </div>
-              <div className="grid2">
-                <div className="card">
-                  <h3>Проблемные остатки</h3>
-                  <ul className="plainList">
-                    <li>Критичных остатков: <strong>{stocks.filter((x) => x.isLow).length}</strong></li>
-                    <li>На рассмотрении: <strong>{approvalQueue.length}</strong></li>
-                    <li>Заявки в работе: <strong>{issues.filter((x) => x.status !== "ISSUED" && x.status !== "REJECTED").length}</strong></li>
-                  </ul>
+
+              <aside className="homeSplitAside">
+                <div className="card approvalCard">
+                  <h3>Следующая на согласовании</h3>
+                  {approvalQueue[0] ? (
+                    <>
+                      <p className="muted compactLine">
+                        <strong>{approvalQueue[0].number}</strong>
+                        {" · "}
+                        {approvalQueue[0].requestedBy?.fullName || approvalQueue[0].requestedById}
+                      </p>
+                      <div className="approvalActions">
+                        <button
+                          type="button"
+                          className="dangerBtn"
+                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "reject", { fromApprovals: true })}
+                        >
+                          Отклонить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "approve", { fromApprovals: true })}
+                        >
+                          Принять
+                        </button>
+                        <button
+                          type="button"
+                          className="secondaryBtn"
+                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "issue", { fromApprovals: true })}
+                        >
+                          Выдать
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted">На сейчас нет заявок в статусе «На рассмотрении».</p>
+                  )}
                 </div>
+
                 <div className="card">
-                  <h3>Быстрые действия</h3>
-                  <div className="toolbar">
-                    <button onClick={() => setActiveTab("operations")}>Новое поступление</button>
-                    <button onClick={() => setActiveTab("issues")}>Новая выдача</button>
-                    <button onClick={() => setActiveTab("operations")}>Возврат материала</button>
-                    <button onClick={() => setActiveTab("tools")}>Приход инструмента</button>
+                  <div className="rightCardHeader">
+                    <h3>Очередь выдачи</h3>
+                    <button type="button" className="ghostBtn" onClick={() => setActiveTab("approvals")}>
+                      Все
+                    </button>
+                  </div>
+                  <div className="queueList">
+                    {(approvalQueue.length ? approvalQueue : issues.filter((i) => i.status !== "ISSUED").slice(0, 6)).map((i) => (
+                      <div key={i.id} className="queueItem">
+                        <div>
+                          <strong>{i.number}</strong>
+                          <p className="muted compactLine">{i.requestedBy?.fullName || i.requestedById}</p>
+                        </div>
+                        <div className="queueActions">
+                          <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
+                          <button
+                            type="button"
+                            className="miniActionBtn"
+                            onClick={() => {
+                              setSelectedIssueId(i.id);
+                              setDrawerMode("issue");
+                            }}
+                          >
+                            Детали
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {!approvalQueue.length && !issues.length ? <p className="muted">Очередь пуста</p> : null}
                   </div>
                 </div>
-              </div>
-            </section>
-            <aside className="dashboardRight">
-              <div className="card">
-                <div className="rightCardHeader">
-                  <h3>Очередь заявок</h3>
-                  <button className="ghostBtn" onClick={() => setActiveTab("approvals")}>Открыть</button>
+
+                <div className="card">
+                  <div className="rightCardHeader">
+                    <h3>Приёмки по разделу</h3>
+                    <button type="button" className="ghostBtn" disabled={!canReadOperations} onClick={() => setActiveTab("operations")}>
+                      Приходы
+                    </button>
+                  </div>
+                  <div className="queueList">
+                    {receiptRequests
+                      .filter((r) => r.section === objectSectionFilter && r.status !== "RECEIVED" && r.status !== "CANCELLED")
+                      .slice(0, 5)
+                      .map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          className="queueItem homeQueueClick"
+                          disabled={!canReadOperations}
+                          onClick={() => setActiveTab("operations")}
+                        >
+                          <span>
+                            <strong>{r.number}</strong>
+                            <p className="muted compactLine">
+                              {(r.detectedProjectTitle || r.detectedOrderNumber || r.sourceFileName || "Excel").slice(0, 60)}
+                            </p>
+                          </span>
+                          <span className={`badge ${r.status === "NEW" ? "neutral" : "warn"}`}>
+                            {r.status === "NEW" ? "Новая" : "В работе"}
+                          </span>
+                        </button>
+                      ))}
+                    {!canReadOperations ? (
+                      <p className="muted">Нет прав на приходы по заявке.</p>
+                    ) : !receiptRequests.filter((x) => x.section === objectSectionFilter && x.status !== "RECEIVED" && x.status !== "CANCELLED")
+                        .length ? (
+                      <p className="muted">Активных приёмок в этом разделе нет.</p>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="queueList">
-                  {(approvalQueue.length ? approvalQueue : issues.filter((i) => i.status !== "ISSUED").slice(0, 5)).map((i) => (
-                    <div key={i.id} className="queueItem">
-                      <div>
-                        <strong>{i.number}</strong>
-                        <p className="muted">{i.requestedBy?.fullName || i.requestedById}</p>
-                      </div>
-                      <div className="queueActions">
-                        <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
-                        <button className="miniActionBtn" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
-                      </div>
-                    </div>
-                  ))}
-                  {!approvalQueue.length && !issues.length && <p className="muted">Очередь пуста</p>}
-                </div>
-              </div>
-              <div className="card approvalCard">
-                <h3>Карточка заявки</h3>
-                {approvalQueue.length ? (
-                  <>
-                    <p className="muted">
-                      {approvalQueue[0]?.number} · {approvalQueue[0]?.requestedBy?.fullName || approvalQueue[0]?.requestedById}
-                    </p>
-                    <div className="approvalActions">
+
+                <div className="card">
+                  <div className="rightCardHeader">
+                    <h3>Недавние заявки</h3>
+                    <button type="button" className="ghostBtn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
+                      Выдачи
+                    </button>
+                  </div>
+                  <div className="queueList">
+                    {issues.slice(0, 6).map((i) => (
                       <button
-                        className="dangerBtn"
-                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "reject", { fromApprovals: true })}
+                        key={i.id}
+                        type="button"
+                        className="queueItem homeQueueClick"
+                        disabled={!canReadIssues}
+                        onClick={() => {
+                          setSelectedIssueId(i.id);
+                          setDrawerMode("issue");
+                        }}
                       >
-                        Отклонить
+                        <span>{i.number}</span>
+                        <strong className={statusClass(i.status)}>{issueStatusLabel(i.status)}</strong>
                       </button>
-                      <button
-                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "approve", { fromApprovals: true })}
-                      >
-                        Подтвердить
-                      </button>
-                      <button
-                        className="secondaryBtn"
-                        onClick={() => approvalQueue[0] && void executeIssueAction(approvalQueue[0].id, "issue", { fromApprovals: true })}
-                      >
-                        Выдать
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="muted">Нет заявок на рассмотрении.</p>
-                )}
-              </div>
-              <div className="card">
-                <h3>Последние заявки</h3>
-                <div className="queueList">
-                  {issues.slice(0, 4).map((i) => (
-                    <div key={i.id} className="queueItem">
-                      <span>{i.number}</span>
-                      <strong className={statusClass(i.status)}>{issueStatusLabel(i.status)}</strong>
-                    </div>
-                  ))}
+                    ))}
+                    {!issues.length ? <p className="muted">Заявки ещё не загружались.</p> : null}
+                  </div>
                 </div>
-              </div>
-              <div className="card">
-                <h3>Динамика расходов</h3>
-                <div className="miniBars">
-                  {[32, 46, 28, 62, 52, 44].map((v, idx) => (
-                    <div key={idx} className="miniBarWrap">
-                      <div className="miniBar" style={{ height: `${v}%` }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
+              </aside>
+            </div>
           </div>
         )}
       {showLegacyMatching && activeTab === "matching" && (
