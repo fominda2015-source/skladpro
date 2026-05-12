@@ -1,9 +1,11 @@
 import {
   IssueBasisType,
+  IssueRequestDomain,
   IssueRequestStatus,
   NotificationLevel,
   OperationType,
-  StockMovementDirection
+  StockMovementDirection,
+  ToolStatus
 } from "@prisma/client";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -23,25 +25,50 @@ import { notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
-const createIssueSchema = z.object({
-  warehouseId: z.string().min(1),
-  section: z.enum(["SS", "EOM"]).default("SS"),
-  projectId: z.string().optional(),
-  note: z.string().optional(),
-  responsibleName: z.string().max(160).optional().nullable(),
-  flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
-  basisType: z.nativeEnum(IssueBasisType).optional(),
-  basisRef: z.string().max(500).optional().nullable(),
-  items: z
-    .array(
-      z.object({
-        materialId: z.string().min(1),
-        quantity: z.number().positive(),
-        factLabel: z.string().max(500).optional().nullable()
-      })
-    )
-    .min(1)
-});
+const createIssueSchema = z
+  .object({
+    warehouseId: z.string().min(1),
+    section: z.enum(["SS", "EOM"]).default("SS"),
+    projectId: z.string().optional(),
+    note: z.string().optional(),
+    responsibleName: z.string().max(160).optional().nullable(),
+    flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
+    basisType: z.nativeEnum(IssueBasisType).optional(),
+    basisRef: z.string().max(500).optional().nullable(),
+    items: z
+      .array(
+        z.object({
+          materialId: z.string().min(1),
+          quantity: z.number().positive(),
+          factLabel: z.string().max(500).optional().nullable()
+        })
+      )
+      .optional()
+      .default([]),
+    toolItems: z.array(z.object({ toolId: z.string().min(1) })).optional().default([])
+  })
+  .superRefine((data, ctx) => {
+    const nm = data.items.length;
+    const nt = data.toolItems.length;
+    if (nm > 0 && nt > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "В одной заявке нельзя смешивать материалы и инструмент — выберите что-то одно.",
+        path: ["items"]
+      });
+      return;
+    }
+    if (nm === 0 && nt === 0) {
+      ctx.addIssue({ code: "custom", message: "Добавьте строки материалов или инструментов.", path: ["items"] });
+      return;
+    }
+    if (nt > 0) {
+      const ids = data.toolItems.map((x) => x.toolId);
+      if (new Set(ids).size !== ids.length) {
+        ctx.addIssue({ code: "custom", message: "Инструмент указан несколько раз.", path: ["toolItems"] });
+      }
+    }
+  });
 
 const issueActionSchema = z.object({
   actualRecipientName: z.string().trim().min(1).max(160).optional()
@@ -178,6 +205,105 @@ async function createIssueActDocument(params: {
   });
 }
 
+async function createToolIssueActDocument(params: {
+  issueId: string;
+  storekeeperId: string;
+  actualRecipientName: string;
+}) {
+  const issue = await prisma.issueRequest.findUnique({
+    where: { id: params.issueId },
+    include: {
+      warehouse: true,
+      project: true,
+      requestedBy: true,
+      approvedBy: true,
+      toolItems: { include: { tool: true } }
+    }
+  });
+  if (!issue || !issue.toolItems.length) {
+    throw new Error("Tool issue not found for act generation");
+  }
+  const storekeeper = await prisma.user.findUnique({ where: { id: params.storekeeperId } });
+  const safeNumber = issue.number.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `issue-tool-act-${safeNumber}.pdf`;
+  const storedFileName = `${Date.now()}_${fileName}`;
+  const absPath = path.join(uploadDirAbs, storedFileName);
+  const fontPath = path.resolve(process.cwd(), "node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
+
+  const doc = new PDFDocument({ size: "A4", margin: 32 });
+  doc.font(fontPath);
+  doc.fontSize(17).text(`Акт выдачи инструмента ${issue.number}`, { align: "center" });
+  doc.moveDown(0.6);
+  doc.fontSize(10);
+  doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
+  doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
+  doc.text(`Раздел: ${issue.section}`);
+  doc.text(`Проект: ${issue.project?.name || "-"}`);
+  doc.text(`Основание: ${issue.basisRef || issue.basisType}`);
+  doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
+  doc.text(`Фактически получил: ${params.actualRecipientName}`);
+  doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
+  doc.moveDown(0.8);
+
+  doc.fontSize(12).text("Инструменты", { underline: true });
+  doc.moveDown(0.3);
+  doc.fontSize(9);
+  doc.text("№ | Инв. № | Наименование | Статус до выдачи");
+  doc.moveDown(0.2);
+  issue.toolItems.forEach((row, idx) => {
+    doc.text(
+      `${idx + 1} | ${row.tool.inventoryNumber} | ${row.tool.name} | ${row.tool.status}`
+    );
+  });
+
+  doc.moveDown(1.2);
+  if (issue.note) {
+    doc.fontSize(10).text(`Примечание: ${issue.note}`);
+    doc.moveDown(0.8);
+  }
+  doc.text("Инструмент выдан и принят получателем (по перечню).");
+  doc.moveDown(2);
+  doc.text(`Ответственное лицо / получил: ${params.actualRecipientName}`);
+  doc.moveDown(1);
+  doc.text("Подпись: ______________________________");
+  doc.moveDown(1.2);
+  doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || ""}`);
+  doc.moveDown(1);
+  doc.text("Подпись: ______________________________");
+
+  await writePdfToFile(doc, absPath);
+  const fileBuffer = await fs.promises.readFile(absPath);
+  const checksumSha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+  const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
+
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.documentFile.create({
+      data: {
+        groupId: crypto.randomUUID(),
+        version: 1,
+        entityType: "issue",
+        entityId: issue.id,
+        type: "issue-act-tools",
+        fileName,
+        filePath,
+        mimeType: "application/pdf",
+        size: fileBuffer.length,
+        checksumSha256,
+        createdBy: params.storekeeperId
+      }
+    });
+    await tx.documentLink.create({
+      data: {
+        documentFileId: created.id,
+        entityType: "issue",
+        entityId: issue.id,
+        createdById: params.storekeeperId
+      }
+    });
+    return created;
+  });
+}
+
 export const issueRequestsRouter = Router();
 issueRequestsRouter.use(requireAuth);
 issueRequestsRouter.use(requirePermission("issues.read"));
@@ -220,13 +346,26 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     : {};
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const sectionFilter = sectionParam === "SS" || sectionParam === "EOM" ? { section: sectionParam } : {};
-  const where = mergeIssueWhere(scope, { ...statusFilter, ...basisFilter, ...flowFilter, ...sectionFilter, ...searchFilter } as any);
+  const domainParam = typeof req.query.domain === "string" ? req.query.domain.toUpperCase() : "";
+  const domainFilter =
+    domainParam === "MATERIALS" || domainParam === "TOOLS"
+      ? { domain: domainParam as IssueRequestDomain }
+      : {};
+  const where = mergeIssueWhere(scope, {
+    ...statusFilter,
+    ...basisFilter,
+    ...flowFilter,
+    ...sectionFilter,
+    ...searchFilter,
+    ...domainFilter
+  } as any);
   const [total, rows] = await prisma.$transaction([
     prisma.issueRequest.count({ where }),
     prisma.issueRequest.findMany({
       where,
       include: {
         items: { include: { material: true } },
+        toolItems: { include: { tool: true } },
         warehouse: true,
         project: true,
         requestedBy: true,
@@ -271,8 +410,11 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   const count = await prisma.issueRequest.count();
   const number = `REQ-${String(count + 1).padStart(5, "0")}`;
 
+  const domain: IssueRequestDomain =
+    parsed.data.toolItems.length > 0 ? IssueRequestDomain.TOOLS : IssueRequestDomain.MATERIALS;
+
   let initialStatus: IssueRequestStatus = IssueRequestStatus.DRAFT;
-  if (parsed.data.projectId) {
+  if (domain === IssueRequestDomain.MATERIALS && parsed.data.projectId) {
     const limit = await getLatestProjectLimit(parsed.data.projectId);
     if (limit) {
       const byMaterial = new Map(limit.items.map((x) => [x.materialId, x]));
@@ -297,6 +439,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   const created = await prisma.issueRequest.create({
     data: {
       number,
+      domain,
       flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
       section: parsed.data.section,
@@ -307,15 +450,25 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
       basisRef: parsed.data.basisRef ?? undefined,
       requestedById: req.user!.userId,
       status: initialStatus,
-      items: {
-        create: parsed.data.items.map((item) => ({
-          materialId: item.materialId,
-          quantity: item.quantity,
-          factLabel: item.factLabel?.trim() || null
-        }))
-      }
+      ...(domain === IssueRequestDomain.MATERIALS
+        ? {
+            items: {
+              create: parsed.data.items.map((item) => ({
+                materialId: item.materialId,
+                quantity: item.quantity,
+                factLabel: item.factLabel?.trim() || null
+              }))
+            }
+          }
+        : {
+            toolItems: {
+              create: parsed.data.toolItems.map((item) => ({
+                toolId: item.toolId
+              }))
+            }
+          })
     },
-    include: { items: true }
+    include: { items: { include: { material: true } }, toolItems: { include: { tool: true } } }
   });
 
   return res.status(201).json(created);
@@ -507,7 +660,7 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
   const scope = await getRequestDataScope(req);
   const issueRow = await prisma.issueRequest.findFirst({
     where: mergeIssueWhere(scope, { id }),
-    include: { items: true }
+    include: { items: true, toolItems: { include: { tool: true } } }
   });
   if (!issueRow) {
     return res.status(404).json({ error: "Issue request not found" });
@@ -524,6 +677,160 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
   const actualRecipientName = parsed.data.actualRecipientName || issueRow.responsibleName || "";
   if (!actualRecipientName.trim()) {
     return res.status(400).json({ error: "actualRecipientName is required" });
+  }
+
+  if (issueRow.domain === IssueRequestDomain.TOOLS) {
+    try {
+      const prevStatus = issueRow.status;
+      const result = await prisma.$transaction(async (tx) => {
+        const toolLines = await tx.issueRequestToolItem.findMany({
+          where: { issueRequestId: issueRow.id },
+          include: { tool: true }
+        });
+        if (!toolLines.length) {
+          throw new Error("NO_TOOLS");
+        }
+
+        const toolIds = toolLines.map((l) => l.toolId);
+        const tools = await tx.tool.findMany({ where: { id: { in: toolIds } } });
+        const byId = new Map(tools.map((t) => [t.id, t]));
+
+        for (const line of toolLines) {
+          const tool = byId.get(line.toolId);
+          if (!tool) {
+            throw new Error(`TOOL_MISSING:${line.toolId}`);
+          }
+          if (tool.warehouseId !== issueRow.warehouseId) {
+            throw new Error(`TOOL_WRONG_PLACE:${tool.id}`);
+          }
+          if (tool.section !== issueRow.section) {
+            throw new Error(`TOOL_WRONG_SECTION:${tool.id}`);
+          }
+          if (tool.status !== ToolStatus.IN_STOCK) {
+            throw new Error(`TOOL_NOT_AVAILABLE:${tool.id}`);
+          }
+        }
+
+        const toolEvents: string[] = [];
+        for (const line of toolLines) {
+          const beforeSnap = byId.get(line.toolId)!;
+          await tx.tool.update({
+            where: { id: line.toolId },
+            data: {
+              status: ToolStatus.ISSUED,
+              responsible: actualRecipientName.trim()
+            }
+          });
+          const ev = await tx.toolEvent.create({
+            data: {
+              toolId: line.toolId,
+              action: "ISSUE",
+              status: ToolStatus.ISSUED,
+              actorId: req.user!.userId,
+              comment: `Выдача по заявке ${issueRow.number}`
+            }
+          });
+          toolEvents.push(ev.id);
+          await recordAudit({
+            userId: req.user!.userId,
+            action: "TOOL_ISSUE",
+            entityType: "Tool",
+            entityId: line.toolId,
+            summary: `Инструмент ${beforeSnap.name} (инв. ${beforeSnap.inventoryNumber}) — выдан по заявке ${issueRow.number}`,
+            before: {
+              status: beforeSnap.status,
+              responsible: beforeSnap.responsible,
+              warehouseId: beforeSnap.warehouseId,
+              section: beforeSnap.section
+            },
+            after: {
+              status: ToolStatus.ISSUED,
+              responsible: actualRecipientName.trim(),
+              toolEventId: ev.id,
+              issueRequestId: issueRow.id
+            },
+            tx
+          });
+        }
+
+        const updatedIssue = await tx.issueRequest.update({
+          where: { id: issueRow.id },
+          data: {
+            status: IssueRequestStatus.ISSUED,
+            actualRecipientName: actualRecipientName.trim()
+          }
+        });
+
+        return { issue: updatedIssue, toolIds: toolLines.map((l) => l.toolId), toolEvents };
+      });
+
+      let document: Awaited<ReturnType<typeof createToolIssueActDocument>> | null = null;
+      try {
+        document = await createToolIssueActDocument({
+          issueId: result.issue.id,
+          storekeeperId: req.user!.userId,
+          actualRecipientName: actualRecipientName.trim()
+        });
+      } catch (documentError) {
+        console.error("Failed to generate tool issue act", documentError);
+      }
+
+      await recordAudit({
+        userId: req.user!.userId,
+        action: "ISSUE_REQUEST_ISSUE",
+        entityType: "IssueRequest",
+        entityId: id,
+        summary: `Выдача инструмента по заявке ${issueRow.number} (единиц: ${result.toolIds.length})`,
+        before: {
+          domain: IssueRequestDomain.TOOLS,
+          status: prevStatus as IssueRequestStatus,
+          toolIds: result.toolIds
+        },
+        after: {
+          domain: IssueRequestDomain.TOOLS,
+          status: result.issue.status,
+          toolEvents: result.toolEvents,
+          recipient: actualRecipientName.trim(),
+          documentId: document?.id ?? null
+        }
+      });
+
+      await safeNotify({
+        userId: result.issue.requestedById,
+        title: "Инструмент выдан по заявке",
+        message: `Заявка ${issueRow.number} проведена (инструмент). Получатель: ${actualRecipientName.trim()}.`,
+        entityType: "IssueRequest",
+        entityId: result.issue.id
+      });
+
+      return res.json({ operation: null, issue: result.issue, document, toolIds: result.toolIds });
+    } catch (error) {
+      if (error instanceof Error && error.message === "NO_TOOLS") {
+        return res.status(409).json({ error: "No tools in issue request" });
+      }
+      if (error instanceof Error && error.message.startsWith("TOOL_MISSING:")) {
+        return res.status(409).json({ error: "Tool not found", toolId: error.message.split(":")[1] });
+      }
+      if (error instanceof Error && error.message.startsWith("TOOL_WRONG_PLACE:")) {
+        return res.status(409).json({
+          error: "Tool warehouse does not match issue request",
+          toolId: error.message.split(":")[1]
+        });
+      }
+      if (error instanceof Error && error.message.startsWith("TOOL_WRONG_SECTION:")) {
+        return res.status(409).json({
+          error: "Tool section does not match issue request",
+          toolId: error.message.split(":")[1]
+        });
+      }
+      if (error instanceof Error && error.message.startsWith("TOOL_NOT_AVAILABLE:")) {
+        return res.status(409).json({
+          error: "Tool is not available for issue (expect IN_STOCK)",
+          toolId: error.message.split(":")[1]
+        });
+      }
+      return res.status(500).json({ error: "Internal server error" });
+    }
   }
 
   try {

@@ -44,6 +44,11 @@ enum IssueFlowType {
   DIRECT_ISSUE
 }
 
+enum IssueRequestDomain {
+  MATERIALS
+  TOOLS
+}
+
 enum ToolStatus {
   IN_STOCK
   ISSUED
@@ -544,6 +549,7 @@ model Tool {
   warehouse       Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   events          ToolEvent[]
+  issueLines      IssueRequestToolItem[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -608,6 +614,7 @@ model IssueRequest {
   number        String             @unique
   status        IssueRequestStatus @default(DRAFT)
   flowType      IssueFlowType      @default(REQUEST)
+  domain        IssueRequestDomain @default(MATERIALS)
   basisType     IssueBasisType     @default(OTHER)
   basisRef      String?
   responsibleName String?
@@ -623,6 +630,7 @@ model IssueRequest {
   requestedBy   User               @relation("IssueCreatedBy", fields: [requestedById], references: [id], onDelete: Restrict)
   approvedBy    User?              @relation("IssueApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   items         IssueRequestItem[]
+  toolItems     IssueRequestToolItem[]
   operations    Operation[]
   waybills      TransportWaybill[]
   stockMovements StockMovement[]
@@ -725,6 +733,17 @@ model ReceiptRequestItem {
   updatedAt        DateTime       @updatedAt
 
   @@index([receiptRequestId])
+}
+
+model IssueRequestToolItem {
+  id             String       @id @default(cuid())
+  issueRequestId String
+  toolId         String
+  issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
+  tool           Tool         @relation(fields: [toolId], references: [id], onDelete: Restrict)
+
+  @@index([issueRequestId])
+  @@index([toolId])
 }
 
 model IssueRequestItem {

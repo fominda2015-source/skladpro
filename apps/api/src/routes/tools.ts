@@ -61,10 +61,20 @@ toolsRouter.use(requirePermission("tools.read"));
 
 toolsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
+  const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  try {
+    if (warehouseIdParam) {
+      assertWarehouseInScope(scope, warehouseIdParam);
+    }
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
   const pageRaw = Number(req.query.page);
   const pageSizeRaw = Number(req.query.pageSize);
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
-  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(100, Math.max(1, Math.floor(pageSizeRaw))) : 20;
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(150, Math.max(1, Math.floor(pageSizeRaw))) : 20;
   const sort =
     typeof req.query.sort === "string" && ["created_desc", "inventory", "status"].includes(req.query.sort)
       ? req.query.sort
@@ -80,6 +90,7 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     AND: [
       toolWhereFromScope(scope),
       {
+        ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
         ...(status ? { status } : {}),
         ...(section ? { section } : {}),
         ...(q

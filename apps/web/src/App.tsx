@@ -145,10 +145,23 @@ type Material = {
 type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
 type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
 type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
+type IssueRequestDomainApi = "MATERIALS" | "TOOLS";
+
+function effectiveIssueDomain(row: {
+  domain?: IssueRequestDomainApi;
+  items?: unknown[] | null;
+  toolItems?: unknown[] | null;
+}): IssueRequestDomainApi {
+  if (row.domain === "TOOLS") return "TOOLS";
+  if (row.domain === "MATERIALS") return "MATERIALS";
+  if (row.toolItems && row.toolItems.length > 0) return "TOOLS";
+  return "MATERIALS";
+}
 type IssueRequest = {
   id: string;
   number: string;
   status: IssueStatus;
+  domain?: IssueRequestDomainApi;
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
@@ -166,6 +179,11 @@ type IssueRequest = {
     quantity: string | number;
     factLabel?: string | null;
     material?: { name: string; sku?: string | null };
+  }>;
+  toolItems?: Array<{
+    id: string;
+    toolId: string;
+    tool?: { id: string; name: string; inventoryNumber: string; status?: string };
   }>;
   warehouse?: { name: string };
   project?: { id: string; name: string; code?: string | null } | null;
@@ -634,6 +652,19 @@ function App() {
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
+  const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
+    try {
+      return localStorage.getItem("skladpro_issue_domain") === "TOOLS" ? "TOOLS" : "MATERIALS";
+    } catch {
+      return "MATERIALS";
+    }
+  });
+  const [issueToolSearch, setIssueToolSearch] = useState("");
+  const [issueToolPickIds, setIssueToolPickIds] = useState<string[]>([]);
+  const [issueToolCatalog, setIssueToolCatalog] = useState<ToolItem[]>([]);
+  const [issueToolCatalogLoading, setIssueToolCatalogLoading] = useState(false);
+  const [operationsSubTab, setOperationsSubTab] = useState<"materialReceipts" | "toolReceipt">("materialReceipts");
+  const [approvalQueueTab, setApprovalQueueTab] = useState<IssueRequestDomainApi>("MATERIALS");
   const [approvalQueue, setApprovalQueue] = useState<IssueRequest[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
@@ -729,11 +760,20 @@ function App() {
     }
   });
   const [toolsTotal, setToolsTotal] = useState(0);
+  const [toolsDisplayMode, setToolsDisplayMode] = useState<"table" | "cards">(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIST_VIEW_KEY) || "{}") as { toolsDisplayMode?: string };
+      return saved.toolsDisplayMode === "cards" ? "cards" : "table";
+    } catch {
+      return "table";
+    }
+  });
   const [toolName, setToolName] = useState("Перфоратор Bosch");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
   const [toolSerialNumber, setToolSerialNumber] = useState("");
   const [toolWarehouseId, setToolWarehouseId] = useState("");
   const [toolResponsible, setToolResponsible] = useState("");
+  const [toolReceiptNote, setToolReceiptNote] = useState("");
   const [toolSearch, setToolSearch] = useState("");
   const [toolStatusFilter, setToolStatusFilter] = useState<"" | ToolStatus>("");
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
@@ -2505,6 +2545,9 @@ function App() {
       if (issueBasisFilter) params.set("basisType", issueBasisFilter);
       if (activeTab === "issues" && issueFlowFilter) params.set("flowType", issueFlowFilter);
       params.set("section", objectSectionFilter);
+      if (activeTab === "issues") {
+        params.set("domain", issueIssuesDomain);
+      }
       if (issueSearch.trim()) params.set("q", issueSearch.trim());
       params.set("sort", issuesSort);
       params.set("page", String(issuesPage));
@@ -2540,11 +2583,16 @@ function App() {
     if (action === "issue" && !actualRecipientName) {
       const issue = issues.find((x) => x.id === issueId) || approvalQueue.find((x) => x.id === issueId) || selectedIssue;
       const fallback = issue?.actualRecipientName || issue?.responsibleName || "";
-      const prompted = window.prompt("Кто фактически получает материалы? Это ФИО попадёт в акт выдачи.", fallback);
+      const dom = issue ? effectiveIssueDomain(issue) : "MATERIALS";
+      const promptText =
+        dom === "TOOLS"
+          ? "Кто фактически получает инструмент? Это ФИО попадёт в акт выдачи."
+          : "Кто фактически получает материалы? Это ФИО попадёт в акт выдачи.";
+      const prompted = window.prompt(promptText, fallback);
       if (prompted === null) return;
       actualRecipientName = prompted.trim();
       if (!actualRecipientName) {
-        setIssuesMessage("Укажи фактического получателя материалов");
+        setIssuesMessage(dom === "TOOLS" ? "Укажи фактического получателя инструмента" : "Укажи фактического получателя материалов");
         setIssuesTone("error");
         return;
       }
@@ -2573,6 +2621,7 @@ function App() {
     }
     if (action === "issue") {
       await loadStocks(q);
+      void loadTools().catch(() => undefined);
     }
   }
 
@@ -2698,6 +2747,96 @@ function App() {
     }
   }
 
+  async function performDirectToolIssue(opts?: { openDocument?: boolean }) {
+    if (!token) return;
+    if (issueSubmitting) return;
+    if (!activeObjectId) {
+      setIssuesMessage("Выберите объект в верхнем меню");
+      setIssuesTone("error");
+      return;
+    }
+    const responsibleName = issueResponsible.trim();
+    const actualRecipientName = (issueActualRecipient.trim() || responsibleName).trim();
+    if (!responsibleName) {
+      setIssuesMessage("Укажите ответственное лицо");
+      setIssuesTone("error");
+      return;
+    }
+    if (!actualRecipientName) {
+      setIssuesMessage("Укажите фактического получателя");
+      setIssuesTone("error");
+      return;
+    }
+    if (!issueToolPickIds.length) {
+      setIssuesMessage("Выберите хотя бы один инструмент в списке");
+      setIssuesTone("error");
+      return;
+    }
+    setIssueSubmitting(true);
+    setIssuesMessage("");
+    try {
+      const createRes = await fetch(`${API_URL}/api/issues`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouseId: activeObjectId,
+          section: objectSectionFilter,
+          note: issueNote.trim() || undefined,
+          responsibleName,
+          flowType: "DIRECT_ISSUE",
+          basisType: "OTHER",
+          toolItems: issueToolPickIds.map((toolId) => ({ toolId }))
+        })
+      });
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}));
+        const det = typeof (err as { details?: unknown }).details === "object" ? JSON.stringify((err as { details?: unknown }).details) : "";
+        setIssuesMessage(
+          typeof (err as { error?: string }).error === "string"
+            ? `${(err as { error: string }).error}${det ? ` ${det}` : ""}`
+            : "Не удалось создать заявку на инструмент"
+        );
+        setIssuesTone(createRes.status === 409 ? "conflict" : "error");
+        return;
+      }
+      const created = (await createRes.json()) as { id: string; number: string };
+      const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ actualRecipientName })
+      });
+      if (!issueRes.ok) {
+        const err = await issueRes.json().catch(() => ({}));
+        setIssuesMessage(
+          typeof err.error === "string"
+            ? `Заявка ${created.number} создана, но выдача не проведена: ${err.error}`
+            : `Заявка ${created.number}: выдача не проведена`
+        );
+        setIssuesTone("conflict");
+        await loadIssues();
+        return;
+      }
+      const issuePayload = (await issueRes.json()) as {
+        document?: { id?: string; fileName?: string; filePath?: string } | null;
+      };
+      if (opts?.openDocument && issuePayload.document?.filePath) {
+        openUploadedDocument(issuePayload.document.filePath, issuePayload.document.fileName);
+      }
+      setIssuesMessage(`Инструмент по заявке ${created.number} выдан. Акт сформирован автоматически.`);
+      setIssuesTone("success");
+      setIssueToolPickIds([]);
+      setIssueToolSearch("");
+      setIssueNote("");
+      await loadIssues();
+      void loadTools().catch(() => undefined);
+    } catch (e) {
+      setIssuesMessage(`Ошибка выдачи инструмента: ${String(e)}`);
+      setIssuesTone("error");
+    } finally {
+      setIssueSubmitting(false);
+    }
+  }
+
   async function executeWaybillStatus(
     waybillId: string,
     status: WaybillStatus,
@@ -2726,7 +2865,11 @@ function App() {
 
   async function loadApprovalQueue() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/issues?status=ON_APPROVAL&section=${encodeURIComponent(objectSectionFilter)}`, {
+    const params = new URLSearchParams();
+    params.set("status", "ON_APPROVAL");
+    params.set("section", objectSectionFilter);
+    params.set("domain", approvalQueueTab);
+    const res = await fetch(`${API_URL}/api/issues?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3372,12 +3515,48 @@ function App() {
     issueBasisFilter,
     issueFlowFilter,
     issueSearch,
+    issueIssuesDomain,
     issuesSort,
     issuesPage,
     issuesPageSize,
     objectSectionFilter,
     activeObjectId
   ]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "issues" || issueIssuesDomain !== "TOOLS" || !activeObjectId) {
+      return undefined;
+    }
+    let cancelled = false;
+    void (async () => {
+      setIssueToolCatalogLoading(true);
+      try {
+        const params = new URLSearchParams({
+          section: objectSectionFilter,
+          status: "IN_STOCK",
+          warehouseId: activeObjectId,
+          sort: "inventory",
+          page: "1",
+          pageSize: "150"
+        });
+        if (issueToolSearch.trim()) params.set("q", issueToolSearch.trim());
+        const res = await fetch(`${API_URL}/api/tools?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = (await res.json()) as PagedResponse<ToolItem> | ToolItem[];
+        const items = Array.isArray(payload) ? payload : payload.items;
+        if (!cancelled) setIssueToolCatalog(items);
+      } catch {
+        if (!cancelled) setIssueToolCatalog([]);
+      } finally {
+        if (!cancelled) setIssueToolCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, activeTab, issueIssuesDomain, activeObjectId, objectSectionFilter, issueToolSearch]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -3502,10 +3681,11 @@ function App() {
       JSON.stringify({
         issuesPageSize,
         waybillsPageSize,
-        toolsPageSize
+        toolsPageSize,
+        toolsDisplayMode
       })
     );
-  }, [issuesPageSize, waybillsPageSize, toolsPageSize]);
+  }, [issuesPageSize, waybillsPageSize, toolsPageSize, toolsDisplayMode]);
 
   useEffect(() => {
     if (toolsPage > toolsTotalPages) setToolsPage(toolsTotalPages);
@@ -3519,11 +3699,15 @@ function App() {
   }, [showStockSku, showStockReserve]);
 
   useEffect(() => {
+    localStorage.setItem("skladpro_issue_domain", issueIssuesDomain);
+  }, [issueIssuesDomain]);
+
+  useEffect(() => {
     if (token && activeTab === "approvals") {
       void loadApprovalQueue();
       void loadReceiptRequests();
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, approvalQueueTab, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "limits") {
@@ -5829,16 +6013,35 @@ function App() {
 
       {activeTab === "operations" && (
         <div className="receiptsWorkspace">
-          <div className="card">
-            <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-              <div>
-                <h2 style={{ margin: 0 }}>Приходы</h2>
-                <p className="muted">
+          <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 6 }}>
+            <button
+              type="button"
+              className={operationsSubTab === "materialReceipts" ? "active" : ""}
+              onClick={() => setOperationsSubTab("materialReceipts")}
+            >
+              Приём материалов (Excel)
+            </button>
+            <button
+              type="button"
+              className={operationsSubTab === "toolReceipt" ? "active" : ""}
+              onClick={() => setOperationsSubTab("toolReceipt")}
+            >
+              Приход инструмента
+            </button>
+          </div>
+
+          {operationsSubTab === "materialReceipts" && (
+            <>
+              <div className="card">
+                <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <h2 style={{ margin: 0 }}>Приём материалов</h2>
+                    <p className="muted">
                   Раздел {objectSectionFilter}. Материал принимается только из заявок (раздел «Заявки»).
                   Здесь отметь галочками позиции, которые принимаешь сейчас, проверь количества — после нажатия «Принять отмеченные»
                   спросим документы (по заявке их может быть несколько приёмок).
-                </p>
-              </div>
+                    </p>
+                  </div>
               <div className="kpiRow" style={{ margin: 0 }}>
                 <div className="kpi">
                   <span>Активных заявок</span>
@@ -6234,6 +6437,104 @@ function App() {
               ))}
             </div>
           </div>
+            </>
+          )}
+
+          {operationsSubTab === "toolReceipt" && (
+            <div className="card toolReceiptComposer">
+              <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Оприходовать инструмент</h2>
+                  <p className="muted" style={{ margin: "6px 0 0", maxWidth: 720 }}>
+                    Единичная позиция: карточка инструмента на выбранном объекте, QR-код и запись CREATE в журнале. После этого выдаётся через вкладку «Выдачи → Инструмент».
+                  </p>
+                  <p className="muted" style={{ marginTop: 4 }}>
+                    Склад:{" "}
+                    {activeObjectId ? safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "") || activeObjectId : "не выбран"} · раздел {objectSectionFilter}
+                  </p>
+                </div>
+              </div>
+              {opsMessage ? (
+                <ResultBanner
+                  text={opsMessage}
+                  tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"}
+                />
+              ) : null}
+              <div className="form grid2" style={{ marginTop: 8 }}>
+                <label>
+                  Наименование
+                  <input value={toolName} onChange={(e) => setToolName(e.target.value)} placeholder="Например, перфоратор" />
+                </label>
+                <label>
+                  Инвентарный номер
+                  <input value={toolInventoryNumber} onChange={(e) => setToolInventoryNumber(e.target.value)} />
+                </label>
+                <label>
+                  Серийный номер (если есть)
+                  <input value={toolSerialNumber} onChange={(e) => setToolSerialNumber(e.target.value)} />
+                </label>
+                <label>
+                  Объект (склад)
+                  <select value={toolWarehouseId} disabled>
+                    <option value="">Не указан</option>
+                    {warehouses
+                      .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
+                      .map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {safeName(w.name)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Примечание
+                  <input
+                    value={toolReceiptNote}
+                    onChange={(e) => setToolReceiptNote(e.target.value)}
+                    placeholder="Состояние, комплектность..."
+                  />
+                </label>
+              </div>
+              <div className="toolbar" style={{ flexWrap: "wrap", marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="primaryBtn"
+                  disabled={!toolName.trim() || !toolInventoryNumber.trim()}
+                  onClick={async () => {
+                    if (!token || !toolName.trim() || !toolInventoryNumber.trim()) return;
+                    setOpsMessage("");
+                    const res = await fetch(`${API_URL}/api/tools`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        name: toolName.trim(),
+                        inventoryNumber: toolInventoryNumber.trim(),
+                        serialNumber: toolSerialNumber.trim() || undefined,
+                        warehouseId: toolWarehouseId || undefined,
+                        section: objectSectionFilter,
+                        note: toolReceiptNote.trim() || undefined
+                      })
+                    });
+                    if (!res.ok) {
+                      const text = await res.text();
+                      setOpsMessage(`Не удалось создать инструмент: ${text}`);
+                      return;
+                    }
+                    setOpsMessage(`Инструмент «${safeName(toolName.trim())}» зарегистрирован на складе.`);
+                    setToolInventoryNumber(`INV-${Date.now()}`);
+                    setToolSerialNumber("");
+                    setToolReceiptNote("");
+                    await loadTools().catch(() => undefined);
+                  }}
+                >
+                  Зарегистрировать на складе
+                </button>
+                <button type="button" className="ghostBtn" onClick={() => setActiveTab("tools")}>
+                  Открыть «Инструменты»
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -6242,26 +6543,70 @@ function App() {
           <div className="card issueComposer">
             <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
               <div>
-                <h2>Выдача материалов</h2>
-                <p className="muted">Раздел {objectSectionFilter}{activeObjectId ? ` · ${safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "")}` : ""}</p>
+                <h2>Выдачи со склада</h2>
+                <p className="muted">
+                  {issueIssuesDomain === "TOOLS" ? "Инструмент · " : "Материалы · "}раздел {objectSectionFilter}
+                  {activeObjectId ? ` · ${safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "")}` : ""}
+                </p>
               </div>
               <div className="kpiRow" style={{ margin: 0 }}>
+                {issueIssuesDomain === "MATERIALS" ? (
+                  <>
+                    <div className="kpi">
+                      <span>В корзине</span>
+                      <strong>{issuePickCart.length}</strong>
+                    </div>
+                    <div className="kpi">
+                      <span>Вариантов на складе</span>
+                      <strong>{issueFacingRows.length}</strong>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="kpi">
+                      <span>К выдаче</span>
+                      <strong>{issueToolPickIds.length}</strong>
+                    </div>
+                    <div className="kpi">
+                      <span>В каталоге (на складе)</span>
+                      <strong>{issueToolCatalog.length}</strong>
+                    </div>
+                  </>
+                )}
                 <div className="kpi">
-                  <span>В корзине</span>
-                  <strong>{issuePickCart.length}</strong>
-                </div>
-                <div className="kpi">
-                  <span>Вариантов на складе</span>
-                  <strong>{issueFacingRows.length}</strong>
-                </div>
-                <div className="kpi">
-                  <span>Всего выдач</span>
+                  <span>В списке истории</span>
                   <strong>{issuesTotal}</strong>
                 </div>
               </div>
             </div>
 
             {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
+
+            <div className="tabs" style={{ flexWrap: "wrap", marginTop: 2 }}>
+              <button
+                type="button"
+                className={issueIssuesDomain === "MATERIALS" ? "active" : ""}
+                onClick={() => {
+                  setIssueIssuesDomain("MATERIALS");
+                  setIssuesPage(1);
+                  setIssueToolPickIds([]);
+                }}
+              >
+                Материалы
+              </button>
+              <button
+                type="button"
+                className={issueIssuesDomain === "TOOLS" ? "active" : ""}
+                onClick={() => {
+                  setIssueIssuesDomain("TOOLS");
+                  setIssuesPage(1);
+                  setIssuePickCart([]);
+                  setIssuePickQtyByKey({});
+                }}
+              >
+                Инструмент
+              </button>
+            </div>
 
             <div className="grid2 issueRecipients">
               <label>
@@ -6299,6 +6644,7 @@ function App() {
               </datalist>
             </div>
 
+            {issueIssuesDomain === "MATERIALS" && (
             <div className="issuePicker">
               <div className="rightCardHeader" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div>
@@ -6474,9 +6820,101 @@ function App() {
                 {issueSubmitting ? "Выдача..." : "Выдать материал"}
               </button>
             </div>
+            )}
+            {issueIssuesDomain === "TOOLS" && (
+              <div className="issueToolComposer">
+                <div className="rightCardHeader" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>Инструмент на складе</h3>
+                    <p className="muted" style={{ margin: "4px 0 0" }}>
+                      Только статус «на складе» и тот же раздел объекта. Проведение создаёт акт выдачи инструмента и событие в журнале.
+                    </p>
+                  </div>
+                  {issueToolCatalogLoading ? <span className="muted">Загрузка...</span> : null}
+                </div>
+                <input
+                  className="issueSearchInput"
+                  placeholder="Поиск по названию или инв. номеру…"
+                  value={issueToolSearch}
+                  onChange={(e) => setIssueToolSearch(e.target.value)}
+                />
+                <div className="issueMaterialList">
+                  {!activeObjectId ? (
+                    <p className="muted">Выберите объект склада вверху страницы.</p>
+                  ) : issueToolCatalog.length === 0 && !issueToolCatalogLoading ? (
+                    <p className="muted">Нет доступного инструмента на этом объекте в статусе «на складе».</p>
+                  ) : (
+                    issueToolCatalog.map((t) => {
+                      const picked = issueToolPickIds.includes(t.id);
+                      return (
+                        <button
+                          type="button"
+                          key={`issue-tool-${t.id}`}
+                          className={`issueMaterialRow ${picked ? "selected" : ""}`}
+                          disabled={!picked && t.status !== "IN_STOCK"}
+                          onClick={() => {
+                            if (picked) {
+                              setIssueToolPickIds((prev) => prev.filter((id) => id !== t.id));
+                            } else if (t.status === "IN_STOCK") {
+                              setIssueToolPickIds((prev) => [...prev, t.id]);
+                            }
+                          }}
+                        >
+                          <div className="issueMaterialInfo">
+                            <strong>{safeName(t.name)}</strong>
+                            <span className="muted">
+                              инв.&nbsp;{t.inventoryNumber}
+                              {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
+                            </span>
+                          </div>
+                          <div className="issueMaterialMeta">
+                            <span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span>
+                            <span className="muted">{picked ? "В списке" : t.status === "IN_STOCK" ? "Добавить" : "—"}</span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                {issueToolPickIds.length > 0 && (
+                  <div className="issueCart">
+                    <h3>Подобрано к выдаче</h3>
+                    <div className="issueCartList">
+                      {issueToolPickIds.map((id) => {
+                        const row = issueToolCatalog.find((x) => x.id === id);
+                        const label = row ? `${row.inventoryNumber} · ${safeName(row.name)}` : id.slice(0, 8);
+                        return (
+                          <div key={`tool-pick-${id}`} className="issueCartRow">
+                            <div className="issueCartName">
+                              <strong>{label}</strong>
+                            </div>
+                            <div className="issueCartControls">
+                              <button type="button" className="ghostBtn" onClick={() => setIssueToolPickIds((p) => p.filter((x) => x !== id))}>
+                                Убрать
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div className="issueActionBar">
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    disabled={issueSubmitting}
+                    onClick={() => void performDirectToolIssue({ openDocument: true })}
+                  >
+                    Акт инструмента (PDF)
+                  </button>
+                  <button type="button" className="primaryBtn" disabled={issueSubmitting} onClick={() => void performDirectToolIssue()}>
+                    {issueSubmitting ? "Выдача..." : "Выдать инструмент"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-
-          <div className="card issueHistory">
             <div className="rightCardHeader" style={{ alignItems: "center", gap: 8 }}>
               <h3 style={{ margin: 0 }}>История выдачи</h3>
               <input
@@ -6492,7 +6930,14 @@ function App() {
             {issuesLoading && <LoadingState text="Загрузка выдач..." />}
             {issuesError && <ErrorState text={issuesError} />}
             {!issuesLoading && !issuesError && !issues.length && (
-              <EmptyState title="Выдач пока нет" hint="Подберите материалы выше и нажмите «Выдать материал»." />
+              <EmptyState
+                title="В этой вкладке пока нет записей"
+                hint={
+                  issueIssuesDomain === "TOOLS"
+                    ? "Выберите инструмент из списка «на складе» и нажмите «Выдать инструмент»."
+                    : "Подберите материалы в композере и нажмите «Выдать материал»."
+                }
+              />
             )}
             {!issuesLoading && !issuesError && issues.length > 0 && (
               <>
@@ -6500,6 +6945,7 @@ function App() {
                   <thead>
                     <tr>
                       <th>Номер</th>
+                      <th>Тип</th>
                       <th>Статус</th>
                       <th>Ответственный</th>
                       <th>Получил</th>
@@ -6511,6 +6957,11 @@ function App() {
                     {issues.map((i) => (
                       <tr key={i.id}>
                         <td><strong>{i.number}</strong></td>
+                        <td>
+                          <span className="badge neutral">
+                            {effectiveIssueDomain(i) === "TOOLS" ? "Инструмент" : "Материалы"}
+                          </span>
+                        </td>
                         <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
                         <td>{i.responsibleName || "—"}</td>
                         <td>{i.actualRecipientName || "—"}</td>
@@ -6541,6 +6992,12 @@ function App() {
                   {issues.map((i) => (
                     <article key={`m-issue-${i.id}`} className="mobileCard">
                       <h4>{i.number}</h4>
+                      <p>
+                        <strong>Тип:</strong>{" "}
+                        <span className="badge neutral">
+                          {effectiveIssueDomain(i) === "TOOLS" ? "Инструмент" : "Материалы"}
+                        </span>
+                      </p>
                       <p><strong>Статус:</strong> <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></p>
                       <p><strong>Ответственный:</strong> {i.responsibleName || "—"}</p>
                       <p><strong>Получил:</strong> {i.actualRecipientName || "—"}</p>
@@ -7173,7 +7630,7 @@ function App() {
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           <div className="kpiRow">
             <div className="kpi">
-              <span>На рассмотрении</span>
+              <span>В очереди ({approvalQueueTab === "TOOLS" ? "инструмент" : "материалы"})</span>
               <strong>{approvalQueue.length}</strong>
             </div>
             <div className="kpi">
@@ -7225,7 +7682,26 @@ function App() {
             )}
           </div>
 
-          <h3>Заявки на выдачу</h3>
+          <div className="tabs" style={{ marginTop: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={approvalQueueTab === "MATERIALS" ? "active" : ""}
+              onClick={() => setApprovalQueueTab("MATERIALS")}
+            >
+              Согласование: материалы
+            </button>
+            <button
+              type="button"
+              className={approvalQueueTab === "TOOLS" ? "active" : ""}
+              onClick={() => setApprovalQueueTab("TOOLS")}
+            >
+              Согласование: инструмент
+            </button>
+          </div>
+          <h3>Очередь на выдачу</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Показаны заявки со статусом «на рассмотрении» для выбранного типа ({approvalQueueTab === "TOOLS" ? "инструмент" : "материалы"}).
+          </p>
           <table>
             <thead>
               <tr>
@@ -7237,7 +7713,14 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {approvalQueue.map((i) => (
+              {approvalQueue.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    В очереди ничего нет для этого типа.
+                  </td>
+                </tr>
+              ) : (
+              approvalQueue.map((i) => (
                 <tr key={i.id}>
                   <td>{i.number}</td>
                   <td>{i.warehouse?.name || i.warehouseId}</td>
@@ -7252,7 +7735,8 @@ function App() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              ))
+              )}
             </tbody>
           </table>
           <h3 style={{ marginTop: 18 }}>Приходные заявки</h3>
@@ -7783,6 +8267,29 @@ function App() {
             <p><strong>Одобрил:</strong> {selectedIssue.approvedBy.fullName}</p>
           ) : null}
           <p><strong>Создана:</strong> {new Date(selectedIssue.createdAt).toLocaleString()}</p>
+          {selectedIssue.toolItems && selectedIssue.toolItems.length > 0 ? (
+            <div>
+              <h4>Инструменты</h4>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Инв. №</th>
+                    <th>Наименование</th>
+                    <th>Статус карточки</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedIssue.toolItems.map((line) => (
+                    <tr key={line.id}>
+                      <td>{line.tool?.inventoryNumber || line.toolId.slice(0, 8)}</td>
+                      <td>{safeName(line.tool?.name || line.toolId)}</td>
+                      <td>{line.tool?.status ? toolStatusLabel(line.tool.status as ToolStatus) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           {selectedIssue.items && selectedIssue.items.length > 0 ? (
             <div>
               <h4>Позиции</h4>
@@ -7917,7 +8424,7 @@ function App() {
           <p className="muted">Текущий раздел: {objectSectionFilter}</p>
           {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
           {toolsError && <ErrorState text={toolsError} />}
-          <div className="toolbar">
+          <div className="toolbar" style={{ flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             <input
               placeholder="Поиск инструмента (название, инв. номер, QR)"
               value={toolSearch}
@@ -7938,7 +8445,28 @@ function App() {
               <option value="inventory">По инвентарному номеру</option>
               <option value="status">По статусу</option>
             </select>
-            <button onClick={() => void loadTools()}>Обновить список</button>
+            <button type="button" onClick={() => void loadTools()}>
+              Обновить список
+            </button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="muted">Вид списка</span>
+              <div className="tabs" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className={toolsDisplayMode === "cards" ? "active" : ""}
+                  onClick={() => setToolsDisplayMode("cards")}
+                >
+                  Карточки
+                </button>
+                <button
+                  type="button"
+                  className={toolsDisplayMode === "table" ? "active" : ""}
+                  onClick={() => setToolsDisplayMode("table")}
+                >
+                  Таблица
+                </button>
+              </div>
+            </div>
           </div>
           {selectedTool && (
             <div className="card processCard">
@@ -8066,6 +8594,68 @@ function App() {
           )}
           {!toolsLoading && !toolsError && tools.length > 0 && (
           <>
+          {toolsDisplayMode === "cards" ? (
+            <div className="toolsCardGrid">
+              {tools.map((t) => (
+                <article key={`tc-${t.id}`} className="toolMiniCard">
+                  <div className="toolMiniCardTop">
+                    <label className="toolMiniCardCheck">
+                      <input
+                        type="checkbox"
+                        checked={selectedToolIds.includes(t.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedToolIds((prev) => [...prev, t.id]);
+                          } else {
+                            setSelectedToolIds((prev) => prev.filter((id) => id !== t.id));
+                          }
+                        }}
+                      />
+                    </label>
+                    <strong className="toolMiniCardTitle">{safeName(t.name)}</strong>
+                    <span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span>
+                  </div>
+                  <p className="muted toolMiniCardMeta">
+                    Инв. <strong>{t.inventoryNumber}</strong>
+                    {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
+                  </p>
+                  <div className="toolbar toolMiniCardActions">
+                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "ISSUE")}>
+                      Выдать
+                    </button>
+                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "RETURN")}>
+                      На склад
+                    </button>
+                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>
+                      Списать
+                    </button>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      onClick={async () => {
+                        if (!token) return;
+                        const res = await fetch(`${API_URL}/api/tools/${t.id}/qr`, {
+                          headers: { Authorization: `Bearer ${token}` }
+                        });
+                        if (!res.ok) {
+                          setToolsMessage("Не удалось получить QR");
+                          setToolsTone("error");
+                          return;
+                        }
+                        const data = (await res.json()) as { toolId?: string; id: string; dataUrl: string; qrCode: string };
+                        setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
+                        setQrCode(data.qrCode);
+                        setSelectedToolForEvents(t.id);
+                        await loadToolEvents(t.id);
+                      }}
+                    >
+                      QR
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
           <table>
             <thead>
               <tr>
@@ -8129,6 +8719,7 @@ function App() {
               ))}
             </tbody>
           </table>
+          )}
           <div className="toolbar">
             <span className="muted">
               Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-

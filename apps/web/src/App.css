@@ -2081,3 +2081,67 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   }
 }
 
+.tabs button.active {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border: 1px solid #1e40af;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+.toolsCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.toolMiniCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+}
+
+.toolMiniCardTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolMiniCardCheck input {
+  margin-top: 4px;
+}
+
+.toolMiniCardTitle {
+  flex: 1;
+  min-width: 120px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.toolMiniCardMeta {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.toolMiniCardActions {
+  flex-wrap: wrap !important;
+  margin-top: 10px !important;
+  gap: 6px !important;
+}
+
+.toolMiniCardActions .ghostBtn,
+.toolMiniCardActions button {
+  min-height: 32px;
+  font-size: 13px;
+}
+
+.toolReceiptComposer,
+.issueToolComposer {
+  border-style: dashed;
+  border-color: #cbd5f5;
+  background: #fafbff;
+}
+
