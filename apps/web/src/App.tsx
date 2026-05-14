@@ -1640,7 +1640,6 @@ function App() {
   const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
   const canManageFeedback = useMemo(() => hasPermission("feedback.manage"), [me]);
   const canWriteAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
-  const showLegacyMatching = false;
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   async function loadStockMovements() {
@@ -4326,6 +4325,9 @@ function App() {
               Войти в объект
             </button>
             {authError && <p className="error">{authError}</p>}
+            <button type="button" className="ghostBtn" style={{ marginTop: 12 }} onClick={onLogout}>
+              Выйти из аккаунта
+            </button>
           </div>
         </div>
       </main>
@@ -4341,39 +4343,46 @@ function App() {
           <h2 className="brand">СкладПро</h2>
           <p className="brandSub">Warehouse ERP</p>
         </div>
-        <p className="navSectionTitle">Операции</p>
-        {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
-        {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
-        <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
-        {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
-        {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
-        {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
-        {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
+        <div className="sidebarNavScroll">
+          <p className="navSectionTitle">Операции</p>
+          {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
+          {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
+          <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
+          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
+          {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
+          {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
+          {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
 
-        <p className="navSectionTitle">Контроль</p>
-        {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
-        {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
-        {showLegacyMatching && canMaterialMatch && <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}><span className="navIcon">◇</span>Сопоставление</button>}
+          <p className="navSectionTitle">Контроль</p>
+          {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
+          {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+          {canMaterialMatch && (
+            <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}>
+              <span className="navIcon">◇</span>Сопоставление
+            </button>
+          )}
 
+          <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
+          <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка</button>
+          {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
 
-        <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
-        <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка</button>
-        {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
+          <p className="navSectionTitle">Сервис</p>
+          {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
+          {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
+          {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
+          {(canReadIntegrations || canReadNotifications) && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>{canReadIntegrations ? "Интеграции" : "Уведомления"}</button>}
 
-        <p className="navSectionTitle">Сервис</p>
-        {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
-        {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
-        {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
-        {(canReadIntegrations || canReadNotifications) && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>{canReadIntegrations ? "Интеграции" : "Уведомления"}</button>}
+          <p className="navSectionTitle">Администрирование</p>
+          {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
+        </div>
 
-        <p className="navSectionTitle">Администрирование</p>
-        {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
-
-        <p className="navSectionTitle">Аккаунт</p>
-        <button className={`navBtn ${activeTab === "profile" ? "active" : ""}`} onClick={() => setActiveTab("profile")}><span className="navIcon">◉</span>Профиль</button>
-        <button className={`navBtn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}><span className="navIcon">⚙</span>Настройки</button>
-        <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Смена пароля</button>
-        <button className="navBtn danger" onClick={onLogout}>Выйти</button>
+        <div className="sidebarFoot">
+          <p className="navSectionTitle">Аккаунт</p>
+          <button className={`navBtn ${activeTab === "profile" ? "active" : ""}`} onClick={() => setActiveTab("profile")}><span className="navIcon">◉</span>Профиль</button>
+          <button className={`navBtn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}><span className="navIcon">⚙</span>Настройки</button>
+          <button className={`navBtn ${activeTab === "password" ? "active" : ""}`} onClick={() => setActiveTab("password")}><span className="navIcon">✱</span>Смена пароля</button>
+          <button type="button" className="navBtn danger" onClick={onLogout}>Выйти</button>
+        </div>
       </aside>
       {mobileNavOpen && (
         <button
@@ -4434,8 +4443,11 @@ function App() {
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
 
 
-            <button className="topIconBtn" onClick={() => setActiveTab("profile")}>Профиль</button>
-            <button className="topIconBtn" onClick={() => setActiveTab("settings")}>Настройки</button>
+            <button className="topIconBtn" type="button" onClick={() => setActiveTab("profile")}>Профиль</button>
+            <button className="topIconBtn" type="button" onClick={() => setActiveTab("settings")}>Настройки</button>
+            <button className="topIconBtn topIconBtnDanger" type="button" onClick={onLogout}>
+              Выйти
+            </button>
             {me ? (
               <span className="userChip">
                 <span className="userAvatar">
@@ -4704,7 +4716,7 @@ function App() {
                       <span className="homeInsightLabel">ТТН не закрыты</span>
                       <span className="homeInsightValue">{dashboard.warehouse.waybillsOpen}</span>
                     </button>
-                    {showLegacyMatching ? (
+                    {canMaterialMatch ? (
                       <button
                         type="button"
                         className="homeInsightCard"
@@ -5184,7 +5196,7 @@ function App() {
             </div>
           </div>
         )}
-      {showLegacyMatching && activeTab === "matching" && (
+      {canMaterialMatch && activeTab === "matching" && (
         <div className="card">
           <h2>Сопоставление с канонической номенклатурой</h2>
           <p className="muted">

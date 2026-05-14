@@ -13,7 +13,26 @@
   flex-direction: column;
   gap: 6px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.sidebarNavScroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebarFoot {
+  flex-shrink: 0;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .mobileMenuBtn,
@@ -147,7 +166,6 @@
 }
 
 .navBtn.danger {
-  margin-top: auto;
   background: rgba(239, 68, 68, 0.22);
   border: 1px solid rgba(239, 68, 68, 0.44);
 }
@@ -377,6 +395,17 @@ button:hover {
   background: #fff;
   color: #3d4d6d;
   font-size: 12px;
+}
+
+.topIconBtnDanger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.topIconBtnDanger:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
 .userChip {
@@ -1298,6 +1327,7 @@ tr.low {
     transform: translateX(-105%);
     transition: transform 0.22s ease;
     box-shadow: 0 20px 44px rgba(11, 31, 68, 0.3);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
   .sidebar.mobileOpen {
     transform: translateX(0);
