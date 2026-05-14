@@ -833,6 +833,8 @@ function App() {
     domain: "TOOLS" | "WORKWEAR" | "OTHER";
   }>(null);
   const [issueRecipientDraft, setIssueRecipientDraft] = useState("");
+  const [issueRecipientSignedFile, setIssueRecipientSignedFile] = useState<File | null>(null);
+  const [directIssueSignedFile, setDirectIssueSignedFile] = useState<File | null>(null);
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   // Городок: список + UI-состояния.
   const [campItems, setCampItems] = useState<CampItemRow[]>([]);
@@ -3056,7 +3058,12 @@ function App() {
   async function executeIssueAction(
     issueId: string,
     action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue",
-    opts?: { fromApprovals?: boolean; closeDrawer?: boolean; actualRecipientName?: string }
+    opts?: {
+      fromApprovals?: boolean;
+      closeDrawer?: boolean;
+      actualRecipientName?: string;
+      signedFile?: File | null;
+    }
   ) {
     if (!token) return;
     const actionText = issueActionLabel(action).toLowerCase();
@@ -3068,6 +3075,7 @@ function App() {
       const modalDom: "TOOLS" | "WORKWEAR" | "OTHER" =
         dom === "TOOLS" ? "TOOLS" : dom === "WORKWEAR" ? "WORKWEAR" : "OTHER";
       setIssueRecipientDraft(fallback.trim());
+      setIssueRecipientSignedFile(null);
       setIssueRecipientModal({
         issueId,
         opts,
@@ -3078,13 +3086,24 @@ function App() {
     }
     const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
     if (!ok) return;
+    const signed = opts?.signedFile ?? undefined;
+    const useMultipart = Boolean(action === "issue" && signed);
     const res = await fetch(`${API_URL}/api/issues/${issueId}/${action}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
-        ...(action === "issue" ? { "Content-Type": "application/json" } : {})
+        ...(action === "issue" && !useMultipart ? { "Content-Type": "application/json" } : {})
       },
-      ...(action === "issue" ? { body: JSON.stringify({ actualRecipientName }) } : {})
+      ...(action === "issue"
+        ? useMultipart
+          ? (() => {
+              const fd = new FormData();
+              fd.append("payload", JSON.stringify({ actualRecipientName }));
+              fd.append("signedFile", signed!);
+              return { body: fd };
+            })()
+          : { body: JSON.stringify({ actualRecipientName }) }
+        : {})
     });
     if (!res.ok) {
       setIssuesMessage(`Не удалось выполнить действие: ${issueActionLabel(action)}`);
@@ -3101,6 +3120,7 @@ function App() {
     if (action === "issue") {
       await loadStocks(q);
       void loadTools().catch(() => undefined);
+      setIssueRecipientSignedFile(null);
     }
   }
 
@@ -3188,11 +3208,23 @@ function App() {
         return;
       }
       const created = (await createRes.json()) as { id: string; number: string };
-      const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ actualRecipientName })
-      });
+      let issueRes: Response;
+      if (directIssueSignedFile) {
+        const fd = new FormData();
+        fd.append("payload", JSON.stringify({ actualRecipientName }));
+        fd.append("signedFile", directIssueSignedFile);
+        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd
+        });
+      } else {
+        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ actualRecipientName })
+        });
+      }
       if (!issueRes.ok) {
         const err = await issueRes.json().catch(() => ({}));
         setIssuesMessage(
@@ -3216,6 +3248,7 @@ function App() {
       setIssuePickQtyByKey({});
       setIssueMaterialSearch("");
       setIssueNote("");
+      setDirectIssueSignedFile(null);
       await loadIssues();
       await loadStocks(q);
       await loadStockMovements();
@@ -3280,11 +3313,23 @@ function App() {
         return;
       }
       const created = (await createRes.json()) as { id: string; number: string };
-      const issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ actualRecipientName })
-      });
+      let issueRes: Response;
+      if (directIssueSignedFile) {
+        const fd = new FormData();
+        fd.append("payload", JSON.stringify({ actualRecipientName }));
+        fd.append("signedFile", directIssueSignedFile);
+        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd
+        });
+      } else {
+        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ actualRecipientName })
+        });
+      }
       if (!issueRes.ok) {
         const err = await issueRes.json().catch(() => ({}));
         setIssuesMessage(
@@ -3307,6 +3352,7 @@ function App() {
       setIssueToolPickIds([]);
       setIssueToolSearch("");
       setIssueNote("");
+      setDirectIssueSignedFile(null);
       await loadIssues();
       void loadTools().catch(() => undefined);
     } catch (e) {
@@ -3819,6 +3865,7 @@ function App() {
       setLimitPromptRequest(null);
       setManualStockModalOpen(false);
       setIssueRecipientModal(null);
+      setIssueRecipientSignedFile(null);
       setPendingAcceptanceRequestId(null);
       setPendingAcceptanceFiles([]);
       setMaterialWriteoffModal(null);
@@ -7662,6 +7709,21 @@ function App() {
               </div>
             )}
 
+            {(issueIssuesDomain === "MATERIALS" ||
+              issueIssuesDomain === "CONSUMABLES" ||
+              issueIssuesDomain === "WORKWEAR") && (
+              <label className="muted" style={{ display: "block", marginTop: 10, fontSize: 13 }}>
+                Вложение подписанного акта при прямой выдаче (необязательно)
+                <input
+                  type="file"
+                  accept="image/*,.pdf,application/pdf"
+                  style={{ marginTop: 6 }}
+                  disabled={issueSubmitting}
+                  onChange={(e) => setDirectIssueSignedFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
+
             <div className="issueActionBar">
               <button
                 type="button"
@@ -7766,6 +7828,16 @@ function App() {
                     </div>
                   </div>
                 )}
+                <label className="muted" style={{ display: "block", marginTop: 10, fontSize: 13 }}>
+                  Подписанный акт по выдаче инструмента (необязательно)
+                  <input
+                    type="file"
+                    accept="image/*,.pdf,application/pdf"
+                    style={{ marginTop: 6 }}
+                    disabled={issueSubmitting}
+                    onChange={(e) => setDirectIssueSignedFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
                 <div className="issueActionBar">
                   <button
                     type="button"
@@ -8382,6 +8454,7 @@ function App() {
                                   <th>Осталось привезти</th>
                                   <th>В закупке (заявки)</th>
                                   <th>Остаток на складе</th>
+                                  <th style={{ minWidth: 128 }}>Структура</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -8393,6 +8466,10 @@ function App() {
                                   const onOrd = sm?.onOrderQty ?? 0;
                                   const stk = sm?.stockQty ?? 0;
                                   const remain = Math.max(0, plan - arrived);
+                                  const base = Math.max(plan, 1e-9);
+                                  const pctArr = Math.min(100, (arrived / base) * 100);
+                                  const pctIss = Math.min(100, (iss / base) * 100);
+                                  const overIss = plan > 0 && iss > plan;
                                   return (
                                     <tr key={`mt-${node.id}-${m.id}`}>
                                       <td>{safeName(String(m.materialName || m.title || ""))}</td>
@@ -8403,19 +8480,55 @@ function App() {
                                       <td>{m.materialId ? metricFmt(remain) : "—"}</td>
                                       <td>{m.materialId ? metricFmt(onOrd) : "—"}</td>
                                       <td>{m.materialId ? metricFmt(stk) : "—"}</td>
+                                      <td>
+                                        {m.materialId && plan > 0 ? (
+                                          <div style={{ minWidth: 120 }}>
+                                            <div
+                                              className="muted"
+                                              style={{ fontSize: 10, marginBottom: 2 }}
+                                              title="Синим — доля прихода от плана; зелёным — доля выдачи от плана"
+                                            >
+                                              приход / выдача от плана
+                                            </div>
+                                            <div className="progressWrap" style={{ height: 7, marginBottom: 3 }}>
+                                              <div
+                                                className="progressBar"
+                                                style={{
+                                                  width: `${pctArr}%`,
+                                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
+                                                  opacity: arrived > 0 ? 1 : 0.25
+                                                }}
+                                              />
+                                            </div>
+                                            <div className="progressWrap" style={{ height: 7 }}>
+                                              <div
+                                                className={`progressBar ${overIss ? "bad" : ""}`}
+                                                style={{
+                                                  width: `${pctIss}%`,
+                                                  ...(overIss ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
+                                                }}
+                                              />
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          "—"
+                                        )}
+                                      </td>
                                     </tr>
                                   );
                                 })}
                               </tbody>
                             </table>
                             <p className="muted" style={{ margin: "6px 0 0", fontSize: 11 }}>
-                              Показатели по разделу {objectSectionFilter}: приход по операциям INCOME, выдача по движениям OUT, «в закупке» — открытые заявки на приход.
+                              Учётный раздел объекта: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}. Приход — операции INCOME по
+                              разделу; выдано — движения OUT; «в закупке» — открытые заявки на приход. Структура — доля прихода и доля
+                              выдачи от планового количества по строке.
                             </p>
                           </div>
                         ) : null}
 
                         {isGroup && isExpanded && children.length
-                          ? children.map((ch) => renderNode(ch, depth + 1))
+                          ? children.filter((ch) => ch.nodeType !== "MATERIAL").map((ch) => renderNode(ch, depth + 1))
                           : null}
                       </div>
                     );
@@ -11786,14 +11899,20 @@ function App() {
             zIndex: 65,
             padding: 16
           }}
-          onClick={() => setIssueRecipientModal(null)}
+          onClick={() => {
+            setIssueRecipientModal(null);
+            setIssueRecipientSignedFile(null);
+          }}
         >
           <div className="card" style={{ maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
               <h3 id="issue-recipient-title" style={{ marginTop: 0 }}>
                 Фактический получатель
               </h3>
-              <button type="button" className="ghostBtn" onClick={() => setIssueRecipientModal(null)}>
+              <button type="button" className="ghostBtn" onClick={() => {
+                setIssueRecipientModal(null);
+                setIssueRecipientSignedFile(null);
+              }}>
                 Закрыть
               </button>
             </div>
@@ -11828,14 +11947,30 @@ function App() {
                       }
                       const { issueId, opts } = issueRecipientModal;
                       setIssueRecipientModal(null);
-                      await executeIssueAction(issueId, "issue", { ...opts, actualRecipientName: name });
+                      await executeIssueAction(issueId, "issue", {
+                        ...opts,
+                        actualRecipientName: name,
+                        signedFile: issueRecipientSignedFile
+                      });
                     })();
                   }
                 }}
               />
             </label>
+            <label className="muted" style={{ marginTop: 10, display: "block", fontSize: 13 }}>
+              Подписанный акт или скан (PDF, изображение) — необязательно, сохранится в карточке заявки
+              <input
+                type="file"
+                accept="image/*,.pdf,application/pdf"
+                style={{ marginTop: 6 }}
+                onChange={(e) => setIssueRecipientSignedFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
             <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button type="button" className="ghostBtn" onClick={() => setIssueRecipientModal(null)}>
+              <button type="button" className="ghostBtn" onClick={() => {
+                setIssueRecipientModal(null);
+                setIssueRecipientSignedFile(null);
+              }}>
                 Отмена
               </button>
               <button
@@ -11856,7 +11991,11 @@ function App() {
                     }
                     const { issueId, opts } = issueRecipientModal;
                     setIssueRecipientModal(null);
-                    await executeIssueAction(issueId, "issue", { ...opts, actualRecipientName: name });
+                    await executeIssueAction(issueId, "issue", {
+                      ...opts,
+                      actualRecipientName: name,
+                      signedFile: issueRecipientSignedFile
+                    });
                   })();
                 }}
               >

@@ -11,7 +11,9 @@ import {
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { Express } from "express";
 import { Router } from "express";
+import multer from "multer";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
 import { config } from "../config.js";
@@ -23,6 +25,7 @@ import {
   mergeIssueWhere
 } from "../lib/dataScope.js";
 import { notifyUser } from "../lib/notifications.js";
+import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -83,6 +86,15 @@ if (!fs.existsSync(uploadDirAbs)) {
   fs.mkdirSync(uploadDirAbs, { recursive: true });
 }
 
+const issueUploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDirAbs),
+  filename: (_req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${safe}`);
+  }
+});
+const issueUpload = multer({ storage: issueUploadStorage });
+
 async function getLatestProjectLimit(projectId: string) {
   return prisma.projectLimit.findFirst({
     where: { projectId },
@@ -102,11 +114,27 @@ function materialIssueActTitle(domain: IssueRequestDomain): string {
   }
 }
 
-function issueLimitSectionLabel(issue: {
-  limitReleasePath?: string | null;
-  project?: { name: string } | null;
-}): string {
-  return issue.limitReleasePath?.trim() || "—";
+function limitSectionPdfLabel(issue: { limitReleasePath?: string | null }): string {
+  const t = issue.limitReleasePath?.trim();
+  return t && t.length > 0 ? t : "Не указан (выдача вне дерева лимита)";
+}
+
+function basisPdfLine(basisType: IssueBasisType, basisRef: string | null | undefined): string {
+  const refTrim = basisRef?.trim() ?? "";
+  const extra = refTrim ? ` Реквизиты основания: ${refTrim}` : "";
+  switch (basisType) {
+    case IssueBasisType.PROJECT_WORK:
+      return `Основание выдачи: производство работ.${extra}`;
+    case IssueBasisType.INTERNAL_NEED:
+      return `Основание выдачи: внутренняя потребность.${extra}`;
+    case IssueBasisType.EMERGENCY:
+      return `Основание выдачи: срочная / аварийная необходимость.${extra}`;
+    case IssueBasisType.OTHER:
+    default:
+      return refTrim.length
+        ? `Основание выдачи: прочее.${extra}`
+        : "Основание выдачи: прочее (реквизиты основания не заполнены).";
+  }
 }
 
 function expectedMaterialKind(domain: IssueRequestDomain): MaterialKind | null {
@@ -196,7 +224,8 @@ async function createIssueActDocument(params: {
   doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
   doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
   doc.text(`Учётный раздел: ${issue.section === "SS" ? "СС" : "ЭОМ"}`);
-  doc.text(`Раздел: ${issueLimitSectionLabel(issue)}`);
+  doc.text(`Раздел (путь в лимитах): ${limitSectionPdfLabel(issue)}`);
+  doc.text(basisPdfLine(issue.basisType, issue.basisRef));
   doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
   doc.text(`Фактически получил: ${params.actualRecipientName}`);
   doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
@@ -293,7 +322,8 @@ async function createToolIssueActDocument(params: {
   doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
   doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
   doc.text(`Учётный раздел: ${issue.section === "SS" ? "СС" : "ЭОМ"}`);
-  doc.text(`Раздел: ${issueLimitSectionLabel(issue)}`);
+  doc.text(`Раздел (путь в лимитах): ${limitSectionPdfLabel(issue)}`);
+  doc.text(basisPdfLine(issue.basisType, issue.basisRef));
   doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
   doc.text(`Фактически получил: ${params.actualRecipientName}`);
   doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
@@ -355,6 +385,45 @@ async function createToolIssueActDocument(params: {
       }
     });
     return created;
+  });
+}
+
+async function attachSignedIssueAttachment(params: {
+  issueId: string;
+  operationId: string | null;
+  userId: string;
+  file: Express.Multer.File;
+}) {
+  const absPath = path.join(uploadDirAbs, params.file.filename);
+  const checksumSha256 = await sha256File(absPath);
+  const relPath = `${config.uploadsDir}/${params.file.filename}`.replace(/\\/g, "/");
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.documentFile.create({
+      data: {
+        groupId: crypto.randomUUID(),
+        version: 1,
+        entityType: "issue",
+        entityId: params.issueId,
+        type: "issue-signed-attachment",
+        fileName: params.file.originalname || "signed-issue-scan",
+        filePath: relPath,
+        mimeType: params.file.mimetype || "application/octet-stream",
+        size: params.file.size,
+        checksumSha256,
+        createdBy: params.userId
+      }
+    });
+    if (params.operationId) {
+      await tx.documentLink.create({
+        data: {
+          documentFileId: row.id,
+          entityType: "operation",
+          entityId: params.operationId,
+          createdById: params.userId
+        }
+      });
+    }
+    return row;
   });
 }
 
@@ -753,36 +822,57 @@ issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), asyn
   return res.json(updated);
 });
 
-issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
-  const id = String(req.params.id);
-  const parsed = issueActionSchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
-  }
-  const scope = await getRequestDataScope(req);
-  const issueRow = await prisma.issueRequest.findFirst({
-    where: mergeIssueWhere(scope, { id }),
-    include: { items: true, toolItems: { include: { tool: true } } }
-  });
-  if (!issueRow) {
-    return res.status(404).json({ error: "Issue request not found" });
-  }
-  if (issueRow.status === IssueRequestStatus.ON_APPROVAL) {
-    return res.status(409).json({ error: "Issue request is pending approval" });
-  }
-  if (
-    issueRow.status !== IssueRequestStatus.APPROVED &&
-    issueRow.status !== IssueRequestStatus.DRAFT
-  ) {
-    return res.status(409).json({ error: `Wrong status: ${issueRow.status}` });
-  }
-  const actualRecipientName = parsed.data.actualRecipientName || issueRow.responsibleName || "";
-  if (!actualRecipientName.trim()) {
-    return res.status(400).json({ error: "actualRecipientName is required" });
-  }
+issueRequestsRouter.patch(
+  "/:id/issue",
+  requirePermission("operations.write"),
+  issueUpload.single("signedFile"),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    const rawBody = (req.body || {}) as Record<string, unknown>;
+    const bodyJson: unknown =
+      typeof rawBody.payload === "string"
+        ? (() => {
+            try {
+              return JSON.parse(rawBody.payload as string);
+            } catch {
+              return null;
+            }
+          })()
+        : rawBody;
+    if (bodyJson === null) {
+      return res.status(400).json({ error: "Некорректный JSON в поле payload" });
+    }
+    const parsed = issueActionSchema.safeParse(bodyJson);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const scope = await getRequestDataScope(req);
+    const issueRow = await prisma.issueRequest.findFirst({
+      where: mergeIssueWhere(scope, { id }),
+      include: { items: true, toolItems: { include: { tool: true } } }
+    });
+    if (!issueRow) {
+      return res.status(404).json({ error: "Issue request not found" });
+    }
+    if (issueRow.status === IssueRequestStatus.ON_APPROVAL) {
+      return res.status(409).json({ error: "Issue request is pending approval" });
+    }
+    if (
+      issueRow.status !== IssueRequestStatus.APPROVED &&
+      issueRow.status !== IssueRequestStatus.DRAFT
+    ) {
+      return res.status(409).json({ error: `Wrong status: ${issueRow.status}` });
+    }
+    const actualRecipientName = parsed.data.actualRecipientName || issueRow.responsibleName || "";
+    if (!actualRecipientName.trim()) {
+      return res.status(400).json({ error: "actualRecipientName is required" });
+    }
 
-  if (issueRow.domain === IssueRequestDomain.TOOLS) {
-    try {
+    const signedUpload = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+    let signedAttachment: { id: string; filePath: string; fileName: string } | null = null;
+
+    if (issueRow.domain === IssueRequestDomain.TOOLS) {
+      try {
       const prevStatus = issueRow.status;
       const result = await prisma.$transaction(async (tx) => {
         const toolLines = await tx.issueRequestToolItem.findMany({
@@ -877,6 +967,20 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         console.error("Failed to generate tool issue act", documentError);
       }
 
+      if (signedUpload) {
+        try {
+          const row = await attachSignedIssueAttachment({
+            issueId: result.issue.id,
+            operationId: null,
+            userId: req.user!.userId,
+            file: signedUpload
+          });
+          signedAttachment = { id: row.id, filePath: row.filePath, fileName: row.fileName };
+        } catch (attachErr) {
+          console.error("Failed to attach signed issue scan", attachErr);
+        }
+      }
+
       await recordAudit({
         userId: req.user!.userId,
         action: "ISSUE_REQUEST_ISSUE",
@@ -905,7 +1009,13 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         entityId: result.issue.id
       });
 
-      return res.json({ operation: null, issue: result.issue, document, toolIds: result.toolIds });
+      return res.json({
+        operation: null,
+        issue: result.issue,
+        document,
+        toolIds: result.toolIds,
+        signedAttachment
+      });
     } catch (error) {
       if (error instanceof Error && error.message === "NO_TOOLS") {
         return res.status(409).json({ error: "No tools in issue request" });
@@ -933,7 +1043,7 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       }
       return res.status(500).json({ error: "Internal server error" });
     }
-  }
+    }
 
   try {
     const prevStatus = issueRow.status;
@@ -1059,6 +1169,19 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
     } catch (documentError) {
       console.error("Failed to generate issue act", documentError);
     }
+    if (signedUpload) {
+      try {
+        const row = await attachSignedIssueAttachment({
+          issueId: issue.id,
+          operationId: operation.id,
+          userId: req.user!.userId,
+          file: signedUpload
+        });
+        signedAttachment = { id: row.id, filePath: row.filePath, fileName: row.fileName };
+      } catch (attachErr) {
+        console.error("Failed to attach signed issue scan", attachErr);
+      }
+    }
     await recordAudit({
       userId: req.user!.userId,
       action: "ISSUE_REQUEST_ISSUE",
@@ -1088,7 +1211,7 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
       entityId: issue.id
     });
 
-    return res.json({ operation, issue, document });
+    return res.json({ operation, issue, document, signedAttachment });
   } catch (error) {
     if (error instanceof Error && error.message === "LIMIT_EXCEEDED_NEEDS_APPROVAL") {
       return res.status(409).json({ error: "Limit exceeded. Send request for approval." });
