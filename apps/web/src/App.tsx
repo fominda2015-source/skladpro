@@ -265,9 +265,17 @@ type ToolItem = {
   status: ToolStatus;
   section?: "SS" | "EOM";
   warehouseId?: string | null;
+  warehouse?: { id: string; name: string } | null;
   responsible?: string | null;
   note?: string | null;
   createdAt: string;
+};
+type ToolWarehouseSummaryRow = {
+  warehouseId: string | null;
+  warehouseName: string;
+  count: number;
+  inStock: number;
+  issued: number;
 };
 type ToolEvent = {
   id: string;
@@ -851,15 +859,13 @@ function App() {
     }
   });
   const [toolsTotal, setToolsTotal] = useState(0);
-  const [toolsDisplayMode, setToolsDisplayMode] = useState<"table" | "cards">(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(LIST_VIEW_KEY) || "{}") as { toolsDisplayMode?: string };
-      return saved.toolsDisplayMode === "cards" ? "cards" : "table";
-    } catch {
-      return "table";
-    }
-  });
-  const [toolName, setToolName] = useState("Перфоратор Bosch");
+  const [toolWarehouseSummary, setToolWarehouseSummary] = useState<ToolWarehouseSummaryRow[]>([]);
+  const [toolListWarehouseId, setToolListWarehouseId] = useState("");
+  const [toolManualModalOpen, setToolManualModalOpen] = useState(false);
+  const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
+  const [toolDetailRecord, setToolDetailRecord] = useState<ToolItem | null>(null);
+  const [loginFieldsReadonly, setLoginFieldsReadonly] = useState(true);
+  const [toolName, setToolName] = useState("");
   const [toolInventoryNumber, setToolInventoryNumber] = useState(`INV-${Date.now()}`);
   const [toolSerialNumber, setToolSerialNumber] = useState("");
   const [toolWarehouseId, setToolWarehouseId] = useState("");
@@ -1611,7 +1617,10 @@ function App() {
     () => hasPermission("audit.read"),
     [me]
   );
-  const canRevertAudit = useMemo(() => hasPermission("audit.revert"), [me]);
+  const canRevertAudit = useMemo(
+    () => Boolean(me?.role === "ADMIN" || me?.permissions?.includes("audit.revert")),
+    [me]
+  );
   const canDashboard = useMemo(
     () =>
       Boolean(
@@ -3189,6 +3198,7 @@ function App() {
         toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
         `section=${encodeURIComponent(objectSectionFilter)}`,
+        toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -3202,16 +3212,23 @@ function App() {
       const items = Array.isArray(payload) ? payload : payload.items;
       setTools(items);
       setToolsTotal(Array.isArray(payload) ? items.length : payload.total);
-      if (items.length && !selectedToolIds.length) {
-        setSelectedToolIds([items[0].id]);
-      }
-      if (items.length && !selectedToolForEvents) {
-        setSelectedToolForEvents(items[0].id);
-      }
     } catch (e) {
       setToolsError(`Не удалось загрузить инструменты: ${String(e)}`);
     } finally {
       setToolsLoading(false);
+    }
+  }
+
+  async function loadToolWarehouseSummary() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/tools/summary/by-warehouse`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setToolWarehouseSummary(((await res.json()) as ToolWarehouseSummaryRow[]) || []);
+    } catch {
+      setToolWarehouseSummary([]);
     }
   }
 
@@ -3328,6 +3345,7 @@ function App() {
     }
     await loadTools();
     await loadToolEvents(toolId);
+    await loadToolWarehouseSummary();
   }
 
   function openToolActionDialog(toolId: string, action: ToolActionKind) {
@@ -3339,13 +3357,22 @@ function App() {
   }
 
   async function submitToolActionDialog() {
-    if (!toolAction) return;
-    await doToolAction(toolAction.toolId, toolAction.action, {
+    if (!toolAction || !token) return;
+    const tid = toolAction.toolId;
+    await doToolAction(tid, toolAction.action, {
       responsible: toolActionResponsible,
       comment: toolActionComment,
       photo: toolActionPhoto
     });
     setToolAction(null);
+    if (toolDetailModalId === tid) {
+      const res = await fetch(`${API_URL}/api/tools/${tid}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setToolDetailRecord((await res.json()) as ToolItem);
+      }
+    }
   }
 
   async function loadDocuments() {
@@ -3555,7 +3582,6 @@ function App() {
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
   const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
-  const selectedTool = tools.find((x) => x.id === selectedToolForEvents) || tools[0] || null;
   const issuesTotalPages = Math.max(1, Math.ceil(issuesTotal / issuesPageSize));
   const waybillsTotalPages = Math.max(1, Math.ceil(waybillsTotal / waybillsPageSize));
   const toolsTotalPages = Math.max(1, Math.ceil(toolsTotal / toolsPageSize));
@@ -3598,17 +3624,35 @@ function App() {
   }
 
   useEffect(() => {
-    const openOverlay = Boolean(limitPromptRequest || manualStockModalOpen || issueRecipientModal);
+    const openOverlay = Boolean(
+      limitPromptRequest ||
+        manualStockModalOpen ||
+        issueRecipientModal ||
+        pendingAcceptanceRequestId ||
+        toolManualModalOpen ||
+        toolDetailModalId
+    );
     if (!openOverlay) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       setLimitPromptRequest(null);
       setManualStockModalOpen(false);
       setIssueRecipientModal(null);
+      setPendingAcceptanceRequestId(null);
+      setPendingAcceptanceFiles([]);
+      setToolManualModalOpen(false);
+      setToolDetailModalId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [limitPromptRequest, manualStockModalOpen, issueRecipientModal]);
+  }, [
+    limitPromptRequest,
+    manualStockModalOpen,
+    issueRecipientModal,
+    pendingAcceptanceRequestId,
+    toolManualModalOpen,
+    toolDetailModalId
+  ]);
 
   useEffect(() => {
     if (token && !mustPickObject) {
@@ -4039,7 +4083,7 @@ function App() {
 
   useEffect(() => {
     setToolsPage(1);
-  }, [toolSearch, toolStatusFilter, toolsSort, toolsPageSize]);
+  }, [toolSearch, toolStatusFilter, toolsSort, toolsPageSize, toolListWarehouseId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -4047,11 +4091,10 @@ function App() {
       JSON.stringify({
         issuesPageSize,
         waybillsPageSize,
-        toolsPageSize,
-        toolsDisplayMode
+        toolsPageSize
       })
     );
-  }, [issuesPageSize, waybillsPageSize, toolsPageSize, toolsDisplayMode]);
+  }, [issuesPageSize, waybillsPageSize, toolsPageSize]);
 
   useEffect(() => {
     if (toolsPage > toolsTotalPages) setToolsPage(toolsTotalPages);
@@ -4127,8 +4170,38 @@ function App() {
     if (token && activeTab === "tools") {
       void loadCatalogData();
       void loadTools();
+      void loadToolWarehouseSummary();
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter, toolsSort, toolsPage, toolsPageSize, objectSectionFilter]);
+  }, [
+    token,
+    activeTab,
+    toolSearch,
+    toolStatusFilter,
+    toolsSort,
+    toolsPage,
+    toolsPageSize,
+    objectSectionFilter,
+    toolListWarehouseId
+  ]);
+
+  useEffect(() => {
+    if (!token || !toolDetailModalId) {
+      setToolDetailRecord(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`${API_URL}/api/tools/${toolDetailModalId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!cancelled && res.ok) {
+        setToolDetailRecord((await res.json()) as ToolItem);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, toolDetailModalId]);
 
   useEffect(() => {
     if (token && activeTab === "waybills") {
@@ -4186,7 +4259,10 @@ function App() {
       setOpWarehouseId(activeObjectId);
       setIssueWarehouseId(activeObjectId);
       setToolWarehouseId(activeObjectId);
+      setToolListWarehouseId(activeObjectId);
       if (!dashboardWarehouseId) setDashboardWarehouseId(activeObjectId);
+    } else {
+      setToolListWarehouseId("");
     }
   }, [activeObjectId, dashboardWarehouseId]);
 
@@ -4255,15 +4331,31 @@ function App() {
             <p className="muted">Warehouse ERP platform</p>
           </div>
           <h2>Вход в систему</h2>
-          <form className="form" onSubmit={onLoginSubmit}>
-            <label>
+          <form className="form" onSubmit={onLoginSubmit} autoComplete="off">
+            <label style={{ flexDirection: "column", gap: 6 }}>
               Email
-              <input value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input
+                name="login-email-field"
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="username"
+                spellCheck={false}
+                readOnly={loginFieldsReadonly}
+                onFocus={() => setLoginFieldsReadonly(false)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </label>
-            <label>
+            <label style={{ flexDirection: "column", gap: 6 }}>
               Пароль
               <input
+                name="login-password-field"
                 type="password"
+                autoComplete="current-password"
+                readOnly={loginFieldsReadonly}
+                onFocus={() => setLoginFieldsReadonly(false)}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -9424,13 +9516,50 @@ function App() {
 
       {activeTab === "tools" && (
         <div className="card">
-          <h2>Инструмент: карточка, QR и печать</h2>
+          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Инструменты</h2>
+              <p className="muted" style={{ margin: "6px 0 0", maxWidth: 720 }}>
+                Список карточек с фильтрами. Нажмите карточку, чтобы открыть действия и журнал. Ручное создание — отдельной кнопкой.
+              </p>
+            </div>
+          </div>
           <p className="muted">Текущий раздел: {objectSectionFilter}</p>
+
+          {toolWarehouseSummary.length > 1 && (
+            <div className="card" style={{ marginBottom: 12, background: "rgba(148, 163, 184, 0.08)" }}>
+              <h3 style={{ marginTop: 0 }}>Срез по объектам</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Сводка по доступным складам. Удобно, если вы не закреплены за одним объектом или ведёте несколько площадок.
+              </p>
+              <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`ghostBtn${!toolListWarehouseId ? " active" : ""}`}
+                  onClick={() => setToolListWarehouseId("")}
+                >
+                  Все объекты · {toolWarehouseSummary.reduce((s, x) => s + x.count, 0)} шт.
+                </button>
+                {toolWarehouseSummary.map((row) => (
+                  <button
+                    type="button"
+                    key={`tw-sum-${row.warehouseId ?? "none"}`}
+                    className={`ghostBtn${toolListWarehouseId === (row.warehouseId ?? "") ? " active" : ""}`}
+                    onClick={() => setToolListWarehouseId(row.warehouseId ?? "")}
+                  >
+                    {row.warehouseName}: {row.count} (на складе {row.inStock}, выдано {row.issued})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
           {toolsError && <ErrorState text={toolsError} />}
+
           <div className="toolbar" style={{ flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             <input
-              placeholder="Поиск инструмента (название, инв. номер, QR)"
+              placeholder="Поиск (название, инв. номер, QR)"
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
             />
@@ -9444,127 +9573,48 @@ function App() {
               <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
               <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
             </select>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0 }}>
+              <span className="muted">Объект</span>
+              <select value={toolListWarehouseId} onChange={(e) => setToolListWarehouseId(e.target.value)}>
+                <option value="">Все в зоне доступа</option>
+                {warehouses.map((w) => (
+                  <option key={`twf-${w.id}`} value={w.id}>
+                    {safeName(w.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)}>
               <option value="created_desc">Сначала новые</option>
               <option value="inventory">По инвентарному номеру</option>
               <option value="status">По статусу</option>
             </select>
-            <button type="button" onClick={() => void loadTools()}>
+            <button type="button" onClick={() => void loadTools().then(() => loadToolWarehouseSummary())}>
               Обновить список
             </button>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="muted">Вид списка</span>
-              <div className="tabs" style={{ margin: 0 }}>
-                <button
-                  type="button"
-                  className={toolsDisplayMode === "cards" ? "active" : ""}
-                  onClick={() => setToolsDisplayMode("cards")}
-                >
-                  Карточки
-                </button>
-                <button
-                  type="button"
-                  className={toolsDisplayMode === "table" ? "active" : ""}
-                  onClick={() => setToolsDisplayMode("table")}
-                >
-                  Таблица
-                </button>
-              </div>
-            </div>
-          </div>
-          {selectedTool && (
-            <div className="card processCard">
-              <h4>Шаг процесса инструмента</h4>
-              <p className="muted">
-                {selectedTool.inventoryNumber} · {selectedTool.name} · текущий этап:{" "}
-                <strong>{toolStatusLabel(selectedTool.status)}</strong>
-              </p>
-              <div className="toolbar">
-                {selectedTool.status !== "ISSUED" && (
-                  <button onClick={() => openToolActionDialog(selectedTool.id, "ISSUE")}>Выдать</button>
-                )}
-                {selectedTool.status !== "IN_STOCK" && (
-                  <button onClick={() => openToolActionDialog(selectedTool.id, "RETURN")}>Вернуть на склад</button>
-                )}
-                {selectedTool.status !== "IN_REPAIR" && (
-                  <button onClick={() => openToolActionDialog(selectedTool.id, "SEND_TO_REPAIR")}>Передать в ремонт</button>
-                )}
-                {selectedTool.status !== "DISPUTED" && (
-                  <button onClick={() => openToolActionDialog(selectedTool.id, "MARK_DISPUTED")}>Открыть спор</button>
-                )}
-                {selectedTool.status !== "WRITTEN_OFF" && (
-                  <button className="dangerBtn" onClick={() => openToolActionDialog(selectedTool.id, "WRITE_OFF")}>Списать</button>
-                )}
-              </div>
-              <p className="muted">История изменений доступна ниже в журнале инструмента.</p>
-            </div>
-          )}
-          <div className="form">
-            <label>
-              Название
-              <input value={toolName} onChange={(e) => setToolName(e.target.value)} />
-            </label>
-            <label>
-              Инвентарный номер
-              <input value={toolInventoryNumber} onChange={(e) => setToolInventoryNumber(e.target.value)} />
-            </label>
-            <label>
-              Серийный номер
-              <input value={toolSerialNumber} onChange={(e) => setToolSerialNumber(e.target.value)} />
-            </label>
-            <label>
-              Склад
-              <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)} disabled>
-                <option value="">Не указан</option>
-                {warehouses
-                  .filter((w) => (activeObjectId ? w.id === activeObjectId : true))
-                  .map((w) => (
-                    <option key={w.id} value={w.id}>{safeName(w.name)}</option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Ответственный
-              <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
-            </label>
-          </div>
-          <div className="toolbar">
+            {hasPermission("tools.write") && (
+              <button
+                type="button"
+                className="primaryBtn"
+                onClick={() => {
+                  setToolsMessage("");
+                  setToolsTone("neutral");
+                  setToolName("");
+                  setToolSerialNumber("");
+                  setToolResponsible("");
+                  setToolInventoryNumber(`INV-${Date.now()}`);
+                  if (activeObjectId) setToolWarehouseId(activeObjectId);
+                  setToolManualModalOpen(true);
+                }}
+              >
+                Добавить вручную
+              </button>
+            )}
             <button
-              onClick={async () => {
-                if (!token || !toolName || !toolInventoryNumber) return;
-                setToolsMessage("");
-                setToolsTone("neutral");
-                const res = await fetch(`${API_URL}/api/tools`, {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    name: toolName,
-                    inventoryNumber: toolInventoryNumber,
-                    serialNumber: toolSerialNumber || undefined,
-                    warehouseId: toolWarehouseId || undefined,
-                    section: objectSectionFilter,
-                    responsible: toolResponsible || undefined
-                  })
-                });
-                if (!res.ok) {
-                  const text = await res.text();
-                  setToolsMessage(`Ошибка создания инструмента: ${text}`);
-                  setToolsTone(res.status === 409 ? "conflict" : "error");
-                  return;
-                }
-                setToolsMessage("Инструмент создан");
-                setToolsTone("success");
-                setToolInventoryNumber(`INV-${Date.now()}`);
-                setToolSerialNumber("");
-                await loadTools();
-              }}
-            >
-              Создать инструмент
-            </button>
-            <button
+              type="button"
               onClick={async () => {
                 if (!token || !selectedToolIds.length) {
-                  setToolsMessage("Выбери хотя бы один инструмент");
+                  setToolsMessage("Отметьте карточки для печати или откройте одну и сохраните");
                   setToolsTone("conflict");
                   return;
                 }
@@ -9589,7 +9639,9 @@ function App() {
             </button>
           </div>
           {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
-          {!toolsLoading && !toolsError && !tools.length && <EmptyState title="Инструменты не найдены" hint="Добавь инструмент или проверь фильтры." />}
+          {!toolsLoading && !toolsError && !tools.length && (
+            <EmptyState title="Инструменты не найдены" hint="Смените фильтры или добавьте карточку вручную." />
+          )}
           {toolQrPreview && (
             <div className="card">
               <h3>QR предпросмотр: {toolQrPreview.qrCode}</h3>
@@ -9597,188 +9649,338 @@ function App() {
             </div>
           )}
           {!toolsLoading && !toolsError && tools.length > 0 && (
-          <>
-          {toolsDisplayMode === "cards" ? (
-            <div className="toolsCardGrid">
-              {tools.map((t) => (
-                <article key={`tc-${t.id}`} className="toolMiniCard">
-                  <div className="toolMiniCardTop">
-                    <label className="toolMiniCardCheck">
-                      <input
-                        type="checkbox"
-                        checked={selectedToolIds.includes(t.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedToolIds((prev) => [...prev, t.id]);
-                          } else {
-                            setSelectedToolIds((prev) => prev.filter((id) => id !== t.id));
-                          }
-                        }}
-                      />
-                    </label>
-                    <strong className="toolMiniCardTitle">{safeName(t.name)}</strong>
-                    <span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span>
-                  </div>
-                  <p className="muted toolMiniCardMeta">
-                    Инв. <strong>{t.inventoryNumber}</strong>
-                    {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
-                  </p>
-                  <div className="toolbar toolMiniCardActions">
-                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "ISSUE")}>
-                      Выдать
-                    </button>
-                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "RETURN")}>
-                      На склад
-                    </button>
-                    <button type="button" className="ghostBtn" onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>
-                      Списать
-                    </button>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={async () => {
-                        if (!token) return;
-                        const res = await fetch(`${API_URL}/api/tools/${t.id}/qr`, {
-                          headers: { Authorization: `Bearer ${token}` }
-                        });
-                        if (!res.ok) {
-                          setToolsMessage("Не удалось получить QR");
-                          setToolsTone("error");
-                          return;
-                        }
-                        const data = (await res.json()) as { toolId?: string; id: string; dataUrl: string; qrCode: string };
-                        setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
-                        setQrCode(data.qrCode);
+            <>
+              <p className="muted" style={{ marginBottom: 8 }}>
+                Отметьте позиции для массовой печати QR. Клик по карточке открывает детали.
+              </p>
+              <div className="toolsCardGrid">
+                {tools.map((t) => (
+                  <article
+                    key={`tc-${t.id}`}
+                    className="toolMiniCard"
+                    style={{ cursor: "pointer" }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setToolDetailModalId(t.id);
                         setSelectedToolForEvents(t.id);
-                        await loadToolEvents(t.id);
-                      }}
-                    >
-                      QR
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-          <table>
-            <thead>
-              <tr>
-                <th></th>
-                <th>Инв. номер</th>
-                <th>Название</th>
-                <th>Серийный</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tools.map((t) => (
-                <tr key={t.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedToolIds.includes(t.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedToolIds((prev) => [...prev, t.id]);
-                        } else {
-                          setSelectedToolIds((prev) => prev.filter((id) => id !== t.id));
-                        }
-                      }}
-                    />
-                  </td>
-                  <td>{t.inventoryNumber}</td>
-                  <td>{t.name}</td>
-                  <td>{t.serialNumber || "-"}</td>
-                  <td><span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span></td>
-                  <td>
-                    <div className="toolbar">
-                      <button onClick={() => openToolActionDialog(t.id, "ISSUE")}>Выдать</button>
-                      <button onClick={() => openToolActionDialog(t.id, "RETURN")}>Вернуть</button>
-                      <button onClick={() => openToolActionDialog(t.id, "SEND_TO_REPAIR")}>Ремонт</button>
-                      <button onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>Списать</button>
-                      <button
-                        onClick={async () => {
-                          if (!token) return;
-                          const res = await fetch(`${API_URL}/api/tools/${t.id}/qr`, {
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          if (!res.ok) {
-                            setToolsMessage("Не удалось получить QR");
-                            setToolsTone("error");
-                            return;
-                          }
-                          const data = (await res.json()) as { toolId?: string; id: string; dataUrl: string; qrCode: string };
-                          setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
-                          setQrCode(data.qrCode);
-                          setSelectedToolForEvents(t.id);
-                          await loadToolEvents(t.id);
-                        }}
-                      >
-                        QR
-                      </button>
+                        void loadToolEvents(t.id);
+                      }
+                    }}
+                    onClick={() => {
+                      setToolDetailModalId(t.id);
+                      setSelectedToolForEvents(t.id);
+                      void loadToolEvents(t.id);
+                    }}
+                  >
+                    <div className="toolMiniCardTop">
+                      <label className="toolMiniCardCheck" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedToolIds.includes(t.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedToolIds((prev) => [...prev, t.id]);
+                            } else {
+                              setSelectedToolIds((prev) => prev.filter((id) => id !== t.id));
+                            }
+                          }}
+                        />
+                      </label>
+                      <strong className="toolMiniCardTitle">{safeName(t.name)}</strong>
+                      <span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <p className="muted toolMiniCardMeta">
+                      Инв. <strong>{t.inventoryNumber}</strong>
+                      {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
+                      {t.warehouse?.name ? ` · ${safeName(t.warehouse.name)}` : ""}
+                    </p>
+                    <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
+                      Нажмите карточку, чтобы выдать, вернуть или открыть журнал
+                    </p>
+                  </article>
+                ))}
+              </div>
+              <div className="toolbar">
+                <span className="muted">
+                  Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
+                  {Math.min(toolsPage * toolsPageSize, toolsTotal)} из {toolsTotal}
+                </span>
+                <select
+                  value={toolsPageSize}
+                  onChange={(e) => setToolsPageSize(Number(e.target.value) as ListPageSize)}
+                  aria-label="Размер страницы инструментов"
+                >
+                  <option value={20}>20 на стр.</option>
+                  <option value={50}>50 на стр.</option>
+                  <option value={100}>100 на стр.</option>
+                </select>
+                <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
+                  Назад
+                </button>
+                <span className="muted">
+                  Стр. {toolsPage} / {toolsTotalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setToolsPage((p) => Math.min(toolsTotalPages, p + 1))}
+                  disabled={toolsPage >= toolsTotalPages}
+                >
+                  Вперед
+                </button>
+              </div>
+            </>
           )}
-          <div className="toolbar">
-            <span className="muted">
-              Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
-              {Math.min(toolsPage * toolsPageSize, toolsTotal)} из {toolsTotal}
-            </span>
-            <select
-              value={toolsPageSize}
-              onChange={(e) => setToolsPageSize(Number(e.target.value) as ListPageSize)}
-              aria-label="Размер страницы инструментов"
+
+          {toolManualModalOpen && hasPermission("tools.write") && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 55,
+                padding: 16
+              }}
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setToolManualModalOpen(false);
+              }}
             >
-              <option value={20}>20 на стр.</option>
-              <option value={50}>50 на стр.</option>
-              <option value={100}>100 на стр.</option>
-            </select>
-            <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
-              Назад
-            </button>
-            <span className="muted">Стр. {toolsPage} / {toolsTotalPages}</span>
-            <button type="button" onClick={() => setToolsPage((p) => Math.min(toolsTotalPages, p + 1))} disabled={toolsPage >= toolsTotalPages}>
-              Вперед
-            </button>
-          </div>
-          <h3>Журнал инструмента</h3>
-          <div className="toolbar">
-            <select value={selectedToolForEvents} onChange={(e) => setSelectedToolForEvents(e.target.value)}>
-              {tools.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.inventoryNumber} - {t.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => void loadToolEvents(selectedToolForEvents)}>Обновить журнал</button>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Действие</th>
-                <th>Статус</th>
-                <th>Комментарий</th>
-              </tr>
-            </thead>
-            <tbody>
-              {toolEvents.map((e) => (
-                <tr key={e.id}>
-                  <td>{new Date(e.createdAt).toLocaleString()}</td>
-                  <td>{toolActionLabel(e.action)}</td>
-                  <td>{toolStatusLabel(e.status)}</td>
-                  <td>{e.comment || "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </>
+              <div className="card" style={{ maxWidth: 520, width: "100%" }} onMouseDown={(e) => e.stopPropagation()}>
+                <h3 style={{ marginTop: 0 }}>Новый инструмент вручную</h3>
+                <div className="form">
+                  <label>
+                    Наименование
+                    <input value={toolName} onChange={(e) => setToolName(e.target.value)} placeholder="Например, перфоратор" />
+                  </label>
+                  <label>
+                    Инвентарный номер
+                    <input value={toolInventoryNumber} onChange={(e) => setToolInventoryNumber(e.target.value)} />
+                  </label>
+                  <label>
+                    Серийный номер
+                    <input value={toolSerialNumber} onChange={(e) => setToolSerialNumber(e.target.value)} />
+                  </label>
+                  <label>
+                    Объект (склад)
+                    <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
+                      <option value="">Не указан</option>
+                      {warehouses.map((w) => (
+                        <option key={`tmw-${w.id}`} value={w.id}>
+                          {safeName(w.name)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Ответственный при создании
+                    <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
+                  </label>
+                </div>
+                <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
+                  <button type="button" className="ghostBtn" onClick={() => setToolManualModalOpen(false)}>
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!toolName.trim() || !toolInventoryNumber.trim()}
+                    onClick={async () => {
+                      if (!token || !toolName.trim() || !toolInventoryNumber.trim()) return;
+                      setToolsMessage("");
+                      setToolsTone("neutral");
+                      const res = await fetch(`${API_URL}/api/tools`, {
+                        method: "POST",
+                        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          name: toolName.trim(),
+                          inventoryNumber: toolInventoryNumber.trim(),
+                          serialNumber: toolSerialNumber.trim() || undefined,
+                          warehouseId: toolWarehouseId || undefined,
+                          section: objectSectionFilter,
+                          responsible: toolResponsible.trim() || undefined
+                        })
+                      });
+                      if (!res.ok) {
+                        const text = await res.text();
+                        setToolsMessage(`Ошибка создания: ${text}`);
+                        setToolsTone(res.status === 409 ? "conflict" : "error");
+                        return;
+                      }
+                      setToolsMessage("Инструмент создан");
+                      setToolsTone("success");
+                      setToolManualModalOpen(false);
+                      setToolInventoryNumber(`INV-${Date.now()}`);
+                      setToolSerialNumber("");
+                      await loadTools();
+                      await loadToolWarehouseSummary();
+                    }}
+                  >
+                    Создать
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
+
+          {toolDetailModalId && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 56,
+                padding: 16,
+                overflowY: "auto"
+              }}
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setToolDetailModalId(null);
+              }}
+            >
+              <div
+                className="card"
+                style={{ maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {(() => {
+                  const d = toolDetailRecord && toolDetailRecord.id === toolDetailModalId ? toolDetailRecord : null;
+                  const t =
+                    d || tools.find((x) => x.id === toolDetailModalId);
+                  if (!t) {
+                    return (
+                      <>
+                        <h3 style={{ marginTop: 0 }}>Карточка инструмента</h3>
+                        <p className="muted">Загрузка данных…</p>
+                        <div className="toolbar">
+                          <button type="button" className="ghostBtn" onClick={() => setToolDetailModalId(null)}>
+                            Закрыть
+                          </button>
+                        </div>
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                        <h3 style={{ marginTop: 0 }}>{safeName(t.name)}</h3>
+                        <button type="button" className="ghostBtn" onClick={() => setToolDetailModalId(null)}>
+                          Закрыть
+                        </button>
+                      </div>
+                      <p className="muted">
+                        Инв. <strong>{t.inventoryNumber}</strong>
+                        {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
+                        {t.qrCode ? ` · ${t.qrCode}` : ""}
+                      </p>
+                      <p className="muted">
+                        Статус: <strong>{toolStatusLabel(t.status)}</strong>
+                        {t.warehouse?.name ? ` · объект: ${safeName(t.warehouse.name)}` : ""}
+                        {t.responsible ? ` · ответственный: ${t.responsible}` : ""}
+                      </p>
+                      <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                        {t.status !== "ISSUED" && (
+                          <button type="button" onClick={() => openToolActionDialog(t.id, "ISSUE")}>
+                            Выдать
+                          </button>
+                        )}
+                        {t.status !== "IN_STOCK" && (
+                          <button type="button" onClick={() => openToolActionDialog(t.id, "RETURN")}>
+                            На склад
+                          </button>
+                        )}
+                        {t.status !== "IN_REPAIR" && (
+                          <button type="button" onClick={() => openToolActionDialog(t.id, "SEND_TO_REPAIR")}>
+                            В ремонт
+                          </button>
+                        )}
+                        {t.status !== "DISPUTED" && (
+                          <button type="button" onClick={() => openToolActionDialog(t.id, "MARK_DISPUTED")}>
+                            Спор
+                          </button>
+                        )}
+                        {t.status !== "WRITTEN_OFF" && (
+                          <button type="button" className="dangerBtn" onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>
+                            Списать
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          onClick={async () => {
+                            if (!token) return;
+                            const res = await fetch(`${API_URL}/api/tools/${t.id}/qr`, {
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            if (!res.ok) {
+                              setToolsMessage("Не удалось получить QR");
+                              setToolsTone("error");
+                              return;
+                            }
+                            const data = (await res.json()) as { id: string; dataUrl: string; qrCode: string };
+                            setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
+                            setQrCode(data.qrCode);
+                          }}
+                        >
+                          Показать QR
+                        </button>
+                      </div>
+                      <h4 style={{ marginBottom: 8 }}>Журнал</h4>
+                      <div className="toolbar">
+                        <button type="button" onClick={() => void loadToolEvents(t.id)}>
+                          Обновить журнал
+                        </button>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Дата</th>
+                            <th>Действие</th>
+                            <th>Статус</th>
+                            <th>Комментарий</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedToolForEvents !== t.id ? (
+                            <tr>
+                              <td colSpan={4} className="muted">
+                                Загрузка журнала…
+                              </td>
+                            </tr>
+                          ) : toolEvents.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="muted">
+                                Записей пока нет
+                              </td>
+                            </tr>
+                          ) : (
+                            toolEvents.map((e) => (
+                              <tr key={e.id}>
+                                <td>{new Date(e.createdAt).toLocaleString()}</td>
+                                <td>{toolActionLabel(e.action)}</td>
+                                <td>{toolStatusLabel(e.status)}</td>
+                                <td>{e.comment || "-"}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {toolAction && (
             <div className="card">
               <h3>Подтверждение действия: {toolActionLabel(toolAction.action)}</h3>
@@ -11436,12 +11638,14 @@ function App() {
             zIndex: 50,
             padding: 16
           }}
-          onClick={() => setLimitPromptRequest(null)}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setLimitPromptRequest(null);
+          }}
         >
           <div
             className="card"
             style={{ maxWidth: 480, width: "100%" }}
-            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
               <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
@@ -11532,8 +11736,8 @@ function App() {
               zIndex: 60,
               padding: 16
             }}
-            onClick={() => {
-              if (!isSubmitting) {
+            onMouseDown={(e) => {
+              if (!isSubmitting && e.target === e.currentTarget) {
                 setPendingAcceptanceRequestId(null);
                 setPendingAcceptanceFiles([]);
               }
@@ -11542,7 +11746,7 @@ function App() {
             <div
               className="card"
               style={{ maxWidth: 560, width: "100%" }}
-              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               <h3 style={{ marginTop: 0 }}>Приложите документы к приёмке</h3>
               <p className="muted">

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { ToolStatus } from "@prisma/client";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
@@ -8,7 +9,8 @@ import {
   assertProjectInScope,
   assertWarehouseInScope,
   getRequestDataScope,
-  toolWhereFromScope
+  toolWhereFromScope,
+  warehouseWhereFromScope
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
@@ -130,6 +132,60 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     page,
     pageSize
   });
+});
+
+/** Агрегат карточек инструмента по складу — для «среза по объектам». */
+toolsRouter.get("/summary/by-warehouse", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const scopedToolFilter = toolWhereFromScope(scope);
+  const toolScopeWhere: Prisma.ToolWhereInput =
+    Object.keys(scopedToolFilter).length > 0 ? scopedToolFilter : {};
+  const grouped = await prisma.tool.groupBy({
+    by: ["warehouseId"],
+    where: toolScopeWhere,
+    _count: { _all: true }
+  });
+  const whWhere = warehouseWhereFromScope(scope);
+  const warehouses = await prisma.warehouse.findMany({
+    ...(Object.keys(whWhere).length ? { where: whWhere } : {}),
+    select: { id: true, name: true }
+  });
+  const nameById = new Map(warehouses.map((w) => [w.id, w.name]));
+
+  type Row = {
+    warehouseId: string | null;
+    warehouseName: string;
+    count: number;
+    inStock: number;
+    issued: number;
+  };
+  const rows: Row[] = grouped.map((g) => {
+    const wid = g.warehouseId;
+    const warehouseName = wid ? (nameById.get(wid) ?? "Объект") : "Без объекта";
+    return {
+      warehouseId: wid,
+      warehouseName,
+      count: g._count._all,
+      inStock: 0,
+      issued: 0
+    };
+  });
+
+  for (const r of rows) {
+    const whFilter: Prisma.ToolWhereInput =
+      r.warehouseId === null ? { warehouseId: null } : { warehouseId: r.warehouseId };
+    const baseWhere: Prisma.ToolWhereInput =
+      Object.keys(toolScopeWhere).length > 0 ? { AND: [toolScopeWhere, whFilter] } : whFilter;
+    const [inStock, issued] = await Promise.all([
+      prisma.tool.count({ where: { ...baseWhere, status: ToolStatus.IN_STOCK } }),
+      prisma.tool.count({ where: { ...baseWhere, status: ToolStatus.ISSUED } })
+    ]);
+    r.inStock = inStock;
+    r.issued = issued;
+  }
+
+  rows.sort((a, b) => b.count - a.count);
+  return res.json(rows);
 });
 
 toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
@@ -275,6 +331,19 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
     const mapped = handlePrismaError(error);
     return res.status(mapped.status).json(mapped.body);
   }
+});
+
+toolsRouter.get("/:id", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const scope = await getRequestDataScope(req);
+  const tool = await prisma.tool.findFirst({
+    where: { AND: [toolWhereFromScope(scope), { id }] },
+    include: { warehouse: true, project: true }
+  });
+  if (!tool) {
+    return res.status(404).json({ error: "Tool not found" });
+  }
+  return res.json(tool);
 });
 
 toolsRouter.get("/:id/events", async (req: AuthedRequest, res) => {

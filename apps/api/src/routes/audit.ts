@@ -8,13 +8,24 @@ import {
   StockMovementDirection,
   ToolStatus
 } from "@prisma/client";
-import { Router } from "express";
+import { Router, type NextFunction, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 export const auditRouter = Router();
 auditRouter.use(requireAuth);
 auditRouter.use(requirePermission("audit.read"));
+
+function requireAuditRevertPrivilege(req: AuthedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const perms = Array.isArray(req.user.permissions) ? req.user.permissions : [];
+  if (req.user.role === "ADMIN" || perms.includes("audit.revert")) {
+    return next();
+  }
+  return res.status(403).json({ error: "Forbidden" });
+}
 
 const ENTITY_LABELS: Record<string, string> = {
   User: "Пользователь",
@@ -758,7 +769,7 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
 
 auditRouter.post(
   "/:id/revert",
-  requirePermission("audit.revert"),
+  requireAuditRevertPrivilege,
   async (req: AuthedRequest, res) => {
     const id = String(req.params.id);
     const log = await prisma.auditLog.findUnique({
