@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { OperationType } from "@prisma/client";
 import { Router } from "express";
 import { assertObjectSectionInScope, getRequestDataScope, type DataScope } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
@@ -70,6 +71,116 @@ stockMovementsRouter.get("/issued-summary", async (req: AuthedRequest, res) => {
       issuedQty: Number(row._sum.quantity || 0)
     }))
   );
+});
+
+/** Сводка для количественной диаграммы лимита: приход по секции, расход по выдаче, остаток, «в закупке». */
+stockMovementsRouter.get("/supply-metrics", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
+
+  if (!warehouseId || !section) {
+    return res.status(400).json({ error: "warehouseId и section обязательны (SS|EOM)" });
+  }
+  try {
+    assertObjectSectionInScope(scope, warehouseId, section);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+
+  const scopedMovement = movementScopeWhere(scope);
+
+  const basePartsIssued: Prisma.StockMovementWhereInput[] = [{ direction: "OUT" }];
+  if (Object.keys(scopedMovement).length) basePartsIssued.push(scopedMovement);
+  basePartsIssued.push({ warehouseId });
+  basePartsIssued.push({
+    OR: [
+      { issueRequest: { is: { section } } },
+      { operation: { is: { section } } }
+    ]
+  });
+
+  const issuedRows = await prisma.stockMovement.groupBy({
+    by: ["materialId"],
+    where: basePartsIssued.length > 1 ? { AND: basePartsIssued } : basePartsIssued[0],
+    _sum: { quantity: true }
+  });
+
+  const basePartsArrived: Prisma.StockMovementWhereInput[] = [{ direction: "IN" }];
+  if (Object.keys(scopedMovement).length) basePartsArrived.push(scopedMovement);
+  basePartsArrived.push({ warehouseId });
+  basePartsArrived.push({
+    operation: {
+      is: {
+        type: OperationType.INCOME,
+        section,
+        warehouseId
+      }
+    }
+  });
+
+  const arrivedRows = await prisma.stockMovement.groupBy({
+    by: ["materialId"],
+    where: basePartsArrived.length > 1 ? { AND: basePartsArrived } : basePartsArrived[0],
+    _sum: { quantity: true }
+  });
+
+  const openReceiptItems = await prisma.receiptRequestItem.findMany({
+    where: {
+      mappedMaterialId: { not: null },
+      receiptRequest: {
+        warehouseId,
+        section,
+        status: { in: ["NEW", "IN_PROGRESS"] }
+      }
+    },
+    select: {
+      mappedMaterialId: true,
+      quantity: true,
+      acceptedQty: true
+    }
+  });
+
+  const onOrderByMaterial = new Map<string, number>();
+  for (const it of openReceiptItems) {
+    const mid = it.mappedMaterialId!;
+    const rem = Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
+    if (rem <= 0) continue;
+    onOrderByMaterial.set(mid, (onOrderByMaterial.get(mid) || 0) + rem);
+  }
+
+  const stocks = await prisma.stock.findMany({
+    where: { warehouseId, section },
+    select: { materialId: true, quantity: true }
+  });
+
+  const stockByMat = new Map(stocks.map((s) => [s.materialId, Number(s.quantity) || 0]));
+
+  const arrivedMap = new Map(
+    arrivedRows.map((x) => [x.materialId, Number(x._sum.quantity || 0) || 0])
+  );
+  const issuedMap = new Map(
+    issuedRows.map((x) => [x.materialId, Number(x._sum.quantity || 0) || 0])
+  );
+
+  const allIds = new Set<string>();
+  for (const id of issuedMap.keys()) allIds.add(id);
+  for (const id of arrivedMap.keys()) allIds.add(id);
+  for (const id of onOrderByMaterial.keys()) allIds.add(id);
+  for (const id of stockByMat.keys()) allIds.add(id);
+
+  const out = [...allIds].map((materialId) => ({
+    materialId,
+    arrivedQty: arrivedMap.get(materialId) || 0,
+    issuedQty: issuedMap.get(materialId) || 0,
+    onOrderQty: onOrderByMaterial.get(materialId) || 0,
+    stockQty: stockByMat.get(materialId) || 0
+  }));
+
+  return res.json(out);
 });
 
 stockMovementsRouter.get("/", async (req: AuthedRequest, res) => {

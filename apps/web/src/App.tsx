@@ -95,6 +95,31 @@ type IssuedSummaryRow = {
   materialId: string;
   issuedQty: number;
 };
+type LimitSupplyMetricRow = {
+  materialId: string;
+  arrivedQty: number;
+  issuedQty: number;
+  onOrderQty: number;
+  stockQty: number;
+};
+type MaterialReportHolderRow = {
+  holderUserId: string;
+  holderName: string;
+  lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
+};
+type MaterialWriteoffHistoryApiRow = {
+  id: string;
+  createdAt: string;
+  quantity: number;
+  comment?: string | null;
+  holderName: string;
+  actorName: string;
+  materialName: string;
+  materialUnit: string;
+  documentFileId?: string | null;
+  documentPath?: string | null;
+  documentFileName?: string | null;
+};
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => {
   detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
 };
@@ -649,6 +674,7 @@ function App() {
     | "profile"
     | "chat"
     | "feedback"
+    | "materialReport"
     | "reports"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -761,6 +787,9 @@ function App() {
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
   const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
+  const [limitSupplyByMaterialId, setLimitSupplyByMaterialId] = useState<
+    Record<string, Pick<LimitSupplyMetricRow, "arrivedQty" | "issuedQty" | "onOrderQty" | "stockQty">>
+  >({});
   const [limitEditMode, setLimitEditMode] = useState(false);
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
   // Локальные «черновики» правки строк лимита: ключ — id узла шаблона.
@@ -768,6 +797,17 @@ function App() {
     Record<string, { title?: string; unit?: string; plannedQty?: string }>
   >({});
   const [limitTemplateTitleDrafts, setLimitTemplateTitleDrafts] = useState<Record<string, string>>({});
+  const [materialBalances, setMaterialBalances] = useState<MaterialReportHolderRow[]>([]);
+  const [materialBalancesLoading, setMaterialBalancesLoading] = useState(false);
+  const [materialWriteoffHistory, setMaterialWriteoffHistory] = useState<MaterialWriteoffHistoryApiRow[]>([]);
+  const [materialReportMessage, setMaterialReportMessage] = useState("");
+  const [materialWriteoffModal, setMaterialWriteoffModal] = useState<
+    null | { holderUserId: string; materialId: string; name: string; unit: string; maxQty: number }
+  >(null);
+  const [materialWriteoffQty, setMaterialWriteoffQty] = useState("");
+  const [materialWriteoffComment, setMaterialWriteoffComment] = useState("");
+  const [materialWriteoffFile, setMaterialWriteoffFile] = useState<File | null>(null);
+  const [materialWriteoffBusy, setMaterialWriteoffBusy] = useState(false);
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   // Модалка «Заявка из лимита?» после загрузки Excel.
@@ -984,7 +1024,12 @@ function App() {
   const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const hasPermission = (permission: string) =>
-    Boolean(me?.permissions?.includes("*") || me?.permissions?.includes(permission));
+    Boolean(
+      me?.permissions?.includes("*") ||
+        me?.permissions?.includes(permission) ||
+        (permission === "limits.edit" && Boolean(me?.permissions?.includes("limits.write"))) ||
+        (permission === "limits.write" && Boolean(me?.permissions?.includes("limits.edit")))
+    );
   const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
     { id: "stocks", label: "Главная", permissions: ["dashboard.read"] },
     { id: "warehouse", label: "Склад", permissions: ["stocks.read"] },
@@ -993,7 +1038,8 @@ function App() {
     { id: "approvals", label: "Заявки", permissions: ["issues.approve"] },
     { id: "waybills", label: "Перемещения", permissions: ["waybills.read", "waybills.write"] },
     { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
-    { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.write"] },
+    { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.edit", "limits.write"] },
+    { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read", "materialReport.write"] },
     { id: "matching", label: "Сопоставление", permissions: ["materials.match", "materials.read"] },
     { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read", "materials.write"] },
     { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
@@ -1569,6 +1615,7 @@ function App() {
     issues: "Заявки на выдачу",
     limits: "Лимиты проекта",
     approvals: "Заявки",
+    materialReport: "Материальный отчёт",
     documents: "Документы",
     waybills: "Транспортные накладные",
     qr: "QR-сканирование",
@@ -1592,6 +1639,7 @@ function App() {
     documents: "Контроль",
     limits: "Контроль",
     matching: "Контроль",
+    materialReport: "Контроль",
     chat: "Контроль",
     feedback: "Контроль",
     reports: "Контроль",
@@ -1612,7 +1660,10 @@ function App() {
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
   const canWriteCatalog = useMemo(() => Boolean(hasPermission("warehouses.write") || hasPermission("materials.write")), [me]);
   const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
-  const canWriteLimits = useMemo(() => hasPermission("limits.write"), [me]);
+  const canWriteLimits = useMemo(
+    () => hasPermission("limits.edit") || hasPermission("limits.write"),
+    [me]
+  );
   const canReadAudit = useMemo(
     () => hasPermission("audit.read"),
     [me]
@@ -1641,6 +1692,8 @@ function App() {
   const canReadIssues = useMemo(() => hasPermission("issues.read"), [me]);
   const canReadOperations = useMemo(() => hasPermission("operations.read"), [me]);
   const canReadLimits = useMemo(() => hasPermission("limits.read"), [me]);
+  const canMaterialReport = useMemo(() => hasPermission("materialReport.read"), [me]);
+  const canMaterialWriteoff = useMemo(() => hasPermission("materialReport.write"), [me]);
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
@@ -2496,11 +2549,14 @@ function App() {
       section: objectSectionFilter
     });
     try {
-      const [templatesRes, issuedRes] = await Promise.all([
+      const [templatesRes, issuedRes, supplyRes] = await Promise.all([
         fetch(`${API_URL}/api/limit-imports?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
         fetch(`${API_URL}/api/stock-movements/issued-summary?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${API_URL}/api/stock-movements/supply-metrics?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -2513,12 +2569,136 @@ function App() {
       setLimitTemplates((await templatesRes.json()) as LimitImportTemplate[]);
       const issuedRows = (await issuedRes.json()) as IssuedSummaryRow[];
       setLimitIssuedTotals(Object.fromEntries(issuedRows.map((x) => [x.materialId, Number(x.issuedQty) || 0])));
+      const supplyRows: LimitSupplyMetricRow[] = supplyRes.ok ? await supplyRes.json() : [];
+      const nextSupply: Record<string, Pick<LimitSupplyMetricRow, "arrivedQty" | "issuedQty" | "onOrderQty" | "stockQty">> =
+        {};
+      for (const r of supplyRows) {
+        nextSupply[r.materialId] = {
+          arrivedQty: Number(r.arrivedQty) || 0,
+          issuedQty: Number(r.issuedQty) || 0,
+          onOrderQty: Number(r.onOrderQty) || 0,
+          stockQty: Number(r.stockQty) || 0
+        };
+      }
+      setLimitSupplyByMaterialId(nextSupply);
     } catch (e) {
       setLimitTemplates([]);
       setLimitIssuedTotals({});
+      setLimitSupplyByMaterialId({});
       setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
     } finally {
       setLimitTemplatesLoading(false);
+    }
+  }
+
+  async function loadMaterialReportData() {
+    if (!token || !activeObjectId) return;
+    setMaterialBalancesLoading(true);
+    setMaterialReportMessage("");
+    const params = new URLSearchParams({
+      warehouseId: activeObjectId,
+      section: objectSectionFilter
+    });
+    try {
+      const [balRes, histRes] = await Promise.all([
+        fetch(`${API_URL}/api/material-report/balances?${params}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${API_URL}/api/material-report/writeoffs/history?${params}&take=100`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+
+      let balancesPayload: MaterialReportHolderRow[] = [];
+      let historyPayload: MaterialWriteoffHistoryApiRow[] = [];
+      let errText = "";
+
+      if (!balRes.ok) {
+        const err = await balRes.json().catch(() => ({}));
+        errText =
+          typeof (err as { error?: unknown }).error === "string"
+            ? (err as { error: string }).error
+            : `Ошибка загрузки остатков (${balRes.status})`;
+      } else {
+        balancesPayload = (await balRes.json()) as MaterialReportHolderRow[];
+      }
+
+      if (!histRes.ok) {
+        const err = await histRes.json().catch(() => ({}));
+        const histMsg =
+          typeof (err as { error?: unknown }).error === "string"
+            ? (err as { error: string }).error
+            : `Ошибка загрузки истории (${histRes.status})`;
+        errText = errText ? `${errText} · ${histMsg}` : histMsg;
+      } else {
+        historyPayload = (await histRes.json()) as MaterialWriteoffHistoryApiRow[];
+      }
+
+      setMaterialBalances(balancesPayload);
+      setMaterialWriteoffHistory(historyPayload);
+      if (errText) setMaterialReportMessage(errText);
+    } catch (e) {
+      setMaterialBalances([]);
+      setMaterialWriteoffHistory([]);
+      setMaterialReportMessage(`Не удалось загрузить материальный отчёт: ${String(e)}`);
+    } finally {
+      setMaterialBalancesLoading(false);
+    }
+  }
+
+  async function submitMaterialWriteoff() {
+    if (!token || !activeObjectId || !materialWriteoffModal || !canMaterialWriteoff) return;
+    const qty = Number(String(materialWriteoffQty).trim().replace(",", "."));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setMaterialReportMessage("Укажите положительное количество списания.");
+      return;
+    }
+    if (qty > materialWriteoffModal.maxQty + 1e-6) {
+      setMaterialReportMessage(`Не больше остатка у ответственного: ${materialWriteoffModal.maxQty}`);
+      return;
+    }
+    setMaterialWriteoffBusy(true);
+    setMaterialReportMessage("");
+    const form = new FormData();
+    const payload: Record<string, unknown> = {
+      warehouseId: activeObjectId,
+      section: objectSectionFilter,
+      holderUserId: materialWriteoffModal.holderUserId,
+      materialId: materialWriteoffModal.materialId,
+      quantity: qty
+    };
+    const c = materialWriteoffComment.trim();
+    if (c) payload.comment = c;
+    form.append("payload", JSON.stringify(payload));
+    if (materialWriteoffFile) form.append("file", materialWriteoffFile);
+    try {
+      const res = await fetch(`${API_URL}/api/material-report/writeoffs`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: unknown; balance?: unknown };
+        const apiErr = typeof err.error === "string" ? err.error : "";
+        const balance =
+          typeof err.balance === "number" && Number.isFinite(err.balance) ? err.balance : null;
+        const msg =
+          apiErr ||
+          (res.status === 409 && balance !== null
+            ? `Недостаточно остатка (доступно ${balance})`
+            : `Списание не выполнено (${res.status})`);
+        setMaterialReportMessage(msg);
+        return;
+      }
+      setMaterialWriteoffModal(null);
+      setMaterialWriteoffQty("");
+      setMaterialWriteoffComment("");
+      setMaterialWriteoffFile(null);
+      await loadMaterialReportData();
+    } catch (e) {
+      setMaterialReportMessage(`Ошибка сети: ${String(e)}`);
+    } finally {
+      setMaterialWriteoffBusy(false);
     }
   }
 
@@ -3629,6 +3809,7 @@ function App() {
         manualStockModalOpen ||
         issueRecipientModal ||
         pendingAcceptanceRequestId ||
+        materialWriteoffModal ||
         toolManualModalOpen ||
         toolDetailModalId
     );
@@ -3640,6 +3821,7 @@ function App() {
       setIssueRecipientModal(null);
       setPendingAcceptanceRequestId(null);
       setPendingAcceptanceFiles([]);
+      setMaterialWriteoffModal(null);
       setToolManualModalOpen(false);
       setToolDetailModalId(null);
     };
@@ -3650,6 +3832,7 @@ function App() {
     manualStockModalOpen,
     issueRecipientModal,
     pendingAcceptanceRequestId,
+    materialWriteoffModal,
     toolManualModalOpen,
     toolDetailModalId
   ]);
@@ -3811,6 +3994,7 @@ function App() {
     }
     if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
+    if (canMaterialReport) visibleTabs.add("materialReport");
     visibleTabs.add("camp");
     if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
     visibleTabs.add("feedback");
@@ -4131,6 +4315,12 @@ function App() {
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
+    if (token && activeTab === "materialReport" && canMaterialReport) {
+      void loadMaterialReportData();
+    }
+  }, [token, activeTab, activeObjectId, objectSectionFilter, canMaterialReport]);
+
+  useEffect(() => {
     if (!limitEditMode) {
       setLimitNodeDrafts({});
       setLimitTemplateTitleDrafts({});
@@ -4448,6 +4638,15 @@ function App() {
           <p className="navSectionTitle">Контроль</p>
           {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
           {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+          {canMaterialReport && (
+            <button
+              type="button"
+              className={`navBtn ${activeTab === "materialReport" ? "active" : ""}`}
+              onClick={() => setActiveTab("materialReport")}
+            >
+              <span className="navIcon">▪</span>Материальный отчёт
+            </button>
+          )}
           {canMaterialMatch && (
             <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}>
               <span className="navIcon">◇</span>Сопоставление
@@ -7857,6 +8056,9 @@ function App() {
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
+                    const directMaterials = children.filter((c) => c.nodeType === "MATERIAL");
+                    const metricFmt = (n: number) =>
+                      Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
 
                     return (
                       <div key={node.id} style={{ marginLeft: depth * 16 }}>
@@ -8167,6 +8369,51 @@ function App() {
                           </div>
                         )}
 
+                        {isGroup && isExpanded && directMaterials.length > 0 ? (
+                          <div style={{ marginLeft: (depth + 1) * 16, marginBottom: 10, overflowX: "auto" }}>
+                            <table className="desktopTable" style={{ fontSize: 12 }}>
+                              <thead>
+                                <tr>
+                                  <th>Материал</th>
+                                  <th>Ед.</th>
+                                  <th>План</th>
+                                  <th>Приход (учёт)</th>
+                                  <th>Выдано</th>
+                                  <th>Осталось привезти</th>
+                                  <th>В закупке (заявки)</th>
+                                  <th>Остаток на складе</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {directMaterials.map((m) => {
+                                  const plan = Number(m.plannedQty || 0);
+                                  const sm = m.materialId ? limitSupplyByMaterialId[m.materialId] : undefined;
+                                  const arrived = sm?.arrivedQty ?? 0;
+                                  const iss = m.materialId ? Number(issuedTotalsByMaterialId.get(m.materialId) || 0) : 0;
+                                  const onOrd = sm?.onOrderQty ?? 0;
+                                  const stk = sm?.stockQty ?? 0;
+                                  const remain = Math.max(0, plan - arrived);
+                                  return (
+                                    <tr key={`mt-${node.id}-${m.id}`}>
+                                      <td>{safeName(String(m.materialName || m.title || ""))}</td>
+                                      <td>{m.unit || "шт"}</td>
+                                      <td>{metricFmt(plan)}</td>
+                                      <td>{m.materialId ? metricFmt(arrived) : "—"}</td>
+                                      <td>{m.materialId ? metricFmt(iss) : "—"}</td>
+                                      <td>{m.materialId ? metricFmt(remain) : "—"}</td>
+                                      <td>{m.materialId ? metricFmt(onOrd) : "—"}</td>
+                                      <td>{m.materialId ? metricFmt(stk) : "—"}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                            <p className="muted" style={{ margin: "6px 0 0", fontSize: 11 }}>
+                              Показатели по разделу {objectSectionFilter}: приход по операциям INCOME, выдача по движениям OUT, «в закупке» — открытые заявки на приход.
+                            </p>
+                          </div>
+                        ) : null}
+
                         {isGroup && isExpanded && children.length
                           ? children.map((ch) => renderNode(ch, depth + 1))
                           : null}
@@ -8291,6 +8538,160 @@ function App() {
                 })()}
             </div>
           ))}
+        </div>
+      )}
+
+      {canMaterialReport && activeTab === "materialReport" && (
+        <div className="card limitsWorkspace">
+          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <h2>Материальный отчёт</h2>
+              <p className="muted">
+                Остатки выданных материалов, расходников и спецодежды на ответственных (после статуса «Выдано»: кто утвердил заявку
+                или кто её создал). Учитывается раздел объекта — {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}. Списание здесь не
+                меняет складской остаток, только корректирует учёт «у ответственного» и фиксируется в журнале.
+              </p>
+            </div>
+            <div className="toolbar">
+              <button
+                type="button"
+                className="ghostBtn"
+                disabled={!activeObjectId}
+                onClick={() => void loadMaterialReportData()}
+              >
+                Обновить
+              </button>
+            </div>
+          </div>
+
+          {!activeObjectId ? (
+            <p className="muted">Выберите объект в верхней панели.</p>
+          ) : (
+            <>
+              {materialReportMessage ? (
+                <ResultBanner
+                  text={materialReportMessage}
+                  tone={
+                    /403|502|Недостаточно|[Оо]шибка|[Нн]екоррект|Invalid/i.test(materialReportMessage)
+                      ? "error"
+                      : "neutral"
+                  }
+                />
+              ) : null}
+              {materialBalancesLoading ? (
+                <LoadingState text="Загрузка материального отчёта..." />
+              ) : materialBalances.length === 0 ? (
+                <EmptyState
+                  title="Нет позиций на ответственных"
+                  hint="После выдачи заявок материалы/расходники/спецодежда попадут в этот раздел для выбранного объекта и раздела (СС/ЭОМ)."
+                />
+              ) : (
+                <div className="plainList" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {materialBalances.map((h) => (
+                    <div key={h.holderUserId} className="card" style={{ margin: 0, padding: "12px 14px" }}>
+                      <div className="rightCardHeader" style={{ marginBottom: 8 }}>
+                        <strong>{safeName(h.holderName)}</strong>
+                        <span className="muted">{h.lines.length} поз.</span>
+                      </div>
+                      <div style={{ overflowX: "auto" }}>
+                        <table className="desktopTable" style={{ fontSize: 13 }}>
+                          <thead>
+                            <tr>
+                              <th>Материал</th>
+                              <th>Ед.</th>
+                              <th>Остаток у ответственного</th>
+                              {canMaterialWriteoff ? <th aria-label="Действия" /> : null}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {h.lines.map((ln) => (
+                              <tr key={`${h.holderUserId}-${ln.materialId}`}>
+                                <td>{safeName(ln.name)}</td>
+                                <td>{ln.unit}</td>
+                                <td>{Number(ln.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
+                                {canMaterialWriteoff ? (
+                                  <td style={{ whiteSpace: "nowrap" }}>
+                                    <button
+                                      type="button"
+                                      className="ghostBtn"
+                                      onClick={() => {
+                                        setMaterialWriteoffQty("");
+                                        setMaterialWriteoffComment("");
+                                        setMaterialWriteoffFile(null);
+                                        setMaterialReportMessage("");
+                                        setMaterialWriteoffModal({
+                                          holderUserId: h.holderUserId,
+                                          materialId: ln.materialId,
+                                          name: ln.name,
+                                          unit: ln.unit,
+                                          maxQty: Number(ln.quantity) || 0
+                                        });
+                                      }}
+                                    >
+                                      Списать
+                                    </button>
+                                  </td>
+                                ) : null}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="card" style={{ marginTop: 16 }}>
+                <h3 style={{ marginTop: 0 }}>История списаний</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Последние операции списания с ответственных по текущему объекту и разделу.
+                </p>
+                {!materialWriteoffHistory.length && !materialBalancesLoading ? (
+                  <p className="muted">Записей пока нет.</p>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="desktopTable" style={{ fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th>Дата</th>
+                          <th>Ответственный</th>
+                          <th>Материал</th>
+                          <th>Кол-во</th>
+                          <th>Исполнитель</th>
+                          <th>Комментарий</th>
+                          <th>Вложение</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materialWriteoffHistory.map((w) => (
+                          <tr key={w.id}>
+                            <td>{new Date(w.createdAt).toLocaleString("ru-RU")}</td>
+                            <td>{safeName(w.holderName)}</td>
+                            <td>
+                              {safeName(w.materialName)} ({w.materialUnit})
+                            </td>
+                            <td>{Number(w.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
+                            <td>{safeName(w.actorName)}</td>
+                            <td>{w.comment ? String(w.comment) : "—"}</td>
+                            <td>
+                              {w.documentPath ? (
+                                <a href={`${API_URL}/${w.documentPath}`} target="_blank" rel="noreferrer">
+                                  {safeName(w.documentFileName || "Файл")}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -11460,6 +11861,101 @@ function App() {
                 }}
               >
                 Подтвердить и выдать
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {materialWriteoffModal && canMaterialWriteoff && activeObjectId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="material-writeoff-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 55,
+            padding: 16
+          }}
+          onClick={() =>
+            !materialWriteoffBusy &&
+            (() => {
+              setMaterialWriteoffModal(null);
+              setMaterialWriteoffQty("");
+              setMaterialWriteoffComment("");
+              setMaterialWriteoffFile(null);
+            })()
+          }
+        >
+          <div className="card" style={{ maxWidth: 520, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+              <h3 id="material-writeoff-title" style={{ marginTop: 0 }}>
+                Списание с ответственного
+              </h3>
+              <button
+                type="button"
+                className="ghostBtn"
+                disabled={materialWriteoffBusy}
+                onClick={() => {
+                  setMaterialWriteoffModal(null);
+                  setMaterialWriteoffQty("");
+                  setMaterialWriteoffComment("");
+                  setMaterialWriteoffFile(null);
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+            <p className="muted" style={{ margin: "0 0 10px" }}>
+              {safeName(materialWriteoffModal.name)} · не больше{" "}
+              {materialWriteoffModal.maxQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {materialWriteoffModal.unit}
+            </p>
+            <div className="form">
+              <label>
+                Количество ({materialWriteoffModal.unit})
+                <input
+                  type="number"
+                  min={0.001}
+                  step="any"
+                  value={materialWriteoffQty}
+                  onChange={(e) => setMaterialWriteoffQty(e.target.value)}
+                  autoFocus
+                />
+              </label>
+              <label>
+                Комментарий (необязательно)
+                <input value={materialWriteoffComment} onChange={(e) => setMaterialWriteoffComment(e.target.value)} />
+              </label>
+              <label>
+                Подписанный акт или иной файл (необязательно)
+                <input
+                  type="file"
+                  onChange={(e) => setMaterialWriteoffFile(e.target.files?.[0] || null)}
+                  disabled={materialWriteoffBusy}
+                />
+              </label>
+            </div>
+            <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="ghostBtn"
+                disabled={materialWriteoffBusy}
+                onClick={() => {
+                  setMaterialWriteoffModal(null);
+                  setMaterialWriteoffQty("");
+                  setMaterialWriteoffComment("");
+                  setMaterialWriteoffFile(null);
+                }}
+              >
+                Отмена
+              </button>
+              <button type="button" className="primaryBtn" disabled={materialWriteoffBusy} onClick={() => void submitMaterialWriteoff()}>
+                {materialWriteoffBusy ? "Сохранение…" : "Списать"}
               </button>
             </div>
           </div>

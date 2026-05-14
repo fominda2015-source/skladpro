@@ -311,7 +311,7 @@ limitImportsRouter.use(requirePermission("limits.read"));
 
 limitImportsRouter.post(
   "/upload",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   upload.single("file"),
   async (req: AuthedRequest, res) => {
     const parsed = importQuerySchema.safeParse(req.body);
@@ -382,7 +382,7 @@ limitImportsRouter.post(
 
 limitImportsRouter.patch(
   "/nodes/:nodeId",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   async (req: AuthedRequest, res) => {
     const nodeId = String(req.params.nodeId);
     const parsed = patchNodeSchema.safeParse(req.body);
@@ -493,7 +493,7 @@ limitImportsRouter.patch(
 
 limitImportsRouter.delete(
   "/nodes/:nodeId",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   async (req: AuthedRequest, res) => {
     const nodeId = String(req.params.nodeId);
     const existing = await prisma.objectLimitNode.findUnique({
@@ -518,7 +518,7 @@ limitImportsRouter.delete(
 
 limitImportsRouter.post(
   "/:templateId/nodes",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   async (req: AuthedRequest, res) => {
     const templateId = String(req.params.templateId);
     const parsed = createNodeSchema.safeParse(req.body);
@@ -601,7 +601,7 @@ limitImportsRouter.post(
 
 limitImportsRouter.patch(
   "/:templateId",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   async (req: AuthedRequest, res) => {
     const templateId = String(req.params.templateId);
     const parsed = patchTemplateSchema.safeParse(req.body);
@@ -633,7 +633,7 @@ limitImportsRouter.patch(
 
 limitImportsRouter.delete(
   "/:templateId",
-  requirePermission("limits.write"),
+  requirePermission("limits.edit"),
   async (req: AuthedRequest, res) => {
     const templateId = String(req.params.templateId);
     const tpl = await prisma.objectLimitTemplate.findUnique({ where: { id: templateId } });

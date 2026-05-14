@@ -14,7 +14,7 @@ const baseWarehouseOps = [
   "operations.write",
   "stocks.read",
   "limits.read",
-  "limits.write",
+  "limits.edit",
   "issues.read",
   "issues.write",
   "issues.approve",
@@ -28,10 +28,11 @@ const baseWarehouseOps = [
   "integrations.read",
   "integrations.write",
   "notifications.read",
-  "notifications.write"
+  "notifications.write",
+  "materialReport.read"
 ] as const;
 
-const warehouseDeskExtras = ["feedback.manage", "announcements.write"] as const;
+const warehouseDeskExtras = ["feedback.manage", "announcements.write", "materialReport.write"] as const;
 
 const defaultRoles = [
   { name: "ADMIN", permissions: ["*"] },
@@ -63,7 +64,9 @@ const defaultRoles = [
       "waybills.read",
       "waybills.write",
       "integrations.read",
-      "notifications.read"
+      "notifications.read",
+      "materialReport.read",
+      "materialReport.write"
     ]
   },
   {
@@ -74,6 +77,7 @@ const defaultRoles = [
       "materials.read",
       "stocks.read",
       "limits.read",
+      "materialReport.read",
       "issues.read",
       "issues.write",
       "documents.read",
@@ -90,12 +94,13 @@ const defaultRoles = [
       "materials.read",
       "stocks.read",
       "limits.read",
-      "limits.write",
+      "limits.edit",
       "issues.read",
       "issues.approve",
       "documents.read",
       "tools.read",
-      "waybills.read"
+      "waybills.read",
+      "materialReport.read"
     ]
   },
   {
@@ -110,7 +115,8 @@ const defaultRoles = [
       "operations.read",
       "documents.read",
       "waybills.read",
-      "notifications.read"
+      "notifications.read",
+      "materialReport.read"
     ]
   },
   {
@@ -121,6 +127,7 @@ const defaultRoles = [
       "materials.read",
       "stocks.read",
       "limits.read",
+      "materialReport.read",
       "issues.read",
       "operations.read",
       "documents.read",
@@ -139,6 +146,7 @@ const defaultRoles = [
       "stocks.read",
       "issues.read",
       "limits.read",
+      "materialReport.read",
       "documents.read",
       "tools.read",
       "waybills.read",

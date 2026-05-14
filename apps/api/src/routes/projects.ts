@@ -34,7 +34,7 @@ projectsRouter.get("/", async (req: AuthedRequest, res) => {
   );
 });
 
-projectsRouter.post("/", requirePermission("limits.write"), async (req, res) => {
+projectsRouter.post("/", requirePermission("limits.edit"), async (req, res) => {
   const parsed = createProjectSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });

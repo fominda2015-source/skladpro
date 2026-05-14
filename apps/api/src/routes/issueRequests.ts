@@ -106,7 +106,7 @@ function issueLimitSectionLabel(issue: {
   limitReleasePath?: string | null;
   project?: { name: string } | null;
 }): string {
-  return issue.limitReleasePath?.trim() || issue.project?.name?.trim() || "—";
+  return issue.limitReleasePath?.trim() || "—";
 }
 
 function expectedMaterialKind(domain: IssueRequestDomain): MaterialKind | null {

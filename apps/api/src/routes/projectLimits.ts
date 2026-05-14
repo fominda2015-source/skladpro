@@ -63,7 +63,7 @@ projectLimitsRouter.get("/", async (req: AuthedRequest, res) => {
   return res.json(rows);
 });
 
-projectLimitsRouter.post("/", requirePermission("limits.write"), async (req: AuthedRequest, res) => {
+projectLimitsRouter.post("/", requirePermission("limits.edit"), async (req: AuthedRequest, res) => {
   const parsed = createProjectLimitSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
