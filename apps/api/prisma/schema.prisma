@@ -47,6 +47,14 @@ enum IssueFlowType {
 enum IssueRequestDomain {
   MATERIALS
   TOOLS
+  CONSUMABLES
+  WORKWEAR
+}
+
+enum MaterialKind {
+  MATERIAL
+  CONSUMABLE
+  WORKWEAR
 }
 
 enum ToolStatus {
@@ -103,6 +111,22 @@ enum ReceiptRequestStatus {
   CANCELLED
 }
 
+enum FeedbackTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_REPLY
+  RESOLVED
+  CLOSED
+}
+
+enum TransferRequestStatus {
+  NEW
+  APPROVED
+  REJECTED
+  DONE
+  CANCELLED
+}
+
 enum LimitNodeType {
   GROUP
   MATERIAL
@@ -140,6 +164,10 @@ model User {
   receiptRequests  ReceiptRequest[]      @relation("ReceiptRequestCreator")
   campItems        CampItem[]            @relation("CampItemCreator")
   revertedAuditLogs AuditLog[]           @relation("AuditRevertedBy")
+  feedbackTicketsAuthored FeedbackTicket[] @relation("FeedbackTicketAuthor")
+  feedbackTicketMessagesSent FeedbackTicketMessage[] @relation("FeedbackTicketMessageSender")
+  transferRequestsRequested TransferRequest[]
+  announcementsCreated Announcement[] @relation("AnnouncementAuthor")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -216,6 +244,8 @@ model Warehouse {
   materialMappings MaterialMappingLibrary[]
   receiptRequests ReceiptRequest[]
   campItems   CampItem[]
+  transferRequestsFrom TransferRequest[] @relation("TransferFromWh")
+  transferRequestsTo   TransferRequest[] @relation("TransferToWh")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -225,6 +255,8 @@ model Material {
   sku             String?             @unique
   name            String
   unit            String
+  kind            MaterialKind        @default(MATERIAL)
+  unitPrice       Decimal?            @db.Decimal(14, 2)
   category        String?
   mergedIntoId    String?
   synonyms        MaterialSynonym[]
@@ -239,6 +271,7 @@ model Material {
   limitNodes      ObjectLimitNode[]
   mappingTargets  MaterialMappingLibrary[]
   receiptMappedItems ReceiptRequestItem[]
+  transferRequestLines TransferRequestLine[]
   mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom      Material[]           @relation("MaterialMergedInto")
   mergeHistoryFrom MaterialMergeHistory[] @relation("MergeSource")
@@ -609,12 +642,97 @@ model MessageAttachment {
   createdAt DateTime @default(now())
 }
 
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  body      String
+  isPinned  Boolean   @default(false)
+  authorId  String?
+  author    User?     @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([expiresAt, createdAt])
+}
+
+model FeedbackTicket {
+  id        String               @id @default(cuid())
+  seq       Int                  @unique @default(autoincrement())
+  authorId  String
+  subject   String               @default("")
+  status    FeedbackTicketStatus @default(OPEN)
+  author    User                 @relation("FeedbackTicketAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  messages  FeedbackTicketMessage[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([authorId, createdAt])
+  @@index([status, createdAt])
+}
+
+model FeedbackTicketMessage {
+  id          String   @id @default(cuid())
+  ticketId    String
+  senderId    String
+  text        String
+  ticket      FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender      User           @relation("FeedbackTicketMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+  attachments FeedbackTicketAttachment[]
+  createdAt   DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model FeedbackTicketAttachment {
+  id        String   @id @default(cuid())
+  messageId String
+  fileName  String
+  mimeType  String?
+  dataUrl   String
+  message   FeedbackTicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model TransferRequest {
+  id              String                @id @default(cuid())
+  seq             Int                   @unique @default(autoincrement())
+  fromWarehouseId String
+  toWarehouseId   String
+  section         ObjectSection
+  requestedById   String
+  status          TransferRequestStatus @default(NEW)
+  note            String?
+  fromWarehouse   Warehouse @relation("TransferFromWh", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
+  toWarehouse     Warehouse @relation("TransferToWh", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+  requestedBy     User      @relation(fields: [requestedById], references: [id], onDelete: Restrict)
+  lines           TransferRequestLine[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([toWarehouseId, status, createdAt])
+  @@index([fromWarehouseId, status, createdAt])
+}
+
+model TransferRequestLine {
+  id                String @id @default(cuid())
+  transferRequestId String
+  materialId        String
+  quantity          Decimal @db.Decimal(14, 3)
+  transferRequest   TransferRequest @relation(fields: [transferRequestId], references: [id], onDelete: Cascade)
+  material          Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@index([transferRequestId])
+}
+
 model IssueRequest {
   id            String             @id @default(cuid())
   number        String             @unique
   status        IssueRequestStatus @default(DRAFT)
   flowType      IssueFlowType      @default(REQUEST)
   domain        IssueRequestDomain @default(MATERIALS)
+  /** Путь раздела/подраздела лимита для печати в акте («Раздел: …») */
+  limitReleasePath String?
   basisType     IssueBasisType     @default(OTHER)
   basisRef      String?
   responsibleName String?

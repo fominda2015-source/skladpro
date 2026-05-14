@@ -31,12 +31,14 @@ const baseWarehouseOps = [
   "notifications.write"
 ] as const;
 
+const warehouseDeskExtras = ["feedback.manage", "announcements.write"] as const;
+
 const defaultRoles = [
   { name: "ADMIN", permissions: ["*"] },
-  { name: "WAREHOUSE_MANAGER", permissions: [...baseWarehouseOps] },
+  { name: "WAREHOUSE_MANAGER", permissions: [...baseWarehouseOps, ...warehouseDeskExtras] },
   {
     name: "CHIEF_WAREHOUSE",
-    permissions: [...baseWarehouseOps]
+    permissions: [...baseWarehouseOps, ...warehouseDeskExtras]
   },
   {
     name: "STOREKEEPER",

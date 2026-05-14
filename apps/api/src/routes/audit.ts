@@ -758,7 +758,7 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
 
 auditRouter.post(
   "/:id/revert",
-  requirePermission("audit.write"),
+  requirePermission("audit.revert"),
   async (req: AuthedRequest, res) => {
     const id = String(req.params.id);
     const log = await prisma.auditLog.findUnique({

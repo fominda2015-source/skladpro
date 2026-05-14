@@ -258,3 +258,14 @@ export function mergeIssueWhere(scope: DataScope, extra: Prisma.IssueRequestWher
   }
   return { AND: [s, extra] };
 }
+
+export function transferRequestWhereFromScope(scope: DataScope, userId: string): Prisma.TransferRequestWhereInput {
+  if (scope.unrestricted && !scope.warehouseIds?.length) {
+    return {};
+  }
+  const or: Prisma.TransferRequestWhereInput[] = [{ requestedById: userId }];
+  if (scope.warehouseIds?.length) {
+    or.push({ fromWarehouseId: { in: scope.warehouseIds } }, { toWarehouseId: { in: scope.warehouseIds } });
+  }
+  return { OR: or };
+}

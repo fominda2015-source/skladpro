@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import "./App.css";
 import jsQR from "jsqr";
-import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY } from "./app/constants";
+import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY, resolvePublicFileUrl } from "./app/constants";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
   IntegrationJobsTable,
@@ -65,6 +65,8 @@ type StockRow = {
   materialName: string;
   materialSku: string | null;
   materialUnit: string;
+  materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+  unitPrice?: number | null;
   quantity: number;
   reserved: number;
   storageRoom?: string | null;
@@ -141,13 +143,15 @@ type Material = {
   name: string;
   sku?: string | null;
   unit: string;
+  kind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+  unitPrice?: number | null;
   category?: string | null;
   mergedIntoId?: string | null;
 };
 type IssueBasisType = "PROJECT_WORK" | "INTERNAL_NEED" | "EMERGENCY" | "OTHER";
 type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
 type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
-type IssueRequestDomainApi = "MATERIALS" | "TOOLS";
+type IssueRequestDomainApi = "MATERIALS" | "TOOLS" | "CONSUMABLES" | "WORKWEAR";
 
 function userObjectBindingKind(u: Pick<AdminUser, "warehouseScopeIds" | "projectScopeIds">): "free" | "projects" | "objects" {
   const wh = u.warehouseScopeIds?.length ?? 0;
@@ -163,6 +167,8 @@ function effectiveIssueDomain(row: {
 }): IssueRequestDomainApi {
   if (row.domain === "TOOLS") return "TOOLS";
   if (row.domain === "MATERIALS") return "MATERIALS";
+  if (row.domain === "CONSUMABLES") return "CONSUMABLES";
+  if (row.domain === "WORKWEAR") return "WORKWEAR";
   if (row.toolItems && row.toolItems.length > 0) return "TOOLS";
   return "MATERIALS";
 }
@@ -171,6 +177,8 @@ type IssueRequest = {
   number: string;
   status: IssueStatus;
   domain?: IssueRequestDomainApi;
+  /** Текст «Раздел» в акте: раздел/подраздел лимита */
+  limitReleasePath?: string | null;
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
@@ -341,6 +349,51 @@ type WarehouseSnapshotReport = {
 type ChatUser = { id: string; fullName: string; avatarUrl?: string | null; role: string; position?: string | null };
 type ChatAttachment = { id: string; fileName: string; mimeType?: string | null; dataUrl: string };
 type ChatMessage = { id: string; text: string; createdAt: string; senderId: string; sender: { id: string; fullName: string }; attachments: ChatAttachment[] };
+type FeedbackTicketListItem = {
+  id: string;
+  number: string;
+  subject: string;
+  status: string;
+  authorId: string;
+  authorName: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+type FeedbackTicketDetailView = {
+  id: string;
+  number: string;
+  subject: string;
+  status: string;
+  authorId: string;
+  authorName: string;
+  messages: ChatMessage[];
+};
+type AnnouncementBoardRow = {
+  id: string;
+  title: string;
+  body: string;
+  isPinned: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  author?: { id: string; fullName: string } | null;
+};
+type TransferRequestApiRow = {
+  id: string;
+  number: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  fromWarehouseName: string | null;
+  toWarehouseName: string | null;
+  section: string;
+  requestedById: string;
+  requesterName: string | null;
+  status: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: Array<{ materialId: string; quantity: number; materialName: string; unit: string }>;
+};
 type Conversation = {
   id: string;
   kind: "DM" | "FEEDBACK";
@@ -528,8 +581,8 @@ type CampItemRow = {
   documents: CampItemFile[];
 };
 function App() {
-  const [email, setEmail] = useState("admin@skladpro.local");
-  const [password, setPassword] = useState("1111");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
   const [authError, setAuthError] = useState("");
   const [availableObjects, setAvailableObjects] = useState<Array<{ id: string; name: string; address?: string | null }>>([]);
@@ -549,12 +602,16 @@ function App() {
   const [stockOnlyAvailable, setStockOnlyAvailable] = useState(false);
   const [stockOnlyLow, setStockOnlyLow] = useState(false);
   const [stockOnlyWithFactNames, setStockOnlyWithFactNames] = useState(false);
+  /** Вкладка вида номенклатуры на экране «Склад». */
+  const [stockShelfKindTab, setStockShelfKindTab] = useState<"ALL" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR">("ALL");
   const [manualStockWarehouseOverride, setManualStockWarehouseOverride] = useState("");
   const [manualStockName, setManualStockName] = useState("");
   const [manualStockQty, setManualStockQty] = useState("1");
   const [manualStockUnit, setManualStockUnit] = useState("шт");
   const [manualStockBusy, setManualStockBusy] = useState(false);
   const [manualStockMessage, setManualStockMessage] = useState("");
+  const [manualStockKind, setManualStockKind] = useState<"MATERIAL" | "CONSUMABLE" | "WORKWEAR">("MATERIAL");
+  const [manualStockUnitPrice, setManualStockUnitPrice] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
@@ -605,7 +662,7 @@ function App() {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRoleName, setSelectedRoleName] = useState("VIEWER");
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
-  const [newPassword, setNewPassword] = useState("1111");
+  const [newPassword, setNewPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
   const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects">("users");
   const [adminUserFilter, setAdminUserFilter] = useState("");
@@ -615,14 +672,13 @@ function App() {
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserFullName, setNewUserFullName] = useState("");
   const [newUserRoleName, setNewUserRoleName] = useState("VIEWER");
-  const [newUserPassword, setNewUserPassword] = useState("1111");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserWarehouseScopes, setNewUserWarehouseScopes] = useState<string[]>([]);
   const [newUserProjectScopes, setNewUserProjectScopes] = useState<string[]>([]);
-  const [passCurrent, setPassCurrent] = useState("1111");
-  const [passNext, setPassNext] = useState("1111");
+  const [passCurrent, setPassCurrent] = useState("");
+  const [passNext, setPassNext] = useState("");
   const [passMessage, setPassMessage] = useState("");
   const [profileFullName, setProfileFullName] = useState("");
-  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
   const [profileMessage, setProfileMessage] = useState("");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -670,7 +726,16 @@ function App() {
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
   const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
     try {
-      return localStorage.getItem("skladpro_issue_domain") === "TOOLS" ? "TOOLS" : "MATERIALS";
+      const saved = localStorage.getItem("skladpro_issue_domain");
+      if (
+        saved === "TOOLS" ||
+        saved === "MATERIALS" ||
+        saved === "CONSUMABLES" ||
+        saved === "WORKWEAR"
+      ) {
+        return saved;
+      }
+      return "MATERIALS";
     } catch {
       return "MATERIALS";
     }
@@ -710,6 +775,16 @@ function App() {
   // Модалка «приложить документы» перед самым приёмом.
   const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
   const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
+  /** Ручной приход на склад — форма только в модалке. */
+  const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
+  /** ФИО получателя при выдаче заявки (вместо window.prompt). */
+  const [issueRecipientModal, setIssueRecipientModal] = useState<null | {
+    issueId: string;
+    opts?: { fromApprovals?: boolean; closeDrawer?: boolean };
+    fallback: string;
+    domain: "TOOLS" | "WORKWEAR" | "OTHER";
+  }>(null);
+  const [issueRecipientDraft, setIssueRecipientDraft] = useState("");
   const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   // Городок: список + UI-состояния.
   const [campItems, setCampItems] = useState<CampItemRow[]>([]);
@@ -826,6 +901,16 @@ function App() {
   const [waybillMaterialId, setWaybillMaterialId] = useState("");
   const [waybillQty, setWaybillQty] = useState(1);
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
+  const [peerSummaries, setPeerSummaries] = useState<
+    Array<{ warehouseId: string; warehouseName: string; stockLines: number; totalQty: number }>
+  >([]);
+  const [transferRequests, setTransferRequests] = useState<TransferRequestApiRow[]>([]);
+  const [transferReqFromWarehouseId, setTransferReqFromWarehouseId] = useState("");
+  const [transferReqToWarehouseId, setTransferReqToWarehouseId] = useState("");
+  const [transferReqMaterialId, setTransferReqMaterialId] = useState("");
+  const [transferReqQty, setTransferReqQty] = useState(1);
+  const [transferReqNote, setTransferReqNote] = useState("");
+  const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser">("");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -869,11 +954,21 @@ function App() {
   const [chatWidgetUserId, setChatWidgetUserId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
   const [chatViewedAt, setChatViewedAt] = useState<Record<string, string>>({});
-  const [feedbackMessages, setFeedbackMessages] = useState<ChatMessage[]>([]);
+  const [feedbackTickets, setFeedbackTickets] = useState<FeedbackTicketListItem[]>([]);
+  const [feedbackSelectedId, setFeedbackSelectedId] = useState<string>("");
+  const [feedbackTicketDetail, setFeedbackTicketDetail] = useState<FeedbackTicketDetailView | null>(null);
+  const [feedbackComposerMode, setFeedbackComposerMode] = useState<"thread" | "new">("thread");
+  const [feedbackNewSubject, setFeedbackNewSubject] = useState("");
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
   const [feedbackError, setFeedbackError] = useState("");
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackListLoading, setFeedbackListLoading] = useState(false);
+  const [feedbackDetailLoading, setFeedbackDetailLoading] = useState(false);
+  const [announcements, setAnnouncements] = useState<AnnouncementBoardRow[]>([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [announcementComposeOpen, setAnnouncementComposeOpen] = useState(false);
+  const [announcementTitleDraft, setAnnouncementTitleDraft] = useState("");
+  const [announcementBodyDraft, setAnnouncementBodyDraft] = useState("");
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
   const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
@@ -983,6 +1078,22 @@ function App() {
       RECEIVED: "Получена",
       CLOSED: "Закрыта"
     })[status] ?? status;
+  const feedbackTicketStatusLabel = (status: string) =>
+    ({
+      OPEN: "Открыто",
+      IN_PROGRESS: "В работе",
+      WAITING_REPLY: "Ожидает ответа",
+      RESOLVED: "Решено",
+      CLOSED: "Закрыто"
+    })[status] ?? status;
+  const transferRequestStatusLabel = (status: string) =>
+    ({
+      NEW: "Новая",
+      APPROVED: "Согласовано",
+      REJECTED: "Отказано",
+      DONE: "Выполнено",
+      CANCELLED: "Отменено автором"
+    })[status] ?? status;
   const dmByUserId = useMemo(() => {
     const map = new Map<string, Conversation>();
     for (const conv of chatConversations) {
@@ -1056,26 +1167,6 @@ function App() {
     }
     return rows;
   }, [chatMessages]);
-  const groupedFeedbackMessages = useMemo(() => {
-    const rows: Array<{ type: "date"; label: string } | { type: "message"; item: ChatMessage }> = [];
-    let prevDateKey = "";
-    const now = new Date();
-    const yesterday = new Date();
-    yesterday.setDate(now.getDate() - 1);
-    for (const item of feedbackMessages) {
-      const dt = new Date(item.createdAt);
-      const dateKey = dt.toDateString();
-      if (dateKey !== prevDateKey) {
-        let label = dt.toLocaleDateString();
-        if (dt.toDateString() === now.toDateString()) label = "Сегодня";
-        if (dt.toDateString() === yesterday.toDateString()) label = "Вчера";
-        rows.push({ type: "date", label });
-        prevDateKey = dateKey;
-      }
-      rows.push({ type: "message", item });
-    }
-    return rows;
-  }, [feedbackMessages]);
   const movementSlicesByStockKey = useMemo(() => {
     const map = new Map<string, StockMovementRow[]>();
     for (const m of stockMovements) {
@@ -1184,6 +1275,9 @@ function App() {
 
   const warehouseDisplayRows = useMemo(() => {
     let rows = warehouseVisibleRows;
+    if (stockShelfKindTab !== "ALL") {
+      rows = rows.filter((r) => (r.materialKind ?? "MATERIAL") === stockShelfKindTab);
+    }
     if (stockFilterWarehouseId) {
       rows = rows.filter((r) => r.warehouseId === stockFilterWarehouseId);
     }
@@ -1203,6 +1297,7 @@ function App() {
     return rows;
   }, [
     warehouseVisibleRows,
+    stockShelfKindTab,
     stockFilterWarehouseId,
     stockOnlyAvailable,
     stockOnlyLow,
@@ -1218,6 +1313,10 @@ function App() {
     if (!activeObjectId) return out;
     for (const s of stocks) {
       if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
+      const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+      if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
+      if (issueIssuesDomain === "CONSUMABLES" && mk !== "CONSUMABLE") continue;
+      if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
       const mid = s.materialId;
       const bucket = acceptedBySourceByTargetId.get(mid);
       const maps = materialMappingsByTargetId.get(mid) ?? [];
@@ -1272,7 +1371,7 @@ function App() {
     return out.sort((a, b) =>
       (a.factLabel || a.canonName).localeCompare(b.factLabel || b.canonName, "ru", { sensitivity: "base" })
     );
-  }, [stocks, activeObjectId, acceptedBySourceByTargetId, materialMappingsByTargetId]);
+  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, materialMappingsByTargetId]);
 
   const issueFacingRowsFiltered = useMemo(() => {
     const qLower = issueMaterialSearch.trim().toLowerCase();
@@ -1512,6 +1611,7 @@ function App() {
     () => hasPermission("audit.read"),
     [me]
   );
+  const canRevertAudit = useMemo(() => hasPermission("audit.revert"), [me]);
   const canDashboard = useMemo(
     () =>
       Boolean(
@@ -1535,8 +1635,11 @@ function App() {
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
+  const canWriteWaybills = useMemo(() => hasPermission("waybills.write"), [me]);
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
   const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
+  const canManageFeedback = useMemo(() => hasPermission("feedback.manage"), [me]);
+  const canWriteAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
   const showLegacyMatching = false;
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
@@ -1602,7 +1705,6 @@ function App() {
     const data = (await res.json()) as MeResponse;
     setMe(data);
     setProfileFullName(data.fullName);
-    setProfileAvatarUrl(data.avatarUrl ?? null);
     if (Array.isArray(data.availableObjects)) {
       setAvailableObjects(data.availableObjects);
     }
@@ -1635,6 +1737,24 @@ function App() {
     void updateAuthContext({ warehouseId: activeObjectId, section: next });
   }
 
+  async function uploadProfileAvatar(file: File) {
+    if (!token) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${API_URL}/api/auth/me/avatar`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(typeof body.error === "string" ? body.error : "Не удалось загрузить аватар");
+    }
+    const data = (await res.json()) as MeResponse;
+    setMe(data);
+    setProfileFullName(data.fullName);
+  }
+
   async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
     if (!token) return;
     const res = await fetch(`${API_URL}/api/auth/me/profile`, {
@@ -1651,7 +1771,6 @@ function App() {
     const data = (await res.json()) as MeResponse;
     setMe(data);
     setProfileFullName(data.fullName);
-    setProfileAvatarUrl(data.avatarUrl ?? null);
   }
 
   async function loadDashboardSummary() {
@@ -1857,8 +1976,14 @@ function App() {
       setActiveTab("tools");
       return;
     }
-    if (entityType === "documentfile") {
-      setActiveTab("documents");
+    if (entityType === "feedbackticket") {
+      setFeedbackSelectedId(notification.entityId);
+      setFeedbackComposerMode("thread");
+      setActiveTab("feedback");
+      return;
+    }
+    if (entityType === "transferrequest") {
+      setActiveTab("waybills");
       return;
     }
     setActiveTab("integrations");
@@ -1949,41 +2074,197 @@ function App() {
     await loadConversations();
   }
 
-  async function loadFeedbackMessages() {
+  async function loadFeedbackTickets() {
     if (!token) return;
-    setFeedbackLoading(true);
+    setFeedbackListLoading(true);
     setFeedbackError("");
-    const res = await fetch(`${API_URL}/api/feedback/messages`, {
+    const res = await fetch(`${API_URL}/api/feedback/tickets`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      setFeedbackError("Не удалось загрузить обращения");
+      setFeedbackListLoading(false);
+      return;
+    }
+    setFeedbackTickets((await res.json()) as FeedbackTicketListItem[]);
+    setFeedbackListLoading(false);
+  }
+
+  async function loadFeedbackTicketDetail(ticketId: string) {
+    if (!token || !ticketId) return;
+    setFeedbackDetailLoading(true);
+    setFeedbackError("");
+    const res = await fetch(`${API_URL}/api/feedback/tickets/${ticketId}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
-      setFeedbackError("Не удалось загрузить сообщения поддержки");
-      setFeedbackLoading(false);
+      setFeedbackError("Не удалось загрузить тред обращения");
+      setFeedbackDetailLoading(false);
       return;
     }
-    const payload = (await res.json()) as { items: ChatMessage[] };
-    setFeedbackMessages(payload.items);
-    setFeedbackLoading(false);
+    const d = (await res.json()) as FeedbackTicketDetailView;
+    setFeedbackTicketDetail({
+      id: d.id,
+      number: d.number,
+      subject: d.subject,
+      status: d.status,
+      authorId: d.authorId,
+      authorName: d.authorName,
+      messages: d.messages ?? []
+    });
+    setFeedbackDetailLoading(false);
   }
 
-  async function sendFeedbackMessage() {
+  async function submitNewFeedbackTicket() {
     if (!token || !feedbackText.trim()) return;
     setFeedbackError("");
     const attachments = feedbackAttachment
-      ? [{ fileName: feedbackAttachment.name, mimeType: feedbackAttachment.type, dataUrl: await fileToDataUrl(feedbackAttachment) }]
+      ? [
+          {
+            fileName: feedbackAttachment.name,
+            mimeType: feedbackAttachment.type || undefined,
+            dataUrl: await fileToDataUrl(feedbackAttachment)
+          }
+        ]
       : [];
-    const res = await fetch(`${API_URL}/api/feedback/messages`, {
+    const res = await fetch(`${API_URL}/api/feedback/tickets`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: feedbackNewSubject.trim(), text: feedbackText.trim(), attachments })
+    });
+    const body = (await res.json()) as { id?: string; error?: string };
+    if (!res.ok) {
+      setFeedbackError(typeof body.error === "string" ? body.error : "Не удалось создать обращение");
+      return;
+    }
+    setFeedbackComposerMode("thread");
+    setFeedbackNewSubject("");
+    setFeedbackText("");
+    setFeedbackAttachment(null);
+    await loadFeedbackTickets();
+    if (body.id) {
+      setFeedbackSelectedId(body.id);
+      await loadFeedbackTicketDetail(body.id);
+    }
+  }
+
+  async function sendFeedbackTicketReply() {
+    if (!token || !feedbackSelectedId || !feedbackText.trim()) return;
+    setFeedbackError("");
+    const attachments = feedbackAttachment
+      ? [
+          {
+            fileName: feedbackAttachment.name,
+            mimeType: feedbackAttachment.type || undefined,
+            dataUrl: await fileToDataUrl(feedbackAttachment)
+          }
+        ]
+      : [];
+    const res = await fetch(`${API_URL}/api/feedback/tickets/${feedbackSelectedId}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: feedbackText.trim(), attachments })
     });
     if (!res.ok) {
-      setFeedbackError("Не удалось отправить сообщение в поддержку");
+      setFeedbackError("Не удалось отправить сообщение");
       return;
     }
     setFeedbackText("");
     setFeedbackAttachment(null);
-    await loadFeedbackMessages();
+    await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(feedbackSelectedId)]);
+  }
+
+  async function updateFeedbackTicketStatus(ticketId: string, status: string) {
+    if (!token) return;
+    setFeedbackError("");
+    const res = await fetch(`${API_URL}/api/feedback/tickets/${ticketId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) {
+      setFeedbackError("Не удалось обновить статус");
+      return;
+    }
+    await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(ticketId)]);
+  }
+
+  async function loadAnnouncementsBoard() {
+    if (!token) return;
+    setAnnouncementsLoading(true);
+    const res = await fetch(`${API_URL}/api/announcements`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) setAnnouncements((await res.json()) as AnnouncementBoardRow[]);
+    setAnnouncementsLoading(false);
+  }
+
+  async function publishAnnouncementDraft() {
+    if (!token || !announcementTitleDraft.trim() || !announcementBodyDraft.trim()) return;
+    const res = await fetch(`${API_URL}/api/announcements`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: announcementTitleDraft.trim(), body: announcementBodyDraft.trim(), isPinned: false })
+    });
+    if (!res.ok) return;
+    setAnnouncementTitleDraft("");
+    setAnnouncementBodyDraft("");
+    setAnnouncementComposeOpen(false);
+    await loadAnnouncementsBoard();
+  }
+
+  async function loadTransferRequestsList() {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/transfer-requests`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) setTransferRequests((await res.json()) as TransferRequestApiRow[]);
+  }
+
+  async function loadPeerWarehouseSummaries() {
+    if (!token || !activeObjectId) {
+      setPeerSummaries([]);
+      return;
+    }
+    const sec = objectSectionFilter === "EOM" ? "EOM" : "SS";
+    const res = await fetch(
+      `${API_URL}/api/stocks/peer-summaries?excludeWarehouseId=${encodeURIComponent(activeObjectId)}&section=${sec}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.ok) setPeerSummaries(await res.json());
+  }
+
+  async function submitWarehouseTransferRequest() {
+    if (!token || transferReqSaving) return;
+    if (transferReqFromWarehouseId === transferReqToWarehouseId) {
+      return;
+    }
+    if (!transferReqMaterialId || transferReqQty <= 0) return;
+    setTransferReqSaving(true);
+    try {
+      const section = objectSectionFilter === "EOM" ? "EOM" : "SS";
+      const res = await fetch(`${API_URL}/api/transfer-requests`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromWarehouseId: transferReqFromWarehouseId,
+          toWarehouseId: transferReqToWarehouseId,
+          section,
+          lines: [{ materialId: transferReqMaterialId, quantity: transferReqQty }],
+          note: transferReqNote.trim() || undefined
+        })
+      });
+      if (!res.ok) return;
+      setTransferReqNote("");
+      await Promise.all([loadTransferRequestsList(), loadPeerWarehouseSummaries()]);
+    } finally {
+      setTransferReqSaving(false);
+    }
+  }
+
+  async function patchWarehouseTransferStatus(transferId: string, status: string) {
+    if (!token) return;
+    const res = await fetch(`${API_URL}/api/transfer-requests/${transferId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) return;
+    await loadTransferRequestsList();
   }
 
   async function syncObjectUsers(objectId: string, userIds: string[]) {
@@ -2596,18 +2877,16 @@ function App() {
       const issue = issues.find((x) => x.id === issueId) || approvalQueue.find((x) => x.id === issueId) || selectedIssue;
       const fallback = issue?.actualRecipientName || issue?.responsibleName || "";
       const dom = issue ? effectiveIssueDomain(issue) : "MATERIALS";
-      const promptText =
-        dom === "TOOLS"
-          ? "Кто фактически получает инструмент? Это ФИО попадёт в акт выдачи."
-          : "Кто фактически получает материалы? Это ФИО попадёт в акт выдачи.";
-      const prompted = window.prompt(promptText, fallback);
-      if (prompted === null) return;
-      actualRecipientName = prompted.trim();
-      if (!actualRecipientName) {
-        setIssuesMessage(dom === "TOOLS" ? "Укажи фактического получателя инструмента" : "Укажи фактического получателя материалов");
-        setIssuesTone("error");
-        return;
-      }
+      const modalDom: "TOOLS" | "WORKWEAR" | "OTHER" =
+        dom === "TOOLS" ? "TOOLS" : dom === "WORKWEAR" ? "WORKWEAR" : "OTHER";
+      setIssueRecipientDraft(fallback.trim());
+      setIssueRecipientModal({
+        issueId,
+        opts,
+        fallback: fallback.trim(),
+        domain: modalDom
+      });
+      return;
     }
     const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
     if (!ok) return;
@@ -2710,6 +2989,7 @@ function App() {
           responsibleName,
           flowType: "DIRECT_ISSUE",
           basisType: "OTHER",
+          domain: issueIssuesDomain === "TOOLS" ? undefined : issueIssuesDomain,
           items: lines
         })
       });
@@ -3319,6 +3599,19 @@ function App() {
   }
 
   useEffect(() => {
+    const openOverlay = Boolean(limitPromptRequest || manualStockModalOpen || issueRecipientModal);
+    if (!openOverlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setLimitPromptRequest(null);
+      setManualStockModalOpen(false);
+      setIssueRecipientModal(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [limitPromptRequest, manualStockModalOpen, issueRecipientModal]);
+
+  useEffect(() => {
     if (token && !mustPickObject) {
       void loadMe();
       void loadStocks(q);
@@ -3337,6 +3630,13 @@ function App() {
       void loadReceiptRequests();
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter, mustPickObject, canReadOperations]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "stocks" || mustPickObject) {
+      return;
+    }
+    void loadAnnouncementsBoard();
+  }, [token, activeTab, mustPickObject]);
 
   useEffect(() => {
     if (!token || !canDashboard) {
@@ -3417,8 +3717,17 @@ function App() {
 
   useEffect(() => {
     if (!token || activeTab !== "feedback") return;
-    void loadFeedbackMessages();
+    void loadFeedbackTickets();
   }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "feedback") return;
+    if (!feedbackSelectedId || feedbackComposerMode !== "thread") {
+      setFeedbackTicketDetail(null);
+      return;
+    }
+    void loadFeedbackTicketDetail(feedbackSelectedId);
+  }, [token, activeTab, feedbackSelectedId, feedbackComposerMode]);
 
   useEffect(() => {
     if (activeTab !== "reports") return;
@@ -3431,7 +3740,7 @@ function App() {
     const node = feedbackMessagesRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [activeTab, feedbackMessages, feedbackLoading]);
+  }, [activeTab, feedbackTicketDetail?.messages, feedbackDetailLoading]);
 
   useEffect(() => {
     if (token && canManageUsers && activeTab === "admin") {
@@ -3826,8 +4135,19 @@ function App() {
     if (token && activeTab === "waybills") {
       void loadCatalogData();
       void loadWaybills();
+      void loadPeerWarehouseSummaries();
+      void loadTransferRequestsList();
     }
-  }, [token, activeTab, waybillStatusFilter, waybillsSort, waybillsPage, waybillsPageSize]);
+  }, [
+    token,
+    activeTab,
+    waybillStatusFilter,
+    waybillsSort,
+    waybillsPage,
+    waybillsPageSize,
+    activeObjectId,
+    objectSectionFilter
+  ]);
 
   useEffect(() => {
     if (token && activeTab === "waybills" && selectedWaybillId) {
@@ -3848,7 +4168,19 @@ function App() {
     if (materials.length > 0 && !waybillMaterialId) {
       setWaybillMaterialId(materials[0].id);
     }
-  }, [warehouses, materials, waybillFromWarehouseId, waybillMaterialId]);
+    if (materials.length > 0 && !transferReqMaterialId) {
+      setTransferReqMaterialId(materials[0].id);
+    }
+  }, [warehouses, materials, waybillFromWarehouseId, waybillMaterialId, transferReqMaterialId]);
+
+  useEffect(() => {
+    if (activeTab !== "waybills" || !warehouses.length) return;
+    const to =
+      activeObjectId && warehouses.some((w) => w.id === activeObjectId) ? activeObjectId : warehouses[0].id;
+    setTransferReqToWarehouseId(to);
+    const from = warehouses.find((w) => w.id !== to) ?? warehouses[0];
+    setTransferReqFromWarehouseId(from.id);
+  }, [activeTab, warehouses, activeObjectId]);
 
   useEffect(() => {
     if (activeObjectId) {
@@ -4107,7 +4439,11 @@ function App() {
             {me ? (
               <span className="userChip">
                 <span className="userAvatar">
-                  {me.avatarUrl ? <img src={me.avatarUrl} alt={me.fullName} className="userAvatarImage" /> : me.fullName.slice(0, 1).toUpperCase()}
+                  {me.avatarUrl ? (
+                    <img src={resolvePublicFileUrl(me.avatarUrl) || ""} alt={me.fullName} className="userAvatarImage" />
+                  ) : (
+                    me.fullName.slice(0, 1).toUpperCase()
+                  )}
                 </span>
                 <span>{me.fullName}</span>
               </span>
@@ -4167,6 +4503,67 @@ function App() {
                   </button>
                 </div>
               ) : null}
+            </section>
+
+            <section className="card homeSectionBlock">
+              <h3 className="homeSectionTitle">Объявления</h3>
+              {canWriteAnnouncements && (
+                <div className="toolbar" style={{ marginBottom: 8 }}>
+                  <button type="button" className="ghostBtn" onClick={() => setAnnouncementComposeOpen((v) => !v)}>
+                    {announcementComposeOpen ? "Закрыть форму" : "Новое объявление"}
+                  </button>
+                </div>
+              )}
+              {announcementComposeOpen && canWriteAnnouncements ? (
+                <div className="form card" style={{ marginBottom: 12 }}>
+                  <label>
+                    Заголовок
+                    <input value={announcementTitleDraft} onChange={(e) => setAnnouncementTitleDraft(e.target.value)} />
+                  </label>
+                  <label>
+                    Текст
+                    <textarea
+                      value={announcementBodyDraft}
+                      onChange={(e) => setAnnouncementBodyDraft(e.target.value)}
+                      rows={4}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!announcementTitleDraft.trim() || !announcementBodyDraft.trim()}
+                    onClick={() => void publishAnnouncementDraft()}
+                  >
+                    Опубликовать
+                  </button>
+                </div>
+              ) : null}
+              {announcementsLoading ? (
+                <p className="muted">Загрузка…</p>
+              ) : announcements.length === 0 ? (
+                <p className="muted">Объявлений пока нет.</p>
+              ) : (
+                <div className="homeInsightGrid">
+                  {announcements.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`homeInsightCard ${a.isPinned ? "accentWarn" : ""}`}
+                      style={{ alignItems: "flex-start" }}
+                    >
+                      <span className="homeInsightLabel">
+                        {a.isPinned ? "Закреплено · " : ""}
+                        {a.title}
+                      </span>
+                      <p className="homeInsightHint" style={{ whiteSpace: "pre-wrap" }}>
+                        {a.body}
+                      </p>
+                      <span className="muted" style={{ fontSize: "0.85rem" }}>
+                        {new Date(a.createdAt).toLocaleString()}
+                        {a.author?.fullName ? ` · ${a.author.fullName}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             {!dashboard ? (
@@ -4957,6 +5354,18 @@ function App() {
             <button type="button" onClick={() => void loadStockMovements()}>
               Журнал движений
             </button>
+            {canWriteOperations && warehouses.length > 0 ? (
+              <button
+                type="button"
+                className="secondaryBtn"
+                onClick={() => {
+                  setManualStockMessage("");
+                  setManualStockModalOpen(true);
+                }}
+              >
+                Добавить материал вручную
+              </button>
+            ) : null}
             <button
               type="button"
               className={showAttachedMaterials ? "secondaryBtn" : "ghostBtn"}
@@ -4964,6 +5373,25 @@ function App() {
             >
               {showAttachedMaterials ? "Только лимитные" : "Все материалы"}
             </button>
+          </div>
+          <div className="tabs" style={{ flexWrap: "wrap", marginTop: 8 }}>
+            {(
+              [
+                ["ALL", "Все"],
+                ["MATERIAL", "Основные материалы"],
+                ["CONSUMABLE", "Расходники"],
+                ["WORKWEAR", "Спецодежда"]
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                className={stockShelfKindTab === k ? "active" : ""}
+                onClick={() => setStockShelfKindTab(k)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <div className="stockFiltersStrip">
             <label>
@@ -5009,106 +5437,6 @@ function App() {
               <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
             </label>
           </div>
-          {canWriteOperations && warehouses.length > 0 && (
-            <div className="card warehouseManualStockCard" style={{ marginTop: 12 }}>
-              <h4 style={{ margin: "0 0 6px" }}>Добавить материал вручную</h4>
-              <p className="muted" style={{ margin: "0 0 10px" }}>
-                Создаётся новая карточка номенклатуры только с названием и единицей и сразу увеличивается остаток по текущему разделу (
-                {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}) без сопоставления и без объединения с другими позициями.
-              </p>
-              {manualStockMessage ? <p className="muted">{manualStockMessage}</p> : null}
-              <div className="form grid2">
-                <label>
-                  Объект (склад)
-                  <select
-                    value={(manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id) ?? ""}
-                    onChange={(e) => setManualStockWarehouseOverride(e.target.value)}
-                  >
-                    {warehouses.map((w) => (
-                      <option key={`man-wh-${w.id}`} value={w.id}>
-                        {safeName(w.name)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Количество
-                  <input
-                    type="number"
-                    min={0.001}
-                    step="any"
-                    value={manualStockQty}
-                    onChange={(e) => setManualStockQty(e.target.value)}
-                  />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Название материала
-                  <input
-                    value={manualStockName}
-                    onChange={(e) => setManualStockName(e.target.value)}
-                    placeholder="Например: Перфоратор (аренда)"
-                  />
-                </label>
-                <label>
-                  Ед. измерения
-                  <input value={manualStockUnit} onChange={(e) => setManualStockUnit(e.target.value)} placeholder="шт" />
-                </label>
-              </div>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  className="primaryBtn"
-                  disabled={manualStockBusy || !manualStockName.trim()}
-                  onClick={async () => {
-                    if (!token) return;
-                    const wid = manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id;
-                    if (!wid) return;
-                    const qty = Number(String(manualStockQty).trim().replace(",", "."));
-                    if (!Number.isFinite(qty) || qty <= 0) {
-                      setManualStockMessage("Укажи положительное количество.");
-                      return;
-                    }
-                    setManualStockBusy(true);
-                    setManualStockMessage("");
-                    try {
-                      const res = await fetch(`${API_URL}/api/stocks/manual-line`, {
-                        method: "POST",
-                        headers: {
-                          Authorization: `Bearer ${token}`,
-                          "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                          warehouseId: wid,
-                          section: objectSectionFilter,
-                          materialName: manualStockName.trim(),
-                          quantity: qty,
-                          unit: (manualStockUnit.trim() || "шт").slice(0, 64)
-                        })
-                      });
-                      const data = (await res.json().catch(() => ({}))) as { error?: string };
-                      if (res.status === 403) {
-                        setManualStockMessage("Нет прав на этот объект или раздел.");
-                        return;
-                      }
-                      if (!res.ok) {
-                        setManualStockMessage(data.error || `Ошибка ${res.status}`);
-                        return;
-                      }
-                      setManualStockMessage("Строка добавлена.");
-                      setManualStockName("");
-                      setManualStockQty("1");
-                      await loadCatalogData();
-                      await loadStocks(q);
-                    } finally {
-                      setManualStockBusy(false);
-                    }
-                  }}
-                >
-                  {manualStockBusy ? "Сохранение…" : "Добавить на склад"}
-                </button>
-              </div>
-            </div>
-          )}
           {limitFilterEnabled && (
             <p className="muted">
               В списке показаны только материалы лимитов, которые реально есть на складе. Нулевые позиции из лимитов скрыты.
@@ -5124,6 +5452,8 @@ function App() {
                   <th>Материал</th>
                   {showStockSku && <th>SKU</th>}
                   <th>Ед.</th>
+                  <th>Вид</th>
+                  <th>Цена</th>
                   <th>Помещение</th>
                   <th>Ячейка</th>
                   <th>Остаток</th>
@@ -5154,6 +5484,21 @@ function App() {
                       </td>
                       {showStockSku && <td>{row.materialSku || "-"}</td>}
                       <td>{row.materialUnit}</td>
+                      <td className="muted">
+                        {row.materialKind === "CONSUMABLE"
+                          ? "расходники"
+                          : row.materialKind === "WORKWEAR"
+                            ? "спецодежда"
+                            : "основной"}
+                      </td>
+                      <td>
+                        {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
+                          ? Number(row.unitPrice).toLocaleString("ru-RU", {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 2
+                            })
+                          : "—"}
+                      </td>
                       <td>{row.storageRoom || "—"}</td>
                       <td>{row.storageCell || "—"}</td>
                       <td>
@@ -5233,6 +5578,20 @@ function App() {
                   <p><strong>Склад:</strong> {safeName(row.warehouseName)}</p>
                   {showStockSku ? <p><strong>SKU:</strong> {row.materialSku || "-"}</p> : null}
                   <p><strong>Ед.:</strong> {row.materialUnit}</p>
+                  <p>
+                    <strong>Вид:</strong>{" "}
+                    {row.materialKind === "CONSUMABLE"
+                      ? "расходники"
+                      : row.materialKind === "WORKWEAR"
+                        ? "спецодежда"
+                        : "основной"}
+                  </p>
+                  {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                    <p>
+                      <strong>Цена:</strong>{" "}
+                      {Number(row.unitPrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽
+                    </p>
+                  ) : null}
                   <p><strong>Помещение:</strong> {row.storageRoom || "—"}</p>
                   <p><strong>Ячейка:</strong> {row.storageCell || "—"}</p>
                   <p><strong>Остаток:</strong> {Number(row.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</p>
@@ -6033,7 +6392,7 @@ function App() {
                       <td>
                         {row.reverted ? (
                           <span className="muted">отменено</span>
-                        ) : row.revertable ? (
+                        ) : row.revertable && canRevertAudit ? (
                           <button
                             type="button"
                             className="dangerBtn"
@@ -6163,7 +6522,9 @@ function App() {
             <div className="card">
               <h3>Материалы</h3>
               <p className="muted">
-                Добавление новых материалов перенесено в раздел `Приходы`, чтобы кладовщик работал в одном сценарии.
+                Новые позиции заводятся при приёмке и через «Склад» → «Добавить материал вручную». Там же задаются{" "}
+                <strong>вид</strong> (основной / расходник / спецодежда) и <strong>цена за единицу</strong>. Правка
+                карточки: API <code className="muted">PATCH /api/materials/:id</code> (поля kind, unitPrice).
               </p>
             </div>
           </div>
@@ -6705,12 +7066,19 @@ function App() {
               <div>
                 <h2>Выдачи со склада</h2>
                 <p className="muted">
-                  {issueIssuesDomain === "TOOLS" ? "Инструмент · " : "Материалы · "}раздел {objectSectionFilter}
+                  {issueIssuesDomain === "TOOLS"
+                    ? "Инструмент · "
+                    : issueIssuesDomain === "CONSUMABLES"
+                      ? "Расходники · "
+                      : issueIssuesDomain === "WORKWEAR"
+                        ? "Спецодежда · "
+                        : "Материалы · "}
+                  раздел {objectSectionFilter}
                   {activeObjectId ? ` · ${safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "")}` : ""}
                 </p>
               </div>
               <div className="kpiRow" style={{ margin: 0 }}>
-                {issueIssuesDomain === "MATERIALS" ? (
+                {issueIssuesDomain !== "TOOLS" ? (
                   <>
                     <div className="kpi">
                       <span>В корзине</span>
@@ -6750,9 +7118,37 @@ function App() {
                   setIssueIssuesDomain("MATERIALS");
                   setIssuesPage(1);
                   setIssueToolPickIds([]);
+                  setIssuePickCart([]);
+                  setIssuePickQtyByKey({});
                 }}
               >
                 Материалы
+              </button>
+              <button
+                type="button"
+                className={issueIssuesDomain === "CONSUMABLES" ? "active" : ""}
+                onClick={() => {
+                  setIssueIssuesDomain("CONSUMABLES");
+                  setIssuesPage(1);
+                  setIssueToolPickIds([]);
+                  setIssuePickCart([]);
+                  setIssuePickQtyByKey({});
+                }}
+              >
+                Расходники
+              </button>
+              <button
+                type="button"
+                className={issueIssuesDomain === "WORKWEAR" ? "active" : ""}
+                onClick={() => {
+                  setIssueIssuesDomain("WORKWEAR");
+                  setIssuesPage(1);
+                  setIssueToolPickIds([]);
+                  setIssuePickCart([]);
+                  setIssuePickQtyByKey({});
+                }}
+              >
+                Спецодежда
               </button>
               <button
                 type="button"
@@ -6804,7 +7200,7 @@ function App() {
               </datalist>
             </div>
 
-            {issueIssuesDomain === "MATERIALS" && (
+            {issueIssuesDomain !== "TOOLS" && (
               <>
             <div className="issuePicker">
               <div className="rightCardHeader" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -6978,7 +7374,13 @@ function App() {
                 disabled={issueSubmitting}
                 onClick={() => void performDirectIssue()}
               >
-                {issueSubmitting ? "Выдача..." : "Выдать материал"}
+                {issueSubmitting
+                  ? "Выдача..."
+                  : issueIssuesDomain === "WORKWEAR"
+                    ? "Выдать спецодежду"
+                    : issueIssuesDomain === "CONSUMABLES"
+                      ? "Выдать расходники"
+                      : "Выдать материал"}
               </button>
             </div>
               </>
@@ -7794,7 +8196,15 @@ function App() {
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
           <div className="kpiRow">
             <div className="kpi">
-              <span>В очереди ({approvalQueueTab === "TOOLS" ? "инструмент" : "материалы"})</span>
+              <span>В очереди (
+              {approvalQueueTab === "TOOLS"
+                ? "инструмент"
+                : approvalQueueTab === "CONSUMABLES"
+                  ? "расходники"
+                  : approvalQueueTab === "WORKWEAR"
+                    ? "спецодежда"
+                    : "материалы"}
+              )</span>
               <strong>{approvalQueue.length}</strong>
             </div>
             <div className="kpi">
@@ -7856,6 +8266,20 @@ function App() {
             </button>
             <button
               type="button"
+              className={approvalQueueTab === "CONSUMABLES" ? "active" : ""}
+              onClick={() => setApprovalQueueTab("CONSUMABLES")}
+            >
+              Расходники
+            </button>
+            <button
+              type="button"
+              className={approvalQueueTab === "WORKWEAR" ? "active" : ""}
+              onClick={() => setApprovalQueueTab("WORKWEAR")}
+            >
+              Спецодежда
+            </button>
+            <button
+              type="button"
               className={approvalQueueTab === "TOOLS" ? "active" : ""}
               onClick={() => setApprovalQueueTab("TOOLS")}
             >
@@ -7864,7 +8288,15 @@ function App() {
           </div>
           <h3>Очередь на выдачу</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Показаны заявки со статусом «на рассмотрении» для выбранного типа ({approvalQueueTab === "TOOLS" ? "инструмент" : "материалы"}).
+            Показаны заявки со статусом «на рассмотрении» для выбранного типа (
+            {approvalQueueTab === "TOOLS"
+              ? "инструмент"
+              : approvalQueueTab === "CONSUMABLES"
+                ? "расходники"
+                : approvalQueueTab === "WORKWEAR"
+                  ? "спецодежда"
+                  : "материалы"}
+            ).
           </p>
           <table>
             <thead>
@@ -8209,6 +8641,159 @@ function App() {
               <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
             </select>
             <button onClick={() => void loadWaybills()}>Обновить</button>
+          </div>
+
+          <div className="grid2" style={{ marginBottom: 12 }}>
+            <div className="card">
+              <h3>Остатки на других складах</h3>
+              <p className="muted">
+                Раздел в шапке: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"} · показаны склады вашего доступа, кроме текущего
+                объекта.
+              </p>
+              {!activeObjectId ? (
+                <p className="muted">Выберите объект в шапке.</p>
+              ) : peerSummaries.length === 0 ? (
+                <p className="muted">Нет сумм по другим складам (в доступе один объект или нет строк остатков).</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Склад</th>
+                      <th>Позиций</th>
+                      <th>Сумма количества</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {peerSummaries.map((p) => (
+                      <tr key={p.warehouseId}>
+                        <td>{safeName(p.warehouseName)}</td>
+                        <td>{p.stockLines}</td>
+                        <td>{p.totalQty.toLocaleString("ru-RU")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="card">
+              <h3>Заявка на перемещение</h3>
+              {!canWriteWaybills ? (
+                <p className="muted">Недостаточно прав (<code>waybills.write</code>).</p>
+              ) : (
+                <div className="form">
+                  <label>
+                    Склад-отправитель
+                    <select value={transferReqFromWarehouseId} onChange={(e) => setTransferReqFromWarehouseId(e.target.value)}>
+                      {warehouses.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {safeName(w.name)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Склад-получатель
+                    <select value={transferReqToWarehouseId} onChange={(e) => setTransferReqToWarehouseId(e.target.value)}>
+                      {warehouses.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {safeName(w.name)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Материал · количество
+                    <select value={transferReqMaterialId} onChange={(e) => setTransferReqMaterialId(e.target.value)}>
+                      {materials.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={0.001}
+                      step={0.001}
+                      value={transferReqQty}
+                      onChange={(e) => setTransferReqQty(Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Комментарий
+                    <input value={transferReqNote} onChange={(e) => setTransferReqNote(e.target.value)} />
+                  </label>
+                  <button type="button" disabled={transferReqSaving || transferReqFromWarehouseId === transferReqToWarehouseId} onClick={() => void submitWarehouseTransferRequest()}>
+                    Отправить заявку
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 12 }}>
+            <h3>Список заявок на перемещение</h3>
+            {transferRequests.length === 0 ? (
+              <p className="muted">Заявок нет.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Номер</th>
+                    <th>Статус</th>
+                    <th>Маршрут</th>
+                    <th>Состав</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transferRequests.map((tr) => (
+                    <tr key={tr.id}>
+                      <td>{tr.number}</td>
+                      <td>{transferRequestStatusLabel(tr.status)}</td>
+                      <td>
+                        {safeName(tr.fromWarehouseName || tr.fromWarehouseId)} → {safeName(tr.toWarehouseName || tr.toWarehouseId)} ·{" "}
+                        {tr.section}
+                      </td>
+                      <td>
+                        {(tr.lines || []).map((ln) => (
+                          <div key={`${tr.id}:${ln.materialId}`}>
+                            {ln.materialName} · {ln.quantity} {ln.unit}
+                          </div>
+                        ))}
+                      </td>
+                      <td>
+                        <div className="toolbar" style={{ flexWrap: "wrap" }}>
+                          {tr.status === "NEW" ? (
+                            <>
+                              {canWriteWaybills ? (
+                                <>
+                                  <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "APPROVED")}>
+                                    Согласовать
+                                  </button>
+                                  <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "REJECTED")}>
+                                    Отказать
+                                  </button>
+                                </>
+                              ) : null}
+                              {me?.id === tr.requestedById ? (
+                                <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "CANCELLED")}>
+                                  Отменить
+                                </button>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {tr.status === "APPROVED" && canWriteWaybills ? (
+                            <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "DONE")}>
+                              Завершить
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="grid2">
@@ -9267,81 +9852,181 @@ function App() {
       {activeTab === "feedback" && (
         <div className="card">
           <h2>Обратная связь</h2>
-          <p className="muted">Чат напрямую с администратором. Можно приложить скриншот ошибки.</p>
+          <p className="muted">
+            Обращения «ОБ-…» видны автору со статусом; поддержка может оставить ответ и перевести этапы.
+          </p>
           {feedbackError && <ErrorState text={feedbackError} />}
-          <div className="chatMessages feedbackThread" ref={feedbackMessagesRef}>
-            {feedbackLoading ? (
-              <>
-                <div className="chatSkeleton" />
-                <div className="chatSkeleton short" />
-                <div className="chatSkeleton" />
-              </>
-            ) : groupedFeedbackMessages.length ? (
-              groupedFeedbackMessages.map((row, idx) =>
-                row.type === "date" ? (
-                  <div key={`feedback-date-${idx}`} className="chatDateDivider">{row.label}</div>
-                ) : (
-                  <div key={row.item.id} className={`chatBubble ${row.item.senderId === me?.id ? "mine" : ""}`}>
-                    <p>{row.item.text}</p>
-                    {row.item.attachments?.map((a) => (
-                      <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
-                        {a.fileName}
-                      </a>
-                    ))}
-                    <small className="chatDeliveryState">{row.item.senderId === me?.id ? "Вы" : "Администратор"}</small>
-                  </div>
-                )
-              )
-            ) : (
-              <p className="muted">Сообщений пока нет. Опиши проблему, и админ ответит в этом треде.</p>
-            )}
-          </div>
-          <div className="chatComposer">
-            <div className="chatQuickReplies">
-              {feedbackQuickReplies.map((text) => (
-                <button key={`feedback-quick-${text}`} type="button" className="ghostBtn" onClick={() => setFeedbackText(text)}>
-                  {text}
+          <div className="grid2">
+            <div className="card">
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="primaryBtn"
+                  onClick={() => {
+                    setFeedbackComposerMode("new");
+                    setFeedbackSelectedId("");
+                    setFeedbackTicketDetail(null);
+                  }}
+                >
+                  Новое обращение
                 </button>
-              ))}
-            </div>
-            <textarea
-              value={feedbackText}
-              onChange={(e) => setFeedbackText(e.target.value)}
-              placeholder="Опиши проблему или вопрос"
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  void sendFeedbackMessage();
-                }
-              }}
-            />
-            <div className="chatComposerActions">
-              <button
-                type="button"
-                className="ghostBtn chatAttachBtn"
-                title="Добавить скриншот"
-                onClick={() => feedbackFileInputRef.current?.click()}
-              >
-                📎
-              </button>
-              <input
-                ref={feedbackFileInputRef}
-                className="chatHiddenFile"
-                type="file"
-                accept="image/*"
-                onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)}
-              />
-              <button type="button" onClick={() => void sendFeedbackMessage()}>Отправить в поддержку</button>
-            </div>
-            <p className="muted">Подсказка: `Ctrl+Enter` отправляет сообщение.</p>
-            {feedbackAttachment ? (
-              <div className="chatAttachmentBar">
-                <small>{feedbackAttachment.name}</small>
-                <button type="button" className="ghostBtn" onClick={() => setFeedbackAttachment(null)}>
-                  Убрать
+                <button type="button" className="ghostBtn" onClick={() => void loadFeedbackTickets()}>
+                  Обновить список
                 </button>
               </div>
-            ) : null}
+              {feedbackListLoading ? (
+                <LoadingState text="Загрузка обращений..." />
+              ) : (
+                <div className="plainList" style={{ maxHeight: 360, overflow: "auto", marginTop: 8 }}>
+                  {feedbackTickets.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className="ghostBtn"
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        marginBottom: 6,
+                        textAlign: "left",
+                        border: feedbackSelectedId === t.id ? "2px solid #4c6ef5" : undefined
+                      }}
+                      onClick={() => {
+                        setFeedbackComposerMode("thread");
+                        setFeedbackSelectedId(t.id);
+                      }}
+                    >
+                      <strong>{t.number}</strong> · {feedbackTicketStatusLabel(t.status)}
+                      <br />
+                      <span className="muted">
+                        {t.subject || "Без темы"} · от {t.authorName}
+                      </span>
+                    </button>
+                  ))}
+                  {!feedbackTickets.length ? <p className="muted">Обращений пока нет.</p> : null}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              {feedbackComposerMode === "new" ? (
+                <h3 style={{ marginTop: 0 }}>Новое обращение</h3>
+              ) : (
+                <div className="toolbar" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <h3 style={{ flex: "1 1 auto", margin: 0 }}>
+                    {feedbackTicketDetail
+                      ? `${feedbackTicketDetail.number} · ${feedbackTicketStatusLabel(feedbackTicketDetail.status)}`
+                      : "Выберите обращение слева"}
+                  </h3>
+                  {canManageFeedback && feedbackTicketDetail ? (
+                    <label>
+                      Статус{" "}
+                      <select
+                        value={feedbackTicketDetail.status}
+                        onChange={(e) => void updateFeedbackTicketStatus(feedbackTicketDetail.id, e.target.value)}
+                      >
+                        {(["OPEN", "IN_PROGRESS", "WAITING_REPLY", "RESOLVED", "CLOSED"] as const).map((s) => (
+                          <option key={s} value={s}>
+                            {feedbackTicketStatusLabel(s)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              )}
+              {feedbackComposerMode === "new" ? (
+                <div className="form" style={{ marginBottom: 8 }}>
+                  <label>
+                    Тема (необязательно)
+                    <input value={feedbackNewSubject} onChange={(e) => setFeedbackNewSubject(e.target.value)} />
+                  </label>
+                </div>
+              ) : null}
+
+              <div className="chatMessages feedbackThread" ref={feedbackMessagesRef}>
+                {feedbackDetailLoading ? (
+                  <LoadingState text="Загрузка сообщений..." />
+                ) : feedbackComposerMode === "new" ? (
+                  <p className="muted">Опишите ситуацию в первом сообщении — появится лента переписки.</p>
+                ) : feedbackTicketDetail?.messages?.length ? (
+                  feedbackTicketDetail.messages.map((m) => (
+                    <div key={m.id} className={`chatBubble ${m.senderId === me?.id ? "mine" : ""}`}>
+                      <p>{m.text}</p>
+                      {m.attachments?.map((a) => (
+                        <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
+                          {a.fileName}
+                        </a>
+                      ))}
+                      <small className="chatDeliveryState">
+                        {m.sender.fullName} · {new Date(m.createdAt).toLocaleString()}
+                      </small>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">Нет сообщений в этом обращении.</p>
+                )}
+              </div>
+
+              {(feedbackComposerMode === "new" || (feedbackComposerMode === "thread" && Boolean(feedbackSelectedId))) && (
+                <div className="chatComposer">
+                  <div className="chatQuickReplies">
+                    {feedbackQuickReplies.map((text) => (
+                      <button key={`feedback-quick-${text}`} type="button" className="ghostBtn" onClick={() => setFeedbackText(text)}>
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder={
+                      feedbackComposerMode === "new" ? "Первое сообщение обращения" : "Сообщение в тред"
+                    }
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        void (feedbackComposerMode === "new" ? submitNewFeedbackTicket() : sendFeedbackTicketReply());
+                      }
+                    }}
+                  />
+                  <div className="chatComposerActions">
+                    <button
+                      type="button"
+                      className="ghostBtn chatAttachBtn"
+                      title="Добавить скриншот"
+                      onClick={() => feedbackFileInputRef.current?.click()}
+                    >
+                      📎
+                    </button>
+                    <input
+                      ref={feedbackFileInputRef}
+                      className="chatHiddenFile"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)}
+                    />
+                    <button
+                      type="button"
+                      disabled={!feedbackText.trim()}
+                      onClick={() =>
+                        void (feedbackComposerMode === "new" ? submitNewFeedbackTicket() : sendFeedbackTicketReply())
+                      }
+                    >
+                      {feedbackComposerMode === "new" ? "Создать обращение" : "Отправить"}
+                    </button>
+                  </div>
+                  <p className="muted">Подсказка: Ctrl+Enter отправляет сообщение.</p>
+                  {feedbackAttachment ? (
+                    <div className="chatAttachmentBar">
+                      <small>{feedbackAttachment.name}</small>
+                      <button type="button" className="ghostBtn" onClick={() => setFeedbackAttachment(null)}>
+                        Убрать
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -9724,7 +10409,11 @@ function App() {
                       {assigned.length ? assigned.map((u) => (
                         <div key={`obj-${obj.id}-user-${u.id}`} className="userMiniChip">
                           <span className="userAvatar">
-                            {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                            {u.avatarUrl ? (
+                              <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt={u.fullName} className="userAvatarImage" />
+                            ) : (
+                              u.fullName.slice(0, 1).toUpperCase()
+                            )}
                           </span>
                           <span>{u.fullName}</span>
                           <button
@@ -10059,7 +10748,11 @@ function App() {
                   <div key={`admin-u-${u.id}`} className="adminUserCard card">
                     <div className="adminUserCardTop">
                       <span className="userAvatar">
-                        {u.avatarUrl ? <img src={u.avatarUrl} alt="" className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                        {u.avatarUrl ? (
+                          <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt="" className="userAvatarImage" />
+                        ) : (
+                          u.fullName.slice(0, 1).toUpperCase()
+                        )}
                       </span>
                       <div>
                         <strong>{u.fullName}</strong>
@@ -10163,9 +10856,12 @@ function App() {
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => setProfileAvatarUrl(typeof reader.result === "string" ? reader.result : null);
-                  reader.readAsDataURL(file);
+                  setProfileMessage("");
+                  void uploadProfileAvatar(file)
+                    .then(() => setProfileMessage("Аватар обновлён"))
+                    .catch((err) =>
+                      setProfileMessage(err instanceof Error ? err.message : "Не удалось загрузить аватар")
+                    );
                 }}
               />
             </label>
@@ -10174,7 +10870,7 @@ function App() {
             <button
               onClick={async () => {
                 try {
-                  await updateProfile({ fullName: profileFullName, avatarUrl: profileAvatarUrl });
+                  await updateProfile({ fullName: profileFullName });
                   setProfileMessage("Профиль обновлен");
                 } catch {
                   setProfileMessage("Не удалось обновить профиль");
@@ -10188,7 +10884,6 @@ function App() {
               onClick={async () => {
                 try {
                   await updateProfile({ avatarUrl: null });
-                  setProfileAvatarUrl(null);
                   setProfileMessage("Аватар удален");
                 } catch {
                   setProfileMessage("Не удалось удалить аватар");
@@ -10342,7 +11037,11 @@ function App() {
                       }}
                     >
                       <span className="userAvatar">
-                        {u.avatarUrl ? <img src={u.avatarUrl} alt={u.fullName} className="userAvatarImage" /> : u.fullName.slice(0, 1).toUpperCase()}
+                        {u.avatarUrl ? (
+                          <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt={u.fullName} className="userAvatarImage" />
+                        ) : (
+                          u.fullName.slice(0, 1).toUpperCase()
+                        )}
                       </span>
                       <span className="chatUserMeta">
                         <strong>
@@ -10457,6 +11156,260 @@ function App() {
         </div>
       )}
 
+      {issueRecipientModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="issue-recipient-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.48)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 65,
+            padding: 16
+          }}
+          onClick={() => setIssueRecipientModal(null)}
+        >
+          <div className="card" style={{ maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+              <h3 id="issue-recipient-title" style={{ marginTop: 0 }}>
+                Фактический получатель
+              </h3>
+              <button type="button" className="ghostBtn" onClick={() => setIssueRecipientModal(null)}>
+                Закрыть
+              </button>
+            </div>
+            <p className="muted">
+              {issueRecipientModal.domain === "TOOLS"
+                ? "Кто фактически получает инструмент? ФИО попадёт в акт выдачи."
+                : issueRecipientModal.domain === "WORKWEAR"
+                  ? "ФИО сотрудника, на которого оформляется спецодежда — попадёт в акт выдачи."
+                  : "Кто фактически получает материалы или расходники? ФИО попадёт в акт выдачи."}
+            </p>
+            <label>
+              ФИО
+              <input
+                value={issueRecipientDraft}
+                onChange={(e) => setIssueRecipientDraft(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void (async () => {
+                      const name = issueRecipientDraft.trim();
+                      if (!name) {
+                        setIssuesMessage(
+                          issueRecipientModal.domain === "TOOLS"
+                            ? "Укажи фактического получателя инструмента"
+                            : issueRecipientModal.domain === "WORKWEAR"
+                              ? "Укажи ФИО получателя спецодежды"
+                              : "Укажи фактического получателя материалов"
+                        );
+                        setIssuesTone("error");
+                        return;
+                      }
+                      const { issueId, opts } = issueRecipientModal;
+                      setIssueRecipientModal(null);
+                      await executeIssueAction(issueId, "issue", { ...opts, actualRecipientName: name });
+                    })();
+                  }
+                }}
+              />
+            </label>
+            <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button type="button" className="ghostBtn" onClick={() => setIssueRecipientModal(null)}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const name = issueRecipientDraft.trim();
+                    if (!name) {
+                      setIssuesMessage(
+                        issueRecipientModal.domain === "TOOLS"
+                          ? "Укажи фактического получателя инструмента"
+                          : issueRecipientModal.domain === "WORKWEAR"
+                            ? "Укажи ФИО получателя спецодежды"
+                            : "Укажи фактического получателя материалов"
+                      );
+                      setIssuesTone("error");
+                      return;
+                    }
+                    const { issueId, opts } = issueRecipientModal;
+                    setIssueRecipientModal(null);
+                    await executeIssueAction(issueId, "issue", { ...opts, actualRecipientName: name });
+                  })();
+                }}
+              >
+                Подтвердить и выдать
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {manualStockModalOpen && canWriteOperations && warehouses.length > 0 && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 55,
+            padding: 16
+          }}
+          onClick={() => !manualStockBusy && setManualStockModalOpen(false)}
+        >
+          <div
+            className="card warehouseManualStockCard"
+            style={{ maxWidth: 520, width: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+              <h3 style={{ marginTop: 0 }}>Добавить материал вручную</h3>
+              <button type="button" className="ghostBtn" disabled={manualStockBusy} onClick={() => setManualStockModalOpen(false)}>
+                Закрыть
+              </button>
+            </div>
+            <p className="muted" style={{ margin: "0 0 10px" }}>
+              Создаётся новая карточка номенклатуры только с названием и единицей и сразу увеличивается остаток по текущему разделу (
+              {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}) без сопоставления и без объединения с другими позициями.
+            </p>
+            {manualStockMessage ? <p className="muted">{manualStockMessage}</p> : null}
+            <div className="form grid2">
+              <label>
+                Объект (склад)
+                <select
+                  value={(manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id) ?? ""}
+                  onChange={(e) => setManualStockWarehouseOverride(e.target.value)}
+                >
+                  {warehouses.map((w) => (
+                    <option key={`man-wh-${w.id}`} value={w.id}>
+                      {safeName(w.name)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Количество
+                <input
+                  type="number"
+                  min={0.001}
+                  step="any"
+                  value={manualStockQty}
+                  onChange={(e) => setManualStockQty(e.target.value)}
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Название материала
+                <input
+                  value={manualStockName}
+                  onChange={(e) => setManualStockName(e.target.value)}
+                  placeholder="Например: Перфоратор (аренда)"
+                />
+              </label>
+              <label>
+                Вид номенклатуры
+                <select value={manualStockKind} onChange={(e) => setManualStockKind(e.target.value as typeof manualStockKind)}>
+                  <option value="MATERIAL">Основной материал</option>
+                  <option value="CONSUMABLE">Расходник</option>
+                  <option value="WORKWEAR">Спецодежда</option>
+                </select>
+              </label>
+              <label>
+                Цена за ед., ₽ (необязательно)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={manualStockUnitPrice}
+                  onChange={(e) => setManualStockUnitPrice(e.target.value)}
+                  placeholder="0"
+                />
+              </label>
+              <label>
+                Ед. измерения
+                <input value={manualStockUnit} onChange={(e) => setManualStockUnit(e.target.value)} placeholder="шт" />
+              </label>
+            </div>
+            <div className="toolbar" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="primaryBtn"
+                disabled={manualStockBusy || !manualStockName.trim()}
+                onClick={async () => {
+                  if (!token) return;
+                  const wid = manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id;
+                  if (!wid) return;
+                  const qty = Number(String(manualStockQty).trim().replace(",", "."));
+                  if (!Number.isFinite(qty) || qty <= 0) {
+                    setManualStockMessage("Укажи положительное количество.");
+                    return;
+                  }
+                  const priceRaw = manualStockUnitPrice.trim().replace(",", ".");
+                  let unitPrice: number | null | undefined;
+                  if (priceRaw === "") {
+                    unitPrice = undefined;
+                  } else {
+                    const p = Number(priceRaw);
+                    if (!Number.isFinite(p) || p < 0) {
+                      setManualStockMessage("Некорректная цена.");
+                      return;
+                    }
+                    unitPrice = p;
+                  }
+                  setManualStockBusy(true);
+                  setManualStockMessage("");
+                  try {
+                    const res = await fetch(`${API_URL}/api/stocks/manual-line`, {
+                      method: "POST",
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json"
+                      },
+                      body: JSON.stringify({
+                        warehouseId: wid,
+                        section: objectSectionFilter,
+                        materialName: manualStockName.trim(),
+                        quantity: qty,
+                        unit: (manualStockUnit.trim() || "шт").slice(0, 64),
+                        kind: manualStockKind,
+                        unitPrice: unitPrice ?? null
+                      })
+                    });
+                    const data = (await res.json().catch(() => ({}))) as { error?: string };
+                    if (res.status === 403) {
+                      setManualStockMessage("Нет прав на этот объект или раздел.");
+                      return;
+                    }
+                    if (!res.ok) {
+                      setManualStockMessage(data.error || `Ошибка ${res.status}`);
+                      return;
+                    }
+                    setManualStockMessage("Строка добавлена.");
+                    setManualStockName("");
+                    setManualStockQty("1");
+                    await loadCatalogData();
+                    await loadStocks(q);
+                  } finally {
+                    setManualStockBusy(false);
+                  }
+                }}
+              >
+                {manualStockBusy ? "Сохранение…" : "Добавить на склад"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {limitPromptRequest && (
         <div
           role="dialog"
@@ -10478,27 +11431,44 @@ function App() {
             style={{ maxWidth: 480, width: "100%" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+              <h3 style={{ marginTop: 0 }}>Заявка из лимита?</h3>
+              <button type="button" className="ghostBtn" onClick={() => setLimitPromptRequest(null)}>
+                Закрыть
+              </button>
+            </div>
             <p className="muted">
               Заявка <strong>{limitPromptRequest.number}</strong> загружена.
               Можно привязать её к одному из шаблонов лимита этого объекта/раздела —
-              тогда при приёмке будут предлагаться названия материалов из лимита.
+              тогда при приёмке будут предлагаться названия материалов из лимита. Связь с лимитом можно изменить позже в
+              списке заявок.
             </p>
-            <label>
-              Шаблон лимита
-              <select
-                value={limitPromptTemplateId}
-                onChange={(e) => setLimitPromptTemplateId(e.target.value)}
-              >
-                <option value="">Не из лимита</option>
-                {limitTemplates.map((t) => (
-                  <option key={`limit-prompt-${t.id}`} value={t.id}>
-                    {safeName(t.title)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {limitTemplates.length === 0 ? (
+              <p className="muted">На объекте нет шаблонов лимита — только вариант «Не из лимита» или закройте окно.</p>
+            ) : (
+              <label>
+                Шаблон лимита
+                <select
+                  value={limitPromptTemplateId}
+                  onChange={(e) => setLimitPromptTemplateId(e.target.value)}
+                >
+                  <option value="">Не из лимита</option>
+                  {limitTemplates.map((t) => (
+                    <option key={`limit-prompt-${t.id}`} value={t.id}>
+                      {safeName(t.title)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={() => setLimitPromptRequest(null)}
+              >
+                Позже
+              </button>
               <button
                 type="button"
                 className="ghostBtn"

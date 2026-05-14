@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { StockMovementDirection } from "@prisma/client";
+import { MaterialKind, StockMovementDirection } from "@prisma/client";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
@@ -19,7 +19,9 @@ const manualStockLineSchema = z.object({
   section: z.enum(["SS", "EOM"]),
   materialName: z.string().trim().min(1).max(800),
   quantity: z.coerce.number().positive().max(1_000_000_000),
-  unit: z.string().trim().min(1).max(64).optional().default("шт")
+  unit: z.string().trim().min(1).max(64).optional().default("шт"),
+  kind: z.nativeEnum(MaterialKind).optional().default(MaterialKind.MATERIAL),
+  unitPrice: z.coerce.number().nonnegative().optional().nullable()
 });
 
 stocksRouter.post("/manual-line", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
@@ -39,7 +41,9 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
       const material = await tx.material.create({
         data: {
           name,
-          unit
+          unit,
+          kind: parsed.data.kind,
+          unitPrice: parsed.data.unitPrice ?? undefined
         },
         select: { id: true }
       });
@@ -118,6 +122,59 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
   }
 });
 
+stocksRouter.get("/peer-summaries", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const excludeWarehouseId =
+    typeof req.query.excludeWarehouseId === "string" ? req.query.excludeWarehouseId : undefined;
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
+
+  let warehouseIdList: string[];
+  if (scope.unrestricted && !scope.warehouseIds?.length) {
+    const whs = await prisma.warehouse.findMany({
+      where: { isActive: true },
+      select: { id: true },
+      orderBy: { name: "asc" }
+    });
+    warehouseIdList = whs.map((w) => w.id);
+  } else if (scope.warehouseIds?.length) {
+    warehouseIdList = scope.warehouseIds;
+  } else {
+    return res.json([]);
+  }
+
+  const filtered = warehouseIdList.filter((id) => id !== excludeWarehouseId);
+  if (!filtered.length) {
+    return res.json([]);
+  }
+
+  const grouped = await prisma.stock.groupBy({
+    by: ["warehouseId"],
+    where: {
+      warehouseId: { in: filtered },
+      ...(section ? { section } : {}),
+      ...stockWhereFromScope(scope)
+    },
+    _sum: { quantity: true },
+    _count: { _all: true }
+  });
+
+  const names = await prisma.warehouse.findMany({
+    where: { id: { in: grouped.map((g) => g.warehouseId) } },
+    select: { id: true, name: true }
+  });
+  const nameById = Object.fromEntries(names.map((w) => [w.id, w.name]));
+
+  return res.json(
+    grouped.map((g) => ({
+      warehouseId: g.warehouseId,
+      warehouseName: nameById[g.warehouseId] ?? g.warehouseId,
+      stockLines: g._count._all,
+      totalQty: Number(g._sum.quantity ?? 0)
+    }))
+  );
+});
+
 stocksRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
@@ -132,6 +189,12 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
     return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
   }
 
+  const kindParam = typeof req.query.kind === "string" ? req.query.kind.toUpperCase() : "";
+  const kindFilter =
+    kindParam === "MATERIAL" || kindParam === "CONSUMABLE" || kindParam === "WORKWEAR"
+      ? { material: { kind: kindParam as MaterialKind } }
+      : {};
+
   const rows = await prisma.stock.findMany({
     where: {
       AND: [
@@ -140,6 +203,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
           ...(warehouseId ? { warehouseId } : {}),
           ...(materialId ? { materialId } : {}),
           ...(section ? { section } : {}),
+          ...kindFilter,
       ...(q
         ? {
             material: {
@@ -177,6 +241,8 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       materialName: row.material.name,
       materialSku: row.material.sku,
       materialUnit: row.material.unit,
+      materialKind: row.material.kind,
+      unitPrice: row.material.unitPrice != null ? Number(row.material.unitPrice) : null,
       quantity: qty,
       reserved,
       storageRoom: row.storageRoom,

@@ -2,6 +2,7 @@ import {
   IssueBasisType,
   IssueRequestDomain,
   IssueRequestStatus,
+  MaterialKind,
   NotificationLevel,
   OperationType,
   StockMovementDirection,
@@ -35,6 +36,9 @@ const createIssueSchema = z
     flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
     basisType: z.nativeEnum(IssueBasisType).optional(),
     basisRef: z.string().max(500).optional().nullable(),
+    /** Явный тип заявки по материалам; для инструмента не используется (см. toolItems). */
+    domain: z.nativeEnum(IssueRequestDomain).optional(),
+    limitReleasePath: z.string().max(2000).optional().nullable(),
     items: z
       .array(
         z.object({
@@ -87,6 +91,58 @@ async function getLatestProjectLimit(projectId: string) {
   });
 }
 
+function materialIssueActTitle(domain: IssueRequestDomain): string {
+  switch (domain) {
+    case IssueRequestDomain.WORKWEAR:
+      return "Акт выдачи спецодежды";
+    case IssueRequestDomain.CONSUMABLES:
+      return "Акт выдачи расходников";
+    default:
+      return "Акт выдачи материалов";
+  }
+}
+
+function issueLimitSectionLabel(issue: {
+  limitReleasePath?: string | null;
+  project?: { name: string } | null;
+}): string {
+  return issue.limitReleasePath?.trim() || issue.project?.name?.trim() || "—";
+}
+
+function expectedMaterialKind(domain: IssueRequestDomain): MaterialKind | null {
+  if (domain === IssueRequestDomain.CONSUMABLES) return MaterialKind.CONSUMABLE;
+  if (domain === IssueRequestDomain.WORKWEAR) return MaterialKind.WORKWEAR;
+  if (domain === IssueRequestDomain.MATERIALS) return MaterialKind.MATERIAL;
+  return null;
+}
+
+function inferMaterialDomain(rows: Array<{ kind: MaterialKind }>): IssueRequestDomain | null {
+  const kinds = new Set(rows.map((r) => r.kind));
+  if (kinds.size !== 1) return null;
+  const k = [...kinds][0];
+  if (k === MaterialKind.CONSUMABLE) return IssueRequestDomain.CONSUMABLES;
+  if (k === MaterialKind.WORKWEAR) return IssueRequestDomain.WORKWEAR;
+  return IssueRequestDomain.MATERIALS;
+}
+
+function validateMaterialsForDomain(
+  rows: Array<{ id: string; kind: MaterialKind }>,
+  materialIds: string[],
+  domain: IssueRequestDomain
+): string | undefined {
+  if (rows.length !== materialIds.length) {
+    return "Не все материалы найдены в справочнике.";
+  }
+  const expected = expectedMaterialKind(domain);
+  if (!expected) return undefined;
+  for (const r of rows) {
+    if (r.kind !== expected) {
+      return `Вид номенклатуры не соответствует типу заявки (ожидается ${expected}).`;
+    }
+  }
+  return undefined;
+}
+
 async function safeNotify(params: Parameters<typeof notifyUser>[0]) {
   try {
     await notifyUser(params);
@@ -134,14 +190,13 @@ async function createIssueActDocument(params: {
 
   const doc = new PDFDocument({ size: "A4", margin: 32 });
   doc.font(fontPath);
-  doc.fontSize(17).text(`Акт выдачи материалов ${issue.number}`, { align: "center" });
+  doc.fontSize(17).text(`${materialIssueActTitle(issue.domain)} ${issue.number}`, { align: "center" });
   doc.moveDown(0.6);
   doc.fontSize(10);
   doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
   doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
-  doc.text(`Раздел: ${issue.section}`);
-  doc.text(`Проект: ${issue.project?.name || "-"}`);
-  doc.text(`Основание: ${issue.basisRef || issue.basisType}`);
+  doc.text(`Учётный раздел: ${issue.section === "SS" ? "СС" : "ЭОМ"}`);
+  doc.text(`Раздел: ${issueLimitSectionLabel(issue)}`);
   doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
   doc.text(`Фактически получил: ${params.actualRecipientName}`);
   doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
@@ -237,9 +292,8 @@ async function createToolIssueActDocument(params: {
   doc.fontSize(10);
   doc.text(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`);
   doc.text(`Склад: ${issue.warehouse?.name || issue.warehouseId}`);
-  doc.text(`Раздел: ${issue.section}`);
-  doc.text(`Проект: ${issue.project?.name || "-"}`);
-  doc.text(`Основание: ${issue.basisRef || issue.basisType}`);
+  doc.text(`Учётный раздел: ${issue.section === "SS" ? "СС" : "ЭОМ"}`);
+  doc.text(`Раздел: ${issueLimitSectionLabel(issue)}`);
   doc.text(`Ответственное лицо: ${issue.responsibleName || "-"}`);
   doc.text(`Фактически получил: ${params.actualRecipientName}`);
   doc.text(`Кладовщик: ${storekeeper?.fullName || storekeeper?.email || params.storekeeperId}`);
@@ -348,7 +402,10 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const sectionFilter = sectionParam === "SS" || sectionParam === "EOM" ? { section: sectionParam } : {};
   const domainParam = typeof req.query.domain === "string" ? req.query.domain.toUpperCase() : "";
   const domainFilter =
-    domainParam === "MATERIALS" || domainParam === "TOOLS"
+    domainParam === "MATERIALS" ||
+    domainParam === "TOOLS" ||
+    domainParam === "CONSUMABLES" ||
+    domainParam === "WORKWEAR"
       ? { domain: domainParam as IssueRequestDomain }
       : {};
   const where = mergeIssueWhere(scope, {
@@ -410,11 +467,51 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
   const count = await prisma.issueRequest.count();
   const number = `REQ-${String(count + 1).padStart(5, "0")}`;
 
-  const domain: IssueRequestDomain =
-    parsed.data.toolItems.length > 0 ? IssueRequestDomain.TOOLS : IssueRequestDomain.MATERIALS;
+  let domain: IssueRequestDomain;
+  const toolLen = parsed.data.toolItems.length;
+  const itemLen = parsed.data.items.length;
+
+  if (toolLen > 0) {
+    domain = IssueRequestDomain.TOOLS;
+    if (parsed.data.domain && parsed.data.domain !== IssueRequestDomain.TOOLS) {
+      return res.status(400).json({ error: "Для заявки на инструмент не указывайте domain по материалам." });
+    }
+  } else if (itemLen === 0) {
+    return res.status(400).json({ error: "Добавьте строки материалов или инструментов." });
+  } else {
+    const materialIds = [...new Set(parsed.data.items.map((i) => i.materialId))];
+    const matRows = await prisma.material.findMany({
+      where: { id: { in: materialIds } },
+      select: { id: true, kind: true }
+    });
+
+    if (parsed.data.domain === IssueRequestDomain.TOOLS) {
+      return res.status(400).json({ error: "Для инструмента передайте toolItems, а не строки материалов." });
+    }
+
+    if (parsed.data.domain) {
+      domain = parsed.data.domain;
+      const verr = validateMaterialsForDomain(matRows, materialIds, domain);
+      if (verr) {
+        return res.status(400).json({ error: verr });
+      }
+    } else {
+      const inferred = inferMaterialDomain(matRows);
+      if (!inferred) {
+        return res.status(400).json({
+          error:
+            "В заявке смешаны виды номенклатуры (материал / расходник / спецодежда) или не найдены позиции — явно передайте domain: MATERIALS, CONSUMABLES или WORKWEAR."
+        });
+      }
+      domain = inferred;
+    }
+  }
 
   let initialStatus: IssueRequestStatus = IssueRequestStatus.DRAFT;
-  if (domain === IssueRequestDomain.MATERIALS && parsed.data.projectId) {
+  if (
+    (domain === IssueRequestDomain.MATERIALS || domain === IssueRequestDomain.CONSUMABLES) &&
+    parsed.data.projectId
+  ) {
     const limit = await getLatestProjectLimit(parsed.data.projectId);
     if (limit) {
       const byMaterial = new Map(limit.items.map((x) => [x.materialId, x]));
@@ -440,6 +537,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
     data: {
       number,
       domain,
+      limitReleasePath: parsed.data.limitReleasePath?.trim() ? parsed.data.limitReleasePath.trim() : undefined,
       flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
       section: parsed.data.section,
@@ -450,7 +548,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
       basisRef: parsed.data.basisRef ?? undefined,
       requestedById: req.user!.userId,
       status: initialStatus,
-      ...(domain === IssueRequestDomain.MATERIALS
+      ...(domain !== IssueRequestDomain.TOOLS
         ? {
             items: {
               create: parsed.data.items.map((item) => ({
@@ -479,7 +577,8 @@ const updateDraftIssueSchema = z.object({
   responsibleName: z.string().max(160).optional().nullable(),
   flowType: z.enum(["REQUEST", "DIRECT_ISSUE"]).optional(),
   basisType: z.nativeEnum(IssueBasisType).optional(),
-  basisRef: z.string().max(500).optional().nullable()
+  basisRef: z.string().max(500).optional().nullable(),
+  limitReleasePath: z.string().max(2000).optional().nullable()
 });
 
 issueRequestsRouter.patch(
@@ -506,7 +605,10 @@ issueRequestsRouter.patch(
         ...(parsed.data.responsibleName !== undefined ? { responsibleName: parsed.data.responsibleName } : {}),
         ...(parsed.data.flowType !== undefined ? { flowType: parsed.data.flowType } : {}),
         ...(parsed.data.basisType !== undefined ? { basisType: parsed.data.basisType } : {}),
-        ...(parsed.data.basisRef !== undefined ? { basisRef: parsed.data.basisRef } : {})
+        ...(parsed.data.basisRef !== undefined ? { basisRef: parsed.data.basisRef } : {}),
+        ...(parsed.data.limitReleasePath !== undefined
+          ? { limitReleasePath: parsed.data.limitReleasePath?.trim() || null }
+          : {})
       }
     });
     return res.json(updated);
@@ -851,7 +953,11 @@ issueRequestsRouter.patch("/:id/issue", requirePermission("operations.write"), a
         }
       }
 
-      if (issueRow.projectId) {
+      if (
+        issueRow.projectId &&
+        issueRow.domain !== IssueRequestDomain.WORKWEAR &&
+        issueRow.domain !== IssueRequestDomain.TOOLS
+      ) {
         const latestLimit = await tx.projectLimit.findFirst({
           where: { projectId: issueRow.projectId },
           include: { items: true },

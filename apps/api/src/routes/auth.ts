@@ -1,6 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import multer from "multer";
+import type { Request } from "express";
 import { z } from "zod";
 import { UserStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
@@ -24,7 +29,30 @@ const changePasswordSchema = z.object({
 
 const updateProfileSchema = z.object({
   fullName: z.string().min(2).max(120).optional(),
-  avatarUrl: z.string().max(500000).nullable().optional()
+  /** Поддержка небольших data URL вручную; для обычных фото см. POST /auth/me/avatar */
+  avatarUrl: z.string().max(900_000).nullable().optional()
+});
+
+const avatarUploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
+if (!fs.existsSync(avatarUploadDirAbs)) {
+  fs.mkdirSync(avatarUploadDirAbs, { recursive: true });
+}
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req: Request, _file, cb) => cb(null, avatarUploadDirAbs),
+    filename: (_req: Request, file, cb) => {
+      const ext = path.extname(file.originalname || "") || ".jpg";
+      cb(null, `avatar_${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`);
+    }
+  }),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("INVALID_AVATAR_TYPE"));
+      return;
+    }
+    cb(null, true);
+  }
 });
 
 const updateContextSchema = z.object({
@@ -283,5 +311,41 @@ authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => 
     position: updated.position?.name || null,
     role: updated.role.name,
     permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
+  });
+});
+
+authRouter.post("/me/avatar", requireAuth, async (req: AuthedRequest, res) => {
+  avatarUpload.single("file")(req, res, async (err: unknown) => {
+    if (err) {
+      const msg =
+        err instanceof Error && err.message === "INVALID_AVATAR_TYPE"
+          ? "Нужен файл изображения"
+          : "Не удалось загрузить файл (до 4 МБ, форматы изображений)";
+      return res.status(400).json({ error: msg });
+    }
+    try {
+      const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+      if (!file) {
+        return res.status(400).json({ error: 'Прикрепите файл в поле "file"' });
+      }
+      const relative = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
+      const updated = await prisma.user.update({
+        where: { id: req.user!.userId },
+        data: { avatarUrl: relative },
+        include: { role: true, position: true }
+      });
+      return res.json({
+        id: updated.id,
+        email: updated.email,
+        fullName: updated.fullName,
+        avatarUrl: updated.avatarUrl,
+        position: updated.position?.name || null,
+        role: updated.role.name,
+        permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
+      });
+    } catch (e) {
+      console.error("avatar upload failed", e);
+      return res.status(500).json({ error: "Не удалось сохранить аватар" });
+    }
   });
 });

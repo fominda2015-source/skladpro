@@ -4,11 +4,14 @@ import { recordAudit } from "../lib/audit.js";
 import { prisma } from "../lib/prisma.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { MaterialKind } from "@prisma/client";
 
 const createMaterialSchema = z.object({
   name: z.string().min(2),
   sku: z.string().min(1).optional(),
   unit: z.string().min(1),
+  kind: z.nativeEnum(MaterialKind).optional(),
+  unitPrice: z.coerce.number().nonnegative().optional().nullable(),
   category: z.string().min(1).optional(),
   synonyms: z.array(z.string().min(1)).optional()
 });
@@ -17,6 +20,8 @@ const updateMaterialSchema = z.object({
   name: z.string().min(2).optional(),
   sku: z.string().min(1).nullable().optional(),
   unit: z.string().min(1).optional(),
+  kind: z.nativeEnum(MaterialKind).optional(),
+  unitPrice: z.coerce.number().nonnegative().nullable().optional(),
   category: z.string().min(1).nullable().optional()
 });
 
@@ -38,12 +43,18 @@ materialsRouter.get("/", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
   const unit = typeof req.query.unit === "string" ? req.query.unit.trim() : "";
+  const kindParam = typeof req.query.kind === "string" ? req.query.kind.toUpperCase() : "";
+  const kindFilter =
+    kindParam === "MATERIAL" || kindParam === "CONSUMABLE" || kindParam === "WORKWEAR"
+      ? { kind: kindParam as MaterialKind }
+      : {};
   const includeMerged = req.query.includeMerged === "1";
   const expandMerged = req.query.expandMerged === "1";
 
   const rows = await prisma.material.findMany({
     where: {
       ...(includeMerged ? {} : { mergedIntoId: null }),
+      ...kindFilter,
       ...(q
         ? {
             OR: [
@@ -100,6 +111,8 @@ materialsRouter.post("/", requirePermission("materials.write"), async (req, res)
         name: data.name,
         sku: data.sku,
         unit: data.unit,
+        kind: data.kind ?? MaterialKind.MATERIAL,
+        unitPrice: data.unitPrice ?? undefined,
         category: data.category,
         synonyms: data.synonyms?.length
           ? { create: data.synonyms.map((value) => ({ value: value.trim() })) }
