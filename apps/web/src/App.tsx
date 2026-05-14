@@ -40,6 +40,33 @@ function warehouseReportTooltipPct(value: unknown): [string, string] {
   return [Number.isFinite(n) ? `${n}%` : "—", "Загрузка"];
 }
 
+const WAYBILL_DRIVER_PLACEHOLDER = "Иванов И.И.";
+const WAYBILL_SENDER_PLACEHOLDER = "СкладПро";
+
+/** Если фото недоступно — инициал вместо битой картинки. */
+function UserAvatarChip(props: {
+  avatarUrl?: string | null;
+  fullName: string;
+  imageClassName: string;
+  fallbackClassName?: string;
+  imageAlt?: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const resolved = resolvePublicFileUrl(props.avatarUrl);
+  const initial = props.fullName.trim().slice(0, 1).toUpperCase() || "?";
+  if (!resolved || imgFailed) {
+    return <span className={props.fallbackClassName ?? props.imageClassName}>{initial}</span>;
+  }
+  return (
+    <img
+      src={resolved}
+      alt={props.imageAlt ?? ""}
+      className={props.imageClassName}
+      onError={() => setImgFailed(true)}
+    />
+  );
+}
+
 type LoginResponse = {
   token: string;
   user: {
@@ -882,6 +909,15 @@ function App() {
       return true;
     }
   });
+  const [showStockPrice, setShowStockPrice] = useState(() => {
+    const saved = localStorage.getItem(STOCK_VIEW_KEY);
+    if (!saved) return true;
+    try {
+      return Boolean(JSON.parse(saved).showStockPrice ?? true);
+    } catch {
+      return true;
+    }
+  });
   const [qrCode, setQrCode] = useState("");
   const [qrResult, setQrResult] = useState<QrResult | null>(null);
   const [qrMessage, setQrMessage] = useState("");
@@ -942,10 +978,10 @@ function App() {
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<"" | WaybillStatus>("");
   const [waybillFromWarehouseId, setWaybillFromWarehouseId] = useState("");
   const [waybillToLocation, setWaybillToLocation] = useState("Объект 1");
-  const [waybillSender, setWaybillSender] = useState("СкладПро");
+  const [waybillSender, setWaybillSender] = useState(WAYBILL_SENDER_PLACEHOLDER);
   const [waybillRecipient, setWaybillRecipient] = useState("ООО Подрядчик");
   const [waybillVehicle, setWaybillVehicle] = useState("ГАЗель");
-  const [waybillDriver, setWaybillDriver] = useState("Иванов И.И.");
+  const [waybillDriver, setWaybillDriver] = useState(WAYBILL_DRIVER_PLACEHOLDER);
   const [waybillMaterialId, setWaybillMaterialId] = useState("");
   const [waybillQty, setWaybillQty] = useState(1);
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
@@ -1706,6 +1742,15 @@ function App() {
   const canWriteAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((n) => !n.isRead).length,
+    [notifications]
+  );
+  const warehouseStockTableColSpan = useMemo(
+    () => 8 + (showStockSku ? 1 : 0) + (showStockPrice ? 1 : 0) + (showStockReserve ? 1 : 0),
+    [showStockSku, showStockPrice, showStockReserve]
+  );
+
   async function loadStockMovements() {
     if (!token) {
       return;
@@ -2311,8 +2356,14 @@ function App() {
           note: transferReqNote.trim() || undefined
         })
       });
-      if (!res.ok) return;
-      setTransferReqNote("");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setWaybillsMessage(typeof err.error === "string" ? err.error : `Ошибка создания заявки (${res.status})`);
+        setWaybillsTone("error");
+        return;
+      }
+      setWaybillsMessage("Заявка на перемещение создана");
+      setWaybillsTone("success");
       await Promise.all([loadTransferRequestsList(), loadPeerWarehouseSummaries()]);
     } finally {
       setTransferReqSaving(false);
@@ -3885,6 +3936,22 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (!token || !canReadNotifications) return;
+    void loadNotifications();
+    const id = window.setInterval(() => void loadNotifications(), 120_000);
+    return () => window.clearInterval(id);
+  }, [token, canReadNotifications]);
+
+  useEffect(() => {
+    if (!me?.fullName?.trim()) return;
+    const name = me.fullName.trim();
+    setIssueResponsible((v) => (v.trim() === "" ? name : v));
+    setToolResponsible((v) => (v.trim() === "" ? name : v));
+    setWaybillDriver((w) => (w === WAYBILL_DRIVER_PLACEHOLDER ? name : w));
+    setWaybillSender((s) => (s === WAYBILL_SENDER_PLACEHOLDER ? name : s));
+  }, [me?.id, me?.fullName]);
+
+  useEffect(() => {
     if (token && !mustPickObject) {
       void loadMe();
       void loadStocks(q);
@@ -4334,9 +4401,9 @@ function App() {
   useEffect(() => {
     localStorage.setItem(
       STOCK_VIEW_KEY,
-      JSON.stringify({ showStockSku, showStockReserve })
+      JSON.stringify({ showStockSku, showStockReserve, showStockPrice })
     );
-  }, [showStockSku, showStockReserve]);
+  }, [showStockSku, showStockReserve, showStockPrice]);
 
   useEffect(() => {
     localStorage.setItem("skladpro_issue_domain", issueIssuesDomain);
@@ -4708,7 +4775,36 @@ function App() {
           {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
           {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
           {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
-          {(canReadIntegrations || canReadNotifications) && <button className={`navBtn ${activeTab === "integrations" ? "active" : ""}`} onClick={() => setActiveTab("integrations")}><span className="navIcon">⎘</span>{canReadIntegrations ? "Интеграции" : "Уведомления"}</button>}
+          {(canReadIntegrations || canReadNotifications) && (
+            <button
+              className={`navBtn ${activeTab === "integrations" ? "active" : ""}`}
+              type="button"
+              onClick={() => setActiveTab("integrations")}
+            >
+              <span className="navIcon">⎘</span>
+              {canReadIntegrations ? "Интеграции" : "Уведомления"}
+              {unreadNotificationCount > 0 ? (
+                <span
+                  className="navBadgeMuted"
+                  title="Непрочитанные уведомления"
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 11,
+                    lineHeight: "18px",
+                    minWidth: 18,
+                    padding: "0 5px",
+                    borderRadius: 9,
+                    background: "var(--accent, #2563eb)",
+                    color: "#fff",
+                    display: "inline-block",
+                    fontWeight: 700
+                  }}
+                >
+                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                </span>
+              ) : null}
+            </button>
+          )}
 
           <p className="navSectionTitle">Администрирование</p>
           {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
@@ -4789,11 +4885,7 @@ function App() {
             {me ? (
               <span className="userChip">
                 <span className="userAvatar">
-                  {me.avatarUrl ? (
-                    <img src={resolvePublicFileUrl(me.avatarUrl) || ""} alt={me.fullName} className="userAvatarImage" />
-                  ) : (
-                    me.fullName.slice(0, 1).toUpperCase()
-                  )}
+                  <UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />
                 </span>
                 <span>{me.fullName}</span>
               </span>
@@ -5786,6 +5878,14 @@ function App() {
             <label className="toggleLine">
               <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
             </label>
+            <label className="toggleLine">
+              <input
+                type="checkbox"
+                checked={showStockPrice}
+                onChange={(e) => setShowStockPrice(e.target.checked)}
+              />{" "}
+              Цена за ед.
+            </label>
           </div>
           {limitFilterEnabled && (
             <p className="muted">
@@ -5803,7 +5903,7 @@ function App() {
                   {showStockSku && <th>SKU</th>}
                   <th>Ед.</th>
                   <th>Вид</th>
-                  <th>Цена</th>
+                  {showStockPrice && <th title="Из карточки номенклатуры">Цена за ед., ₽</th>}
                   <th>Помещение</th>
                   <th>Ячейка</th>
                   <th>Остаток</th>
@@ -5820,12 +5920,15 @@ function App() {
                         <button
                           type="button"
                           className="ghostBtn"
+                          aria-expanded={expandedStockRowId === row.id}
+                          aria-label={expandedStockRowId === row.id ? "Свернуть детали по позиции" : "Показать детали и движения"}
+                          title={expandedStockRowId === row.id ? "Свернуть" : "Подробнее"}
                           onClick={() => {
                             void loadStockMovements();
                             setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
                           }}
                         >
-                          {expandedStockRowId === row.id ? "+" : "−"}
+                          {expandedStockRowId === row.id ? "▾" : "▸"}
                         </button>{" "}
                         {safeName(row.materialName)}
                         {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
@@ -5841,14 +5944,16 @@ function App() {
                             ? "спецодежда"
                             : "основной"}
                       </td>
-                      <td>
-                        {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
-                          ? Number(row.unitPrice).toLocaleString("ru-RU", {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 2
-                            })
-                          : "—"}
-                      </td>
+                      {showStockPrice ? (
+                        <td>
+                          {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
+                            ? `${Number(row.unitPrice).toLocaleString("ru-RU", {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 2
+                              })} ₽`
+                            : "—"}
+                        </td>
+                      ) : null}
                       <td>{row.storageRoom || "—"}</td>
                       <td>{row.storageCell || "—"}</td>
                       <td>
@@ -5859,7 +5964,7 @@ function App() {
                     </tr>
                     {expandedStockRowId === row.id && (
                       <tr>
-                        <td colSpan={showStockSku && showStockReserve ? 9 : showStockSku || showStockReserve ? 8 : 7}>
+                        <td colSpan={warehouseStockTableColSpan}>
                           <div className="card">
                             {((acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ||
                               (materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0) ? (
@@ -5936,9 +6041,9 @@ function App() {
                         ? "спецодежда"
                         : "основной"}
                   </p>
-                  {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                  {showStockPrice && row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
                     <p>
-                      <strong>Цена:</strong>{" "}
+                      <strong>Цена за ед.:</strong>{" "}
                       {Number(row.unitPrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽
                     </p>
                   ) : null}
@@ -6808,6 +6913,18 @@ function App() {
           )}
 
           <h3 style={{ marginTop: canReadIntegrations ? 16 : 0 }}>Уведомления</h3>
+          {canReadNotifications ? (
+            <div className="kpiRow" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <div className="kpi">
+                <span>Непрочитано</span>
+                <strong>{unreadNotificationCount}</strong>
+              </div>
+              <p className="muted" style={{ margin: "4px 0 0", flex: "1 1 240px", minWidth: 200 }}>
+                Список ниже синхронизируется каждые 2 мин. и при открытии раздела. Клик по строке может открыть связанную
+                заявку или операцию.
+              </p>
+            </div>
+          ) : null}
           <div className="toolbar">
             <button type="button" onClick={() => void loadNotifications()}>Обновить уведомления</button>
             <button
@@ -11137,11 +11254,12 @@ function App() {
                       {assigned.length ? assigned.map((u) => (
                         <div key={`obj-${obj.id}-user-${u.id}`} className="userMiniChip">
                           <span className="userAvatar">
-                            {u.avatarUrl ? (
-                              <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt={u.fullName} className="userAvatarImage" />
-                            ) : (
-                              u.fullName.slice(0, 1).toUpperCase()
-                            )}
+                            <UserAvatarChip
+                              fullName={u.fullName}
+                              avatarUrl={u.avatarUrl}
+                              imageClassName="userAvatarImage"
+                              imageAlt={u.fullName}
+                            />
                           </span>
                           <span>{u.fullName}</span>
                           <button
@@ -11476,11 +11594,7 @@ function App() {
                   <div key={`admin-u-${u.id}`} className="adminUserCard card">
                     <div className="adminUserCardTop">
                       <span className="userAvatar">
-                        {u.avatarUrl ? (
-                          <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt="" className="userAvatarImage" />
-                        ) : (
-                          u.fullName.slice(0, 1).toUpperCase()
-                        )}
+                        <UserAvatarChip fullName={u.fullName} avatarUrl={u.avatarUrl} imageClassName="userAvatarImage" />
                       </span>
                       <div>
                         <strong>{u.fullName}</strong>
@@ -11527,6 +11641,11 @@ function App() {
       {activeTab === "profile" && me && (
         <div className="card">
           <h2>Мой профиль</h2>
+          <div style={{ marginBottom: 12 }}>
+            <span className="userAvatar">
+              <UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />
+            </span>
+          </div>
           <div className="form">
             <label>
               Объект
@@ -11765,11 +11884,12 @@ function App() {
                       }}
                     >
                       <span className="userAvatar">
-                        {u.avatarUrl ? (
-                          <img src={resolvePublicFileUrl(u.avatarUrl) || ""} alt={u.fullName} className="userAvatarImage" />
-                        ) : (
-                          u.fullName.slice(0, 1).toUpperCase()
-                        )}
+                        <UserAvatarChip
+                          fullName={u.fullName}
+                          avatarUrl={u.avatarUrl}
+                          imageClassName="userAvatarImage"
+                          imageAlt={u.fullName}
+                        />
                       </span>
                       <span className="chatUserMeta">
                         <strong>
