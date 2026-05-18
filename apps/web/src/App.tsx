@@ -4674,8 +4674,7 @@ function App() {
     }
   }
 
-
-
+  if (!isAuthed) {
     return (
       <main className="loginShell">
         <div className="loginCard card">
@@ -4782,7 +4781,7 @@ function App() {
 
   const adminDrawerUser = users.find((u) => u.id === selectedUserId);
 
-  function PendingAcceptanceModal() {
+  const PendingAcceptanceModal = () => {
     if (!pendingAcceptanceRequestId) return null;
     const row = receiptRequests.find((r) => r.id === pendingAcceptanceRequestId);
     if (!row) return null;
@@ -4897,7 +4896,7 @@ function App() {
         </div>
       </div>
     );
-  }
+  };
 
   return (
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
