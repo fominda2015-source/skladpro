@@ -4782,6 +4782,123 @@ function App() {
 
   const adminDrawerUser = users.find((u) => u.id === selectedUserId);
 
+  function PendingAcceptanceModal() {
+    if (!pendingAcceptanceRequestId) return null;
+    const row = receiptRequests.find((r) => r.id === pendingAcceptanceRequestId);
+    if (!row) return null;
+    const drafts = acceptanceDrafts[row.id] || {};
+    const pickedItems = row.items.filter((it) => {
+      const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
+      return Number.isFinite(q) && q > 0;
+    });
+    const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 60,
+          padding: 16
+        }}
+        onMouseDown={(e) => {
+          if (!isSubmitting && e.target === e.currentTarget) {
+            setPendingAcceptanceRequestId(null);
+            setPendingAcceptanceFiles([]);
+          }
+        }}
+      >
+        <div
+          className="card"
+          style={{ maxWidth: 560, width: "100%" }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <h3 style={{ marginTop: 0 }}>Приложите документы к приёмке</h3>
+          <p className="muted">
+            Заявка <strong>{row.number}</strong>. Сейчас принимаем {pickedItems.length}{" "}
+            {pickedItems.length === 1 ? "позицию" : "позиций"}. По одной заявке может быть несколько приёмок —
+            документы прикрепятся именно к этой заявке (и к создаваемому приходу).
+          </p>
+          <ul className="plainList" style={{ maxHeight: 160, overflowY: "auto", marginBottom: 12 }}>
+            {pickedItems.map((it) => (
+              <li key={`pending-item-${it.id}`}>
+                {it.sourceName}{" "}
+                <span className="muted">
+                  — {(drafts[it.id]?.qty || "0")} {drafts[it.id]?.newUnit || it.sourceUnit || "шт"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <label>
+            Сканы документов (УПД, ТН, фото, можно несколько)
+            <input
+              type="file"
+              multiple
+              onChange={(e) => setPendingAcceptanceFiles(Array.from(e.target.files || []))}
+            />
+          </label>
+          {pendingAcceptanceFiles.length > 0 && (
+            <ul className="plainList" style={{ marginTop: 6 }}>
+              {pendingAcceptanceFiles.map((f, i) => (
+                <li key={`pending-file-${i}`} className="muted">
+                  📎 {f.name} <span>({Math.ceil(f.size / 1024)} КБ)</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="ghostBtn"
+              disabled={isSubmitting}
+              onClick={() => {
+                setPendingAcceptanceRequestId(null);
+                setPendingAcceptanceFiles([]);
+              }}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="ghostBtn"
+              disabled={isSubmitting}
+              onClick={async () => {
+                const targetRow = row;
+                const ok = await submitReceiptAcceptance(targetRow, []);
+                if (ok) {
+                  setPendingAcceptanceRequestId(null);
+                  setPendingAcceptanceFiles([]);
+                }
+              }}
+            >
+              Принять без документов
+            </button>
+            <button
+              type="button"
+              disabled={isSubmitting || pendingAcceptanceFiles.length === 0}
+              onClick={async () => {
+                const files = [...pendingAcceptanceFiles];
+                const targetRow = row;
+                const ok = await submitReceiptAcceptance(targetRow, files);
+                if (ok) {
+                  setPendingAcceptanceRequestId(null);
+                  setPendingAcceptanceFiles([]);
+                }
+              }}
+            >
+              {isSubmitting ? "Принимаем…" : "Принять с документами"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
       <aside className={`sidebar ${mobileNavOpen ? "mobileOpen" : ""}`}>
@@ -12536,123 +12653,7 @@ function App() {
         </div>
       )}
 
-      {pendingAcceptanceRequestId && (() => {
-        const row = receiptRequests.find((r) => r.id === pendingAcceptanceRequestId);
-        if (!row) return null;
-        const drafts = acceptanceDrafts[row.id] || {};
-        const pickedItems = row.items.filter((it) => {
-          const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
-          return Number.isFinite(q) && q > 0;
-        });
-        const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
-        return (
-          <div
-            role="dialog"
-            aria-modal="true"
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(15, 23, 42, 0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 60,
-              padding: 16
-            }}
-            onMouseDown={(e) => {
-              if (!isSubmitting && e.target === e.currentTarget) {
-                setPendingAcceptanceRequestId(null);
-                setPendingAcceptanceFiles([]);
-              }
-            }}
-          >
-            <div
-              className="card"
-              style={{ maxWidth: 560, width: "100%" }}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <h3 style={{ marginTop: 0 }}>Приложите документы к приёмке</h3>
-              <p className="muted">
-                Заявка <strong>{row.number}</strong>. Сейчас принимаем {pickedItems.length}{" "}
-                {pickedItems.length === 1 ? "позицию" : "позиций"}. По одной заявке может быть несколько приёмок —
-                документы прикрепятся именно к этой заявке (и к создаваемому приходу).
-              </p>
-              <ul className="plainList" style={{ maxHeight: 160, overflowY: "auto", marginBottom: 12 }}>
-                {pickedItems.map((it) => (
-                  <li key={`pending-item-${it.id}`}>
-                    {it.sourceName}{" "}
-                    <span className="muted">
-                      — {(drafts[it.id]?.qty || "0")} {drafts[it.id]?.newUnit || it.sourceUnit || "шт"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <label>
-                Сканы документов (УПД, ТН, фото, можно несколько)
-                <input
-                  type="file"
-                  multiple
-                  onChange={(e) =>
-                    setPendingAcceptanceFiles(Array.from(e.target.files || []))
-                  }
-                />
-              </label>
-              {pendingAcceptanceFiles.length > 0 && (
-                <ul className="plainList" style={{ marginTop: 6 }}>
-                  {pendingAcceptanceFiles.map((f, i) => (
-                    <li key={`pending-file-${i}`} className="muted">
-                      📎 {f.name} <span>({Math.ceil(f.size / 1024)} КБ)</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    setPendingAcceptanceRequestId(null);
-                    setPendingAcceptanceFiles([]);
-                  }}
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  disabled={isSubmitting}
-                  onClick={async () => {
-                    const targetRow = row;
-                    const ok = await submitReceiptAcceptance(targetRow, []);
-                    if (ok) {
-                      setPendingAcceptanceRequestId(null);
-                      setPendingAcceptanceFiles([]);
-                    }
-                  }}
-                >
-                  Принять без документов
-                </button>
-                <button
-                  type="button"
-                  disabled={isSubmitting || pendingAcceptanceFiles.length === 0}
-                  onClick={async () => {
-                    const files = [...pendingAcceptanceFiles];
-                    const targetRow = row;
-                    const ok = await submitReceiptAcceptance(targetRow, files);
-                    if (ok) {
-                      setPendingAcceptanceRequestId(null);
-                      setPendingAcceptanceFiles([]);
-                    }
-                  }}
-                >
-                  {isSubmitting ? "Принимаем…" : "Принять с документами"}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <PendingAcceptanceModal />
       </section>
     </main>
   );
