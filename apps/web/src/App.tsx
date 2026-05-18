@@ -645,6 +645,8 @@ function App() {
   const [password, setPassword] = useState("");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
   const [authError, setAuthError] = useState("");
+  /** Сообщение на экране входа после протухшего JWT / 401 от API. */
+  const [sessionExpiredHint, setSessionExpiredHint] = useState("");
   const [availableObjects, setAvailableObjects] = useState<Array<{ id: string; name: string; address?: string | null }>>([]);
   const [activeObjectId, setActiveObjectId] = useState("");
   const [mustPickObject, setMustPickObject] = useState(false);
@@ -1751,6 +1753,58 @@ function App() {
     [showStockSku, showStockPrice, showStockReserve]
   );
 
+  const purgeAuthClear = useCallback((reason?: "session-expired") => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setStocks([]);
+    setStockMovements([]);
+    setIntegrationJobs([]);
+    setNotifications([]);
+    setUsers([]);
+    setRoles([]);
+    setMe(null);
+    setAvailableObjects([]);
+    setActiveObjectId("");
+    setMustPickObject(false);
+    setSessionExpiredHint(
+      reason === "session-expired" ? "Сессия истекла или доступ отозван. Войдите снова." : ""
+    );
+    if (reason === "session-expired") {
+      setAuthError("");
+    }
+  }, []);
+
+  const fetchWithSession = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const urlString =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input.href;
+
+      const nextInit: RequestInit = init ? { ...init } : {};
+      const headers = new Headers(init?.headers ?? undefined);
+      if (token && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+      nextInit.headers = headers;
+
+      const res = await fetch(input, nextInit);
+
+      if (res.status === 401 && token && !urlString.includes("/api/auth/login")) {
+        purgeAuthClear("session-expired");
+      }
+
+      return res;
+    },
+    [token, purgeAuthClear]
+  );
+
+  const onLogout = useCallback(() => {
+    purgeAuthClear();
+  }, [purgeAuthClear]);
+
   async function loadStockMovements() {
     if (!token) {
       return;
@@ -1758,7 +1812,7 @@ function App() {
     setStockMovementsLoading(true);
     setStockMovementsError("");
     try {
-      const res = await fetch(`${API_URL}/api/stock-movements?take=150`, {
+      const res = await fetchWithSession(`${API_URL}/api/stock-movements?take=150`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
@@ -1785,7 +1839,7 @@ function App() {
       if (search) params.set("q", search);
       params.set("section", objectSectionFilter);
       const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`${API_URL}/api/stocks${query}`, {
+      const res = await fetchWithSession(`${API_URL}/api/stocks${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
@@ -1804,11 +1858,11 @@ function App() {
     if (!token) {
       return;
     }
-    const res = await fetch(`${API_URL}/api/auth/me`, {
+    const res = await fetchWithSession(`${API_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
-      throw new Error("Сессия невалидна");
+      return;
     }
     const data = (await res.json()) as MeResponse;
     setMe(data);
@@ -1827,7 +1881,7 @@ function App() {
 
   async function updateAuthContext(next: { warehouseId: string; section: "SS" | "EOM" }) {
     if (!token) return false;
-    const res = await fetch(`${API_URL}/api/auth/context`, {
+    const res = await fetchWithSession(`${API_URL}/api/auth/context`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(next)
@@ -1849,7 +1903,7 @@ function App() {
     if (!token) return;
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`${API_URL}/api/auth/me/avatar`, {
+    const res = await fetchWithSession(`${API_URL}/api/auth/me/avatar`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: fd
@@ -1865,7 +1919,7 @@ function App() {
 
   async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/auth/me/profile`, {
+    const res = await fetchWithSession(`${API_URL}/api/auth/me/profile`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1888,7 +1942,7 @@ function App() {
     setDashboardError("");
     try {
       const query = dashboardWarehouseId ? `?warehouseId=${encodeURIComponent(dashboardWarehouseId)}` : "";
-      const r = await fetch(`${API_URL}/api/dashboard/summary${query}`, {
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/summary${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) {
@@ -1905,7 +1959,7 @@ function App() {
     if (!token) {
       return;
     }
-    const r = await fetch(`${API_URL}/api/material-match/queue`, {
+    const r = await fetchWithSession(`${API_URL}/api/material-match/queue`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (r.ok) {
@@ -1915,7 +1969,7 @@ function App() {
 
   async function loadMaterialMergeHistory() {
     if (!token) return;
-    const r = await fetch(`${API_URL}/api/materials/merge-history`, {
+    const r = await fetchWithSession(`${API_URL}/api/materials/merge-history`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (r.ok) {
@@ -1936,7 +1990,7 @@ function App() {
     if (auditFilterFrom) parts.push(`dateFrom=${encodeURIComponent(new Date(auditFilterFrom).toISOString())}`);
     if (auditFilterTo) parts.push(`dateTo=${encodeURIComponent(new Date(auditFilterTo).toISOString())}`);
     if (auditShowReverted) parts.push("showReverted=1");
-    const r = await fetch(`${API_URL}/api/audit?${parts.join("&")}`, {
+    const r = await fetchWithSession(`${API_URL}/api/audit?${parts.join("&")}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (r.ok) {
@@ -1948,7 +2002,7 @@ function App() {
 
   async function loadAuditMeta() {
     if (!token || !canReadAudit) return;
-    const r = await fetch(`${API_URL}/api/audit/meta`, {
+    const r = await fetchWithSession(`${API_URL}/api/audit/meta`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (r.ok) {
@@ -1961,7 +2015,7 @@ function App() {
     if (!window.confirm("Отменить это действие? Изменения будут откачены.")) return;
     setAuditReverting((prev) => ({ ...prev, [id]: true }));
     try {
-      const r = await fetch(`${API_URL}/api/audit/${id}/revert`, {
+      const r = await fetchWithSession(`${API_URL}/api/audit/${id}/revert`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1989,7 +2043,7 @@ function App() {
 
   async function loadIntegrationJobs() {
     if (!token) return;
-    const r = await fetch(`${API_URL}/api/integrations/jobs`, {
+    const r = await fetchWithSession(`${API_URL}/api/integrations/jobs`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!r.ok) {
@@ -2008,7 +2062,7 @@ function App() {
       setIntegrationMessage("Payload должен быть валидным JSON");
       return;
     }
-    const r = await fetch(`${API_URL}/api/integrations/jobs`, {
+    const r = await fetchWithSession(`${API_URL}/api/integrations/jobs`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ kind: integrationKind.trim(), payload: payloadObj })
@@ -2023,7 +2077,7 @@ function App() {
 
   async function runIntegrationJob(id: string) {
     if (!token) return;
-    const r = await fetch(`${API_URL}/api/integrations/jobs/${encodeURIComponent(id)}/run`, {
+    const r = await fetchWithSession(`${API_URL}/api/integrations/jobs/${encodeURIComponent(id)}/run`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -2038,7 +2092,7 @@ function App() {
 
   async function loadNotifications() {
     if (!token) return;
-    const r = await fetch(`${API_URL}/api/notifications`, {
+    const r = await fetchWithSession(`${API_URL}/api/notifications`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2047,7 +2101,7 @@ function App() {
 
   async function markNotificationsRead(ids: string[]) {
     if (!token || !ids.length) return;
-    await fetch(`${API_URL}/api/notifications/read`, {
+    await fetchWithSession(`${API_URL}/api/notifications/read`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ids })
@@ -2099,7 +2153,7 @@ function App() {
 
   async function loadReadiness() {
     if (!token) return;
-    const r = await fetch(`${API_URL}/api/contracts/readiness`, {
+    const r = await fetchWithSession(`${API_URL}/api/contracts/readiness`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!r.ok) {
@@ -2111,14 +2165,14 @@ function App() {
 
   async function loadChatUsers() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/chat/users`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithSession(`${API_URL}/api/chat/users`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return;
     setChatUsers((await res.json()) as ChatUser[]);
   }
 
   async function loadConversations() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/chat/conversations`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithSession(`${API_URL}/api/chat/conversations`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return;
     const rows = (await res.json()) as Conversation[];
     setChatConversations(rows);
@@ -2128,7 +2182,7 @@ function App() {
   async function startDmConversation(userId: string): Promise<string | undefined> {
     if (!token) return;
     setChatError("");
-    const res = await fetch(`${API_URL}/api/chat/conversations/dm`, {
+    const res = await fetchWithSession(`${API_URL}/api/chat/conversations/dm`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ userId })
@@ -2148,7 +2202,7 @@ function App() {
     if (!token || !conversationId) return;
     setChatError("");
     setChatLoading(true);
-    const res = await fetch(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
+    const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
@@ -2167,7 +2221,7 @@ function App() {
     const attachments = chatAttachment
       ? [{ fileName: chatAttachment.name, mimeType: chatAttachment.type, dataUrl: await fileToDataUrl(chatAttachment) }]
       : [];
-    const res = await fetch(`${API_URL}/api/chat/conversations/${selectedConversationId}/messages`, {
+    const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${selectedConversationId}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: chatText.trim(), attachments })
@@ -2186,7 +2240,7 @@ function App() {
     if (!token) return;
     setFeedbackListLoading(true);
     setFeedbackError("");
-    const res = await fetch(`${API_URL}/api/feedback/tickets`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithSession(`${API_URL}/api/feedback/tickets`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
       setFeedbackError("Не удалось загрузить обращения");
       setFeedbackListLoading(false);
@@ -2200,7 +2254,7 @@ function App() {
     if (!token || !ticketId) return;
     setFeedbackDetailLoading(true);
     setFeedbackError("");
-    const res = await fetch(`${API_URL}/api/feedback/tickets/${ticketId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/feedback/tickets/${ticketId}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
@@ -2233,7 +2287,7 @@ function App() {
           }
         ]
       : [];
-    const res = await fetch(`${API_URL}/api/feedback/tickets`, {
+    const res = await fetchWithSession(`${API_URL}/api/feedback/tickets`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ subject: feedbackNewSubject.trim(), text: feedbackText.trim(), attachments })
@@ -2266,7 +2320,7 @@ function App() {
           }
         ]
       : [];
-    const res = await fetch(`${API_URL}/api/feedback/tickets/${feedbackSelectedId}/messages`, {
+    const res = await fetchWithSession(`${API_URL}/api/feedback/tickets/${feedbackSelectedId}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: feedbackText.trim(), attachments })
@@ -2283,7 +2337,7 @@ function App() {
   async function updateFeedbackTicketStatus(ticketId: string, status: string) {
     if (!token) return;
     setFeedbackError("");
-    const res = await fetch(`${API_URL}/api/feedback/tickets/${ticketId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/feedback/tickets/${ticketId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ status })
@@ -2298,14 +2352,14 @@ function App() {
   async function loadAnnouncementsBoard() {
     if (!token) return;
     setAnnouncementsLoading(true);
-    const res = await fetch(`${API_URL}/api/announcements`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithSession(`${API_URL}/api/announcements`, { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) setAnnouncements((await res.json()) as AnnouncementBoardRow[]);
     setAnnouncementsLoading(false);
   }
 
   async function publishAnnouncementDraft() {
     if (!token || !announcementTitleDraft.trim() || !announcementBodyDraft.trim()) return;
-    const res = await fetch(`${API_URL}/api/announcements`, {
+    const res = await fetchWithSession(`${API_URL}/api/announcements`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ title: announcementTitleDraft.trim(), body: announcementBodyDraft.trim(), isPinned: false })
@@ -2319,7 +2373,7 @@ function App() {
 
   async function loadTransferRequestsList() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/transfer-requests`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithSession(`${API_URL}/api/transfer-requests`, { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) setTransferRequests((await res.json()) as TransferRequestApiRow[]);
   }
 
@@ -2329,7 +2383,7 @@ function App() {
       return;
     }
     const sec = objectSectionFilter === "EOM" ? "EOM" : "SS";
-    const res = await fetch(
+    const res = await fetchWithSession(
       `${API_URL}/api/stocks/peer-summaries?excludeWarehouseId=${encodeURIComponent(activeObjectId)}&section=${sec}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -2345,7 +2399,7 @@ function App() {
     setTransferReqSaving(true);
     try {
       const section = objectSectionFilter === "EOM" ? "EOM" : "SS";
-      const res = await fetch(`${API_URL}/api/transfer-requests`, {
+      const res = await fetchWithSession(`${API_URL}/api/transfer-requests`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2372,7 +2426,7 @@ function App() {
 
   async function patchWarehouseTransferStatus(transferId: string, status: string) {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/transfer-requests/${transferId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/transfer-requests/${transferId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ status })
@@ -2383,7 +2437,7 @@ function App() {
 
   async function syncObjectUsers(objectId: string, userIds: string[]) {
     if (!token) return false;
-    const res = await fetch(`${API_URL}/api/admin/objects/${objectId}/users`, {
+    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/users`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ userIds })
@@ -2395,7 +2449,7 @@ function App() {
 
   async function syncObjectSectionUsers(objectId: string, section: "SS" | "EOM", userIds: string[]) {
     if (!token) return false;
-    const res = await fetch(`${API_URL}/api/admin/objects/${objectId}/sections/${section}/users`, {
+    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/sections/${section}/users`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ userIds })
@@ -2412,7 +2466,7 @@ function App() {
     setMatchMessage("");
     setMatchTryResult(null);
     try {
-      const r = await fetch(`${API_URL}/api/material-match/try`, {
+      const r = await fetchWithSession(`${API_URL}/api/material-match/try`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2442,7 +2496,7 @@ function App() {
       setMatchMessage("Выберите материал для привязки");
       return;
     }
-    const r = await fetch(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/resolve`, {
+    const r = await fetchWithSession(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/resolve`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ materialId: resolveMaterialId })
@@ -2458,7 +2512,7 @@ function App() {
     if (!token) {
       return;
     }
-    const r = await fetch(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/reject`, {
+    const r = await fetchWithSession(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/reject`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -2480,7 +2534,7 @@ function App() {
     }
     const ok = window.confirm("Объединить материалы? Операция переносит остатки, лимиты и историю на целевой материал.");
     if (!ok) return;
-    const r = await fetch(`${API_URL}/api/materials/merge`, {
+    const r = await fetchWithSession(`${API_URL}/api/materials/merge`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2507,10 +2561,10 @@ function App() {
       return undefined;
     }
     const [usersRes, rolesRes, positionsRes, objectsRes] = await Promise.all([
-      fetch(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/admin/positions`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/admin/objects`, { headers: { Authorization: `Bearer ${token}` } })
+      fetchWithSession(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetchWithSession(`${API_URL}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetchWithSession(`${API_URL}/api/admin/positions`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetchWithSession(`${API_URL}/api/admin/objects`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
     if (!usersRes.ok || !rolesRes.ok || !positionsRes.ok || !objectsRes.ok) {
       throw new Error("Не удалось загрузить админ-данные");
@@ -2539,8 +2593,8 @@ function App() {
       return;
     }
     const [wRes, mRes] = await Promise.all([
-      fetch(`${API_URL}/api/warehouses`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${API_URL}/api/materials?expandMerged=1`, { headers: { Authorization: `Bearer ${token}` } })
+      fetchWithSession(`${API_URL}/api/warehouses`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetchWithSession(`${API_URL}/api/materials?expandMerged=1`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
     if (!wRes.ok || !mRes.ok) {
       throw new Error("Не удалось загрузить справочники");
@@ -2562,7 +2616,7 @@ function App() {
 
   async function loadProjects() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/projects`, {
+    const res = await fetchWithSession(`${API_URL}/api/projects`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -2575,7 +2629,7 @@ function App() {
     setReportsSnapshotLoading(true);
     setReportsMessage("");
     try {
-      const res = await fetch(
+      const res = await fetchWithSession(
         `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/snapshot`,
         {
           headers: { Authorization: `Bearer ${token}` }
@@ -2603,13 +2657,13 @@ function App() {
     });
     try {
       const [templatesRes, issuedRes, supplyRes] = await Promise.all([
-        fetch(`${API_URL}/api/limit-imports?${params.toString()}`, {
+        fetchWithSession(`${API_URL}/api/limit-imports?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch(`${API_URL}/api/stock-movements/issued-summary?${params.toString()}`, {
+        fetchWithSession(`${API_URL}/api/stock-movements/issued-summary?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch(`${API_URL}/api/stock-movements/supply-metrics?${params.toString()}`, {
+        fetchWithSession(`${API_URL}/api/stock-movements/supply-metrics?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -2654,10 +2708,10 @@ function App() {
     });
     try {
       const [balRes, histRes] = await Promise.all([
-        fetch(`${API_URL}/api/material-report/balances?${params}`, {
+        fetchWithSession(`${API_URL}/api/material-report/balances?${params}`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch(`${API_URL}/api/material-report/writeoffs/history?${params}&take=100`, {
+        fetchWithSession(`${API_URL}/api/material-report/writeoffs/history?${params}&take=100`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -2725,7 +2779,7 @@ function App() {
     form.append("payload", JSON.stringify(payload));
     if (materialWriteoffFile) form.append("file", materialWriteoffFile);
     try {
-      const res = await fetch(`${API_URL}/api/material-report/writeoffs`, {
+      const res = await fetchWithSession(`${API_URL}/api/material-report/writeoffs`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form
@@ -2765,7 +2819,7 @@ function App() {
     form.append("file", limitImportFile);
     form.append("warehouseId", activeObjectId);
     form.append("section", objectSectionFilter);
-    const res = await fetch(`${API_URL}/api/limit-imports/upload`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: form
@@ -2787,7 +2841,7 @@ function App() {
       setLimitsMessage("Введите название шаблона лимитов");
       return false;
     }
-    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/${templateId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ title: trimmed })
@@ -2810,7 +2864,7 @@ function App() {
   async function deleteLimitTemplate(templateId: string) {
     if (!token) return;
     if (!window.confirm("Удалить этот импорт лимитов целиком (все разделы и материалы)?")) return;
-    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/${templateId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -2834,7 +2888,7 @@ function App() {
     }
   ) {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/limit-imports/${templateId}/nodes`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/${templateId}/nodes`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -2852,7 +2906,7 @@ function App() {
     body: Record<string, unknown>
   ): Promise<boolean> {
     if (!token) return false;
-    const res = await fetch(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -2875,7 +2929,7 @@ function App() {
   async function deleteLimitImportNode(nodeId: string) {
     if (!token) return;
     if (!window.confirm("Удалить эту строку? Дочерние элементы тоже будут удалены.")) return;
-    const res = await fetch(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/limit-imports/nodes/${nodeId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -2899,7 +2953,7 @@ function App() {
       warehouseId: activeObjectId,
       section: objectSectionFilter
     });
-    const res = await fetch(`${API_URL}/api/receipt-requests?${params.toString()}`, {
+    const res = await fetchWithSession(`${API_URL}/api/receipt-requests?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -2912,7 +2966,7 @@ function App() {
       warehouseId: activeObjectId,
       section: objectSectionFilter
     });
-    const res = await fetch(`${API_URL}/api/material-mappings?${params.toString()}`, {
+    const res = await fetchWithSession(`${API_URL}/api/material-mappings?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -2925,7 +2979,7 @@ function App() {
     form.append("file", receiptRequestFile);
     form.append("warehouseId", activeObjectId);
     form.append("section", objectSectionFilter);
-    const res = await fetch(`${API_URL}/api/receipt-requests/upload`, {
+    const res = await fetchWithSession(`${API_URL}/api/receipt-requests/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: form
@@ -2950,9 +3004,9 @@ function App() {
     await loadReceiptRequests();
   }
 
-  async function attachReceiptRequestToLimit(requestId: string, templateId: string | null) {
-    if (!token) return;
-    const res = await fetch(`${API_URL}/api/receipt-requests/${requestId}/limit`, {
+  async function attachReceiptRequestToLimit(requestId: string, templateId: string | null): Promise<boolean> {
+    if (!token) return false;
+    const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${requestId}/limit`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ fromLimit: Boolean(templateId), objectLimitTemplateId: templateId })
@@ -2966,14 +3020,15 @@ function App() {
         // ignore
       }
       setOpsMessage(serverMsg || "Не удалось привязать заявку к лимиту");
-      return;
+      return false;
     }
     setOpsMessage(templateId ? "Заявка привязана к лимиту" : "Заявка отвязана от лимита");
     await loadReceiptRequests();
+    return true;
   }
 
-  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []) {
-    if (!token) return;
+  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
+    if (!token) return false;
     const drafts = acceptanceDrafts[row.id] || {};
     const mappings: Array<{
       itemId: string;
@@ -2991,7 +3046,7 @@ function App() {
       const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
       if (qty - remaining > 1e-6) {
         setOpsMessage(`По «${it.sourceName}» осталось принять ${remaining}, передали ${qty}`);
-        return;
+        return false;
       }
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
@@ -3005,7 +3060,7 @@ function App() {
     }
     if (!mappings.length) {
       setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
-      return;
+      return false;
     }
     const form = new FormData();
     form.append(
@@ -3022,7 +3077,7 @@ function App() {
     for (const f of filesToSend) form.append("scan", f);
     setAcceptanceSubmitting((prev) => ({ ...prev, [row.id]: true }));
     try {
-      const res = await fetch(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
+      const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form
@@ -3036,7 +3091,7 @@ function App() {
           // ignore
         }
         setOpsMessage(serverMsg || "Не удалось провести приёмку");
-        return;
+        return false;
       }
       setOpsMessage(
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
@@ -3060,6 +3115,7 @@ function App() {
       await loadMaterialMappings();
       await loadStocks(q);
       await loadOperations();
+      return true;
     } finally {
       setAcceptanceSubmitting((prev) => {
         const next = { ...prev };
@@ -3088,7 +3144,7 @@ function App() {
       params.set("pageSize", String(issuesPageSize));
       const qs = params.toString();
       const query = qs ? `?${qs}` : "";
-      const res = await fetch(`${API_URL}/api/issues${query}`, {
+      const res = await fetchWithSession(`${API_URL}/api/issues${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3115,8 +3171,8 @@ function App() {
       actualRecipientName?: string;
       signedFile?: File | null;
     }
-  ) {
-    if (!token) return;
+  ): Promise<boolean> {
+    if (!token) return false;
     const actionText = issueActionLabel(action).toLowerCase();
     let actualRecipientName = opts?.actualRecipientName?.trim();
     if (action === "issue" && !actualRecipientName) {
@@ -3133,13 +3189,16 @@ function App() {
         fallback: fallback.trim(),
         domain: modalDom
       });
-      return;
+      return false;
     }
-    const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
-    if (!ok) return;
+    const skipIssueConfirm = action === "issue" && Boolean(actualRecipientName);
+    if (!skipIssueConfirm) {
+      const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
+      if (!ok) return false;
+    }
     const signed = opts?.signedFile ?? undefined;
     const useMultipart = Boolean(action === "issue" && signed);
-    const res = await fetch(`${API_URL}/api/issues/${issueId}/${action}`, {
+    const res = await fetchWithSession(`${API_URL}/api/issues/${issueId}/${action}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -3159,7 +3218,7 @@ function App() {
     if (!res.ok) {
       setIssuesMessage(`Не удалось выполнить действие: ${issueActionLabel(action)}`);
       setIssuesTone(res.status === 409 ? "conflict" : "error");
-      return;
+      return false;
     }
     if (opts?.closeDrawer) setDrawerMode("");
     setIssuesMessage(`Готово: ${issueActionLabel(action)}`);
@@ -3173,6 +3232,7 @@ function App() {
       void loadTools().catch(() => undefined);
       setIssueRecipientSignedFile(null);
     }
+    return true;
   }
 
   function openUploadedDocument(filePath?: string | null, fileName?: string | null) {
@@ -3238,7 +3298,7 @@ function App() {
     setIssueSubmitting(true);
     setIssuesMessage("");
     try {
-      const createRes = await fetch(`${API_URL}/api/issues`, {
+      const createRes = await fetchWithSession(`${API_URL}/api/issues`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3264,13 +3324,13 @@ function App() {
         const fd = new FormData();
         fd.append("payload", JSON.stringify({ actualRecipientName }));
         fd.append("signedFile", directIssueSignedFile);
-        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}` },
           body: fd
         });
       } else {
-        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ actualRecipientName })
@@ -3339,7 +3399,7 @@ function App() {
     setIssueSubmitting(true);
     setIssuesMessage("");
     try {
-      const createRes = await fetch(`${API_URL}/api/issues`, {
+      const createRes = await fetchWithSession(`${API_URL}/api/issues`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3369,13 +3429,13 @@ function App() {
         const fd = new FormData();
         fd.append("payload", JSON.stringify({ actualRecipientName }));
         fd.append("signedFile", directIssueSignedFile);
-        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}` },
           body: fd
         });
       } else {
-        issueRes = await fetch(`${API_URL}/api/issues/${created.id}/issue`, {
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ actualRecipientName })
@@ -3422,7 +3482,7 @@ function App() {
     if (!token) return;
     const ok = window.confirm(`Подтвердить перевод ТН в статус "${waybillStatusLabel(status)}"?`);
     if (!ok) return;
-    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/status`, {
+    const res = await fetchWithSession(`${API_URL}/api/waybills/${waybillId}/status`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ status, comment })
@@ -3446,7 +3506,7 @@ function App() {
     params.set("status", "ON_APPROVAL");
     params.set("section", objectSectionFilter);
     params.set("domain", approvalQueueTab);
-    const res = await fetch(`${API_URL}/api/issues?${params.toString()}`, {
+    const res = await fetchWithSession(`${API_URL}/api/issues?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3456,7 +3516,7 @@ function App() {
 
   async function loadOperations() {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/operations?section=${encodeURIComponent(objectSectionFilter)}`, {
+    const res = await fetchWithSession(`${API_URL}/api/operations?section=${encodeURIComponent(objectSectionFilter)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3481,7 +3541,7 @@ function App() {
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
       ].filter(Boolean);
       const query = queryParts.length ? `?${queryParts.join("&")}` : "";
-      const res = await fetch(`${API_URL}/api/tools${query}`, {
+      const res = await fetchWithSession(`${API_URL}/api/tools${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3499,7 +3559,7 @@ function App() {
   async function loadToolWarehouseSummary() {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/tools/summary/by-warehouse`, {
+      const res = await fetchWithSession(`${API_URL}/api/tools/summary/by-warehouse`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3511,7 +3571,7 @@ function App() {
 
   async function loadToolEvents(toolId: string) {
     if (!token || !toolId) return;
-    const res = await fetch(`${API_URL}/api/tools/${toolId}/events`, {
+    const res = await fetchWithSession(`${API_URL}/api/tools/${toolId}/events`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3530,7 +3590,7 @@ function App() {
       params.set("pageSize", String(waybillsPageSize));
       const qs = params.toString();
       const query = qs ? `?${qs}` : "";
-      const res = await fetch(`${API_URL}/api/waybills${query}`, {
+      const res = await fetchWithSession(`${API_URL}/api/waybills${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3550,7 +3610,7 @@ function App() {
 
   async function loadWaybillEvents(waybillId: string) {
     if (!token || !waybillId) return;
-    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/events`, {
+    const res = await fetchWithSession(`${API_URL}/api/waybills/${waybillId}/events`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3563,7 +3623,7 @@ function App() {
       setWaybillsTone("error");
       return;
     }
-    const res = await fetch(`${API_URL}/api/waybills/${waybillId}/pdf`, {
+    const res = await fetchWithSession(`${API_URL}/api/waybills/${waybillId}/pdf`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
@@ -3588,16 +3648,16 @@ function App() {
     toolId: string,
     action: ToolActionKind,
     opts?: { responsible?: string; comment?: string; photo?: File | null }
-  ) {
-    if (!token) return;
+  ): Promise<boolean> {
+    if (!token) return false;
     const responsible = opts?.responsible?.trim() || undefined;
     const comment = opts?.comment?.trim() || undefined;
     if (action === "ISSUE" && !responsible) {
       setToolsMessage("Выдача отменена: ответственное лицо обязательно");
       setToolsTone("conflict");
-      return;
+      return false;
     }
-    const res = await fetch(`${API_URL}/api/tools/${toolId}/action`, {
+    const res = await fetchWithSession(`${API_URL}/api/tools/${toolId}/action`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ action, responsible, comment })
@@ -3605,7 +3665,7 @@ function App() {
     if (!res.ok) {
       setToolsMessage("Не удалось изменить статус инструмента");
       setToolsTone(res.status === 409 ? "conflict" : "error");
-      return;
+      return false;
     }
     setToolsTone("success");
     if (opts?.photo) {
@@ -3614,7 +3674,7 @@ function App() {
       formData.append("entityId", toolId);
       formData.append("type", "photo");
       formData.append("file", opts.photo);
-      await fetch(`${API_URL}/api/documents/upload`, {
+      await fetchWithSession(`${API_URL}/api/documents/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData
@@ -3623,6 +3683,7 @@ function App() {
     await loadTools();
     await loadToolEvents(toolId);
     await loadToolWarehouseSummary();
+    return true;
   }
 
   function openToolActionDialog(toolId: string, action: ToolActionKind) {
@@ -3636,14 +3697,15 @@ function App() {
   async function submitToolActionDialog() {
     if (!toolAction || !token) return;
     const tid = toolAction.toolId;
-    await doToolAction(tid, toolAction.action, {
+    const ok = await doToolAction(tid, toolAction.action, {
       responsible: toolActionResponsible,
       comment: toolActionComment,
       photo: toolActionPhoto
     });
+    if (!ok) return;
     setToolAction(null);
     if (toolDetailModalId === tid) {
-      const res = await fetch(`${API_URL}/api/tools/${tid}`, {
+      const res = await fetchWithSession(`${API_URL}/api/tools/${tid}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -3660,7 +3722,7 @@ function App() {
       docTypeFilter ? `type=${encodeURIComponent(docTypeFilter)}` : ""
     ].filter(Boolean);
     const query = parts.length ? `?${parts.join("&")}` : "";
-    const res = await fetch(`${API_URL}/api/documents${query}`, {
+    const res = await fetchWithSession(`${API_URL}/api/documents${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -3690,7 +3752,7 @@ function App() {
     if (campSearch.trim()) parts.push(`q=${encodeURIComponent(campSearch.trim())}`);
     const query = parts.length ? `?${parts.join("&")}` : "";
     try {
-      const res = await fetch(`${API_URL}/api/camp-items${query}`, {
+      const res = await fetchWithSession(`${API_URL}/api/camp-items${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
@@ -3763,7 +3825,7 @@ function App() {
         })
       );
       for (const f of campCreateFiles) form.append("files", f);
-      const res = await fetch(`${API_URL}/api/camp-items`, {
+      const res = await fetchWithSession(`${API_URL}/api/camp-items`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form
@@ -3785,7 +3847,7 @@ function App() {
   async function deleteCampItem(id: string) {
     if (!token) return;
     if (!window.confirm("Удалить позицию городка?")) return;
-    const res = await fetch(`${API_URL}/api/camp-items/${id}`, {
+    const res = await fetchWithSession(`${API_URL}/api/camp-items/${id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -3800,7 +3862,7 @@ function App() {
 
   async function updateCampItem(id: string, patch: Partial<CampItemRow>) {
     if (!token) return;
-    const res = await fetch(`${API_URL}/api/camp-items/${id}`, {
+    const res = await fetchWithSession(`${API_URL}/api/camp-items/${id}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(patch)
@@ -3818,7 +3880,7 @@ function App() {
     try {
       const form = new FormData();
       for (const f of files) form.append("files", f);
-      const res = await fetch(`${API_URL}/api/camp-items/${id}/files`, {
+      const res = await fetchWithSession(`${API_URL}/api/camp-items/${id}/files`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form
@@ -3837,7 +3899,7 @@ function App() {
   async function deleteCampItemFile(itemId: string, fileId: string) {
     if (!token) return;
     if (!window.confirm("Удалить файл?")) return;
-    const res = await fetch(`${API_URL}/api/camp-items/${itemId}/files/${fileId}`, {
+    const res = await fetchWithSession(`${API_URL}/api/camp-items/${itemId}/files/${fileId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -3873,7 +3935,7 @@ function App() {
     if (!token) return;
 
     setQrMessage("");
-    const res = await fetch(`${API_URL}/api/tools?q=${encodeURIComponent(value)}`, {
+    const res = await fetchWithSession(`${API_URL}/api/tools?q=${encodeURIComponent(value)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
@@ -4204,7 +4266,7 @@ function App() {
           pageSize: "150"
         });
         if (issueToolSearch.trim()) params.set("q", issueToolSearch.trim());
-        const res = await fetch(`${API_URL}/api/tools?${params.toString()}`, {
+        const res = await fetchWithSession(`${API_URL}/api/tools?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -4495,7 +4557,7 @@ function App() {
     }
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`${API_URL}/api/tools/${toolDetailModalId}`, {
+      const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!cancelled && res.ok) {
@@ -4573,8 +4635,9 @@ function App() {
   async function onLoginSubmit(e: FormEvent) {
     e.preventDefault();
     setAuthError("");
+    setSessionExpiredHint("");
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
+      const res = await fetchWithSession(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password })
@@ -4611,22 +4674,8 @@ function App() {
     }
   }
 
-  function onLogout() {
-    localStorage.removeItem(TOKEN_KEY);
-    setToken(null);
-    setStocks([]);
-    setStockMovements([]);
-    setIntegrationJobs([]);
-    setNotifications([]);
-    setUsers([]);
-    setRoles([]);
-    setMe(null);
-    setAvailableObjects([]);
-    setActiveObjectId("");
-    setMustPickObject(false);
-  }
 
-  if (!isAuthed) {
+
     return (
       <main className="loginShell">
         <div className="loginCard card">
@@ -4667,6 +4716,7 @@ function App() {
             <button type="submit">Войти</button>
           </form>
           {authError && <p className="error">{authError}</p>}
+          {sessionExpiredHint && !authError ? <p className="muted">{sessionExpiredHint}</p> : null}
         </div>
       </main>
     );
@@ -5784,6 +5834,11 @@ function App() {
             </div>
           </div>
           <div className="toolbar stockToolbarPrimary">
+            {manualStockMessage && !manualStockModalOpen ? (
+              <p className="muted" role="status" style={{ gridColumn: "1 / -1", margin: "0 0 6px" }}>
+                {manualStockMessage}
+              </p>
+            ) : null}
             <input
               className="stockSearchWide"
               placeholder="Поиск по материалу, SKU, синониму…"
@@ -6965,7 +7020,7 @@ function App() {
                   onClick={async () => {
                     if (!token) return;
                     setCatalogMessage("");
-                    const res = await fetch(`${API_URL}/api/warehouses`, {
+                    const res = await fetchWithSession(`${API_URL}/api/warehouses`, {
                       method: "POST",
                       headers: {
                         Authorization: `Bearer ${token}`,
@@ -7491,7 +7546,7 @@ function App() {
                   onClick={async () => {
                     if (!token || !toolName.trim() || !toolInventoryNumber.trim()) return;
                     setOpsMessage("");
-                    const res = await fetch(`${API_URL}/api/tools`, {
+                    const res = await fetchWithSession(`${API_URL}/api/tools`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -9574,7 +9629,7 @@ function App() {
                     if (!token || !waybillFromWarehouseId || !waybillMaterialId || !waybillToLocation) return;
                     setWaybillsMessage("");
                     setWaybillsTone("neutral");
-                    const res = await fetch(`${API_URL}/api/waybills`, {
+                    const res = await fetchWithSession(`${API_URL}/api/waybills`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -9932,7 +9987,7 @@ function App() {
               onClick={async () => {
                 if (!token || !selectedUserId) return;
                 setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/scopes`, {
+                const res = await fetchWithSession(`${API_URL}/api/admin/users/${selectedUserId}/scopes`, {
                   method: "PUT",
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -9981,7 +10036,7 @@ function App() {
               onClick={async () => {
                 if (!token || !selectedUserId) return;
                 setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/access`, {
+                const res = await fetchWithSession(`${API_URL}/api/admin/users/${selectedUserId}/access`, {
                   method: "PATCH",
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -10009,7 +10064,7 @@ function App() {
               onClick={async () => {
                 if (!token || !selectedUserId) return;
                 setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users/${selectedUserId}/reset-password`, {
+                const res = await fetchWithSession(`${API_URL}/api/admin/users/${selectedUserId}/reset-password`, {
                   method: "PATCH",
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -10043,7 +10098,7 @@ function App() {
                   }
                   if (!token) return;
                   setAdminMessage("");
-                  const res = await fetch(`${API_URL}/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
+                  const res = await fetchWithSession(`${API_URL}/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
                     method: "DELETE",
                     headers: { Authorization: `Bearer ${token}` }
                   });
@@ -10128,7 +10183,7 @@ function App() {
                 <button
                   onClick={async () => {
                     if (!token) return;
-                    const res = await fetch(`${API_URL}/api/tools/${qrResult.tool.id}/qr`, {
+                    const res = await fetchWithSession(`${API_URL}/api/tools/${qrResult.tool.id}/qr`, {
                       headers: { Authorization: `Bearer ${token}` }
                     });
                     if (!res.ok) return;
@@ -10249,7 +10304,7 @@ function App() {
                   setToolsTone("conflict");
                   return;
                 }
-                const res = await fetch(`${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`, {
+                const res = await fetchWithSession(`${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`, {
                   headers: { Authorization: `Bearer ${token}` }
                 });
                 if (!res.ok) {
@@ -10425,7 +10480,7 @@ function App() {
                       if (!token || !toolName.trim() || !toolInventoryNumber.trim()) return;
                       setToolsMessage("");
                       setToolsTone("neutral");
-                      const res = await fetch(`${API_URL}/api/tools`, {
+                      const res = await fetchWithSession(`${API_URL}/api/tools`, {
                         method: "POST",
                         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -10549,7 +10604,7 @@ function App() {
                           className="ghostBtn"
                           onClick={async () => {
                             if (!token) return;
-                            const res = await fetch(`${API_URL}/api/tools/${t.id}/qr`, {
+                            const res = await fetchWithSession(`${API_URL}/api/tools/${t.id}/qr`, {
                               headers: { Authorization: `Bearer ${token}` }
                             });
                             if (!res.ok) {
@@ -10914,7 +10969,7 @@ function App() {
               onClick={async () => {
                 if (!token || !activeObjectId) return;
                 setReportsMessage("");
-                const res = await fetch(
+                const res = await fetchWithSession(
                   `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/summary.pdf`,
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -11216,7 +11271,7 @@ function App() {
                   type="button"
                   onClick={async () => {
                     if (!token || !newObjectName.trim()) return;
-                    const res = await fetch(`${API_URL}/api/admin/objects`, {
+                    const res = await fetchWithSession(`${API_URL}/api/admin/objects`, {
                       method: "POST",
                       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -11384,7 +11439,7 @@ function App() {
                           );
                           if (!okCf || !token) return;
                           setAdminMessage("");
-                          const res = await fetch(`${API_URL}/api/admin/objects/${encodeURIComponent(obj.id)}`, {
+                          const res = await fetchWithSession(`${API_URL}/api/admin/objects/${encodeURIComponent(obj.id)}`, {
                             method: "DELETE",
                             headers: { Authorization: `Bearer ${token}` }
                           });
@@ -11535,7 +11590,7 @@ function App() {
               onClick={async () => {
                 if (!token) return;
                 setAdminMessage("");
-                const res = await fetch(`${API_URL}/api/admin/users`, {
+                const res = await fetchWithSession(`${API_URL}/api/admin/users`, {
                   method: "POST",
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -11795,7 +11850,7 @@ function App() {
               onClick={async () => {
                 if (!token) return;
                 setPassMessage("");
-                const res = await fetch(`${API_URL}/api/auth/change-password`, {
+                const res = await fetchWithSession(`${API_URL}/api/auth/change-password`, {
                   method: "POST",
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -12066,12 +12121,16 @@ function App() {
                         return;
                       }
                       const { issueId, opts } = issueRecipientModal;
-                      setIssueRecipientModal(null);
-                      await executeIssueAction(issueId, "issue", {
+                      const signed = issueRecipientSignedFile;
+                      const ok = await executeIssueAction(issueId, "issue", {
                         ...opts,
                         actualRecipientName: name,
-                        signedFile: issueRecipientSignedFile
+                        signedFile: signed
                       });
+                      if (ok) {
+                        setIssueRecipientModal(null);
+                        setIssueRecipientSignedFile(null);
+                      }
                     })();
                   }
                 }}
@@ -12110,12 +12169,16 @@ function App() {
                       return;
                     }
                     const { issueId, opts } = issueRecipientModal;
-                    setIssueRecipientModal(null);
-                    await executeIssueAction(issueId, "issue", {
+                    const signed = issueRecipientSignedFile;
+                    const ok = await executeIssueAction(issueId, "issue", {
                       ...opts,
                       actualRecipientName: name,
-                      signedFile: issueRecipientSignedFile
+                      signedFile: signed
                     });
+                    if (ok) {
+                      setIssueRecipientModal(null);
+                      setIssueRecipientSignedFile(null);
+                    }
                   })();
                 }}
               >
@@ -12337,7 +12400,7 @@ function App() {
                   setManualStockBusy(true);
                   setManualStockMessage("");
                   try {
-                    const res = await fetch(`${API_URL}/api/stocks/manual-line`, {
+                    const res = await fetchWithSession(`${API_URL}/api/stocks/manual-line`, {
                       method: "POST",
                       headers: {
                         Authorization: `Bearer ${token}`,
@@ -12362,7 +12425,8 @@ function App() {
                       setManualStockMessage(data.error || `Ошибка ${res.status}`);
                       return;
                     }
-                    setManualStockMessage("Строка добавлена.");
+                    setManualStockMessage("Строка добавлена — остатки обновлены.");
+                    setManualStockModalOpen(false);
                     setManualStockName("");
                     setManualStockQty("1");
                     await loadCatalogData();
@@ -12444,8 +12508,10 @@ function App() {
                 type="button"
                 className="ghostBtn"
                 onClick={() => {
-                  void attachReceiptRequestToLimit(limitPromptRequest.id, null);
-                  setLimitPromptRequest(null);
+                  void (async () => {
+                    const ok = await attachReceiptRequestToLimit(limitPromptRequest.id, null);
+                    if (ok) setLimitPromptRequest(null);
+                  })();
                 }}
               >
                 Не из лимита
@@ -12453,11 +12519,13 @@ function App() {
               <button
                 type="button"
                 onClick={() => {
-                  void attachReceiptRequestToLimit(
-                    limitPromptRequest.id,
-                    limitPromptTemplateId || null
-                  );
-                  setLimitPromptRequest(null);
+                  void (async () => {
+                    const ok = await attachReceiptRequestToLimit(
+                      limitPromptRequest.id,
+                      limitPromptTemplateId || null
+                    );
+                    if (ok) setLimitPromptRequest(null);
+                  })();
                 }}
                 disabled={!limitPromptTemplateId}
               >
@@ -12556,9 +12624,11 @@ function App() {
                   disabled={isSubmitting}
                   onClick={async () => {
                     const targetRow = row;
-                    setPendingAcceptanceRequestId(null);
-                    setPendingAcceptanceFiles([]);
-                    await submitReceiptAcceptance(targetRow, []);
+                    const ok = await submitReceiptAcceptance(targetRow, []);
+                    if (ok) {
+                      setPendingAcceptanceRequestId(null);
+                      setPendingAcceptanceFiles([]);
+                    }
                   }}
                 >
                   Принять без документов
@@ -12569,9 +12639,11 @@ function App() {
                   onClick={async () => {
                     const files = [...pendingAcceptanceFiles];
                     const targetRow = row;
-                    setPendingAcceptanceRequestId(null);
-                    setPendingAcceptanceFiles([]);
-                    await submitReceiptAcceptance(targetRow, files);
+                    const ok = await submitReceiptAcceptance(targetRow, files);
+                    if (ok) {
+                      setPendingAcceptanceRequestId(null);
+                      setPendingAcceptanceFiles([]);
+                    }
                   }}
                 >
                   {isSubmitting ? "Принимаем…" : "Принять с документами"}
