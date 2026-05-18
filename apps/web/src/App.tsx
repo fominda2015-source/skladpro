@@ -2198,21 +2198,45 @@ function App() {
     return row.id;
   }
 
-  async function loadConversationMessages(conversationId: string) {
+  async function loadConversationMessages(
+    conversationId: string,
+    opts?: { silent?: boolean; touchViewedAt?: boolean }
+  ) {
     if (!token || !conversationId) return;
+    const silent = Boolean(opts?.silent);
+    /** При фоновом poll не поднимать «просмотрено» — не дёргаем счётчики и списки впустую. */
+    const touchViewedAt = opts?.touchViewedAt ?? !silent;
     setChatError("");
-    setChatLoading(true);
+    if (!silent) {
+      setChatLoading(true);
+    }
     const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${conversationId}/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
       setChatError("Не удалось загрузить сообщения");
-      setChatLoading(false);
+      if (!silent) {
+        setChatLoading(false);
+      }
       return;
     }
-    setChatMessages((await res.json()) as ChatMessage[]);
-    setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
-    setChatLoading(false);
+    const next = (await res.json()) as ChatMessage[];
+    setChatMessages((prev) =>
+      silent &&
+      prev.length === next.length &&
+      prev.every((m, i) => {
+        const o = next[i];
+        return o && m.id === o.id && m.text === o.text && m.createdAt === o.createdAt;
+      })
+        ? prev
+        : next
+    );
+    if (touchViewedAt) {
+      setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
+    }
+    if (!silent) {
+      setChatLoading(false);
+    }
   }
 
   async function sendConversationMessage() {
@@ -2232,7 +2256,7 @@ function App() {
     }
     setChatText("");
     setChatAttachment(null);
-    await loadConversationMessages(selectedConversationId);
+    await loadConversationMessages(selectedConversationId, { silent: true, touchViewedAt: true });
     await loadConversations();
   }
 
@@ -4101,7 +4125,11 @@ function App() {
     void loadConversations();
     const timer = window.setInterval(() => {
       void loadConversations();
-      if (selectedConversationId) void loadConversationMessages(selectedConversationId);
+      if (selectedConversationId)
+        void loadConversationMessages(selectedConversationId, {
+          silent: true,
+          touchViewedAt: false
+        });
     }, 10000);
     return () => window.clearInterval(timer);
   }, [token, chatWidgetOpen, selectedConversationId]);
