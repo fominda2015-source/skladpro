@@ -346,12 +346,14 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
     where: { templateId: row.objectLimitTemplateId },
     select: { id: true, parentId: true, title: true, indexLabel: true }
   });
-  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  // Явный тип, иначе TS жалуется на цикл при использовании `nodeById.get(cur)!` внутри замыкания.
+  type LimitPathNode = { id: string; parentId: string | null; title: string; indexLabel: string | null };
+  const nodeById = new Map<string, LimitPathNode>(allNodes.map((n) => [n.id, n] as [string, LimitPathNode]));
   function pathFor(nodeId: string): string {
     const parts: string[] = [];
     let cur: string | null | undefined = nodeId;
     while (cur && nodeById.has(cur)) {
-      const n = nodeById.get(cur)!;
+      const n: LimitPathNode = nodeById.get(cur)!;
       const label = [n.indexLabel, n.title].filter(Boolean).join(" ").trim();
       if (label) parts.unshift(label);
       cur = n.parentId ?? null;
