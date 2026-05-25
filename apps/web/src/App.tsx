@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Bar,
@@ -1744,11 +1744,6 @@ function App() {
     () => notifications.filter((n) => !n.isRead).length,
     [notifications]
   );
-  const warehouseStockTableColSpan = useMemo(
-    () => 8 + (showStockSku ? 1 : 0) + (showStockPrice ? 1 : 0) + (showStockReserve ? 1 : 0),
-    [showStockSku, showStockPrice, showStockReserve]
-  );
-
   const purgeAuthClear = useCallback((reason?: "session-expired") => {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
