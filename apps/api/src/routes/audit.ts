@@ -3,7 +3,6 @@ import {
   CampItemCategory,
   CampItemStatus,
   IssueRequestStatus,
-  MaterialMatchQueueStatus,
   ObjectSection,
   StockMovementDirection,
   ToolStatus
@@ -37,7 +36,6 @@ const ENTITY_LABELS: Record<string, string> = {
   ReceiptRequest: "Заявка",
   Tool: "Инструмент",
   Material: "Материал",
-  MaterialMatchQueue: "Соответствие материала",
   CampItem: "Городок"
 };
 
@@ -63,10 +61,7 @@ const ACTION_LABELS: Record<string, string> = {
   ISSUE_REQUEST_REJECT: "Заявка отклонена",
   ISSUE_REQUEST_CANCEL: "Заявка отменена",
   ISSUE_REQUEST_ISSUE: "Выдача по заявке",
-  RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке",
-  MATERIAL_MERGE: "Слияние материалов",
-  MATERIAL_MATCH_RESOLVE: "Соответствие материала разрешено",
-  MATERIAL_MATCH_REJECT: "Соответствие материала отклонено"
+  RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке"
 };
 
 const REVERTABLE_ACTIONS = new Set<string>([
@@ -91,10 +86,7 @@ const REVERTABLE_ACTIONS = new Set<string>([
   "ISSUE_REQUEST_REJECT",
   "ISSUE_REQUEST_CANCEL",
   "ISSUE_REQUEST_ISSUE",
-  "RECEIPT_REQUEST_ACCEPT",
-  "MATERIAL_MERGE",
-  "MATERIAL_MATCH_RESOLVE",
-  "MATERIAL_MATCH_REJECT"
+  "RECEIPT_REQUEST_ACCEPT"
 ]);
 
 function isRevertable(action: string): boolean {
@@ -727,40 +719,6 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
         }
         throw err;
       }
-    }
-    case "MATERIAL_MERGE": {
-      const before = log.beforeData as { mergedIntoId?: string | null } | null;
-      const exists = await prisma.material.findUnique({ where: { id: log.entityId } });
-      if (!exists) return { ok: false, error: "Материал не найден" };
-      await prisma.material.update({
-        where: { id: log.entityId },
-        data: { mergedIntoId: before?.mergedIntoId ?? null }
-      });
-      return { ok: true };
-    }
-    case "MATERIAL_MATCH_RESOLVE":
-    case "MATERIAL_MATCH_REJECT": {
-      const before = log.beforeData as
-        | {
-            status?: MaterialMatchQueueStatus;
-            suggestedMaterialId?: string | null;
-            resolvedMaterialId?: string | null;
-          }
-        | null;
-      if (!before || !before.status) {
-        return { ok: false, error: "Нет данных до изменения" };
-      }
-      const exists = await prisma.materialMatchQueue.findUnique({ where: { id: log.entityId } });
-      if (!exists) return { ok: false, error: "Запись очереди не найдена" };
-      await prisma.materialMatchQueue.update({
-        where: { id: log.entityId },
-        data: {
-          status: before.status,
-          suggestedMaterialId: before.suggestedMaterialId ?? null,
-          resolvedMaterialId: before.resolvedMaterialId ?? null
-        }
-      });
-      return { ok: true };
     }
     default:
       return { ok: false, error: "Откат этого типа действия пока не поддерживается" };

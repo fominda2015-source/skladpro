@@ -1,7 +1,6 @@
 import {
   IntegrationJobStatus,
   IssueRequestStatus,
-  MaterialMatchQueueStatus,
   NotificationLevel,
   OperationType,
   ReceiptRequestStatus,
@@ -114,7 +113,6 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     staleOpenIssues,
     toolsInRepair,
     waybillsOpen,
-    matchQueuePending,
     failedIntegrations24h,
     unreadNotifications,
     errorNotifications24h,
@@ -131,9 +129,6 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     prisma.issueRequest.count({ where: staleIssuesWhere }),
     prisma.tool.count({ where: toolsRepairWhere }),
     prisma.transportWaybill.count({ where: waybillsOpenWhere }),
-    prisma.materialMatchQueue.count({
-      where: { status: MaterialMatchQueueStatus.PENDING }
-    }),
     prisma.integrationJob.count({
       where: {
         status: IntegrationJobStatus.FAILED,
@@ -249,7 +244,6 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
       staleOpenIssues,
       toolsInRepair,
       waybillsOpen,
-      matchQueuePending,
       failedIntegrations24h,
       unreadNotifications,
       errorNotifications24h

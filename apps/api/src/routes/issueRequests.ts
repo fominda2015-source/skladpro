@@ -24,7 +24,7 @@ import {
   getRequestDataScope,
   mergeIssueWhere
 } from "../lib/dataScope.js";
-import { notifyUser } from "../lib/notifications.js";
+import { dispatchNotification, getLowStockThreshold, notifyUser } from "../lib/notifications.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -1142,6 +1142,26 @@ issueRequestsRouter.patch(
               where: { projectLimitId: latestLimit.id, materialId: item.materialId },
               data: { issuedQty: { increment: item.quantity } }
             });
+            const updatedLine = await tx.projectLimitItem.findUnique({
+              where: {
+                projectLimitId_materialId: {
+                  projectLimitId: latestLimit.id,
+                  materialId: item.materialId
+                }
+              },
+              include: { material: { select: { name: true, unit: true } } }
+            });
+            if (updatedLine && Number(updatedLine.issuedQty) > Number(updatedLine.plannedQty)) {
+              // Шинная рассылка о перерасходе. Делаем «вне» транзакции через void.
+              void dispatchNotification({
+                eventCode: "LIMIT_OVERRUN",
+                title: "Перерасход по лимиту",
+                message: `«${updatedLine.material?.name ?? item.materialId}»: выдано ${Number(updatedLine.issuedQty)} > план ${Number(updatedLine.plannedQty)} ${updatedLine.material?.unit ?? ""}`.trim(),
+                entityType: "ProjectLimitItem",
+                entityId: item.materialId,
+                excludeUserIds: [req.user!.userId]
+              }).catch(() => undefined);
+            }
           }
         }
       }
@@ -1156,6 +1176,56 @@ issueRequestsRouter.patch(
 
       return { operation, issue: updatedIssue };
     });
+
+    // STOCK_LOW: после выдачи проверим, не упал ли остаток ниже универсального порога.
+    void (async () => {
+      try {
+        const threshold = await getLowStockThreshold();
+        for (const it of issueRow.items) {
+          const s = await prisma.stock.findUnique({
+            where: {
+              warehouseId_materialId_section: {
+                warehouseId: issueRow.warehouseId,
+                materialId: it.materialId,
+                section: issueRow.section
+              }
+            },
+            include: { material: { select: { name: true, unit: true } } }
+          });
+          if (!s) continue;
+          const available = Number(s.quantity) - Number(s.reserved);
+          if (available < 0) {
+            await dispatchNotification({
+              eventCode: "STOCK_NEGATIVE",
+              title: "Остаток в минусе",
+              message: `«${s.material?.name ?? it.materialId}»: ${available} ${s.material?.unit ?? ""}`.trim(),
+              entityType: "Stock",
+              entityId: it.materialId,
+              excludeUserIds: [req.user!.userId]
+            }).catch(() => undefined);
+          } else if (available <= threshold) {
+            await dispatchNotification({
+              eventCode: "STOCK_LOW",
+              title: "Низкий остаток",
+              message: `«${s.material?.name ?? it.materialId}»: ${available} ≤ ${threshold} ${s.material?.unit ?? ""}`.trim(),
+              entityType: "Stock",
+              entityId: it.materialId,
+              excludeUserIds: [req.user!.userId]
+            }).catch(() => undefined);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    void dispatchNotification({
+      eventCode: "ISSUE_ISSUED",
+      title: "Выдача проведена",
+      message: `По заявке ${issueRow.number} оформлена выдача`,
+      entityType: "IssueRequest",
+      entityId: issueRow.id,
+      excludeUserIds: [req.user!.userId]
+    }).catch(() => undefined);
 
     const { operation, issue } = result;
     let document: Awaited<ReturnType<typeof createIssueActDocument>> | null = null;

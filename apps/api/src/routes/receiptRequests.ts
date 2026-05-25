@@ -9,7 +9,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
 import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
-import { notifyUser } from "../lib/notifications.js";
+import { dispatchNotification, notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -32,7 +32,11 @@ const acceptItemSchema = z.object({
   materialId: z.string().optional(),
   newMaterialName: z.string().max(500).optional(),
   newMaterialUnit: z.string().max(50).optional(),
-  acceptedQty: z.number().positive()
+  acceptedQty: z.number().positive(),
+  // Опциональная привязка к конкретному узлу шаблона лимита (раздел/подраздел).
+  // Если в шаблоне один и тот же материал лежит сразу в нескольких узлах,
+  // мы спрашиваем пользователя «куда пихаем»; иначе пусто.
+  limitNodeId: z.string().min(1).nullable().optional()
 });
 
 const acceptSchema = z.object({
@@ -239,6 +243,14 @@ receiptRequestsRouter.post(
 
       return receipt;
     });
+    await dispatchNotification({
+      eventCode: "RECEIPT_CREATED",
+      title: "Новая заявка на приход",
+      message: `${created.number}: ${created.items.length} позиций`,
+      entityType: "ReceiptRequest",
+      entityId: created.id,
+      excludeUserIds: [req.user!.userId]
+    }).catch(() => undefined);
     return res.status(201).json({
       ...created,
       detectedOrderNumber: orderNumber || null,
@@ -289,6 +301,92 @@ receiptRequestsRouter.patch(
     return res.json(updated);
   }
 );
+
+// Возвращает по каждой позиции заявки список подходящих узлов в шаблоне лимита,
+// чтобы UI мог спросить «куда отнести» при множественных совпадениях.
+receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const row = await prisma.receiptRequest.findUnique({
+    where: { id },
+    include: {
+      items: {
+        include: { mappedMaterial: { select: { id: true, name: true, unit: true } } }
+      }
+    }
+  });
+  if (!row) return res.status(404).json({ error: "Request not found" });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, row.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  if (!row.objectLimitTemplateId) {
+    return res.json({ items: row.items.map((it) => ({ itemId: it.id, suggestions: [] })) });
+  }
+  // Все узлы шаблона со всеми возможными свойствами для матчинга.
+  const nodes = await prisma.objectLimitNode.findMany({
+    where: { templateId: row.objectLimitTemplateId, nodeType: "MATERIAL" },
+    select: {
+      id: true,
+      title: true,
+      indexLabel: true,
+      materialId: true,
+      materialName: true,
+      parentId: true,
+      plannedQty: true,
+      issuedQty: true,
+      unit: true
+    }
+  });
+  // Построим путь до узла (для красивого отображения "Раздел / Подраздел / Материал").
+  const allNodes = await prisma.objectLimitNode.findMany({
+    where: { templateId: row.objectLimitTemplateId },
+    select: { id: true, parentId: true, title: true, indexLabel: true }
+  });
+  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  function pathFor(nodeId: string): string {
+    const parts: string[] = [];
+    let cur: string | null | undefined = nodeId;
+    while (cur && nodeById.has(cur)) {
+      const n = nodeById.get(cur)!;
+      const label = [n.indexLabel, n.title].filter(Boolean).join(" ").trim();
+      if (label) parts.unshift(label);
+      cur = n.parentId ?? null;
+    }
+    return parts.join(" / ");
+  }
+  const normalize = (s: string | null | undefined) =>
+    String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  function nodeMatchesItem(
+    node: (typeof nodes)[number],
+    materialId: string | null,
+    sourceName: string
+  ): boolean {
+    if (materialId && node.materialId && node.materialId === materialId) return true;
+    if (!materialId && node.materialName && sourceName && normalize(node.materialName) === normalize(sourceName)) {
+      return true;
+    }
+    return false;
+  }
+  const result = row.items.map((it) => {
+    const matched = nodes
+      .filter((n) => nodeMatchesItem(n, it.mappedMaterialId ?? null, it.sourceName))
+      .map((n) => ({
+        id: n.id,
+        title: n.title,
+        indexLabel: n.indexLabel,
+        path: pathFor(n.id),
+        plannedQty: n.plannedQty != null ? Number(n.plannedQty) : null,
+        issuedQty: n.issuedQty != null ? Number(n.issuedQty) : 0,
+        unit: n.unit
+      }));
+    return { itemId: it.id, currentLimitNodeId: it.limitNodeId ?? null, suggestions: matched };
+  });
+  return res.json({ items: result, hasTemplate: true });
+});
 
 receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
@@ -372,13 +470,33 @@ receiptRequestsRouter.post(
       }
     }
 
+    // Валидация limitNodeId — узел должен принадлежать шаблону этой заявки.
+    const proposedNodeIds = parsed.data.itemMappings
+      .map((m) => m.limitNodeId)
+      .filter((x): x is string => typeof x === "string" && x.length > 0);
+    if (proposedNodeIds.length && !row.objectLimitTemplateId) {
+      return res.status(400).json({ error: "Заявка не привязана к шаблону лимита" });
+    }
+    let nodeOwnership = new Map<string, true>();
+    if (proposedNodeIds.length && row.objectLimitTemplateId) {
+      const nodes = await prisma.objectLimitNode.findMany({
+        where: { templateId: row.objectLimitTemplateId, id: { in: proposedNodeIds } },
+        select: { id: true }
+      });
+      nodeOwnership = new Map(nodes.map((n) => [n.id, true as const]));
+      const missing = proposedNodeIds.find((nid) => !nodeOwnership.has(nid));
+      if (missing) {
+        return res.status(400).json({ error: `Узел лимита ${missing} не принадлежит шаблону заявки` });
+      }
+    }
+
     const op = await prisma.$transaction(async (tx) => {
-      // На этом приёме формируем по каждой позиции свой materialId (новый или существующий).
       const resolved: Array<{
         item: (typeof row.items)[number];
         materialId: string;
         acceptedQty: number;
         sourceUnit: string;
+        limitNodeId: string | null;
       }> = [];
       for (const m of parsed.data.itemMappings) {
         const it = itemsById.get(m.itemId)!;
@@ -390,7 +508,13 @@ receiptRequestsRouter.post(
         if (!materialId) {
           throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
         }
-        resolved.push({ item: it, materialId, acceptedQty: m.acceptedQty, sourceUnit: unitHint });
+        resolved.push({
+          item: it,
+          materialId,
+          acceptedQty: m.acceptedQty,
+          sourceUnit: unitHint,
+          limitNodeId: m.limitNodeId ?? null
+        });
       }
 
       const operation = await tx.operation.create({
@@ -413,7 +537,9 @@ receiptRequestsRouter.post(
           data: {
             mappedMaterialId: r.materialId,
             // накопительно: уже принятое + только что принятое
-            acceptedQty: { increment: r.acceptedQty }
+            acceptedQty: { increment: r.acceptedQty },
+            // Если пользователь выбрал узел шаблона, сохраняем. Иначе оставляем как было.
+            ...(r.limitNodeId ? { limitNodeId: r.limitNodeId } : {})
           }
         });
         await tx.stock.upsert({
@@ -562,9 +688,19 @@ receiptRequestsRouter.post(
         message: `По заявке ${row.number} оформлен новый приход${parsed.data.documentNumber ? ` (${parsed.data.documentNumber})` : ""}.`,
         level: NotificationLevel.INFO,
         entityType: "ReceiptRequest",
-        entityId: row.id
+        entityId: row.id,
+        eventCode: "RECEIPT_ACCEPTED"
       }).catch(() => undefined);
     }
+    // Шинная рассылка по правилам подписки.
+    await dispatchNotification({
+      eventCode: "RECEIPT_ACCEPTED",
+      title: "Приёмка по заявке",
+      message: `Заявка ${row.number}: принято позиций ${op.acceptedItems.length}.`,
+      entityType: "ReceiptRequest",
+      entityId: row.id,
+      excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
+    }).catch(() => undefined);
     return res.json({ ok: true, operationId: op.operation.id });
   }
 );

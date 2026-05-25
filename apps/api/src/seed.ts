@@ -5,7 +5,6 @@ import { config } from "./config.js";
 const baseWarehouseOps = [
   "dashboard.read",
   "audit.read",
-  "materials.match",
   "warehouses.read",
   "warehouses.write",
   "materials.read",
@@ -46,7 +45,6 @@ const defaultRoles = [
     permissions: [
       "dashboard.read",
       "audit.read",
-      "materials.match",
       "warehouses.read",
       "materials.read",
       "materials.write",
@@ -65,6 +63,7 @@ const defaultRoles = [
       "waybills.write",
       "integrations.read",
       "notifications.read",
+      "notifications.write",
       "materialReport.read",
       "materialReport.write"
     ]
@@ -83,7 +82,8 @@ const defaultRoles = [
       "documents.read",
       "tools.read",
       "waybills.read",
-      "notifications.read"
+      "notifications.read",
+      "notifications.write"
     ]
   },
   {
@@ -100,7 +100,9 @@ const defaultRoles = [
       "documents.read",
       "tools.read",
       "waybills.read",
-      "materialReport.read"
+      "materialReport.read",
+      "notifications.read",
+      "notifications.write"
     ]
   },
   {
@@ -116,6 +118,7 @@ const defaultRoles = [
       "documents.read",
       "waybills.read",
       "notifications.read",
+      "notifications.write",
       "materialReport.read"
     ]
   },
@@ -133,7 +136,8 @@ const defaultRoles = [
       "documents.read",
       "tools.read",
       "waybills.read",
-      "notifications.read"
+      "notifications.read",
+      "notifications.write"
     ]
   },
   {
@@ -150,7 +154,8 @@ const defaultRoles = [
       "documents.read",
       "tools.read",
       "waybills.read",
-      "notifications.read"
+      "notifications.read",
+      "notifications.write"
     ]
   }
 ];

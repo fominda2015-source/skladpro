@@ -28,8 +28,6 @@ contractsRouter.get("/meta", (_req, res) => {
       limitImports: "/api/limit-imports",
       receiptRequests: "/api/receipt-requests",
       documents: "/api/documents",
-      materialMatch: "/api/material-match/queue",
-      materialMerge: "/api/materials/merge",
       integrationJobs: "/api/integrations/jobs",
       notifications: "/api/notifications"
     }
@@ -306,7 +304,6 @@ contractsRouter.get("/openapi.json", (_req, res) => {
                 staleOpenIssues: { type: "integer" },
                 toolsInRepair: { type: "integer" },
                 waybillsOpen: { type: "integer" },
-                matchQueuePending: { type: "integer" },
                 failedIntegrations24h: { type: "integer" },
                 unreadNotifications: { type: "integer" },
                 errorNotifications24h: { type: "integer" }
@@ -314,22 +311,6 @@ contractsRouter.get("/openapi.json", (_req, res) => {
             }
           },
           required: ["role", "generatedAt", "warehouse"]
-        },
-        MaterialMatchQueueItem: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            rawName: { type: "string" },
-            normalizedName: { type: "string" },
-            status: { type: "string", enum: ["PENDING", "RESOLVED", "REJECTED"] },
-            confidence: { type: ["number", "null"] },
-            suggestedMaterialId: { type: ["string", "null"] },
-            resolvedMaterialId: { type: ["string", "null"] },
-            source: { type: ["string", "null"] },
-            createdAt: { type: "string", format: "date-time" },
-            updatedAt: { type: "string", format: "date-time" }
-          },
-          required: ["id", "rawName", "normalizedName", "status", "createdAt", "updatedAt"]
         }
       }
     },
@@ -702,24 +683,6 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           }
         }
       },
-      "/api/material-match/queue": {
-        get: {
-          tags: ["materials"],
-          summary: "List material matching queue",
-          security: [{ bearerAuth: [] }],
-          parameters: [{ name: "status", in: "query", schema: { type: "string" } }],
-          responses: {
-            "200": {
-              description: "Matching queue rows",
-              content: {
-                "application/json": {
-                  schema: { type: "array", items: { $ref: "#/components/schemas/MaterialMatchQueueItem" } }
-                }
-              }
-            }
-          }
-        }
-      },
       "/api/material-mappings": {
         get: {
           tags: ["materials"],
@@ -812,34 +775,6 @@ contractsRouter.get("/openapi.json", (_req, res) => {
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
           responses: { "200": { description: "Accepted and posted" } }
-        }
-      },
-      "/api/material-match/try": {
-        post: {
-          tags: ["materials"],
-          summary: "Try to match incoming material",
-          security: [{ bearerAuth: [] }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["rawName"],
-                  properties: {
-                    rawName: { type: "string" },
-                    unit: { type: "string" },
-                    article: { type: "string" },
-                    enqueue: { type: "boolean" },
-                    source: { type: "string" }
-                  }
-                }
-              }
-            }
-          },
-          responses: {
-            "200": { description: "Matching result payload" }
-          }
         }
       },
       "/api/integrations/jobs": {

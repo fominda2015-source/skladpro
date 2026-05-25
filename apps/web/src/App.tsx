@@ -22,6 +22,7 @@ import {
   type IntegrationJobRow
 } from "./widgets/integrations/IntegrationJobsTable";
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
+import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -492,7 +493,6 @@ type DashboardSummary = {
     staleOpenIssues: number;
     toolsInRepair: number;
     waybillsOpen: number;
-    matchQueuePending: number;
     failedIntegrations24h: number;
     unreadNotifications: number;
     errorNotifications24h: number;
@@ -511,27 +511,6 @@ type DashboardSummary = {
     usagePercent: number;
   };
   admin?: { activeUsers: number; auditEvents24h: number };
-};
-
-type MatchQueueRow = {
-  id: string;
-  rawName: string;
-  normalizedName: string;
-  status: string;
-  confidence: number | null;
-  suggestedMaterialId: string | null;
-  suggestedMaterial?: { id: string; name: string } | null;
-  resolvedMaterial?: { id: string; name: string } | null;
-};
-type MaterialMergeHistoryRow = {
-  id: string;
-  sourceMaterialId: string;
-  targetMaterialId: string;
-  reason?: string | null;
-  createdAt: string;
-  sourceMaterial?: { id: string; name: string; sku?: string | null; unit: string };
-  targetMaterial?: { id: string; name: string; sku?: string | null; unit: string };
-  actor?: { id: string; fullName: string; email: string } | null;
 };
 
 type AuditLogRow = {
@@ -695,10 +674,10 @@ function App() {
     | "qr"
     | "tools"
     | "waybills"
-    | "matching"
     | "camp"
     | "audit"
     | "integrations"
+    | "notifications"
     | "settings"
     | "profile"
     | "chat"
@@ -843,8 +822,23 @@ function App() {
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
   // Черновики приёмки: на заявку → на позицию → {newName, newUnit, qty}.
-  type AcceptanceDraftItem = { newName: string; newUnit: string; qty: string };
+  type AcceptanceDraftItem = { newName: string; newUnit: string; qty: string; limitNodeId?: string };
   const [acceptanceDrafts, setAcceptanceDrafts] = useState<Record<string, Record<string, AcceptanceDraftItem>>>({});
+  // Подсказки по узлам шаблона лимита для каждой заявки/позиции (для «куда пихаем»).
+  type LimitNodeSuggestion = {
+    id: string;
+    title: string;
+    indexLabel?: string | null;
+    path: string;
+    plannedQty: number | null;
+    issuedQty: number;
+    unit?: string | null;
+  };
+  type LimitSuggestionsPayload = {
+    hasTemplate?: boolean;
+    items: Array<{ itemId: string; currentLimitNodeId: string | null; suggestions: LimitNodeSuggestion[] }>;
+  };
+  const [limitSuggestions, setLimitSuggestions] = useState<Record<string, LimitSuggestionsPayload>>({});
   const [acceptanceScans, setAcceptanceScans] = useState<Record<string, File | null>>({});
   const [acceptanceDocNumbers, setAcceptanceDocNumbers] = useState<Record<string, string>>({});
   const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
@@ -950,9 +944,30 @@ function App() {
   const [toolSerialNumber, setToolSerialNumber] = useState("");
   const [toolWarehouseId, setToolWarehouseId] = useState("");
   const [toolResponsible, setToolResponsible] = useState("");
+  const [toolCategoryDraft, setToolCategoryDraft] = useState<string>("");
   const [toolReceiptNote, setToolReceiptNote] = useState("");
   const [toolSearch, setToolSearch] = useState("");
   const [toolStatusFilter, setToolStatusFilter] = useState<"" | ToolStatus>("");
+  // Карточный режим инструментов: сначала видим карточки категорий, потом проваливаемся внутрь.
+  type ToolCategoryRow = { id: string; name: string; icon?: string | null; order: number };
+  type ToolGroupCard = {
+    key: string;
+    label: string;
+    type: "CATEGORY" | "NAME";
+    categoryId: string | null;
+    icon: string | null;
+    count: number;
+    inStock: number;
+    issued: number;
+    inRepair: number;
+  };
+  const [toolCategories, setToolCategories] = useState<ToolCategoryRow[]>([]);
+  const [toolGroupCards, setToolGroupCards] = useState<ToolGroupCard[]>([]);
+  const [toolGroupCardsLoading, setToolGroupCardsLoading] = useState(false);
+  const [toolDrilledCard, setToolDrilledCard] = useState<ToolGroupCard | null>(null);
+  const [toolCategoryAdminOpen, setToolCategoryAdminOpen] = useState(false);
+  const [toolCategoryDraftName, setToolCategoryDraftName] = useState("");
+  const [toolCategoryEdit, setToolCategoryEdit] = useState<Record<string, { name: string; icon: string; order: string }>>({});
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
@@ -1001,16 +1016,6 @@ function App() {
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser">("");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [dashboardError, setDashboardError] = useState("");
-  const [matchQueue, setMatchQueue] = useState<MatchQueueRow[]>([]);
-  const [matchRaw, setMatchRaw] = useState("Арматура d12");
-  const [matchArticle, setMatchArticle] = useState("");
-  const [matchTryResult, setMatchTryResult] = useState<Record<string, unknown> | null>(null);
-  const [matchMessage, setMatchMessage] = useState("");
-  const [resolveMaterialId, setResolveMaterialId] = useState("");
-  const [mergeSourceMaterialId, setMergeSourceMaterialId] = useState("");
-  const [mergeTargetMaterialId, setMergeTargetMaterialId] = useState("");
-  const [mergeReason, setMergeReason] = useState("");
-  const [materialMergeHistory, setMaterialMergeHistory] = useState<MaterialMergeHistoryRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
   const [auditMeta, setAuditMeta] = useState<AuditMetaResponse>({ users: [], entityTypes: [] });
@@ -1080,11 +1085,11 @@ function App() {
     { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
     { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.edit", "limits.write"] },
     { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read", "materialReport.write"] },
-    { id: "matching", label: "Сопоставление", permissions: ["materials.match", "materials.read"] },
     { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read", "materials.write"] },
     { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
     { id: "qr", label: "QR", permissions: ["tools.read"] },
     { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write", "notifications.read"] },
+    { id: "notifications", label: "Уведомления", permissions: ["notifications.read"] },
     { id: "audit", label: "Логи", permissions: ["audit.read"] },
     { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
   ];
@@ -1560,7 +1565,6 @@ function App() {
       { label: "Инстр. ремонт", value: w.toolsInRepair }
     ];
     rows.push(
-      { label: "Сопоставление", value: w.matchQueuePending },
       { label: "Уведомления", value: w.unreadNotifications },
       { label: "Алерты 24ч", value: w.errorNotifications24h },
       { label: "Интеграции 24ч", value: w.failedIntegrations24h }
@@ -1649,7 +1653,6 @@ function App() {
     stocks: "Главная",
     warehouse: "Склад",
     catalog: "Справочники",
-    matching: "Сопоставление номенклатуры",
     audit: "Аудит действий",
     operations: "Приходы",
     issues: "Заявки на выдачу",
@@ -1661,6 +1664,7 @@ function App() {
     qr: "QR-сканирование",
     tools: "Инструменты",
     integrations: "Интеграции и уведомления",
+    notifications: "Уведомления",
     chat: "Личные сообщения",
     feedback: "Обратная связь",
     reports: "Сводка по объекту",
@@ -1678,7 +1682,6 @@ function App() {
     waybills: "Операции",
     documents: "Контроль",
     limits: "Контроль",
-    matching: "Контроль",
     materialReport: "Контроль",
     chat: "Контроль",
     feedback: "Контроль",
@@ -1688,6 +1691,7 @@ function App() {
     tools: "Сервис",
     qr: "Сервис",
     integrations: "Сервис",
+    notifications: "Контроль",
     admin: "Администрирование",
     profile: "Аккаунт",
     settings: "Аккаунт",
@@ -1717,14 +1721,6 @@ function App() {
       Boolean(
         hasPermission("dashboard.read") ||
           hasPermission("stocks.read")
-      ),
-    [me]
-  );
-  const canMaterialMatch = useMemo(
-    () =>
-      Boolean(
-        hasPermission("materials.match") ||
-          hasPermission("materials.write")
       ),
     [me]
   );
@@ -1952,28 +1948,6 @@ function App() {
     } catch (e) {
       setDashboard(null);
       setDashboardError(String(e));
-    }
-  }
-
-  async function loadMatchQueue() {
-    if (!token) {
-      return;
-    }
-    const r = await fetchWithSession(`${API_URL}/api/material-match/queue`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (r.ok) {
-      setMatchQueue((await r.json()) as MatchQueueRow[]);
-    }
-  }
-
-  async function loadMaterialMergeHistory() {
-    if (!token) return;
-    const r = await fetchWithSession(`${API_URL}/api/materials/merge-history`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (r.ok) {
-      setMaterialMergeHistory((await r.json()) as MaterialMergeHistoryRow[]);
     }
   }
 
@@ -2483,103 +2457,6 @@ function App() {
     return true;
   }
 
-  async function runMaterialMatch(enqueue: boolean) {
-    if (!token) {
-      return;
-    }
-    setMatchMessage("");
-    setMatchTryResult(null);
-    try {
-      const r = await fetchWithSession(`${API_URL}/api/material-match/try`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawName: matchRaw.trim(),
-          article: matchArticle.trim() || undefined,
-          enqueue
-        })
-      });
-      const data = (await r.json()) as Record<string, unknown> & { error?: string };
-      if (!r.ok) {
-        throw new Error(data.error || `HTTP ${r.status}`);
-      }
-      setMatchTryResult(data);
-      if (data.autoResolved) {
-        setMatchMessage("Авто-сопоставление: материал автоматически схлопнут (safe-режим).");
-      }
-      if (enqueue) {
-        await loadMatchQueue();
-      }
-    } catch (e) {
-      setMatchMessage(String(e));
-    }
-  }
-
-  async function resolveMatchQueue(id: string) {
-    if (!token || !resolveMaterialId) {
-      setMatchMessage("Выберите материал для привязки");
-      return;
-    }
-    const r = await fetchWithSession(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/resolve`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ materialId: resolveMaterialId })
-    });
-    if (!r.ok) {
-      setMatchMessage(await r.text());
-    } else {
-      await loadMatchQueue();
-    }
-  }
-
-  async function rejectMatchQueue(id: string) {
-    if (!token) {
-      return;
-    }
-    const r = await fetchWithSession(`${API_URL}/api/material-match/queue/${encodeURIComponent(id)}/reject`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!r.ok) {
-      setMatchMessage(await r.text());
-    } else {
-      await loadMatchQueue();
-    }
-  }
-
-  async function mergeMaterials() {
-    if (!token || !mergeSourceMaterialId || !mergeTargetMaterialId) {
-      setMatchMessage("Выберите исходный и целевой материалы");
-      return;
-    }
-    if (mergeSourceMaterialId === mergeTargetMaterialId) {
-      setMatchMessage("Исходный и целевой материалы должны отличаться");
-      return;
-    }
-    const ok = window.confirm("Объединить материалы? Операция переносит остатки, лимиты и историю на целевой материал.");
-    if (!ok) return;
-    const r = await fetchWithSession(`${API_URL}/api/materials/merge`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sourceMaterialId: mergeSourceMaterialId,
-        targetMaterialId: mergeTargetMaterialId,
-        reason: mergeReason.trim() || undefined
-      })
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      setMatchMessage(typeof err.error === "string" ? err.error : "Не удалось объединить материалы");
-      return;
-    }
-    setMatchMessage("Материалы объединены");
-    setMergeSourceMaterialId("");
-    setMergeReason("");
-    await loadCatalogData();
-    await loadMatchQueue();
-    await loadMaterialMergeHistory();
-  }
-
   async function loadAdminData(): Promise<AdminUser[] | undefined> {
     if (!token || !canManageUsers) {
       return undefined;
@@ -3047,8 +2924,46 @@ function App() {
       return false;
     }
     setOpsMessage(templateId ? "Заявка привязана к лимиту" : "Заявка отвязана от лимита");
+    setLimitSuggestions((prev) => {
+      const next = { ...prev };
+      delete next[requestId];
+      return next;
+    });
     await loadReceiptRequests();
     return true;
+  }
+
+  async function loadLimitSuggestions(receiptRequestId: string) {
+    if (!token) return;
+    try {
+      const r = await fetchWithSession(
+        `${API_URL}/api/receipt-requests/${encodeURIComponent(receiptRequestId)}/limit-suggestions`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) return;
+      const data = (await r.json()) as LimitSuggestionsPayload;
+      setLimitSuggestions((prev) => ({ ...prev, [receiptRequestId]: data }));
+      // Авто-предзаполнение: если по позиции ровно один подходящий узел и пользователь
+      // не выбрал свой — сразу проставляем его как выбор по умолчанию.
+      setAcceptanceDrafts((prev) => {
+        const itemDrafts = { ...(prev[receiptRequestId] || {}) };
+        let changed = false;
+        for (const itemInfo of data.items) {
+          if (itemInfo.suggestions.length === 1 && !itemDrafts[itemInfo.itemId]?.limitNodeId) {
+            const cur = itemDrafts[itemInfo.itemId] || { newName: "", newUnit: "", qty: "" };
+            itemDrafts[itemInfo.itemId] = { ...cur, limitNodeId: itemInfo.suggestions[0].id };
+            changed = true;
+          } else if (itemInfo.currentLimitNodeId && !itemDrafts[itemInfo.itemId]?.limitNodeId) {
+            const cur = itemDrafts[itemInfo.itemId] || { newName: "", newUnit: "", qty: "" };
+            itemDrafts[itemInfo.itemId] = { ...cur, limitNodeId: itemInfo.currentLimitNodeId };
+            changed = true;
+          }
+        }
+        return changed ? { ...prev, [receiptRequestId]: itemDrafts } : prev;
+      });
+    } catch {
+      // ignore network errors — подсказки опциональны
+    }
   }
 
   async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
@@ -3060,6 +2975,7 @@ function App() {
       newMaterialName?: string;
       newMaterialUnit?: string;
       acceptedQty: number;
+      limitNodeId?: string | null;
     }> = [];
     for (const it of row.items) {
       const draft = drafts[it.id];
@@ -3079,7 +2995,8 @@ function App() {
         itemId: it.id,
         newMaterialName: finalName,
         newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
-        acceptedQty: qty
+        acceptedQty: qty,
+        limitNodeId: draft?.limitNodeId || null
       });
     }
     if (!mappings.length) {
@@ -3131,6 +3048,11 @@ function App() {
         return next;
       });
       setAcceptanceDocNumbers((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      setLimitSuggestions((prev) => {
         const next = { ...prev };
         delete next[row.id];
         return next;
@@ -3560,6 +3482,12 @@ function App() {
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
         `section=${encodeURIComponent(objectSectionFilter)}`,
         toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
+        toolDrilledCard?.type === "CATEGORY" && toolDrilledCard.categoryId
+          ? `categoryId=${encodeURIComponent(toolDrilledCard.categoryId)}`
+          : "",
+        toolDrilledCard?.type === "NAME"
+          ? `nameGroup=${encodeURIComponent(toolDrilledCard.label)}`
+          : "",
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -3578,6 +3506,95 @@ function App() {
     } finally {
       setToolsLoading(false);
     }
+  }
+
+  async function loadToolCategories() {
+    if (!token) return;
+    try {
+      const r = await fetchWithSession(`${API_URL}/api/tools/categories`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!r.ok) return;
+      setToolCategories(((await r.json()) as ToolCategoryRow[]) || []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function loadToolGroupCards() {
+    if (!token) return;
+    setToolGroupCardsLoading(true);
+    try {
+      const parts = [
+        `section=${encodeURIComponent(objectSectionFilter)}`,
+        toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : ""
+      ].filter(Boolean);
+      const query = parts.length ? `?${parts.join("&")}` : "";
+      const r = await fetchWithSession(`${API_URL}/api/tools/by-category${query}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!r.ok) return;
+      setToolGroupCards(((await r.json()) as ToolGroupCard[]) || []);
+    } catch {
+      setToolGroupCards([]);
+    } finally {
+      setToolGroupCardsLoading(false);
+    }
+  }
+
+  async function createToolCategory(name: string) {
+    if (!token) return false;
+    const value = name.trim();
+    if (!value) return false;
+    const r = await fetchWithSession(`${API_URL}/api/tools/categories`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: value })
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось создать категорию");
+      setToolsTone("error");
+      return false;
+    }
+    await loadToolCategories();
+    await loadToolGroupCards();
+    return true;
+  }
+
+  async function updateToolCategory(id: string, patch: { name?: string; icon?: string | null; order?: number }) {
+    if (!token) return false;
+    const r = await fetchWithSession(`${API_URL}/api/tools/categories/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось обновить категорию");
+      setToolsTone("error");
+      return false;
+    }
+    await loadToolCategories();
+    await loadToolGroupCards();
+    return true;
+  }
+
+  async function deleteToolCategory(id: string) {
+    if (!token) return false;
+    const r = await fetchWithSession(`${API_URL}/api/tools/categories/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось удалить категорию");
+      setToolsTone("error");
+      return false;
+    }
+    await loadToolCategories();
+    await loadToolGroupCards();
+    return true;
   }
 
   async function loadToolWarehouseSummary() {
@@ -4057,6 +4074,17 @@ function App() {
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter, mustPickObject, canReadOperations]);
 
+  // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
+  useEffect(() => {
+    if (!token) return;
+    for (const r of receiptRequests) {
+      if (!r.objectLimitTemplateId) continue;
+      if (!expandedReceiptIds[r.id]) continue;
+      if (limitSuggestions[r.id]) continue;
+      void loadLimitSuggestions(r.id);
+    }
+  }, [token, receiptRequests, expandedReceiptIds]);
+
   useEffect(() => {
     if (!token || activeTab !== "stocks" || mustPickObject) {
       return;
@@ -4071,15 +4099,6 @@ function App() {
     }
     void loadDashboardSummary();
   }, [token, canDashboard, me, dashboardWarehouseId]);
-
-  useEffect(() => {
-    if (!token || activeTab !== "matching") {
-      return;
-    }
-    void loadCatalogData().catch(() => undefined);
-    void loadMatchQueue();
-    void loadMaterialMergeHistory();
-  }, [token, activeTab]);
 
   useEffect(() => {
     if (!token || activeTab !== "audit" || !canReadAudit) {
@@ -4196,11 +4215,11 @@ function App() {
       visibleTabs.add("tools");
       visibleTabs.add("qr");
     }
-    if (canMaterialMatch) visibleTabs.add("matching");
     if (canReadLimits) visibleTabs.add("limits");
     if (canMaterialReport) visibleTabs.add("materialReport");
     visibleTabs.add("camp");
     if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
+    if (canReadNotifications) visibleTabs.add("notifications");
     visibleTabs.add("feedback");
     visibleTabs.add("reports");
     if (canReadAudit) visibleTabs.add("audit");
@@ -4221,7 +4240,6 @@ function App() {
     canWriteCatalog,
     canReadDocuments,
     canReadTools,
-    canMaterialMatch,
     canReadLimits,
     canReadIntegrations,
     canReadNotifications,
@@ -4565,6 +4583,8 @@ function App() {
       void loadCatalogData();
       void loadTools();
       void loadToolWarehouseSummary();
+      void loadToolCategories();
+      void loadToolGroupCards();
     }
   }, [
     token,
@@ -4575,7 +4595,8 @@ function App() {
     toolsPage,
     toolsPageSize,
     objectSectionFilter,
-    toolListWarehouseId
+    toolListWarehouseId,
+    toolDrilledCard?.key
   ]);
 
   useEffect(() => {
@@ -4955,15 +4976,38 @@ function App() {
               <span className="navIcon">▪</span>Материальный отчёт
             </button>
           )}
-          {canMaterialMatch && (
-            <button className={`navBtn ${activeTab === "matching" ? "active" : ""}`} onClick={() => setActiveTab("matching")}>
-              <span className="navIcon">◇</span>Сопоставление
-            </button>
-          )}
-
           <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
           <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка</button>
           {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
+          {canReadNotifications && (
+            <button
+              className={`navBtn ${activeTab === "notifications" ? "active" : ""}`}
+              type="button"
+              onClick={() => setActiveTab("notifications")}
+            >
+              <span className="navIcon">🔔</span>Уведомления
+              {unreadNotificationCount > 0 ? (
+                <span
+                  className="navBadgeMuted"
+                  title="Непрочитанные уведомления"
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 11,
+                    lineHeight: "18px",
+                    minWidth: 18,
+                    padding: "0 5px",
+                    borderRadius: 9,
+                    background: "var(--accent, #2563eb)",
+                    color: "#fff",
+                    display: "inline-block",
+                    fontWeight: 700
+                  }}
+                >
+                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                </span>
+              ) : null}
+            </button>
+          )}
 
           <p className="navSectionTitle">Сервис</p>
           {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
@@ -5340,17 +5384,6 @@ function App() {
                       <span className="homeInsightLabel">ТТН не закрыты</span>
                       <span className="homeInsightValue">{dashboard.warehouse.waybillsOpen}</span>
                     </button>
-                    {canMaterialMatch ? (
-                      <button
-                        type="button"
-                        className="homeInsightCard"
-                        disabled={!canMaterialMatch}
-                        onClick={() => setActiveTab("matching")}
-                      >
-                        <span className="homeInsightLabel">Очередь сопоставления</span>
-                        <span className="homeInsightValue">{dashboard.warehouse.matchQueuePending}</span>
-                      </button>
-                    ) : null}
                     <button
                       type="button"
                       className="homeInsightCard"
@@ -5820,151 +5853,6 @@ function App() {
             </div>
           </div>
         )}
-      {canMaterialMatch && activeTab === "matching" && (
-        <div className="card">
-          <h2>Сопоставление с канонической номенклатурой</h2>
-          <p className="muted">
-            Проверка строки из УПД/накладной: точное имя, SKU, синонимы и нечёткое совпадение. При низкой уверенности
-            запись попадает в очередь (ТЗ: material_match_queue).
-          </p>
-          <div className="form grid2">
-            <label>
-              Сырое название
-              <input value={matchRaw} onChange={(e) => setMatchRaw(e.target.value)} />
-            </label>
-            <label>
-              Артикул / SKU (необязательно)
-              <input value={matchArticle} onChange={(e) => setMatchArticle(e.target.value)} />
-            </label>
-          </div>
-          <div className="toolbar">
-            <button type="button" onClick={() => void runMaterialMatch(false)}>
-              Проверить совпадение
-            </button>
-            <button type="button" onClick={() => void runMaterialMatch(true)}>
-              В очередь сопоставления
-            </button>
-          </div>
-          {matchMessage && <p className="error">{matchMessage}</p>}
-          {matchTryResult && (
-            <pre className="plainList" style={{ whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(matchTryResult, null, 2)}
-            </pre>
-          )}
-
-          <h3>Очередь (ожидают решения)</h3>
-          <div className="toolbar">
-            <label>
-              Материал для привязки
-              <select value={resolveMaterialId} onChange={(e) => setResolveMaterialId(e.target.value)}>
-                <option value="">— выберите —</option>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Уверенность</th>
-                <th>Подсказка</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {matchQueue.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.rawName}</td>
-                  <td>{row.confidence != null ? row.confidence.toFixed(2) : "—"}</td>
-                  <td>{row.suggestedMaterial?.name || "—"}</td>
-                  <td>
-                    <button type="button" disabled={!canMaterialMatch} onClick={() => void resolveMatchQueue(row.id)}>
-                      Привязать
-                    </button>{" "}
-                    <button type="button" disabled={!canMaterialMatch} onClick={() => void rejectMatchQueue(row.id)}>
-                      Отклонить
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!matchQueue.length && <p className="muted">Очередь пуста.</p>}
-
-          <h3 style={{ marginTop: 18 }}>Объединение дублей материалов</h3>
-          <p className="muted">
-            Переносит ссылки, остатки и лимиты с исходного материала на целевой. Исходный материал помечается как
-            объединенный и скрывается из рабочих списков.
-          </p>
-          <div className="form grid2">
-            <label>
-              Исходный (дубль)
-              <select value={mergeSourceMaterialId} onChange={(e) => setMergeSourceMaterialId(e.target.value)}>
-                <option value="">— выберите —</option>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} {m.sku ? `(${m.sku})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Целевой (канон)
-              <select value={mergeTargetMaterialId} onChange={(e) => setMergeTargetMaterialId(e.target.value)}>
-                <option value="">— выберите —</option>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} {m.sku ? `(${m.sku})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Причина (необязательно)
-              <input
-                value={mergeReason}
-                onChange={(e) => setMergeReason(e.target.value)}
-                placeholder="Напр. дубль после импорта УПД"
-              />
-            </label>
-          </div>
-          <div className="toolbar">
-            <button type="button" disabled={!canMaterialMatch} onClick={() => void mergeMaterials()}>
-              Объединить материалы
-            </button>
-          </div>
-
-          <h3 style={{ marginTop: 18 }}>История объединений</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Из</th>
-                <th>В</th>
-                <th>Причина</th>
-                <th>Кто</th>
-              </tr>
-            </thead>
-            <tbody>
-              {materialMergeHistory.map((row) => (
-                <tr key={row.id}>
-                  <td>{new Date(row.createdAt).toLocaleString()}</td>
-                  <td>{row.sourceMaterial?.name || row.sourceMaterialId}</td>
-                  <td>{row.targetMaterial?.name || row.targetMaterialId}</td>
-                  <td>{row.reason || "—"}</td>
-                  <td>{row.actor?.fullName || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!materialMergeHistory.length && <p className="muted">Объединений пока нет.</p>}
-        </div>
-      )}
-
       {activeTab === "warehouse" && (
         <div className="card stockPanel">
           <div className="stockPanelHead">
@@ -6093,197 +5981,133 @@ function App() {
           )}
           {loadingStocks && <p>Загрузка остатков...</p>}
           {stocksError && <p className="error">{stocksError}</p>}
-          {!loadingStocks && !stocksError && (
-            <table className="desktopTable">
-              <thead>
-                <tr>
-                  <th>Склад</th>
-                  <th>Материал</th>
-                  {showStockSku && <th>SKU</th>}
-                  <th>Ед.</th>
-                  <th>Вид</th>
-                  {showStockPrice && <th title="Из карточки номенклатуры">Цена за ед., ₽</th>}
-                  <th>Помещение</th>
-                  <th>Ячейка</th>
-                  <th>Остаток</th>
-                  {showStockReserve && <th>Резерв</th>}
-                  <th>Доступно</th>
-                </tr>
-              </thead>
-              <tbody>
-                {warehouseDisplayRows.map((row) => (
-                  <Fragment key={row.id}>
-                    <tr className={row.isLow ? "low" : ""}>
-                      <td>{safeName(row.warehouseName)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="ghostBtn"
-                          aria-expanded={expandedStockRowId === row.id}
-                          aria-label={expandedStockRowId === row.id ? "Свернуть детали по позиции" : "Показать детали и движения"}
-                          title={expandedStockRowId === row.id ? "Свернуть" : "Подробнее"}
-                          onClick={() => {
-                            void loadStockMovements();
-                            setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
-                          }}
-                        >
-                          {expandedStockRowId === row.id ? "▾" : "▸"}
-                        </button>{" "}
-                        {safeName(row.materialName)}
-                        {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ? (
-                          <span className="muted"> · фактических названий: {materialMappingsByTargetId.get(row.materialId)?.length}</span>
-                        ) : null}
-                      </td>
-                      {showStockSku && <td>{row.materialSku || "-"}</td>}
-                      <td>{row.materialUnit}</td>
-                      <td className="muted">
-                        {row.materialKind === "CONSUMABLE"
-                          ? "расходники"
-                          : row.materialKind === "WORKWEAR"
-                            ? "спецодежда"
-                            : "основной"}
-                      </td>
-                      {showStockPrice ? (
-                        <td>
-                          {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
-                            ? `${Number(row.unitPrice).toLocaleString("ru-RU", {
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 2
-                              })} ₽`
-                            : "—"}
-                        </td>
-                      ) : null}
-                      <td>{row.storageRoom || "—"}</td>
-                      <td>{row.storageCell || "—"}</td>
-                      <td>
-                        {(Number(row.quantity)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                      </td>
-                      {showStockReserve && <td>{(Number(row.reserved)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>}
-                      <td>{(Number(row.available)).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
-                    </tr>
-                    {expandedStockRowId === row.id && (
-                      <tr>
-                        <td colSpan={warehouseStockTableColSpan}>
-                          <div className="card">
-                            {((acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ||
-                              (materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0) ? (
-                              <>
-                                <h4>Фактические названия</h4>
-                                <p className="muted" style={{ margin: "0 0 8px" }}>
-                                  По каждой строке — как в УПД / сопоставлении; суммарный складской остаток см. в основной строке таблицы.
-                                </p>
-                                <ul className="plainList">
-                                  {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
-                                    <li key={`actual-q-${row.id}-${i}`}>
-                                      <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) —{" "}
-                                      принято {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                                    </li>
-                                  ))}
-                                  {(materialMappingsByTargetId.get(row.materialId) || [])
-                                    .filter((m) => {
-                                      // не дублируем то, что уже показано выше
-                                      const bucket = acceptedBySourceByTargetId.get(row.materialId);
-                                      return !bucket?.has(`${m.sourceName}|${m.sourceUnit || ""}`);
-                                    })
-                                    .map((m) => (
-                                      <li key={`actual-${row.id}-${m.id}`}>
-                                        {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
-                                        <span className="muted">пока не принято</span>
-                                      </li>
-                                    ))}
-                                </ul>
-                              </>
-                            ) : null}
-                            <h4>Движения по позиции (куски, возвраты, приходы)</h4>
-                            <table>
-                              <thead>
-                                <tr>
-                                  <th>Время</th>
-                                  <th>Тип</th>
-                                  <th>Кол-во</th>
-                                  <th>Источник</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
-                                  <tr key={`slice-${m.id}`}>
-                                    <td>{new Date(m.createdAt).toLocaleString()}</td>
-                                    <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
-                                    <td>{Number.isFinite(Number(m.quantity)) ? Math.round(Number(m.quantity)) : 0}</td>
-                                    <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+          {!loadingStocks && !stocksError && !warehouseDisplayRows.length && (
+            <EmptyState title="По текущим фильтрам ничего не нашлось" hint="Смените фильтры, либо снимите их." />
           )}
-          {!loadingStocks && !stocksError && (
-            <div className="mobileCards">
-              {warehouseDisplayRows.map((row) => (
-                <article key={`m-stock-${row.id}`} className={`mobileCard ${row.isLow ? "low" : ""}`}>
-                  <h4>{safeName(row.materialName)}</h4>
-                  <p><strong>Склад:</strong> {safeName(row.warehouseName)}</p>
-                  {showStockSku ? <p><strong>SKU:</strong> {row.materialSku || "-"}</p> : null}
-                  <p><strong>Ед.:</strong> {row.materialUnit}</p>
-                  <p>
-                    <strong>Вид:</strong>{" "}
-                    {row.materialKind === "CONSUMABLE"
-                      ? "расходники"
-                      : row.materialKind === "WORKWEAR"
-                        ? "спецодежда"
-                        : "основной"}
-                  </p>
-                  {showStockPrice && row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
-                    <p>
-                      <strong>Цена за ед.:</strong>{" "}
-                      {Number(row.unitPrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽
+          {!loadingStocks && !stocksError && warehouseDisplayRows.length > 0 && (
+            <div className="toolsCardGrid" style={{ marginTop: 10 }}>
+              {warehouseDisplayRows.map((row) => {
+                const isExpanded = expandedStockRowId === row.id;
+                const factsCount = materialMappingsByTargetId.get(row.materialId)?.length || 0;
+                const acceptedCount = acceptedBySourceByTargetId.get(row.materialId)?.size || 0;
+                const kindLabel =
+                  row.materialKind === "CONSUMABLE"
+                    ? "расходники"
+                    : row.materialKind === "WORKWEAR"
+                      ? "спецодежда"
+                      : "основной";
+                return (
+                  <article
+                    key={`stock-card-${row.id}`}
+                    className={`toolMiniCard${row.isLow ? " low" : ""}`}
+                    style={{
+                      borderLeft: row.isLow ? "4px solid #ef4444" : "4px solid #94a3b8"
+                    }}
+                  >
+                    <div className="toolMiniCardTop">
+                      <strong className="toolMiniCardTitle" title={row.materialName}>
+                        {safeName(row.materialName)}
+                      </strong>
+                      <span className={`badge ${row.isLow ? "bad" : "ok"}`}>
+                        {Number(row.available).toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {row.materialUnit}
+                      </span>
+                    </div>
+                    <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
+                      {safeName(row.warehouseName)} · {kindLabel}
+                      {row.materialSku ? ` · ${row.materialSku}` : ""}
                     </p>
-                  ) : null}
-                  <p><strong>Помещение:</strong> {row.storageRoom || "—"}</p>
-                  <p><strong>Ячейка:</strong> {row.storageCell || "—"}</p>
-                  <p><strong>Остаток:</strong> {Number(row.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</p>
-                  {showStockReserve ? (
-                    <p>
-                      <strong>Резерв:</strong> {Number(row.reserved).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                    </p>
-                  ) : null}
-                  <p>
-                    <strong>Доступно:</strong> {Number(row.available).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                  </p>
-                  {(materialMappingsByTargetId.get(row.materialId)?.length || 0) > 0 ||
-                  (acceptedBySourceByTargetId.get(row.materialId)?.size || 0) > 0 ? (
-                    <details>
-                      <summary>Фактические названия и принятые количества</summary>
-                      <ul className="plainList">
-                        {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
-                          <li key={`m-acc-${row.id}-${i}`}>
-                            <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) — принято{" "}
-                            {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                          </li>
-                        ))}
-                        {(materialMappingsByTargetId.get(row.materialId) || [])
-                          .filter((m) => {
-                            const bk = `${m.sourceName}|${m.sourceUnit || ""}`;
-                            return !acceptedBySourceByTargetId.get(row.materialId)?.has(bk);
-                          })
-                          .map((m) => (
-                            <li key={`m-map-${row.id}-${m.id}`}>
-                              {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
-                              <span className="muted">пока не принято</span>
-                            </li>
-                          ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                </article>
-              ))}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 12, marginTop: 6 }}>
+                      <span>
+                        <strong>Остаток:</strong> {Number(row.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                      </span>
+                      <span>
+                        <strong>Резерв:</strong> {Number(row.reserved).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                      </span>
+                      <span>
+                        <strong>Помещ.:</strong> {row.storageRoom || "—"}
+                      </span>
+                      <span>
+                        <strong>Ячейка:</strong> {row.storageCell || "—"}
+                      </span>
+                      {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                        <span style={{ gridColumn: "1 / -1" }}>
+                          <strong>Цена за ед.:</strong>{" "}
+                          {Number(row.unitPrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽
+                        </span>
+                      ) : null}
+                    </div>
+                    {(acceptedCount > 0 || factsCount > 0) ? (
+                      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                        фактических названий: {factsCount}
+                        {acceptedCount ? ` · принято под разными именами: ${acceptedCount}` : ""}
+                      </p>
+                    ) : null}
+                    <div className="toolbar" style={{ marginTop: 8, gap: 6 }}>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() => {
+                          void loadStockMovements();
+                          setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
+                        }}
+                      >
+                        {isExpanded ? "Свернуть" : "Подробнее"}
+                      </button>
+                    </div>
+                    {isExpanded && (
+                      <div className="card" style={{ marginTop: 8 }}>
+                        {(acceptedCount > 0 || factsCount > 0) ? (
+                          <>
+                            <h4 style={{ marginTop: 0 }}>Фактические названия</h4>
+                            <ul className="plainList">
+                              {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
+                                <li key={`actual-q-${row.id}-${i}`}>
+                                  <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) — принято{" "}
+                                  {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                                </li>
+                              ))}
+                              {(materialMappingsByTargetId.get(row.materialId) || [])
+                                .filter((m) => {
+                                  const bucket = acceptedBySourceByTargetId.get(row.materialId);
+                                  return !bucket?.has(`${m.sourceName}|${m.sourceUnit || ""}`);
+                                })
+                                .map((m) => (
+                                  <li key={`actual-${row.id}-${m.id}`}>
+                                    {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
+                                    <span className="muted">пока не принято</span>
+                                  </li>
+                                ))}
+                            </ul>
+                          </>
+                        ) : null}
+                        <h4>Движения по позиции</h4>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Время</th>
+                              <th>Тип</th>
+                              <th>Кол-во</th>
+                              <th>Источник</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
+                              <tr key={`slice-${m.id}`}>
+                                <td>{new Date(m.createdAt).toLocaleString()}</td>
+                                <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
+                                <td>
+                                  {Number.isFinite(Number(m.quantity)) ? Math.round(Number(m.quantity)) : 0}
+                                </td>
+                                <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
           {stockMovementsLoading && <p>Загрузка движений...</p>}
@@ -7141,6 +6965,21 @@ function App() {
         </div>
       )}
 
+      {activeTab === "notifications" && canReadNotifications && (
+        <NotificationsTabBlock
+          token={token}
+          notifications={notifications}
+          unreadNotificationCount={unreadNotificationCount}
+          loadNotifications={loadNotifications}
+          markNotificationsRead={markNotificationsRead}
+          openNotificationLinkedEntity={openNotificationLinkedEntity}
+          canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
+          users={users}
+          fetchWithSession={fetchWithSession}
+          apiUrl={API_URL}
+        />
+      )}
+
       {activeTab === "catalog" && (
         <div className="card">
           <h2>Справочники</h2>
@@ -7427,6 +7266,7 @@ function App() {
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
                                   <th>Принять сейчас</th>
+                                  {row.objectLimitTemplateId ? <th>Узел лимита</th> : null}
                                 </tr>
                               </thead>
                               <tbody>
@@ -7455,12 +7295,14 @@ function App() {
                                                 prev[row.id]?.[it.id]?.qty &&
                                                 Number(prev[row.id]?.[it.id]?.qty) > 0
                                                   ? prev[row.id][it.id]!.qty
-                                                  : String(remaining)
+                                                  : String(remaining),
+                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
                                             }
                                           : {
                                               newName: prev[row.id]?.[it.id]?.newName || "",
                                               newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                              qty: ""
+                                              qty: "",
+                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
                                             }
                                       }
                                     }));
@@ -7500,7 +7342,8 @@ function App() {
                                                 [it.id]: {
                                                   newName: e.target.value,
                                                   newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: prev[row.id]?.[it.id]?.qty || ""
+                                                  qty: prev[row.id]?.[it.id]?.qty || "",
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
                                                 }
                                               }
                                             }))
@@ -7520,7 +7363,8 @@ function App() {
                                                 [it.id]: {
                                                   newName: prev[row.id]?.[it.id]?.newName || "",
                                                   newUnit: e.target.value,
-                                                  qty: prev[row.id]?.[it.id]?.qty || ""
+                                                  qty: prev[row.id]?.[it.id]?.qty || "",
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
                                                 }
                                               }
                                             }))
@@ -7544,13 +7388,58 @@ function App() {
                                                 [it.id]: {
                                                   newName: prev[row.id]?.[it.id]?.newName || "",
                                                   newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: e.target.value
+                                                  qty: e.target.value,
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
                                                 }
                                               }
                                             }))
                                           }
                                         />
                                       </td>
+                                      {row.objectLimitTemplateId ? (
+                                        <td style={{ minWidth: 220 }}>
+                                          {(() => {
+                                            const suggestions =
+                                              limitSuggestions[row.id]?.items.find((x) => x.itemId === it.id)
+                                                ?.suggestions || [];
+                                            const value = draft.limitNodeId || "";
+                                            if (suggestions.length === 0) {
+                                              return (
+                                                <span className="muted" style={{ fontSize: 12 }}>
+                                                  узел не найден — приём пройдёт без привязки
+                                                </span>
+                                              );
+                                            }
+                                            return (
+                                              <select
+                                                value={value}
+                                                disabled={finished || fullyAccepted}
+                                                onChange={(e) =>
+                                                  setAcceptanceDrafts((prev) => ({
+                                                    ...prev,
+                                                    [row.id]: {
+                                                      ...prev[row.id],
+                                                      [it.id]: {
+                                                        newName: prev[row.id]?.[it.id]?.newName || "",
+                                                        newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                                        qty: prev[row.id]?.[it.id]?.qty || "",
+                                                        limitNodeId: e.target.value || undefined
+                                                      }
+                                                    }
+                                                  }))
+                                                }
+                                              >
+                                                <option value="">— без узла —</option>
+                                                {suggestions.map((s) => (
+                                                  <option key={s.id} value={s.id}>
+                                                    {s.path || s.title}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            );
+                                          })()}
+                                        </td>
+                                      ) : null}
                                     </tr>
                                   );
                                 })}
@@ -8409,13 +8298,56 @@ function App() {
                     arr.sort((a, b) => a.orderNo - b.orderNo);
                   }
                   const materialNodes = tpl.nodes.filter((n) => n.nodeType === "MATERIAL");
+                  // Агрегаты «план / приход / выдача» для каждого узла — рекурсивно по поддереву
+                  // (нужны полосы заполнения и на разделах, и на подразделах).
+                  type NodeAgg = { plan: number; arrived: number; issued: number };
+                  const aggByNodeId = new Map<string, NodeAgg>();
+                  const computeAgg = (nodeId: string): NodeAgg => {
+                    const cached = aggByNodeId.get(nodeId);
+                    if (cached) return cached;
+                    const node = tpl.nodes.find((x) => x.id === nodeId);
+                    if (!node) {
+                      const empty = { plan: 0, arrived: 0, issued: 0 };
+                      aggByNodeId.set(nodeId, empty);
+                      return empty;
+                    }
+                    if (node.nodeType === "MATERIAL") {
+                      const plan = Number(node.plannedQty || 0);
+                      const sm = node.materialId ? limitSupplyByMaterialId[node.materialId] : undefined;
+                      const arrived = sm?.arrivedQty ?? 0;
+                      const issued = node.materialId
+                        ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0)
+                        : 0;
+                      const a: NodeAgg = { plan, arrived, issued };
+                      aggByNodeId.set(nodeId, a);
+                      return a;
+                    }
+                    const kids = childrenByParent.get(nodeId) || [];
+                    const agg: NodeAgg = { plan: 0, arrived: 0, issued: 0 };
+                    for (const k of kids) {
+                      const inner = computeAgg(k.id);
+                      agg.plan += inner.plan;
+                      agg.arrived += inner.arrived;
+                      agg.issued += inner.issued;
+                    }
+                    aggByNodeId.set(nodeId, agg);
+                    return agg;
+                  };
+                  for (const n of tpl.nodes) computeAgg(n.id);
                   const totalPlanned = materialNodes.reduce((sum, n) => sum + Number(n.plannedQty || 0), 0);
                   const totalIssued = materialNodes.reduce(
                     (sum, n) => sum + (n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0),
                     0
                   );
+                  const totalArrived = materialNodes.reduce(
+                    (sum, n) =>
+                      sum + (n.materialId ? Number(limitSupplyByMaterialId[n.materialId]?.arrivedQty || 0) : 0),
+                    0
+                  );
                   const overallPct =
                     totalPlanned > 0 ? Math.min(100, Math.round((totalIssued / totalPlanned) * 100)) : 0;
+                  const overallArrivedPct =
+                    totalPlanned > 0 ? Math.min(100, Math.round((totalArrived / totalPlanned) * 100)) : 0;
                   const overCount = materialNodes.filter((n) => {
                     const planned = Number(n.plannedQty || 0);
                     const issued = n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0;
@@ -8440,18 +8372,26 @@ function App() {
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
                     const planned = Number(node.plannedQty || 0);
                     const issued = node.materialId ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0) : 0;
+                    const arrived = node.materialId
+                      ? Number(limitSupplyByMaterialId[node.materialId]?.arrivedQty || 0)
+                      : 0;
                     const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
+                    const pctArrived = planned > 0 ? Math.min(100, Math.round((arrived / planned) * 100)) : 0;
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
                     const directMaterials = children.filter((c) => c.nodeType === "MATERIAL");
                     const metricFmt = (n: number) =>
                       Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
+                    const agg = isGroup ? aggByNodeId.get(node.id) || { plan: 0, arrived: 0, issued: 0 } : null;
+                    const groupArrivedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.arrived / agg.plan) * 100)) : 0;
+                    const groupIssuedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.issued / agg.plan) * 100)) : 0;
+                    const groupOver = !!(agg && agg.plan > 0 && agg.issued > agg.plan);
 
                     return (
-                      <div key={node.id} style={{ marginLeft: depth * 16 }}>
+                      <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
                         {isGroup ? (
-                          <div className="limitGroupRow">
+                          <div className="limitGroupRow" style={{ gap: 6, padding: "4px 0" }}>
                             <button
                               type="button"
                               className="ghostBtn"
@@ -8596,10 +8536,39 @@ function App() {
                               <>
                                 <strong style={{ color: "#243656" }}>{node.title}</strong>
                                 {children.length ? <span className="muted">{children.length} поз.</span> : null}
+                                {agg && agg.plan > 0 ? (
+                                  <span className="muted" style={{ fontSize: 11 }}>
+                                    {metricFmt(agg.issued)} / {metricFmt(agg.plan)} · приход {groupArrivedPct}% · выдача {groupIssuedPct}%
+                                  </span>
+                                ) : null}
                               </>
                             )}
                           </div>
-                        ) : (
+                        ) : null}
+                        {isGroup && agg && agg.plan > 0 ? (
+                          <div style={{ margin: "2px 0 4px", paddingLeft: 36 }}>
+                            <div className="progressWrap" style={{ height: 5, marginBottom: 2 }}>
+                              <div
+                                className="progressBar"
+                                style={{
+                                  width: `${groupArrivedPct}%`,
+                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
+                                  opacity: agg.arrived > 0 ? 1 : 0.2
+                                }}
+                              />
+                            </div>
+                            <div className="progressWrap" style={{ height: 5 }}>
+                              <div
+                                className={`progressBar ${groupOver ? "bad" : ""}`}
+                                style={{
+                                  width: `${groupIssuedPct}%`,
+                                  ...(groupOver ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+                        {!isGroup ? (
                           <div className={`limitMaterialRow ${isOver ? "low" : ""}`}>
                             {limitEditMode ? (() => {
                               const draft = limitNodeDrafts[node.id] || {};
@@ -8751,14 +8720,30 @@ function App() {
                                 <span className={`badge ${isOver ? "bad" : "ok"}`}>{qtyText}</span>
                               </div>
                             )}
-                            <div className="progressWrap" style={{ width: "100%" }}>
-                              <div className={`progressBar ${isOver ? "bad" : ""}`} style={{ width: `${pct}%` }} />
+                            <div className="progressWrap" style={{ height: 5, marginBottom: 2, width: "100%" }}>
+                              <div
+                                className="progressBar"
+                                style={{
+                                  width: `${pctArrived}%`,
+                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
+                                  opacity: arrived > 0 ? 1 : 0.2
+                                }}
+                              />
+                            </div>
+                            <div className="progressWrap" style={{ height: 5, width: "100%" }}>
+                              <div
+                                className={`progressBar ${isOver ? "bad" : ""}`}
+                                style={{
+                                  width: `${pct}%`,
+                                  ...(isOver ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
+                                }}
+                              />
                             </div>
                           </div>
-                        )}
+                        ) : null}
 
                         {isGroup && isExpanded && directMaterials.length > 0 ? (
-                          <div style={{ marginLeft: (depth + 1) * 16, marginBottom: 10, overflowX: "auto" }}>
+                          <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
                             <table className="desktopTable" style={{ fontSize: 12 }}>
                               <thead>
                                 <tr>
@@ -8956,8 +8941,29 @@ function App() {
                           </div>
                         </div>
                       </div>
-                      <div className="progressWrap" style={{ width: "100%", margin: "10px 0 14px" }}>
-                        <div className={`progressBar ${overCount ? "bad" : ""}`} style={{ width: `${overallPct}%` }} />
+                      <div style={{ width: "100%", margin: "8px 0 10px" }}>
+                        <div className="muted" style={{ fontSize: 10, marginBottom: 2 }}>
+                          приход {overallArrivedPct}% · выдача {overallPct}%
+                        </div>
+                        <div className="progressWrap" style={{ height: 6, marginBottom: 3 }}>
+                          <div
+                            className="progressBar"
+                            style={{
+                              width: `${overallArrivedPct}%`,
+                              background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
+                              opacity: totalArrived > 0 ? 1 : 0.25
+                            }}
+                          />
+                        </div>
+                        <div className="progressWrap" style={{ height: 6 }}>
+                          <div
+                            className={`progressBar ${overCount ? "bad" : ""}`}
+                            style={{
+                              width: `${overallPct}%`,
+                              ...(overCount ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
+                            }}
+                          />
+                        </div>
                       </div>
                       <div className="plainList limitTree">
                         {roots.map((r) => renderNode(r, 0))}
@@ -10350,12 +10356,76 @@ function App() {
             <div>
               <h2 style={{ margin: 0 }}>Инструменты</h2>
               <p className="muted" style={{ margin: "6px 0 0", maxWidth: 720 }}>
-                Список карточек с фильтрами. Нажмите карточку, чтобы открыть действия и журнал. Ручное создание — отдельной кнопкой.
+                Сначала выберите категорию. Затем нажмите карточку инструмента, чтобы открыть действия и журнал. Ручное создание — отдельной кнопкой.
               </p>
             </div>
+            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+              {toolDrilledCard ? (
+                <button type="button" className="ghostBtn" onClick={() => setToolDrilledCard(null)}>
+                  ← Все категории
+                </button>
+              ) : null}
+              {hasPermission("tools.write") && (
+                <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(true)}>
+                  Управление категориями
+                </button>
+              )}
+            </div>
           </div>
-          <p className="muted">Текущий раздел: {objectSectionFilter}</p>
+          <p className="muted">Текущий раздел: {objectSectionFilter}{toolDrilledCard ? ` · Категория: ${toolDrilledCard.label}` : ""}</p>
 
+          {!toolDrilledCard && (
+            <>
+              {toolGroupCardsLoading ? (
+                <LoadingState text="Загрузка категорий..." />
+              ) : !toolGroupCards.length ? (
+                <EmptyState
+                  title="Категорий пока нет"
+                  hint="Импортируйте или добавьте инструменты — по их названиям соберутся карточки автоматически. Можно создать свою категорию."
+                />
+              ) : (
+                <div className="toolsCardGrid" style={{ marginTop: 8 }}>
+                  {toolGroupCards.map((card) => (
+                    <article
+                      key={`tcat-${card.key}`}
+                      className="toolMiniCard"
+                      style={{ cursor: "pointer", borderLeft: `4px solid ${card.type === "CATEGORY" ? "#2563eb" : "#94a3b8"}` }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setToolDrilledCard(card);
+                          setToolsPage(1);
+                        }
+                      }}
+                      onClick={() => {
+                        setToolDrilledCard(card);
+                        setToolsPage(1);
+                      }}
+                    >
+                      <div className="toolMiniCardTop">
+                        <strong className="toolMiniCardTitle">
+                          {card.icon ? `${card.icon} ` : ""}{card.label}
+                        </strong>
+                        <span className="badge ok">{card.count}</span>
+                      </div>
+                      <p className="muted toolMiniCardMeta">
+                        {card.type === "CATEGORY" ? "Категория (ручная)" : "Группа по названию"}
+                      </p>
+                      <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
+                        на складе {card.inStock} · выдано {card.issued}
+                        {card.inRepair ? ` · в ремонте ${card.inRepair}` : ""}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {toolDrilledCard && (
+          <>
           {toolWarehouseSummary.length > 1 && (
             <div className="card" style={{ marginBottom: 12, background: "rgba(148, 163, 184, 0.08)" }}>
               <h3 style={{ marginTop: 0 }}>Срез по объектам</h3>
@@ -10563,6 +10633,8 @@ function App() {
               </div>
             </>
           )}
+          </>
+          )}
 
           {toolManualModalOpen && hasPermission("tools.write") && (
             <div
@@ -10612,6 +10684,17 @@ function App() {
                     Ответственный при создании
                     <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
                   </label>
+                  <label>
+                    Категория (необязательно)
+                    <select value={toolCategoryDraft} onChange={(e) => setToolCategoryDraft(e.target.value)}>
+                      <option value="">— по умолчанию (группа по названию) —</option>
+                      {toolCategories.map((c) => (
+                        <option key={`tcat-opt-${c.id}`} value={c.id}>
+                          {c.icon ? `${c.icon} ` : ""}{c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
                   <button type="button" className="ghostBtn" onClick={() => setToolManualModalOpen(false)}>
@@ -10633,7 +10716,8 @@ function App() {
                           serialNumber: toolSerialNumber.trim() || undefined,
                           warehouseId: toolWarehouseId || undefined,
                           section: objectSectionFilter,
-                          responsible: toolResponsible.trim() || undefined
+                          responsible: toolResponsible.trim() || undefined,
+                          categoryId: toolCategoryDraft || undefined
                         })
                       });
                       if (!res.ok) {
@@ -10647,13 +10731,171 @@ function App() {
                       setToolManualModalOpen(false);
                       setToolInventoryNumber(`INV-${Date.now()}`);
                       setToolSerialNumber("");
+                      setToolCategoryDraft("");
                       await loadTools();
                       await loadToolWarehouseSummary();
+                      await loadToolGroupCards();
                     }}
                   >
                     Создать
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {toolCategoryAdminOpen && hasPermission("tools.write") && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 55,
+                padding: 16
+              }}
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setToolCategoryAdminOpen(false);
+              }}
+            >
+              <div
+                className="card"
+                style={{ maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <h3 style={{ marginTop: 0 }}>Категории инструментов</h3>
+                  <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                <p className="muted">
+                  По умолчанию инструменты группируются по полю «Название». Категории здесь — ручные группы поверх этого.
+                </p>
+                <div className="toolbar" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    placeholder="Новая категория (например, Шуруповёрты)"
+                    value={toolCategoryDraftName}
+                    onChange={(e) => setToolCategoryDraftName(e.target.value)}
+                    style={{ minWidth: 240 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!toolCategoryDraftName.trim()}
+                    onClick={async () => {
+                      const ok = await createToolCategory(toolCategoryDraftName);
+                      if (ok) setToolCategoryDraftName("");
+                    }}
+                  >
+                    Добавить
+                  </button>
+                </div>
+                <table className="desktopTable" style={{ marginTop: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th style={{ width: 80 }}>Икона</th>
+                      <th style={{ width: 80 }}>Порядок</th>
+                      <th style={{ width: 200 }}>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {toolCategories.map((c) => {
+                      const draft = toolCategoryEdit[c.id] || {
+                        name: c.name,
+                        icon: c.icon || "",
+                        order: String(c.order || 0)
+                      };
+                      const dirty =
+                        draft.name !== c.name ||
+                        draft.icon !== (c.icon || "") ||
+                        Number(draft.order || 0) !== Number(c.order || 0);
+                      return (
+                        <tr key={`tcat-row-${c.id}`}>
+                          <td>
+                            <input
+                              value={draft.name}
+                              onChange={(e) =>
+                                setToolCategoryEdit((prev) => ({
+                                  ...prev,
+                                  [c.id]: { ...draft, name: e.target.value }
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={draft.icon}
+                              placeholder="🔧"
+                              onChange={(e) =>
+                                setToolCategoryEdit((prev) => ({
+                                  ...prev,
+                                  [c.id]: { ...draft, icon: e.target.value }
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              value={draft.order}
+                              onChange={(e) =>
+                                setToolCategoryEdit((prev) => ({
+                                  ...prev,
+                                  [c.id]: { ...draft, order: e.target.value }
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              disabled={!dirty || !draft.name.trim()}
+                              onClick={async () => {
+                                const ok = await updateToolCategory(c.id, {
+                                  name: draft.name.trim(),
+                                  icon: draft.icon.trim() || null,
+                                  order: Number(draft.order || 0)
+                                });
+                                if (ok)
+                                  setToolCategoryEdit((prev) => {
+                                    const next = { ...prev };
+                                    delete next[c.id];
+                                    return next;
+                                  });
+                              }}
+                            >
+                              Сохранить
+                            </button>{" "}
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() => {
+                                if (!window.confirm(`Удалить категорию «${c.name}»? Инструменты останутся, но потеряют привязку.`))
+                                  return;
+                                void deleteToolCategory(c.id);
+                              }}
+                            >
+                              Удалить
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!toolCategories.length ? (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          Категорий пока нет.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

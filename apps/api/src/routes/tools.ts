@@ -24,7 +24,8 @@ const createToolSchema = z.object({
   section: z.enum(["SS", "EOM"]).default("SS"),
   projectId: z.string().optional(),
   responsible: z.string().optional(),
-  note: z.string().optional()
+  note: z.string().optional(),
+  categoryId: z.string().nullable().optional()
 });
 
 const updateToolSchema = z.object({
@@ -35,7 +36,14 @@ const updateToolSchema = z.object({
   projectId: z.string().nullable().optional(),
   responsible: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
-  status: z.nativeEnum(ToolStatus).optional()
+  status: z.nativeEnum(ToolStatus).optional(),
+  categoryId: z.string().nullable().optional()
+});
+
+const toolCategorySchema = z.object({
+  name: z.string().min(1).max(120),
+  icon: z.string().max(40).nullable().optional(),
+  order: z.coerce.number().int().min(0).max(9999).optional()
 });
 const toolActionSchema = z.object({
   action: z.enum(["ISSUE", "RETURN", "SEND_TO_REPAIR", "MARK_DAMAGED", "MARK_LOST", "MARK_DISPUTED", "WRITE_OFF"]),
@@ -60,6 +68,142 @@ function buildQrCode(inventoryNumber: string) {
 export const toolsRouter = Router();
 toolsRouter.use(requireAuth);
 toolsRouter.use(requirePermission("tools.read"));
+
+// --- Категории инструмента (карточный вид) ---
+toolsRouter.get("/categories", async (_req, res) => {
+  const cats = await prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] });
+  return res.json(cats);
+});
+
+toolsRouter.post("/categories", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = toolCategorySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  try {
+    const created = await prisma.toolCategory.create({
+      data: {
+        name: parsed.data.name.trim(),
+        icon: parsed.data.icon || null,
+        order: parsed.data.order ?? 0
+      }
+    });
+    return res.status(201).json(created);
+  } catch (error) {
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+toolsRouter.patch("/categories/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const parsed = toolCategorySchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  try {
+    const updated = await prisma.toolCategory.update({
+      where: { id },
+      data: {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name.trim() } : {}),
+        ...(parsed.data.icon !== undefined ? { icon: parsed.data.icon || null } : {}),
+        ...(parsed.data.order !== undefined ? { order: parsed.data.order } : {})
+      }
+    });
+    return res.json(updated);
+  } catch (error) {
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+toolsRouter.delete("/categories/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  try {
+    await prisma.tool.updateMany({ where: { categoryId: id }, data: { categoryId: null } });
+    await prisma.toolCategory.delete({ where: { id } });
+    return res.status(204).send();
+  } catch (error) {
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+// Группировка инструментов по категориям: если categoryId задан — берём категорию,
+// иначе группируем по полю name. Возвращаем массив «карточек».
+toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const scopedToolFilter = toolWhereFromScope(scope);
+  const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section: "SS" | "EOM" | undefined = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
+  try {
+    if (warehouseIdParam) assertWarehouseInScope(scope, warehouseIdParam);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const baseWhere: Prisma.ToolWhereInput = {
+    AND: [
+      scopedToolFilter,
+      {
+        ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+        ...(section ? { section } : {})
+      }
+    ]
+  };
+  const [tools, categories] = await Promise.all([
+    prisma.tool.findMany({
+      where: baseWhere,
+      select: { id: true, name: true, categoryId: true, status: true }
+    }),
+    prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] })
+  ]);
+  type Card = {
+    key: string;
+    label: string;
+    type: "CATEGORY" | "NAME";
+    categoryId: string | null;
+    icon: string | null;
+    count: number;
+    inStock: number;
+    issued: number;
+    inRepair: number;
+  };
+  const cardsByKey = new Map<string, Card>();
+  const ensureCard = (key: string, label: string, type: Card["type"], categoryId: string | null, icon: string | null) => {
+    let c = cardsByKey.get(key);
+    if (!c) {
+      c = { key, label, type, categoryId, icon, count: 0, inStock: 0, issued: 0, inRepair: 0 };
+      cardsByKey.set(key, c);
+    }
+    return c;
+  };
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  for (const cat of categories) {
+    ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
+  }
+  for (const t of tools) {
+    let card: Card;
+    if (t.categoryId && catById.has(t.categoryId)) {
+      const cat = catById.get(t.categoryId)!;
+      card = ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
+    } else {
+      const nameKey = (t.name || "Без названия").trim() || "Без названия";
+      card = ensureCard(`name:${nameKey.toLowerCase()}`, nameKey, "NAME", null, null);
+    }
+    card.count += 1;
+    if (t.status === ToolStatus.IN_STOCK) card.inStock += 1;
+    else if (t.status === ToolStatus.ISSUED) card.issued += 1;
+    else if (t.status === ToolStatus.IN_REPAIR) card.inRepair += 1;
+  }
+  const list = Array.from(cardsByKey.values()).sort((a, b) => {
+    if (a.type !== b.type) return a.type === "CATEGORY" ? -1 : 1;
+    return b.count - a.count || a.label.localeCompare(b.label, "ru");
+  });
+  return res.json(list);
+});
 
 toolsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
@@ -88,6 +232,8 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     typeof req.query.status === "string" && Object.values(ToolStatus).includes(req.query.status as ToolStatus)
       ? (req.query.status as ToolStatus)
       : undefined;
+  const categoryIdParam = typeof req.query.categoryId === "string" ? req.query.categoryId.trim() : "";
+  const nameGroupParam = typeof req.query.nameGroup === "string" ? req.query.nameGroup.trim() : "";
   const where = {
     AND: [
       toolWhereFromScope(scope),
@@ -95,6 +241,10 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
         ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
         ...(status ? { status } : {}),
         ...(section ? { section } : {}),
+        ...(categoryIdParam ? { categoryId: categoryIdParam } : {}),
+        ...(nameGroupParam
+          ? { categoryId: null, name: { equals: nameGroupParam, mode: "insensitive" as const } }
+          : {}),
         ...(q
           ? {
               OR: [

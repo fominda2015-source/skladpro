@@ -75,12 +75,6 @@ enum TransportWaybillStatus {
   CLOSED
 }
 
-enum MaterialMatchQueueStatus {
-  PENDING
-  RESOLVED
-  REJECTED
-}
-
 enum IntegrationJobStatus {
   PENDING
   RUNNING
@@ -155,8 +149,8 @@ model User {
   createdIssues    IssueRequest[]       @relation("IssueCreatedBy")
   approvedIssues   IssueRequest[]       @relation("IssueApprovedBy")
   documentLinks    DocumentLink[]
-  materialMerges   MaterialMergeHistory[]
   notifications    Notification[]       @relation("NotificationRecipient")
+  notificationRules NotificationRule[]  @relation("NotificationRuleOwner")
   conversationParticipants ConversationParticipant[]
   sentMessages     Message[]            @relation("MessageSender")
   limitTemplates   ObjectLimitTemplate[] @relation("LimitTemplateCreator")
@@ -263,8 +257,6 @@ model Material {
   category        String?
   mergedIntoId    String?
   synonyms        MaterialSynonym[]
-  matchSuggestions MaterialMatchQueue[] @relation("MatchSuggestion")
-  matchResolved    MaterialMatchQueue[] @relation("MatchResolved")
   stocks          Stock[]
   operationItems  OperationItem[]
   limitItems      ProjectLimitItem[]
@@ -277,27 +269,9 @@ model Material {
   transferRequestLines TransferRequestLine[]
   mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom      Material[]           @relation("MaterialMergedInto")
-  mergeHistoryFrom MaterialMergeHistory[] @relation("MergeSource")
-  mergeHistoryTo  MaterialMergeHistory[] @relation("MergeTarget")
   materialHolderWriteoffs MaterialHolderWriteoff[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
-}
-
-model MaterialMergeHistory {
-  id               String   @id @default(cuid())
-  sourceMaterialId String
-  targetMaterialId String
-  actorId          String?
-  reason           String?
-  payload          Json?
-  createdAt        DateTime @default(now())
-  sourceMaterial   Material @relation("MergeSource", fields: [sourceMaterialId], references: [id], onDelete: Restrict)
-  targetMaterial   Material @relation("MergeTarget", fields: [targetMaterialId], references: [id], onDelete: Restrict)
-  actor            User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
-
-  @@index([sourceMaterialId, createdAt])
-  @@index([targetMaterialId, createdAt])
 }
 
 model StockMovement {
@@ -493,27 +467,6 @@ model DocumentLink {
   @@index([entityType, entityId])
 }
 
-model MaterialMatchQueue {
-  id                  String                   @id @default(cuid())
-  rawName             String
-  normalizedName      String
-  unit                String?
-  article             String?
-  status              MaterialMatchQueueStatus @default(PENDING)
-  confidence          Float?
-  suggestedMaterialId String?
-  resolvedMaterialId  String?
-  source              String?
-  createdById         String?
-  suggestedMaterial   Material?                @relation("MatchSuggestion", fields: [suggestedMaterialId], references: [id], onDelete: SetNull)
-  resolvedMaterial    Material?                @relation("MatchResolved", fields: [resolvedMaterialId], references: [id], onDelete: SetNull)
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-
-  @@index([status])
-  @@index([normalizedName])
-}
-
 model AuditLog {
   id           String    @id @default(cuid())
   userId       String
@@ -564,11 +517,36 @@ model Notification {
   isRead      Boolean           @default(false)
   entityType  String?
   entityId    String?
+  eventCode   String?
   createdAt   DateTime          @default(now())
   readAt      DateTime?
   user        User              @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead, createdAt])
+  @@index([eventCode])
+}
+
+// Правило подписки: кому отправлять уведомления по конкретному событию.
+// Список eventCode задан в коде (см. apps/api/src/lib/notificationEvents.ts).
+model NotificationRule {
+  id        String   @id @default(cuid())
+  userId    String
+  eventCode String
+  enabled   Boolean  @default(true)
+  level     NotificationLevel?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("NotificationRuleOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventCode])
+  @@index([eventCode, enabled])
+}
+
+// Глобальные настройки приложения: универсальные пороги, флаги, и т.п.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model Tool {
@@ -583,12 +561,27 @@ model Tool {
   projectId       String?
   responsible     String?
   note            String?
+  categoryId      String?
   warehouse       Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  category        ToolCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   events          ToolEvent[]
   issueLines      IssueRequestToolItem[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
+
+  @@index([categoryId])
+  @@index([name])
+}
+
+model ToolCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  icon      String?
+  order     Int      @default(0)
+  tools     Tool[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ToolEvent {
@@ -816,6 +809,7 @@ model ObjectLimitNode {
   parent       ObjectLimitNode?  @relation("LimitNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
   children     ObjectLimitNode[] @relation("LimitNodeTree")
   material     Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  receiptRequestItems ReceiptRequestItem[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -869,14 +863,17 @@ model ReceiptRequestItem {
   sourceUnit       String         @default("шт")
   quantity         Decimal        @db.Decimal(14, 3)
   mappedMaterialId String?
+  limitNodeId      String?
   acceptedQty      Decimal?       @db.Decimal(14, 3)
   note             String?
   receiptRequest   ReceiptRequest @relation(fields: [receiptRequestId], references: [id], onDelete: Cascade)
   mappedMaterial   Material?      @relation(fields: [mappedMaterialId], references: [id], onDelete: SetNull)
+  limitNode        ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
   @@index([receiptRequestId])
+  @@index([limitNodeId])
 }
 
 model IssueRequestToolItem {
