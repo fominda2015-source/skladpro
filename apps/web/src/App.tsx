@@ -23,6 +23,7 @@ import {
 } from "./widgets/integrations/IntegrationJobsTable";
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
+import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -5859,6 +5860,13 @@ function App() {
                 Показано <strong>{warehouseDisplayRows.length}</strong> из {warehouseVisibleRows.length} строк в текущей выборке
               </p>
             </div>
+            <PeriodExportButton
+              section="stocks"
+              token={token}
+              apiUrl={API_URL}
+              fetchWithSession={fetchWithSession}
+              title="Склад в Excel"
+            />
           </div>
           <div className="toolbar stockToolbarPrimary">
             {manualStockMessage && !manualStockModalOpen ? (
@@ -7072,6 +7080,13 @@ function App() {
                   <span>Принято полностью</span>
                   <strong>{receiptRequests.filter((r) => r.status === "RECEIVED").length}</strong>
                 </div>
+                <PeriodExportButton
+                  section="receipts"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Поступления в Excel"
+                />
               </div>
             </div>
 
@@ -7655,6 +7670,13 @@ function App() {
                   <span>В списке истории</span>
                   <strong>{issuesTotal}</strong>
                 </div>
+                <PeriodExportButton
+                  section="issues"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Выдачи в Excel"
+                />
               </div>
             </div>
 
@@ -8190,7 +8212,7 @@ function App() {
               <h2>Лимиты</h2>
               <p className="muted">Импортированные лимиты по выбранному объекту и разделу. В обычном режиме показываем только структуру и выполнение.</p>
             </div>
-            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+            <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button type="button" className="ghostBtn" onClick={() => void loadLimitTemplates()}>
                 Обновить
               </button>
@@ -8202,6 +8224,13 @@ function App() {
               >
                 {limitEditMode ? "Завершить правку" : "Редактировать"}
               </button>
+              <PeriodExportButton
+                section="limits"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Лимиты в Excel"
+              />
             </div>
           </div>
 
@@ -8982,7 +9011,7 @@ function App() {
                 меняет складской остаток, только корректирует учёт «у ответственного» и фиксируется в журнале.
               </p>
             </div>
-            <div className="toolbar">
+            <div className="toolbar" style={{ flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="ghostBtn"
@@ -8991,6 +9020,13 @@ function App() {
               >
                 Обновить
               </button>
+              <PeriodExportButton
+                section="materialReport"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Мат. отчёт в Excel"
+              />
             </div>
           </div>
 
@@ -10236,31 +10272,50 @@ function App() {
                 onClick={async () => {
                   if (
                     !window.confirm(
-                      `Удалить пользователя «${adminDrawerUser.fullName}»? Это нельзя откатить. Не получится удалить автора заявок или креатора связей с файлами.`
+                      `Удалить пользователя «${adminDrawerUser.fullName}»? Это нельзя откатить.`
                     )
                   ) {
                     return;
                   }
                   if (!token) return;
                   setAdminMessage("");
-                  const res = await fetchWithSession(`${API_URL}/api/admin/users/${encodeURIComponent(selectedUserId)}`, {
-                    method: "DELETE",
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  const body = (await res.json().catch(() => ({}))) as {
+                  // Сначала пробуем «безопасное» удаление, если 409 — предлагаем force.
+                  const tryDelete = async (force: boolean) =>
+                    fetchWithSession(
+                      `${API_URL}/api/admin/users/${encodeURIComponent(selectedUserId)}${force ? "?force=1" : ""}`,
+                      { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+                    );
+                  let res = await tryDelete(false);
+                  let body = (await res.json().catch(() => ({}))) as {
                     error?: string;
                     issuesAsAuthor?: number;
                     documentLinks?: number;
+                    materialReportAsHolder?: number;
+                    materialReportAsActor?: number;
+                    transferRequests?: number;
                   };
                   if (res.status === 400 && body.error === "SELF_DELETE_FORBIDDEN") {
                     setAdminMessage("Нельзя удалить собственную учётную запись.");
                     return;
                   }
                   if (res.status === 409 && body.error === "USER_HAS_REFERENCES") {
-                    setAdminMessage(
-                      `Пользователь связан с данными: заявок как автор ${body.issuesAsAuthor ?? 0}, связей с файлами ${body.documentLinks ?? 0}. Сначала переоформи или удали их.`
-                    );
-                    return;
+                    const detail = [
+                      body.issuesAsAuthor ? `заявок как автор: ${body.issuesAsAuthor}` : "",
+                      body.documentLinks ? `связей с файлами: ${body.documentLinks}` : "",
+                      body.materialReportAsHolder ? `записей мат. отчёта (подотчёт): ${body.materialReportAsHolder}` : "",
+                      body.materialReportAsActor ? `записей мат. отчёта (исполнитель): ${body.materialReportAsActor}` : "",
+                      body.transferRequests ? `заявок на перемещение: ${body.transferRequests}` : ""
+                    ].filter(Boolean).join("; ");
+                    if (
+                      !window.confirm(
+                        `Пользователь связан с данными: ${detail}.\n\nПринудительно удалить? История (заявки/перемещения/мат.отчёт) будет перепривязана на ТЕКУЩЕГО админа.`
+                      )
+                    ) {
+                      setAdminMessage("Удаление отменено.");
+                      return;
+                    }
+                    res = await tryDelete(true);
+                    body = (await res.json().catch(() => ({}))) as typeof body;
                   }
                   if (!res.ok) {
                     setAdminMessage(body.error || "Не удалось удалить пользователя");
@@ -10354,7 +10409,7 @@ function App() {
                 Сначала выберите категорию. Затем нажмите карточку инструмента, чтобы открыть действия и журнал. Ручное создание — отдельной кнопкой.
               </p>
             </div>
-            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+            <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
               {toolDrilledCard ? (
                 <button type="button" className="ghostBtn" onClick={() => setToolDrilledCard(null)}>
                   ← Все категории
@@ -10365,6 +10420,13 @@ function App() {
                   Управление категориями
                 </button>
               )}
+              <PeriodExportButton
+                section="tools"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Инструменты в Excel"
+              />
             </div>
           </div>
           <p className="muted">Текущий раздел: {objectSectionFilter}{toolDrilledCard ? ` · Категория: ${toolDrilledCard.label}` : ""}</p>
@@ -11816,25 +11878,42 @@ function App() {
                         disabled={!token}
                         onClick={async () => {
                           const okCf = window.confirm(
-                            `Удалить объект «${obj.name}»? Это сработает только если нет связанных операций, движений остатков и заявок. Очисти историю или перенеси данные на другой объект.`
+                            `Удалить объект «${obj.name}»? Это нельзя откатить.`
                           );
                           if (!okCf || !token) return;
                           setAdminMessage("");
-                          const res = await fetchWithSession(`${API_URL}/api/admin/objects/${encodeURIComponent(obj.id)}`, {
-                            method: "DELETE",
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          const body = (await res.json().catch(() => ({}))) as {
+                          const tryDeleteObj = async (force: boolean) =>
+                            fetchWithSession(
+                              `${API_URL}/api/admin/objects/${encodeURIComponent(obj.id)}${force ? "?force=1" : ""}`,
+                              { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+                            );
+                          let res = await tryDeleteObj(false);
+                          let body = (await res.json().catch(() => ({}))) as {
                             error?: string;
                             operations?: number;
                             stockMovements?: number;
                             issues?: number;
+                            materialReport?: number;
+                            transfers?: number;
                           };
                           if (res.status === 409 && body.error === "WAREHOUSE_NOT_EMPTY") {
-                            setAdminMessage(
-                              `Нельзя удалить: операций ${body.operations ?? 0}, движений ${body.stockMovements ?? 0}, заявок ${body.issues ?? 0}.`
-                            );
-                            return;
+                            const detail = [
+                              body.operations ? `операций: ${body.operations}` : "",
+                              body.stockMovements ? `движений остатка: ${body.stockMovements}` : "",
+                              body.issues ? `заявок на выдачу: ${body.issues}` : "",
+                              body.materialReport ? `мат. отчёта: ${body.materialReport}` : "",
+                              body.transfers ? `перемещений: ${body.transfers}` : ""
+                            ].filter(Boolean).join("; ");
+                            if (
+                              !window.confirm(
+                                `На объекте есть данные: ${detail}.\n\nПринудительно удалить ВМЕСТЕ со всей историей? Это нельзя откатить.`
+                              )
+                            ) {
+                              setAdminMessage("Удаление отменено.");
+                              return;
+                            }
+                            res = await tryDeleteObj(true);
+                            body = (await res.json().catch(() => ({}))) as typeof body;
                           }
                           if (!res.ok) {
                             setAdminMessage(body.error || "Не удалось удалить объект");

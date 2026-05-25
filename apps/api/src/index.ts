@@ -26,6 +26,7 @@ import { announcementsRouter } from "./routes/announcements.js";
 import { feedbackRouter } from "./routes/feedback.js";
 import { transferRequestsRouter } from "./routes/transferRequests.js";
 import { reportsRouter } from "./routes/reports.js";
+import { exportsRouter } from "./routes/exports.js";
 import { receiptRequestsRouter } from "./routes/receiptRequests.js";
 import { campItemsRouter } from "./routes/campItems.js";
 import { warehousesRouter } from "./routes/warehouses.js";
@@ -97,6 +98,7 @@ app.use("/api/announcements", announcementsRouter);
 app.use("/api/transfer-requests", transferRequestsRouter);
 app.use("/api/feedback", feedbackRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/exports", exportsRouter);
 app.use("/api/contracts", contractsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

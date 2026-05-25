@@ -513,29 +513,78 @@ adminRouter.delete("/users/:id", async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: "User not found" });
   }
 
-  const [issueCount, docLinkCount] = await Promise.all([
-    prisma.issueRequest.count({ where: { requestedById: userId } }),
-    prisma.documentLink.count({ where: { createdById: userId } })
-  ]);
+  // `?force=1` или { "force": true } в теле — принудительно удалить даже при наличии истории.
+  // Без force — старое поведение: блокируем 409, если найдены ссылки.
+  const force =
+    String(req.query.force ?? "").toLowerCase() === "1" ||
+    String(req.query.force ?? "").toLowerCase() === "true" ||
+    (req.body && (req.body as { force?: unknown }).force === true);
 
-  if (issueCount > 0 || docLinkCount > 0) {
+  const [issueCount, docLinkCount, mhwHolderCount, mhwActorCount, transferCount] = await Promise.all([
+    prisma.issueRequest.count({ where: { requestedById: userId } }),
+    prisma.documentLink.count({ where: { createdById: userId } }),
+    prisma.materialHolderWriteoff.count({ where: { holderUserId: userId } }),
+    prisma.materialHolderWriteoff.count({ where: { actorUserId: userId } }),
+    prisma.transferRequest.count({ where: { requestedById: userId } })
+  ]);
+  const hasReferences =
+    issueCount > 0 || docLinkCount > 0 || mhwHolderCount > 0 || mhwActorCount > 0 || transferCount > 0;
+
+  if (hasReferences && !force) {
     return res.status(409).json({
       error: "USER_HAS_REFERENCES",
       issuesAsAuthor: issueCount,
-      documentLinks: docLinkCount
+      documentLinks: docLinkCount,
+      materialReportAsHolder: mhwHolderCount,
+      materialReportAsActor: mhwActorCount,
+      transferRequests: transferCount,
+      hint: "Передайте force=1 в query, чтобы переписать историю на текущего админа и удалить пользователя."
     });
   }
 
-  await prisma.user.delete({ where: { id: userId } });
+  // Force-режим: переписываем RESTRICT-связи на текущего администратора, чтобы FK не блокировали удаление.
+  // Cascade-связи (Notification, ChatMessage, Scope, NotificationRule, ActionLog и т.п.) почистятся автоматически.
+  await prisma.$transaction(async (tx) => {
+    if (force && hasReferences) {
+      const adminId = req.user!.userId;
+      await tx.issueRequest.updateMany({
+        where: { requestedById: userId },
+        data: { requestedById: adminId }
+      });
+      await tx.issueRequest.updateMany({
+        where: { approvedById: userId },
+        data: { approvedById: null }
+      });
+      await tx.materialHolderWriteoff.updateMany({
+        where: { holderUserId: userId },
+        data: { holderUserId: adminId }
+      });
+      await tx.materialHolderWriteoff.updateMany({
+        where: { actorUserId: userId },
+        data: { actorUserId: adminId }
+      });
+      await tx.transferRequest.updateMany({
+        where: { requestedById: userId },
+        data: { requestedById: adminId }
+      });
+      // DocumentLink.createdById может быть Restrict (зависит от схемы) — на всякий случай тоже переписываем.
+      await tx.documentLink.updateMany({
+        where: { createdById: userId },
+        data: { createdById: adminId }
+      }).catch(() => undefined);
+    }
+    await tx.user.delete({ where: { id: userId } });
+  });
+
   await recordAudit({
     userId: req.user!.userId,
     action: "USER_DELETE",
     entityType: "User",
     entityId: userId,
-    summary: `Удалён пользователь ${target.fullName || target.email}`,
-    before: { email: target.email, fullName: target.fullName }
+    summary: `Удалён пользователь ${target.fullName || target.email}${force && hasReferences ? " (force, история перепривязана)" : ""}`,
+    before: { email: target.email, fullName: target.fullName, force, hasReferences }
   });
-  return res.json({ ok: true });
+  return res.json({ ok: true, force, rewroteHistory: force && hasReferences });
 });
 
 adminRouter.delete("/objects/:id", async (req: AuthedRequest, res) => {
@@ -548,31 +597,80 @@ adminRouter.delete("/objects/:id", async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: "Object not found" });
   }
 
-  const [opCnt, mvCnt, issCnt] = await Promise.all([
+  // `?force=1` или { "force": true } — снести объект вместе со всеми связанными данными.
+  const force =
+    String(req.query.force ?? "").toLowerCase() === "1" ||
+    String(req.query.force ?? "").toLowerCase() === "true" ||
+    (req.body && (req.body as { force?: unknown }).force === true);
+
+  const [opCnt, mvCnt, issCnt, mhwCnt, transferFromCnt, transferToCnt] = await Promise.all([
     prisma.operation.count({ where: { warehouseId } }),
     prisma.stockMovement.count({ where: { warehouseId } }),
-    prisma.issueRequest.count({ where: { warehouseId } })
+    prisma.issueRequest.count({ where: { warehouseId } }),
+    prisma.materialHolderWriteoff.count({ where: { warehouseId } }),
+    prisma.transferRequest.count({ where: { fromWarehouseId: warehouseId } }),
+    prisma.transferRequest.count({ where: { toWarehouseId: warehouseId } })
   ]);
+  const hasData = opCnt + mvCnt + issCnt + mhwCnt + transferFromCnt + transferToCnt > 0;
 
-  if (opCnt > 0 || mvCnt > 0 || issCnt > 0) {
+  if (hasData && !force) {
     return res.status(409).json({
       error: "WAREHOUSE_NOT_EMPTY",
       operations: opCnt,
       stockMovements: mvCnt,
-      issues: issCnt
+      issues: issCnt,
+      materialReport: mhwCnt,
+      transfers: transferFromCnt + transferToCnt,
+      hint: "Передайте force=1 в query, чтобы удалить объект вместе со всеми его данными."
     });
   }
 
-  await prisma.warehouse.delete({ where: { id: warehouseId } });
+  // Force-режим: вычищаем RESTRICT-связи руками, остальное удалит cascade на стороне БД.
+  // Порядок важен: сначала листья, потом владельцы.
+  await prisma.$transaction(
+    async (tx) => {
+      if (force && hasData) {
+        // Сбросим связанные waybills (ссылаются на operation/issueRequest косвенно — pre-cleanup на всякий случай).
+        await tx.transportWaybill.deleteMany({
+          where: {
+            OR: [
+              { fromWarehouseId: warehouseId },
+              { issueRequest: { warehouseId } },
+              { operation: { warehouseId } }
+            ]
+          }
+        });
+        // StockMovement (Restrict) → удалить.
+        await tx.stockMovement.deleteMany({ where: { warehouseId } });
+        // Operation (Restrict) — удалить (Operation сам cascade-удалит OperationItem/OperationDocument).
+        await tx.operation.deleteMany({ where: { warehouseId } });
+        // IssueRequest (Restrict) — удалить (cascade-удалит позиции и tool-связи).
+        await tx.issueRequest.deleteMany({ where: { warehouseId } });
+        // Material report (Restrict) — удалить.
+        await tx.materialHolderWriteoff.deleteMany({ where: { warehouseId } });
+        // Transfer requests — оба направления (FK Restrict).
+        await tx.transferRequest.deleteMany({
+          where: { OR: [{ fromWarehouseId: warehouseId }, { toWarehouseId: warehouseId }] }
+        });
+      }
+      // На всякий случай отвяжем активный склад у пользователей (User.activeWarehouseId Restrict).
+      await tx.user.updateMany({
+        where: { activeWarehouseId: warehouseId },
+        data: { activeWarehouseId: null, activeSection: null }
+      });
+      await tx.warehouse.delete({ where: { id: warehouseId } });
+    },
+    { timeout: 60_000 }
+  );
   await recordAudit({
     userId: req.user!.userId,
     action: "OBJECT_DELETE",
     entityType: "Warehouse",
     entityId: warehouseId,
-    summary: `Удалён объект (склад) ${wh.name}`,
-    before: { name: wh.name }
+    summary: `Удалён объект (склад) ${wh.name}${force && hasData ? " (force, удалены связанные данные)" : ""}`,
+    before: { name: wh.name, force, hasData }
   });
-  return res.json({ ok: true });
+  return res.json({ ok: true, force, wipedData: force && hasData });
 });
 
 adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
