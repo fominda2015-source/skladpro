@@ -4547,6 +4547,8 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "warehouse") {
+      // Нужно для кнопки «Добавить материал вручную»: модал использует список складов и каталог материалов.
+      void loadCatalogData().catch(() => undefined);
       void loadLimitTemplates();
       void loadMaterialMappings();
       void loadReceiptRequests().catch(() => undefined);
@@ -5886,12 +5888,16 @@ function App() {
             <button type="button" onClick={() => void loadStockMovements()}>
               Журнал движений
             </button>
-            {canWriteOperations && warehouses.length > 0 ? (
+            {canWriteOperations ? (
               <button
                 type="button"
                 className="secondaryBtn"
                 onClick={() => {
                   setManualStockMessage("");
+                  // Если справочники не дотянулись (например, медленный мобильный канал) — подгружаем перед открытием модала.
+                  if (!warehouses.length) {
+                    void loadCatalogData().catch(() => undefined);
+                  }
                   setManualStockModalOpen(true);
                 }}
               >
@@ -12744,7 +12750,7 @@ function App() {
         </div>
       )}
 
-      {manualStockModalOpen && canWriteOperations && warehouses.length > 0 && (
+      {manualStockModalOpen && canWriteOperations && (
         <div
           role="dialog"
           aria-modal="true"
@@ -12776,12 +12782,27 @@ function App() {
               {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}) без сопоставления и без объединения с другими позициями.
             </p>
             {manualStockMessage ? <p className="muted">{manualStockMessage}</p> : null}
+            {!warehouses.length ? (
+              <p className="muted" style={{ color: "#b54708" }}>
+                Список складов ещё загружается или пуст. Подождите секунду и попробуйте снова, либо{" "}
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  style={{ padding: "2px 8px" }}
+                  onClick={() => void loadCatalogData()}
+                >
+                  обновить справочники
+                </button>
+                .
+              </p>
+            ) : null}
             <div className="form grid2">
               <label>
                 Объект (склад)
                 <select
                   value={(manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id) ?? ""}
                   onChange={(e) => setManualStockWarehouseOverride(e.target.value)}
+                  disabled={!warehouses.length}
                 >
                   {warehouses.map((w) => (
                     <option key={`man-wh-${w.id}`} value={w.id}>
