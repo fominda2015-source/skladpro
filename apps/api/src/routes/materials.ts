@@ -1,9 +1,17 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { handlePrismaError } from "../lib/errors.js";
-import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { MaterialKind } from "@prisma/client";
+
+function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ error: "Только администратор может выполнять эту операцию" });
+  }
+  return next();
+}
 
 const createMaterialSchema = z.object({
   name: z.string().min(2),
@@ -173,3 +181,100 @@ materialsRouter.delete(
     return res.status(204).send();
   }
 );
+
+// Удаление материала из каталога. Только для администратора.
+// Без `?force=1`: блокируется 409, если на материал ссылаются документы (остатки, заявки, операции и т.п.).
+// С `?force=1`: в одной транзакции зачищаются все ссылки (Stock/StockMovement/Operation* через каскады
+// невозможно — поля Restrict), а сама позиция удаляется только после очистки этих записей.
+materialsRouter.delete("/:id", requireAdmin, async (req: AuthedRequest, res) => {
+  const materialId = String(req.params.id);
+  const material = await prisma.material.findUnique({
+    where: { id: materialId },
+    select: { id: true, name: true }
+  });
+  if (!material) return res.status(404).json({ error: "Material not found" });
+
+  const force =
+    String(req.query.force ?? "").toLowerCase() === "1" ||
+    String(req.query.force ?? "").toLowerCase() === "true" ||
+    (req.body && (req.body as { force?: unknown }).force === true);
+
+  // Соберём счётчики связей, которые блокируют удаление (поля с onDelete: Restrict).
+  const [
+    stockMovementCount,
+    operationItemCount,
+    issueItemCount,
+    receiptItemCount,
+    projectLimitItemCount,
+    transferLineCount,
+    holderWriteoffCount,
+    mappingCount
+  ] = await Promise.all([
+    prisma.stockMovement.count({ where: { materialId } }),
+    prisma.operationItem.count({ where: { materialId } }),
+    prisma.issueRequestItem.count({ where: { materialId } }),
+    prisma.receiptRequestItem.count({ where: { mappedMaterialId: materialId } }),
+    prisma.projectLimitItem.count({ where: { materialId } }),
+    prisma.transferRequestLine.count({ where: { materialId } }),
+    prisma.materialHolderWriteoff.count({ where: { materialId } }),
+    prisma.materialMappingLibrary.count({ where: { targetMaterialId: materialId } })
+  ]);
+
+  const totalRefs =
+    stockMovementCount +
+    operationItemCount +
+    issueItemCount +
+    receiptItemCount +
+    projectLimitItemCount +
+    transferLineCount +
+    holderWriteoffCount +
+    mappingCount;
+
+  if (totalRefs > 0 && !force) {
+    return res.status(409).json({
+      error: "MATERIAL_HAS_REFERENCES",
+      stockMovements: stockMovementCount,
+      operationItems: operationItemCount,
+      issueItems: issueItemCount,
+      receiptItems: receiptItemCount,
+      limitItems: projectLimitItemCount,
+      transferLines: transferLineCount,
+      materialReport: holderWriteoffCount,
+      mappings: mappingCount,
+      hint: "Передайте force=1, чтобы удалить вместе со всей историей по позиции."
+    });
+  }
+
+  await prisma.$transaction(
+    async (tx) => {
+      if (force && totalRefs > 0) {
+        // Зачищаем Restrict-связи. Cascade (Stock, MaterialSynonym) удалятся сами при .delete().
+        await tx.stockMovement.deleteMany({ where: { materialId } });
+        await tx.operationItem.deleteMany({ where: { materialId } });
+        await tx.issueRequestItem.deleteMany({ where: { materialId } });
+        await tx.receiptRequestItem.updateMany({
+          where: { mappedMaterialId: materialId },
+          data: { mappedMaterialId: null }
+        });
+        await tx.projectLimitItem.deleteMany({ where: { materialId } });
+        await tx.transferRequestLine.deleteMany({ where: { materialId } });
+        await tx.materialHolderWriteoff.deleteMany({ where: { materialId } });
+        await tx.materialMappingLibrary.deleteMany({ where: { targetMaterialId: materialId } });
+        // ObjectLimitNode.materialId — SetNull, очистим явно для чистоты данных.
+        await tx.objectLimitNode.updateMany({
+          where: { materialId },
+          data: { materialId: null }
+        });
+        // Material.mergedIntoId — если кто-то указывал этот материал как «слитый в», обнулим.
+        await tx.material.updateMany({
+          where: { mergedIntoId: materialId },
+          data: { mergedIntoId: null }
+        });
+      }
+      await tx.material.delete({ where: { id: materialId } });
+    },
+    { timeout: 60_000 }
+  );
+
+  return res.json({ ok: true, force, wiped: force && totalRefs > 0, name: material.name });
+});

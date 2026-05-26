@@ -1985,22 +1985,41 @@ function App() {
     if (!window.confirm("Отменить это действие? Изменения будут откачены.")) return;
     setAuditReverting((prev) => ({ ...prev, [id]: true }));
     try {
-      const r = await fetchWithSession(`${API_URL}/api/audit/${id}/revert`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!r.ok) {
-        let detail = "";
-        try {
-          const body = await r.json();
-          detail = typeof body?.error === "string" ? body.error : "";
-        } catch {
-          // ignore
+      const tryRevert = async (force: boolean) =>
+        fetchWithSession(`${API_URL}/api/audit/${id}/revert${force ? "?force=1" : ""}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      let r = await tryRevert(false);
+      let body: { error?: string; canForce?: boolean; softRevert?: boolean } = {};
+      try {
+        body = await r.json();
+      } catch {
+        // ignore
+      }
+      // Если бэкенд предлагает «принудительно» закрыть запись (canForce=true) — спросим у админа.
+      if (!r.ok && body.canForce) {
+        if (
+          window.confirm(
+            `${body.error || "Откат не поддерживается"}.\n\nПометить запись лога «отменённой» вручную? Бизнес-эффект (остатки/статусы) при этом не изменится.`
+          )
+        ) {
+          r = await tryRevert(true);
+          try {
+            body = await r.json();
+          } catch {
+            body = {};
+          }
+        } else {
+          setAuditMessage("Отмена не выполнена.");
+          return;
         }
-        setAuditMessage(detail || `Не удалось отменить действие (HTTP ${r.status})`);
+      }
+      if (!r.ok) {
+        setAuditMessage(body.error || `Не удалось отменить действие (HTTP ${r.status})`);
         return;
       }
-      setAuditMessage("Действие отменено");
+      setAuditMessage(body.softRevert ? "Запись помечена отменённой вручную." : "Действие отменено");
       await loadAuditLogs();
     } finally {
       setAuditReverting((prev) => {
@@ -6051,7 +6070,7 @@ function App() {
                         {acceptedCount ? ` · принято под разными именами: ${acceptedCount}` : ""}
                       </p>
                     ) : null}
-                    <div className="toolbar" style={{ marginTop: 8, gap: 6 }}>
+                    <div className="toolbar" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
                       <button
                         type="button"
                         className="ghostBtn"
@@ -6062,6 +6081,78 @@ function App() {
                       >
                         {isExpanded ? "Свернуть" : "Подробнее"}
                       </button>
+                      {me?.role === "ADMIN" ? (
+                        <button
+                          type="button"
+                          className="dangerBtn"
+                          onClick={async () => {
+                            if (!token) return;
+                            if (
+                              !window.confirm(
+                                `Удалить материал «${row.materialName}» из каталога? Это действие только для админа.`
+                              )
+                            ) {
+                              return;
+                            }
+                            const tryDel = async (force: boolean) =>
+                              fetchWithSession(
+                                `${API_URL}/api/materials/${encodeURIComponent(row.materialId)}${force ? "?force=1" : ""}`,
+                                { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+                              );
+                            let r = await tryDel(false);
+                            let body: {
+                              error?: string;
+                              stockMovements?: number;
+                              operationItems?: number;
+                              issueItems?: number;
+                              receiptItems?: number;
+                              limitItems?: number;
+                              transferLines?: number;
+                              materialReport?: number;
+                              mappings?: number;
+                            } = {};
+                            try {
+                              body = await r.json();
+                            } catch {
+                              // ignore
+                            }
+                            if (r.status === 409 && body.error === "MATERIAL_HAS_REFERENCES") {
+                              const detail = [
+                                body.stockMovements ? `движений: ${body.stockMovements}` : "",
+                                body.operationItems ? `позиций операций: ${body.operationItems}` : "",
+                                body.issueItems ? `позиций выдач: ${body.issueItems}` : "",
+                                body.receiptItems ? `позиций приходов: ${body.receiptItems}` : "",
+                                body.limitItems ? `строк лимитов: ${body.limitItems}` : "",
+                                body.transferLines ? `строк перемещений: ${body.transferLines}` : "",
+                                body.materialReport ? `мат. отчёта: ${body.materialReport}` : "",
+                                body.mappings ? `сопоставлений: ${body.mappings}` : ""
+                              ]
+                                .filter(Boolean)
+                                .join("; ");
+                              if (
+                                !window.confirm(
+                                  `Материал связан с историей (${detail}).\n\nПринудительно удалить ВМЕСТЕ со всеми ссылками? Это нельзя откатить.`
+                                )
+                              ) {
+                                return;
+                              }
+                              r = await tryDel(true);
+                              try {
+                                body = await r.json();
+                              } catch {
+                                body = {};
+                              }
+                            }
+                            if (!r.ok) {
+                              window.alert(body.error || `Не удалось удалить материал (HTTP ${r.status})`);
+                              return;
+                            }
+                            await loadStocks(q);
+                          }}
+                        >
+                          Удалить материал
+                        </button>
+                      ) : null}
                     </div>
                     {isExpanded && (
                       <div className="card" style={{ marginTop: 8 }}>
@@ -6887,6 +6978,17 @@ function App() {
                             onClick={() => void revertAuditLog(row.id)}
                           >
                             {busy ? "Отменяем…" : "Отменить"}
+                          </button>
+                        ) : me?.role === "ADMIN" ? (
+                          // Для админа разрешаем «мягкую» отмену любых записей — бэкенд решит, можно ли откатить бизнес-логически.
+                          <button
+                            type="button"
+                            className="ghostBtn"
+                            disabled={busy}
+                            onClick={() => void revertAuditLog(row.id)}
+                            title="Закрыть запись лога вручную (без бизнес-отката, если он невозможен)"
+                          >
+                            {busy ? "Отменяем…" : "Отменить (admin)"}
                           </button>
                         ) : (
                           <span className="muted" title="Откат этого типа действия пока не поддерживается">

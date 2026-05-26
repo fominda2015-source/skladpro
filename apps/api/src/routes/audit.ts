@@ -98,7 +98,9 @@ function formatRow(row: any) {
     ...row,
     actionLabel: ACTION_LABELS[row.action] || row.action,
     entityLabel: ENTITY_LABELS[row.entityType] || row.entityType,
-    revertable: isRevertable(row.action) && !row.reverted
+    revertable: isRevertable(row.action) && !row.reverted,
+    // Любую запись лога админ может пометить отменённой вручную (мягкий revert).
+    canSoftRevert: !row.reverted
   };
 }
 
@@ -736,24 +738,55 @@ auditRouter.post(
     });
     if (!log) return res.status(404).json({ error: "Запись не найдена" });
     if (log.reverted) return res.status(400).json({ error: "Эта запись уже отменена" });
-    if (!isRevertable(log.action)) {
-      return res.status(400).json({ error: "Откат этого типа действия не поддерживается" });
+
+    // `?force=1` — мягкая отмена: помечаем запись лога как отменённую без бизнес-эффекта.
+    // Используется админом для логов, которые нельзя откатить автоматически, либо когда
+    // бизнес-откат отказался (например, остаток уже использован). Доступно только ADMIN.
+    const isAdmin = req.user?.role === "ADMIN";
+    const force =
+      isAdmin &&
+      (String(req.query.force ?? "").toLowerCase() === "1" ||
+        String(req.query.force ?? "").toLowerCase() === "true" ||
+        (req.body && (req.body as { force?: unknown }).force === true));
+
+    const supportsHard = isRevertable(log.action);
+    if (!supportsHard && !force) {
+      return res
+        .status(400)
+        .json({ error: "Откат этого типа действия не поддерживается", canForce: isAdmin });
     }
-    const result = await revertAction(log);
-    if (!result.ok) return res.status(400).json({ error: result.error });
+
+    let softNote: string | undefined;
+    if (supportsHard) {
+      const result = await revertAction(log);
+      if (!result.ok) {
+        if (!force) return res.status(400).json({ error: result.error, canForce: isAdmin });
+        softNote = `Бизнес-откат отказался («${result.error}»), запись закрыта вручную админом.`;
+      }
+    } else {
+      softNote = "Действие отмечено отменённым вручную админом (без бизнес-отката).";
+    }
 
     const updated = await prisma.auditLog.update({
       where: { id },
       data: {
         reverted: true,
         revertedAt: new Date(),
-        revertedById: req.user!.userId
+        revertedById: req.user!.userId,
+        ...(softNote
+          ? {
+              afterData: {
+                ...((log.afterData as Record<string, unknown> | null) ?? {}),
+                __softRevert: { note: softNote, at: new Date().toISOString() }
+              }
+            }
+          : {})
       },
       include: {
         user: { select: { id: true, email: true, fullName: true } },
         revertedBy: { select: { id: true, email: true, fullName: true } }
       }
     });
-    return res.json(formatRow(updated));
+    return res.json({ ...formatRow(updated), softRevert: Boolean(softNote), softNote });
   }
 );
