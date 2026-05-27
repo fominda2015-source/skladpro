@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Express } from "express";
 import { Router } from "express";
 import multer from "multer";
-import { IssueRequestDomain, IssueRequestStatus } from "@prisma/client";
+import { IssueRequestDomain, IssueRequestStatus, MaterialKind } from "@prisma/client";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { config } from "../config.js";
@@ -34,8 +34,193 @@ const DOMAINS: IssueRequestDomain[] = [
   IssueRequestDomain.WORKWEAR
 ];
 
-function composeKey(holderUserId: string, materialId: string) {
-  return `${holderUserId}:${materialId}`;
+const REPORT_MATERIAL_KINDS: MaterialKind[] = [
+  MaterialKind.MATERIAL,
+  MaterialKind.CONSUMABLE,
+  MaterialKind.WORKWEAR
+];
+
+export const STOREKEEPER_HOLDER_KEY = "__storekeeper__";
+export const STOREKEEPER_HOLDER_NAME = "Кладовщик";
+
+function composeKey(holderKey: string, materialId: string) {
+  return `${holderKey}:${materialId}`;
+}
+
+function normalizePersonKey(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function personHolderKey(name: string) {
+  return `person:${normalizePersonKey(name)}`;
+}
+
+function issueResponsibleLabel(issue: {
+  responsibleName: string | null;
+  actualRecipientName: string | null;
+}): string | null {
+  const responsible = (issue.responsibleName || "").trim();
+  if (responsible) return responsible;
+  const recipient = (issue.actualRecipientName || "").trim();
+  return recipient || null;
+}
+
+type BalanceLine = { materialId: string; name: string; unit: string; quantity: number };
+
+type BalanceMaps = {
+  qtyByKey: Map<string, number>;
+  holderLabels: Map<string, string>;
+  materialMeta: Map<string, { name: string; unit: string }>;
+};
+
+async function buildMaterialReportBalances(
+  warehouseId: string,
+  section: string
+): Promise<BalanceMaps> {
+  const qtyByKey = new Map<string, number>();
+  const holderLabels = new Map<string, string>([[STOREKEEPER_HOLDER_KEY, STOREKEEPER_HOLDER_NAME]]);
+  const materialMeta = new Map<string, { name: string; unit: string }>();
+
+  const rememberMaterial = (id: string, name: string, unit: string) => {
+    if (!materialMeta.has(id)) materialMeta.set(id, { name, unit });
+  };
+
+  const addQty = (holderKey: string, holderName: string, materialId: string, delta: number) => {
+    if (delta <= 0) return;
+    if (!holderLabels.has(holderKey)) holderLabels.set(holderKey, holderName);
+    const key = composeKey(holderKey, materialId);
+    qtyByKey.set(key, (qtyByKey.get(key) || 0) + delta);
+  };
+
+  const stocks = await prisma.stock.findMany({
+    where: {
+      warehouseId,
+      section: section as "SS" | "EOM",
+      material: { kind: { in: REPORT_MATERIAL_KINDS } }
+    },
+    select: {
+      materialId: true,
+      quantity: true,
+      material: { select: { id: true, name: true, unit: true } }
+    }
+  });
+
+  for (const row of stocks) {
+    const qty = Number(row.quantity) || 0;
+    if (qty < 1e-9) continue;
+    rememberMaterial(row.material.id, row.material.name, row.material.unit);
+    addQty(STOREKEEPER_HOLDER_KEY, STOREKEEPER_HOLDER_NAME, row.materialId, qty);
+  }
+
+  const issues = await prisma.issueRequest.findMany({
+    where: {
+      warehouseId,
+      section: section as "SS" | "EOM",
+      status: IssueRequestStatus.ISSUED,
+      domain: { in: DOMAINS },
+      items: { some: {} }
+    },
+    select: {
+      responsibleName: true,
+      actualRecipientName: true,
+      approvedById: true,
+      requestedById: true,
+      items: {
+        select: {
+          materialId: true,
+          quantity: true,
+          material: { select: { id: true, name: true, unit: true } }
+        }
+      }
+    }
+  });
+
+  const fallbackUserIds = new Set<string>();
+  for (const iss of issues) {
+    if (!issueResponsibleLabel(iss)) {
+      const uid = iss.approvedById || iss.requestedById;
+      if (uid) fallbackUserIds.add(uid);
+    }
+  }
+
+  const fallbackUsers =
+    fallbackUserIds.size > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: [...fallbackUserIds] } },
+          select: { id: true, fullName: true, email: true }
+        })
+      : [];
+  const userLabel = new Map(fallbackUsers.map((u) => [u.id, u.fullName || u.email || u.id]));
+
+  for (const iss of issues) {
+    let holderName = issueResponsibleLabel(iss);
+    let holderKey: string;
+    if (holderName) {
+      holderKey = personHolderKey(holderName);
+    } else {
+      const uid = iss.approvedById || iss.requestedById;
+      if (!uid) continue;
+      holderKey = `user:${uid}`;
+      holderName = userLabel.get(uid) || uid;
+    }
+
+    for (const it of iss.items) {
+      const qty = Number(it.quantity) || 0;
+      if (qty <= 0) continue;
+      rememberMaterial(it.material.id, it.material.name, it.material.unit);
+      addQty(holderKey, holderName, it.materialId, qty);
+    }
+  }
+
+  const woRows = await prisma.materialHolderWriteoff.groupBy({
+    by: ["holderKey", "materialId"],
+    where: { warehouseId, section: section as "SS" | "EOM" },
+    _sum: { quantity: true }
+  });
+
+  for (const w of woRows) {
+    const key = composeKey(w.holderKey, w.materialId);
+    const cur = qtyByKey.get(key) || 0;
+    const sub = Number(w._sum.quantity || 0) || 0;
+    qtyByKey.set(key, Math.max(0, cur - sub));
+  }
+
+  return { qtyByKey, holderLabels, materialMeta };
+}
+
+function balancesToPayload(maps: BalanceMaps) {
+  const { qtyByKey, holderLabels, materialMeta } = maps;
+  type Line = BalanceLine;
+  const holders = new Map<string, Line[]>();
+
+  for (const [key, qty] of qtyByKey.entries()) {
+    if (qty < 1e-9) continue;
+    const sep = key.lastIndexOf(":");
+    const holderKey = key.slice(0, sep);
+    const materialId = key.slice(sep + 1);
+    const meta = materialMeta.get(materialId) || {
+      name: materialId.slice(0, 8),
+      unit: "шт"
+    };
+    const arr = holders.get(holderKey) || [];
+    arr.push({ materialId, name: meta.name, unit: meta.unit, quantity: qty });
+    holders.set(holderKey, arr);
+  }
+
+  const payload = [...holders.entries()].map(([holderKey, lines]) => ({
+    holderKey,
+    holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
+    holderName: holderLabels.get(holderKey) || holderKey,
+    lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
+  }));
+
+  payload.sort((a, b) => {
+    if (a.holderKey === STOREKEEPER_HOLDER_KEY) return -1;
+    if (b.holderKey === STOREKEEPER_HOLDER_KEY) return 1;
+    return String(a.holderName).localeCompare(String(b.holderName), "ru");
+  });
+
+  return payload;
 }
 
 export const materialReportRouter = Router();
@@ -59,103 +244,8 @@ materialReportRouter.get("/balances", requirePermission("materialReport.read"), 
     throw e;
   }
 
-  const issues = await prisma.issueRequest.findMany({
-    where: {
-      warehouseId,
-      section,
-      status: IssueRequestStatus.ISSUED,
-      domain: { in: DOMAINS },
-      items: { some: {} }
-    },
-    select: {
-      approvedById: true,
-      requestedById: true,
-      items: {
-        select: {
-          materialId: true,
-          quantity: true,
-          material: { select: { id: true, name: true, unit: true } }
-        }
-      }
-    }
-  });
-
-  const issuedByKey = new Map<string, number>();
-  for (const iss of issues) {
-    const holder = iss.approvedById || iss.requestedById;
-    if (!holder) continue;
-    for (const it of iss.items) {
-      const qty = Number(it.quantity) || 0;
-      if (qty <= 0) continue;
-      const key = composeKey(holder, it.materialId);
-      issuedByKey.set(key, (issuedByKey.get(key) || 0) + qty);
-    }
-  }
-
-  const woRows = await prisma.materialHolderWriteoff.groupBy({
-    by: ["holderUserId", "materialId"],
-    where: { warehouseId, section },
-    _sum: { quantity: true }
-  });
-
-  for (const w of woRows) {
-    const key = composeKey(w.holderUserId, w.materialId);
-    const cur = issuedByKey.get(key) || 0;
-    const sub = Number(w._sum.quantity || 0) || 0;
-    issuedByKey.set(key, Math.max(0, cur - sub));
-  }
-
-  const materialIds = new Set<string>();
-  for (const [key, qty] of issuedByKey.entries()) {
-    if (qty < 1e-9) continue;
-    materialIds.add(key.split(":")[1]!);
-  }
-
-  const materials =
-    materialIds.size > 0
-      ? await prisma.material.findMany({
-          where: { id: { in: [...materialIds] } },
-          select: { id: true, name: true, unit: true }
-        })
-      : [];
-  const materialMeta = new Map(materials.map((m) => [m.id, { name: m.name, unit: m.unit }]));
-
-  const holderIds = new Set<string>();
-  for (const key of issuedByKey.keys()) {
-    if ((issuedByKey.get(key) || 0) < 1e-9) continue;
-    holderIds.add(key.split(":")[0]!);
-  }
-
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...holderIds] } },
-    select: { id: true, fullName: true, email: true }
-  });
-  const userLabel = new Map(users.map((u) => [u.id, u.fullName || u.email]));
-
-  type Line = { materialId: string; name: string; unit: string; quantity: number };
-  const holders = new Map<string, Line[]>();
-
-  for (const [key, qty] of issuedByKey.entries()) {
-    if (qty < 1e-9) continue;
-    const [holderUserId, materialId] = key.split(":") as [string, string];
-    const meta = materialMeta.get(materialId) || {
-      name: materialId.slice(0, 8),
-      unit: "шт"
-    };
-    const arr = holders.get(holderUserId) || [];
-    arr.push({ materialId, name: meta.name, unit: meta.unit, quantity: qty });
-    holders.set(holderUserId, arr);
-  }
-
-  const payload = [...holders.entries()].map(([holderUserId, lines]) => ({
-    holderUserId,
-    holderName: userLabel.get(holderUserId) || holderUserId,
-    lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
-  }));
-
-  payload.sort((a, b) => String(a.holderName).localeCompare(String(b.holderName), "ru"));
-
-  return res.json(payload);
+  const maps = await buildMaterialReportBalances(warehouseId, section);
+  return res.json(balancesToPayload(maps));
 });
 
 materialReportRouter.get("/writeoffs/history", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {
@@ -208,7 +298,8 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
         createdAt: w.createdAt,
         quantity: Number(w.quantity),
         comment: w.comment,
-        holderName: w.holderUser.fullName || w.holderUser.email,
+        holderName:
+          w.holderName || w.holderUser?.fullName || w.holderUser?.email || w.holderKey,
         actorName: w.actorUser.fullName || w.actorUser.email,
         materialName: w.material.name,
         materialUnit: w.material.unit,
@@ -223,7 +314,8 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
 const writeOffSchema = z.object({
   warehouseId: z.string().min(1),
   section: z.enum(["SS", "EOM"]),
-  holderUserId: z.string().min(1),
+  holderKey: z.string().min(1).optional(),
+  holderUserId: z.string().min(1).optional(),
   materialId: z.string().min(1),
   quantity: z.number().positive(),
   comment: z.string().max(2000).optional()
@@ -253,39 +345,19 @@ materialReportRouter.post(
       throw e;
     }
 
-    const { warehouseId, section, holderUserId, materialId, quantity, comment } = parsed.data;
-    const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
-
-    const issues = await prisma.issueRequest.findMany({
-      where: {
-        warehouseId,
-        section,
-        status: IssueRequestStatus.ISSUED,
-        domain: { in: DOMAINS },
-        items: { some: { materialId } }
-      },
-      select: {
-        approvedById: true,
-        requestedById: true,
-        items: { where: { materialId }, select: { quantity: true } }
-      }
-    });
-
-    let issued = 0;
-    for (const iss of issues) {
-      const holder = iss.approvedById || iss.requestedById;
-      if (holder !== holderUserId) continue;
-      for (const it of iss.items) {
-        issued += Number(it.quantity) || 0;
-      }
+    const holderKey =
+      parsed.data.holderKey?.trim() ||
+      (parsed.data.holderUserId ? `user:${parsed.data.holderUserId}` : "");
+    if (!holderKey) {
+      return res.status(400).json({ error: "holderKey обязателен" });
     }
 
-    const writtenOff = await prisma.materialHolderWriteoff.aggregate({
-      where: { warehouseId, section, holderUserId, materialId },
-      _sum: { quantity: true }
-    });
-    const already = Number(writtenOff._sum.quantity || 0) || 0;
-    const balance = Math.max(0, issued - already);
+    const { warehouseId, section, materialId, quantity, comment } = parsed.data;
+    const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+
+    const maps = await buildMaterialReportBalances(warehouseId, section);
+    const holderName = maps.holderLabels.get(holderKey) || holderKey;
+    const balance = maps.qtyByKey.get(composeKey(holderKey, materialId)) || 0;
 
     if (quantity > balance + 1e-6) {
       return res.status(409).json({
@@ -294,12 +366,16 @@ materialReportRouter.post(
       });
     }
 
+    const legacyHolderUserId = holderKey.startsWith("user:") ? holderKey.slice(5) : null;
+
     const writeoff = await prisma.$transaction(async (tx) => {
       const row = await tx.materialHolderWriteoff.create({
         data: {
           warehouseId,
           section,
-          holderUserId,
+          holderKey,
+          holderName,
+          holderUserId: legacyHolderUserId,
           materialId,
           quantity,
           actorUserId: req.user!.userId,
@@ -345,8 +421,8 @@ materialReportRouter.post(
       action: "MATERIAL_HOLDER_WRITEOFF",
       entityType: "MaterialHolderWriteoff",
       entityId: writeoff.id,
-      summary: `Списание с ответственного · материал ${materialId} · ${quantity}`,
-      after: { warehouseId, section, holderUserId, materialId, quantity }
+      summary: `Списание с ответственного · ${holderName} · материал ${materialId} · ${quantity}`,
+      after: { warehouseId, section, holderKey, holderName, materialId, quantity }
     });
 
     return res.status(201).json({ id: writeoff.id });

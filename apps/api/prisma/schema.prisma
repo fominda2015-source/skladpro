@@ -741,7 +741,10 @@ model MaterialHolderWriteoff {
   id             String        @id @default(cuid())
   warehouseId    String
   section        ObjectSection @default(SS)
-  holderUserId   String
+  /** Ключ держателя: __storekeeper__ | person:… | user:… (legacy) */
+  holderKey      String
+  holderName     String
+  holderUserId   String?
   materialId     String
   quantity       Decimal       @db.Decimal(14, 3)
   actorUserId    String
@@ -750,10 +753,11 @@ model MaterialHolderWriteoff {
   createdAt      DateTime      @default(now())
 
   warehouse  Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
-  holderUser User      @relation("MaterialWriteoffHolder", fields: [holderUserId], references: [id], onDelete: Restrict)
+  holderUser User?     @relation("MaterialWriteoffHolder", fields: [holderUserId], references: [id], onDelete: Restrict)
   actorUser  User      @relation("MaterialWriteoffActor", fields: [actorUserId], references: [id], onDelete: Restrict)
   material   Material  @relation(fields: [materialId], references: [id], onDelete: Restrict)
 
+  @@index([warehouseId, section, holderKey])
   @@index([warehouseId, section, holderUserId])
   @@index([createdAt])
 }

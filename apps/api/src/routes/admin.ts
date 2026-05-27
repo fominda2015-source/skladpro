@@ -555,10 +555,26 @@ adminRouter.delete("/users/:id", async (req: AuthedRequest, res) => {
         where: { approvedById: userId },
         data: { approvedById: null }
       });
-      await tx.materialHolderWriteoff.updateMany({
+      const mhwAsHolder = await tx.materialHolderWriteoff.findMany({
         where: { holderUserId: userId },
-        data: { holderUserId: adminId }
+        select: { id: true, holderKey: true }
       });
+      const adminUser = await tx.user.findUnique({
+        where: { id: adminId },
+        select: { fullName: true, email: true }
+      });
+      const adminLabel = adminUser?.fullName || adminUser?.email || adminId;
+      for (const row of mhwAsHolder) {
+        const nextKey = row.holderKey.startsWith("user:") ? `user:${adminId}` : row.holderKey;
+        await tx.materialHolderWriteoff.update({
+          where: { id: row.id },
+          data: {
+            holderUserId: adminId,
+            holderKey: nextKey,
+            holderName: adminLabel
+          }
+        });
+      }
       await tx.materialHolderWriteoff.updateMany({
         where: { actorUserId: userId },
         data: { actorUserId: adminId }

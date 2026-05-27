@@ -153,7 +153,8 @@ type LimitSupplyMetricRow = {
   stockQty: number;
 };
 type MaterialReportHolderRow = {
-  holderUserId: string;
+  holderKey: string;
+  holderUserId?: string | null;
   holderName: string;
   lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
 };
@@ -827,7 +828,7 @@ function App() {
   const [materialWriteoffHistory, setMaterialWriteoffHistory] = useState<MaterialWriteoffHistoryApiRow[]>([]);
   const [materialReportMessage, setMaterialReportMessage] = useState("");
   const [materialWriteoffModal, setMaterialWriteoffModal] = useState<
-    null | { holderUserId: string; materialId: string; name: string; unit: string; maxQty: number }
+    null | { holderKey: string; materialId: string; name: string; unit: string; maxQty: number }
   >(null);
   const [materialWriteoffQty, setMaterialWriteoffQty] = useState("");
   const [materialWriteoffComment, setMaterialWriteoffComment] = useState("");
@@ -2876,7 +2877,7 @@ function App() {
     const payload: Record<string, unknown> = {
       warehouseId: activeObjectId,
       section: objectSectionFilter,
-      holderUserId: materialWriteoffModal.holderUserId,
+      holderKey: materialWriteoffModal.holderKey,
       materialId: materialWriteoffModal.materialId,
       quantity: qty
     };
@@ -9666,16 +9667,18 @@ function App() {
                 <LoadingState text="Загрузка материального отчёта..." />
               ) : materialBalances.length === 0 ? (
                 <EmptyState
-                  title="Нет позиций на ответственных"
-                  hint="После выдачи заявок материалы/расходники/спецодежда попадут в этот раздел для выбранного объекта и раздела (СС/ЭОМ)."
+                  title="Нет позиций в отчёте"
+                  hint="На складе остатки у кладовщика; после выдачи с указанием ответственного материал переходит к нему (СС/ЭОМ)."
                 />
               ) : (
                 <div className="plainList" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {materialBalances.map((h) => (
-                    <div key={h.holderUserId} className="card" style={{ margin: 0, padding: "12px 14px" }}>
+                    <div key={h.holderKey} className="card" style={{ margin: 0, padding: "12px 14px" }}>
                       <div className="rightCardHeader" style={{ marginBottom: 8 }}>
                         <strong>{safeName(h.holderName)}</strong>
-                        <span className="muted">{h.lines.length} поз.</span>
+                        <span className="muted">
+                          {h.holderKey === "__storekeeper__" ? "склад" : "ответственный"} · {h.lines.length} поз.
+                        </span>
                       </div>
                       <div style={{ overflowX: "auto" }}>
                         <table className="desktopTable" style={{ fontSize: 13 }}>
@@ -9689,7 +9692,7 @@ function App() {
                           </thead>
                           <tbody>
                             {h.lines.map((ln) => (
-                              <tr key={`${h.holderUserId}-${ln.materialId}`}>
+                              <tr key={`${h.holderKey}-${ln.materialId}`}>
                                 <td>{safeName(ln.name)}</td>
                                 <td>{ln.unit}</td>
                                 <td>{Number(ln.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
@@ -9704,7 +9707,7 @@ function App() {
                                         setMaterialWriteoffFile(null);
                                         setMaterialReportMessage("");
                                         setMaterialWriteoffModal({
-                                          holderUserId: h.holderUserId,
+                                          holderKey: h.holderKey,
                                           materialId: ln.materialId,
                                           name: ln.name,
                                           unit: ln.unit,
