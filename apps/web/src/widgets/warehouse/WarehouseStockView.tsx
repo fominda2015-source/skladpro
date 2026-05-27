@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 export type WarehouseStockRow = {
   id: string;
@@ -147,19 +147,24 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [menuRowId, setMenuRowId] = useState<string | null>(null);
-  const headerMenuRef = useRef<HTMLDivElement | null>(null);
-  const rowMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!menuRowId) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (headerMenuRef.current?.contains(target)) return;
-      if (rowMenuRef.current?.contains(target)) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuRowId(null);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      if (el.closest(".whRowMenuWrap, .whOverflow")) return;
       setMenuRowId(null);
     };
-    document.addEventListener("click", onDoc);
-    return () => document.removeEventListener("click", onDoc);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [menuRowId]);
 
   const activeFilters =
@@ -195,7 +200,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
               + Добавить
             </button>
           ) : null}
-          <div className="whOverflow" ref={headerMenuRef}>
+          <div className="whOverflow">
             <button
               type="button"
               className="ghostBtn whBtnIcon"
@@ -373,7 +378,31 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                           <span className={`whAvailMobile ${row.isLow ? "bad" : "ok"}`}>
                             {fmtQty(Number(row.available))} {row.materialUnit}
                           </span>
-                          <strong className="whMatName" title={row.materialName}>
+                          <strong
+                            className={`whMatName${canOpenMaterialCard ? " whMatNameClickable" : ""}`}
+                            title={row.materialName}
+                            onClick={
+                              canOpenMaterialCard
+                                ? (e) => {
+                                    e.stopPropagation();
+                                    onOpenMaterialCard(row.materialId, row.warehouseId);
+                                  }
+                                : undefined
+                            }
+                            onKeyDown={
+                              canOpenMaterialCard
+                                ? (e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      onOpenMaterialCard(row.materialId, row.warehouseId);
+                                    }
+                                  }
+                                : undefined
+                            }
+                            role={canOpenMaterialCard ? "button" : undefined}
+                            tabIndex={canOpenMaterialCard ? 0 : undefined}
+                          >
                             {row.materialName}
                           </strong>
                           <span className="whMatMeta">
@@ -412,10 +441,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                         </td>
                       ) : null}
                       <td className="whColAct" onClick={(e) => e.stopPropagation()}>
-                        <div
-                          className="whRowMenuWrap"
-                          ref={menuRowId === row.id ? rowMenuRef : undefined}
-                        >
+                        <div className="whRowMenuWrap">
                           <button
                             type="button"
                             className="ghostBtn whBtnIcon"
@@ -438,7 +464,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                 type="button"
                                 className="whMenuItem"
                                 role="menuitem"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   onToggleExpand(row.id);
                                   setMenuRowId(null);
                                 }}
@@ -450,9 +477,10 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                   type="button"
                                   className="whMenuItem"
                                   role="menuitem"
-                                  onClick={() => {
-                                    onOpenMaterialCard(row.materialId, row.warehouseId);
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setMenuRowId(null);
+                                    onOpenMaterialCard(row.materialId, row.warehouseId);
                                   }}
                                 >
                                   Карточка материала
@@ -463,9 +491,10 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                   type="button"
                                   className="whMenuItem whMenuDanger"
                                   role="menuitem"
-                                  onClick={() => {
-                                    onDeleteMaterial(row.materialId, row.materialName);
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setMenuRowId(null);
+                                    onDeleteMaterial(row.materialId, row.materialName);
                                   }}
                                 >
                                   Удалить из каталога

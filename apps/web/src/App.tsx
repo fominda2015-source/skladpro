@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FormEvent } from "react";
 import {
   Bar,
@@ -13972,20 +13973,23 @@ function App() {
           ]}
         />
       ) : null}
-      {materialEditModal && token ? (
-        <MaterialCardModal
-          materialId={materialEditModal.materialId}
-          apiUrl={API_URL}
-          token={token}
-          fetchWithSession={fetchWithSession}
-          canWrite={canWriteMaterialCards}
-          onClose={() => setMaterialEditModal(null)}
-          onSaved={() => {
-            void loadCatalogData().catch(() => undefined);
-            void loadStocks(q);
-          }}
-        />
-      ) : null}
+      {materialEditModal && token
+        ? createPortal(
+            <MaterialCardModal
+              materialId={materialEditModal.materialId}
+              apiUrl={API_URL}
+              token={token}
+              fetchWithSession={fetchWithSession}
+              canWrite={canWriteMaterialCards}
+              onClose={() => setMaterialEditModal(null)}
+              onSaved={() => {
+                void loadCatalogData().catch(() => undefined);
+                void loadStocks(q);
+              }}
+            />,
+            document.body
+          )
+        : null}
       {requestMaterialsModal && token ? (
         requestMaterialsModal.kind === "issue" ? (
           <RequestMaterialsModal

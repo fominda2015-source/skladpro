@@ -88,11 +88,17 @@
   border-color: rgba(251, 146, 60, 0.7);
 }
 
-.warehouseMode button {
+/* Не перекрашивать все button — ломает меню ⋯ и модалки (белый текст на белом). */
+.warehouseMode .primaryBtn,
+.warehouseMode .secondaryBtn,
+.warehouseMode .dangerBtn {
   background: #ea580c;
+  color: #fff;
 }
 
-.warehouseMode button:hover {
+.warehouseMode .primaryBtn:hover,
+.warehouseMode .secondaryBtn:hover,
+.warehouseMode .dangerBtn:hover {
   background: #c2410c;
 }
 
@@ -3464,8 +3470,19 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 70;
+  z-index: 500;
   padding: 16px;
+}
+
+.requestMaterialsModalBackdrop .ghostBtn {
+  background: #f8fbff;
+  border: 1px solid #dbe1ec;
+  color: #3d4d6d;
+}
+
+.requestMaterialsModalBackdrop button:not(.ghostBtn) {
+  background: #2563eb;
+  color: #fff;
 }
 .requestMaterialsModalCard {
   max-width: 1100px;
@@ -3619,46 +3636,50 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: 40;
+  z-index: 200;
   min-width: 200px;
   padding: 6px;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  pointer-events: auto;
 }
 
-.whMenu button,
-.whMenuItem {
+button.whMenuItem,
+.whMenu button.whMenuItem {
+  -webkit-appearance: none;
+  appearance: none;
   display: block;
   width: 100%;
+  margin: 0;
   text-align: left;
   padding: 10px 12px;
   border: none;
   border-radius: 8px;
-  background: transparent !important;
-  color: #1e293b !important;
+  background: #fff !important;
+  color: #0f172a !important;
   font-size: 14px;
   font-weight: 500;
+  line-height: 1.35;
   cursor: pointer;
+  box-shadow: none;
 }
 
-.whMenu button:hover,
-.whMenuItem:hover {
+button.whMenuItem:hover,
+.whMenu button.whMenuItem:hover {
   background: #f1f5f9 !important;
   color: #0f172a !important;
 }
 
-.warehouseMode .whMenu button,
-.warehouseMode .whMenuItem,
-.warehouseMode .whMenu button:hover,
-.warehouseMode .whMenuItem:hover {
-  background: transparent !important;
-  color: #1e293b !important;
+.warehouseMode button.whMenuItem,
+.warehouseMode .whMenu button.whMenuItem {
+  background: #fff !important;
+  color: #0f172a !important;
 }
 
-.warehouseMode .whMenu button:hover,
-.warehouseMode .whMenuItem:hover {
+.warehouseMode button.whMenuItem:hover,
+.warehouseMode .whMenu button.whMenuItem:hover {
   background: #f1f5f9 !important;
   color: #0f172a !important;
 }
@@ -3874,6 +3895,18 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   font-weight: 600;
   line-height: 1.35;
   word-break: break-word;
+}
+
+.whMatNameClickable {
+  cursor: pointer;
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.whMatNameClickable:hover {
+  color: #1e40af;
 }
 
 .whMatMeta {
