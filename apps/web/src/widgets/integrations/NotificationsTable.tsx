@@ -13,10 +13,12 @@ export type NotificationRow = {
 
 export function NotificationsTable({
   notifications,
-  onOpenLinked
+  onOpenLinked,
+  onOpenDetail
 }: {
   notifications: NotificationRow[];
   onOpenLinked?: (n: NotificationRow) => void;
+  onOpenDetail?: (n: NotificationRow) => void;
 }) {
   const levelLabel = (level: NotificationRow["level"]) =>
     ({
@@ -25,27 +27,42 @@ export function NotificationsTable({
       ERROR: "Ошибка"
     })[level] ?? level;
 
-  const headers = onOpenLinked
-    ? ["Время", "Уровень", "Тема", "Сообщение", "Статус", "Действия"]
-    : ["Время", "Уровень", "Тема", "Сообщение", "Статус"];
+  const headers =
+    onOpenLinked || onOpenDetail
+      ? ["Время", "Уровень", "Тема", "Сообщение", "Статус", "Действия"]
+      : ["Время", "Уровень", "Тема", "Сообщение", "Статус"];
 
   return (
     <DataTable headers={headers}>
       {notifications.map((n) => (
-        <tr key={n.id}>
+        <tr
+          key={n.id}
+          className={onOpenDetail ? "clickableRow" : undefined}
+          onClick={onOpenDetail ? () => onOpenDetail(n) : undefined}
+        >
           <td>{new Date(n.createdAt).toLocaleString()}</td>
           <td>{levelLabel(n.level)}</td>
           <td>{n.title}</td>
           <td>{n.message}</td>
           <td>{n.isRead ? "Прочитано" : "Новое"}</td>
-          {onOpenLinked ? (
-            <td>
-              {n.entityType && n.entityId ? (
-                <button type="button" className="ghostBtn" onClick={() => onOpenLinked(n)}>
-                  Открыть
+          {onOpenLinked || onOpenDetail ? (
+            <td onClick={(e) => e.stopPropagation()}>
+              {onOpenDetail ? (
+                <button type="button" className="ghostBtn" onClick={() => onOpenDetail(n)}>
+                  Подробнее
+                </button>
+              ) : null}
+              {n.entityType && n.entityId && onOpenLinked ? (
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  style={{ marginLeft: onOpenDetail ? 6 : 0 }}
+                  onClick={() => onOpenLinked(n)}
+                >
+                  К объекту
                 </button>
               ) : (
-                <span className="muted">—</span>
+                !onOpenDetail ? <span className="muted">—</span> : null
               )}
             </td>
           ) : null}

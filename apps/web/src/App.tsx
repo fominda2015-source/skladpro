@@ -2125,8 +2125,10 @@ function App() {
       setActiveTab("waybills");
       return;
     }
-    if (entityType === "receiptrequest") {
-      setActiveTab("approvals");
+    if (entityType === "receiptrequest" || entityType === "receipt") {
+      setActiveTab("operations");
+      setOperationsSubTab("materialReceipts");
+      setExpandedReceiptIds((prev) => ({ ...prev, [notification.entityId!]: true }));
       return;
     }
     if (entityType === "integrationjob") {
@@ -4244,15 +4246,26 @@ function App() {
   }, [me?.id, me?.fullName]);
 
   useEffect(() => {
-    if (token && !mustPickObject) {
+    if (token) {
       void loadMe();
-      void loadStocks(q);
-      void loadIssues();
-      void loadApprovalQueue();
       void loadChatUsers();
       void loadConversations();
     }
-  }, [token, objectSectionFilter, mustPickObject]);
+  }, [token]);
+
+  // Перезагрузка данных при смене объекта или раздела СС/ЭОМ.
+  useEffect(() => {
+    if (!token || mustPickObject || !activeObjectId) return;
+    void loadStocks(q);
+    void loadIssues();
+    void loadReceiptRequests();
+    void loadMaterialMappings();
+    void loadOperations();
+    void loadLimitTemplates();
+    void loadApprovalQueue();
+    void loadCatalogData().catch(() => undefined);
+    if (canDashboard) void loadDashboardSummary();
+  }, [token, mustPickObject, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (!token || activeTab !== "stocks" || mustPickObject || !activeObjectId) {
@@ -4320,6 +4333,12 @@ function App() {
       void loadNotifications();
     }
   }, [token, activeTab, canReadIntegrations, canReadNotifications]);
+
+  useEffect(() => {
+    if (token && activeTab === "notifications" && canReadNotifications) {
+      void loadNotifications();
+    }
+  }, [token, activeTab, canReadNotifications]);
 
   useEffect(() => {
     if (!dashboardWarehouseId && warehouses.length) {
@@ -4458,7 +4477,7 @@ function App() {
         void loadMaterialMappings();
       }
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter]);
+  }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter, activeObjectId]);
 
   useEffect(() => {
     if (token && activeTab === "issues") {
@@ -4711,7 +4730,7 @@ function App() {
       void loadApprovalQueue();
       void loadReceiptRequests();
     }
-  }, [token, activeTab, approvalQueueTab, objectSectionFilter]);
+  }, [token, activeTab, approvalQueueTab, objectSectionFilter, activeObjectId]);
 
   useEffect(() => {
     if (token && activeTab === "limits") {
@@ -4755,7 +4774,7 @@ function App() {
       void loadReceiptRequests();
       void loadDocuments();
     }
-  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId]);
+  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "camp") {
@@ -4866,11 +4885,11 @@ function App() {
       setIssueWarehouseId(activeObjectId);
       setToolWarehouseId(activeObjectId);
       setToolListWarehouseId(activeObjectId);
-      if (!dashboardWarehouseId) setDashboardWarehouseId(activeObjectId);
+      setDashboardWarehouseId(activeObjectId);
     } else {
       setToolListWarehouseId("");
     }
-  }, [activeObjectId, dashboardWarehouseId]);
+  }, [activeObjectId]);
 
   async function onLoginSubmit(e: FormEvent) {
     e.preventDefault();
@@ -7622,6 +7641,7 @@ function App() {
             loadNotifications={loadNotifications}
             markNotificationsRead={markNotificationsRead}
             openNotificationLinkedEntity={openNotificationLinkedEntity}
+            openDocumentsForEntity={openDocumentsForEntity}
             canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
             users={users}
             fetchWithSession={fetchWithSession}

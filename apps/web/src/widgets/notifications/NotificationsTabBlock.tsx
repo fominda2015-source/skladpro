@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { NotificationsTable, type NotificationRow } from "../integrations/NotificationsTable";
+import { NotificationDetailModal } from "./NotificationDetailModal";
 
 // Минимальный тип события из каталога API.
 type NotificationEvent = {
@@ -25,6 +26,7 @@ type Props = {
   loadNotifications: () => Promise<unknown>;
   markNotificationsRead: (ids: string[]) => Promise<unknown>;
   openNotificationLinkedEntity: (n: NotificationRow) => void;
+  openDocumentsForEntity?: (entityType: "issue" | "operation" | "receipt", entityId: string) => void;
   canManageRules: boolean;
   users: Array<{ id: string; fullName: string; email: string }>;
   fetchWithSession: typeof fetch;
@@ -44,6 +46,7 @@ export function NotificationsTabBlock(props: Props) {
     loadNotifications,
     markNotificationsRead,
     openNotificationLinkedEntity,
+    openDocumentsForEntity,
     canManageRules,
     users,
     fetchWithSession,
@@ -58,6 +61,18 @@ export function NotificationsTabBlock(props: Props) {
   const [lowStock, setLowStock] = useState<number>(5);
   const [lowStockDraft, setLowStockDraft] = useState<string>("5");
   const [lowStockBusy, setLowStockBusy] = useState(false);
+  const [detailNotificationId, setDetailNotificationId] = useState<string | null>(null);
+  const [inboxSubTab, setInboxSubTab] = useState<"events" | "rules">("events");
+
+  function mapNotificationDocEntity(
+    entityType: string
+  ): "issue" | "operation" | "receipt" | null {
+    const key = entityType.replace(/\s/g, "").toLowerCase();
+    if (key.includes("issue")) return "issue";
+    if (key.includes("receipt")) return "receipt";
+    if (key === "operation") return "operation";
+    return null;
+  }
 
   // События тянем всем — этот эндпойнт открыт.
   useEffect(() => {
@@ -219,13 +234,34 @@ export function NotificationsTabBlock(props: Props) {
   return (
     <div className="card">
       <h2>Уведомления</h2>
+      <div className="tabs" style={{ marginBottom: 10 }}>
+        <button
+          type="button"
+          className={inboxSubTab === "events" ? "active" : ""}
+          onClick={() => setInboxSubTab("events")}
+        >
+          События
+        </button>
+        {canManageRules ? (
+          <button
+            type="button"
+            className={inboxSubTab === "rules" ? "active" : ""}
+            onClick={() => setInboxSubTab("rules")}
+          >
+            Правила подписки
+          </button>
+        ) : null}
+      </div>
+
+      {inboxSubTab === "events" ? (
+        <>
       <div className="kpiRow" style={{ flexWrap: "wrap", alignItems: "center" }}>
         <div className="kpi">
           <span>Непрочитано</span>
           <strong>{unreadNotificationCount}</strong>
         </div>
         <p className="muted" style={{ margin: "4px 0 0", flex: "1 1 240px", minWidth: 200 }}>
-          Список синхронизируется автоматически каждые 2 минуты. Кликом по строке можно открыть связанную сущность.
+          Клик по строке — подробности: кто сделал, журнал действий и документы. Список обновляется каждые 2 минуты.
         </p>
       </div>
       <div className="toolbar">
@@ -238,13 +274,22 @@ export function NotificationsTabBlock(props: Props) {
         </button>
       </div>
       {notifications.length ? (
-        <NotificationsTable notifications={notifications} onOpenLinked={openNotificationLinkedEntity} />
+        <NotificationsTable
+          notifications={notifications}
+          onOpenDetail={(n) => {
+            setDetailNotificationId(n.id);
+            if (!n.isRead) void markNotificationsRead([n.id]);
+          }}
+          onOpenLinked={openNotificationLinkedEntity}
+        />
       ) : (
         <p className="muted">Уведомлений пока нет.</p>
       )}
+        </>
+      ) : null}
 
-      {canManageRules && (
-        <div style={{ marginTop: 24 }}>
+      {inboxSubTab === "rules" && canManageRules ? (
+        <div style={{ marginTop: 8 }}>
           <h3 style={{ marginTop: 0 }}>Правила подписки на события</h3>
           <p className="muted" style={{ marginTop: 0 }}>
             Кому и какие события приходят. Универсальный порог «низкого остатка» одинаков для всех пользователей.
@@ -341,7 +386,33 @@ export function NotificationsTabBlock(props: Props) {
             </div>
           )}
         </div>
-      )}
+      ) : null}
+
+      {detailNotificationId && token ? (
+        <NotificationDetailModal
+          notificationId={detailNotificationId}
+          apiUrl={apiUrl}
+          token={token}
+          fetchWithSession={fetchWithSession}
+          onClose={() => setDetailNotificationId(null)}
+          onMarkRead={(id) => void markNotificationsRead([id])}
+          onOpenLinked={(n) => {
+            setDetailNotificationId(null);
+            openNotificationLinkedEntity(n);
+          }}
+          onOpenDocuments={
+            openDocumentsForEntity
+              ? (entityType, entityId) => {
+                  const mapped = mapNotificationDocEntity(entityType);
+                  if (mapped) {
+                    setDetailNotificationId(null);
+                    openDocumentsForEntity(mapped, entityId);
+                  }
+                }
+              : undefined
+          }
+        />
+      ) : null}
     </div>
   );
 }

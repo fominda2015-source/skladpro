@@ -106,6 +106,124 @@ notificationsRouter.get("/", async (req: AuthedRequest, res) => {
   return res.json(rows);
 });
 
+const ACTION_LABELS: Record<string, string> = {
+  ISSUE_REQUEST_APPROVE: "Заявка согласована",
+  ISSUE_REQUEST_REJECT: "Заявка отклонена",
+  ISSUE_REQUEST_CANCEL: "Заявка отменена",
+  ISSUE_REQUEST_ISSUE: "Выдача по заявке",
+  ISSUE_REQUEST_DELETE: "Заявка на выдачу удалена",
+  RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке",
+  RECEIPT_REQUEST_CANCEL: "Заявка на приход отменена",
+  RECEIPT_REQUEST_DELETE: "Заявка на приход удалена",
+  TOOL_ISSUE: "Инструмент выдан",
+  TOOL_RETURN: "Инструмент возвращён"
+};
+
+function normalizeEntityKey(entityType: string | null | undefined): string {
+  return String(entityType || "")
+    .replace(/\s/g, "")
+    .toLowerCase();
+}
+
+function mapNotificationEntityToAudit(entityType: string | null | undefined): string | undefined {
+  if (!entityType) return undefined;
+  const key = normalizeEntityKey(entityType);
+  if (key.includes("issuerequest") || key === "issue") return "IssueRequest";
+  if (key.includes("receiptrequest") || key === "receipt") return "ReceiptRequest";
+  if (key.includes("tool")) return "Tool";
+  if (key.includes("waybill") || key.includes("transport")) return "TransportWaybill";
+  if (key.includes("transfer")) return "TransferRequest";
+  if (key === "operation") return "Operation";
+  return entityType;
+}
+
+function mapNotificationEntityToDocument(entityType: string | null | undefined): string | null {
+  if (!entityType) return null;
+  const key = normalizeEntityKey(entityType);
+  if (key.includes("issue")) return "issue";
+  if (key.includes("receipt")) return "receipt";
+  if (key === "operation") return "operation";
+  return null;
+}
+
+async function loadDocumentsForEntity(entityType: string, entityId: string) {
+  return prisma.documentFile.findMany({
+    where: {
+      isDeleted: false,
+      OR: [
+        { entityType, entityId },
+        { links: { some: { entityType, entityId } } }
+      ]
+    },
+    orderBy: { createdAt: "asc" },
+    take: 50
+  });
+}
+
+notificationsRouter.get("/:id/detail", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const notification = await prisma.notification.findFirst({
+    where: { id, userId: req.user!.userId }
+  });
+  if (!notification) {
+    return res.status(404).json({ error: "Уведомление не найдено" });
+  }
+
+  const auditEntityType = mapNotificationEntityToAudit(notification.entityType);
+  const auditLogs = notification.entityId
+    ? await prisma.auditLog.findMany({
+        where: auditEntityType
+          ? { entityId: notification.entityId, entityType: auditEntityType }
+          : { entityId: notification.entityId },
+        include: {
+          user: { select: { id: true, email: true, fullName: true } }
+        },
+        orderBy: { createdAt: "asc" },
+        take: 30
+      })
+    : [];
+
+  type DocRow = Awaited<ReturnType<typeof loadDocumentsForEntity>>[number];
+  const docMap = new Map<string, DocRow>();
+  const docEntity = mapNotificationEntityToDocument(notification.entityType);
+  if (notification.entityId && docEntity) {
+    for (const d of await loadDocumentsForEntity(docEntity, notification.entityId)) {
+      docMap.set(d.id, d);
+    }
+  }
+  for (const log of auditLogs) {
+    const after = log.afterData as { operationId?: string } | null;
+    const opId = after?.operationId;
+    if (opId) {
+      for (const d of await loadDocumentsForEntity("operation", opId)) {
+        docMap.set(d.id, d);
+      }
+    }
+  }
+
+  const eventLabel = notification.eventCode
+    ? NOTIFICATION_EVENTS.find((e) => e.code === notification.eventCode)?.label
+    : undefined;
+
+  return res.json({
+    notification,
+    eventLabel,
+    auditLogs: auditLogs.map((row) => ({
+      id: row.id,
+      action: row.action,
+      actionLabel: ACTION_LABELS[row.action] || row.action,
+      summary: row.summary,
+      createdAt: row.createdAt,
+      user: row.user,
+      beforeData: row.beforeData,
+      afterData: row.afterData
+    })),
+    documents: Array.from(docMap.values()).sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    )
+  });
+});
+
 notificationsRouter.patch("/read", requirePermission("notifications.write"), async (req: AuthedRequest, res) => {
   const parsed = markReadSchema.safeParse(req.body);
   if (!parsed.success) {
