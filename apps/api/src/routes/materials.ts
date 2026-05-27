@@ -116,6 +116,18 @@ materialsRouter.post("/", requirePermission("materials.write"), async (req, res)
   }
 });
 
+materialsRouter.get("/:id", async (req, res) => {
+  const materialId = String(req.params.id);
+  const row = await prisma.material.findUnique({
+    where: { id: materialId },
+    include: { synonyms: { orderBy: { value: "asc" } } }
+  });
+  if (!row) {
+    return res.status(404).json({ error: "Material not found" });
+  }
+  return res.json(row);
+});
+
 materialsRouter.patch("/:id", requirePermission("materials.write"), async (req, res) => {
   const parsed = updateMaterialSchema.safeParse(req.body);
   if (!parsed.success) {

@@ -6,6 +6,7 @@ import multer from "multer";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { config } from "../config.js";
+import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { decodeUploadedOriginalName, withRepairedFileName } from "../lib/uploadFileName.js";
@@ -36,23 +37,83 @@ export const documentsRouter = Router();
 documentsRouter.use(requireAuth);
 documentsRouter.use(requirePermission("documents.read"));
 
-documentsRouter.get("/", async (req, res) => {
+documentsRouter.get("/", async (req: AuthedRequest, res) => {
   const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   const includeDeleted = req.query.includeDeleted === "1";
   const hasEntityPair = Boolean(entityType && entityId);
+
+  if (warehouseId) {
+    try {
+      const scope = await getRequestDataScope(req);
+      assertWarehouseInScope(scope, warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+  }
 
   const base: Prisma.DocumentFileWhereInput = {
     ...(type ? { type } : {}),
     ...(includeDeleted ? {} : { isDeleted: false })
   };
 
+  let warehouseFilter: Prisma.DocumentFileWhereInput | undefined;
+  if (warehouseId) {
+    const issueWhere = { warehouseId, ...(section ? { section } : {}) };
+    const receiptWhere = { warehouseId, ...(section ? { section } : {}) };
+    const operationWhere = { warehouseId, ...(section ? { section } : {}) };
+    const [issues, receipts, operations] = await Promise.all([
+      prisma.issueRequest.findMany({ where: issueWhere, select: { id: true } }),
+      prisma.receiptRequest.findMany({ where: receiptWhere, select: { id: true } }),
+      prisma.operation.findMany({ where: operationWhere, select: { id: true } })
+    ]);
+    const issueIds = issues.map((x) => x.id);
+    const receiptIds = receipts.map((x) => x.id);
+    const operationIds = operations.map((x) => x.id);
+    const entityOr: Prisma.DocumentFileWhereInput[] = [];
+    if (issueIds.length) {
+      entityOr.push({ entityType: "issue", entityId: { in: issueIds } });
+    }
+    if (receiptIds.length) {
+      entityOr.push({ entityType: "receipt", entityId: { in: receiptIds } });
+    }
+    if (operationIds.length) {
+      entityOr.push({ entityType: "operation", entityId: { in: operationIds } });
+    }
+    const linkOr: Prisma.DocumentLinkWhereInput[] = [];
+    if (issueIds.length) {
+      linkOr.push({ entityType: "issue", entityId: { in: issueIds } });
+    }
+    if (receiptIds.length) {
+      linkOr.push({ entityType: "receipt", entityId: { in: receiptIds } });
+    }
+    if (operationIds.length) {
+      linkOr.push({ entityType: "operation", entityId: { in: operationIds } });
+    }
+    if (entityOr.length || linkOr.length) {
+      warehouseFilter = {
+        OR: [
+          ...(entityOr.length ? entityOr : []),
+          ...(linkOr.length ? [{ links: { some: { OR: linkOr } } }] : [])
+        ]
+      };
+    } else {
+      return res.json([]);
+    }
+  }
+
   const where: Prisma.DocumentFileWhereInput =
     hasEntityPair && entityType && entityId
       ? {
           AND: [
             base,
+            warehouseFilter ?? {},
             {
               OR: [
                 { entityType, entityId },
@@ -62,9 +123,18 @@ documentsRouter.get("/", async (req, res) => {
           ]
         }
       : {
-          ...base,
-          ...(entityType ? { entityType } : {}),
-          ...(entityId ? { entityId } : {})
+          AND: [
+            base,
+            warehouseFilter ?? {},
+            ...(entityType || entityId
+              ? [
+                  {
+                    ...(entityType ? { entityType } : {}),
+                    ...(entityId ? { entityId } : {})
+                  }
+                ]
+              : [])
+          ]
         };
 
   const rows = await prisma.documentFile.findMany({
@@ -76,8 +146,8 @@ documentsRouter.get("/", async (req, res) => {
           }
         }
       : {}),
-    orderBy: [{ groupId: "desc" }, { version: "desc" }],
-    take: 200
+    orderBy: { createdAt: "asc" },
+    take: 500
   });
 
   const repairedRows = rows.map((r) => withRepairedFileName(r));

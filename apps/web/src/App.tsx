@@ -16,7 +16,8 @@ import {
 import "./App.css";
 import jsQR from "jsqr";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY, resolvePublicFileUrl } from "./app/constants";
-import { displayDocumentFileName } from "./shared/fileName";
+import { displayDocumentFileName, docTypeLabel } from "./shared/fileName";
+import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
   IntegrationJobsTable,
@@ -892,10 +893,14 @@ function App() {
   const [campDetailFiles, setCampDetailFiles] = useState<File[]>([]);
   const [campDetailUploading, setCampDetailUploading] = useState(false);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
-  const [documentsMessage] = useState("");
+  const [documentsMessage, setDocumentsMessage] = useState("");
   const [docSearchQuery, setDocSearchQuery] = useState("");
   const [docEntityType, setDocEntityType] = useState<"" | "operation" | "issue" | "receipt">("");
   const [docEntityId, setDocEntityId] = useState("");
+  const [docWarehouseFilter, setDocWarehouseFilter] = useState("");
+  const [materialEditModal, setMaterialEditModal] = useState<
+    null | { materialId: string; warehouseId: string }
+  >(null);
   const [docTypeFilter, setDocTypeFilter] = useState("");
   const [docPreviewUrl, setDocPreviewUrl] = useState("");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
@@ -1743,6 +1748,14 @@ function App() {
   const canMaterialReport = useMemo(() => hasPermission("materialReport.read"), [me]);
   const canMaterialWriteoff = useMemo(() => hasPermission("materialReport.write"), [me]);
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
+  const canWriteDocuments = useMemo(
+    () => hasPermission("documents.write") || hasPermission("documents.upload"),
+    [me]
+  );
+  const canGrantWarehouseAccess = useMemo(
+    () => hasPermission("warehouses.write") || hasPermission("admin.users.manage"),
+    [me]
+  );
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
   const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
   const canWriteWaybills = useMemo(() => hasPermission("waybills.write"), [me]);
@@ -3958,19 +3971,43 @@ function App() {
     const parts = [
       docEntityType && docEntityId ? `entityType=${encodeURIComponent(docEntityType)}` : "",
       docEntityType && docEntityId ? `entityId=${encodeURIComponent(docEntityId)}` : "",
-      docTypeFilter ? `type=${encodeURIComponent(docTypeFilter)}` : ""
+      docTypeFilter ? `type=${encodeURIComponent(docTypeFilter)}` : "",
+      docWarehouseFilter ? `warehouseId=${encodeURIComponent(docWarehouseFilter)}` : "",
+      docWarehouseFilter ? `section=${encodeURIComponent(objectSectionFilter)}` : ""
     ].filter(Boolean);
     const query = parts.length ? `?${parts.join("&")}` : "";
     const res = await fetchWithSession(`${API_URL}/api/documents${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось загрузить документы");
+      return;
+    }
+    setDocumentsMessage("");
     const data = (await res.json()) as DocumentFile[];
     setDocuments(data);
     if (data.length && !selectedDocumentId) {
       setSelectedDocumentId(data[0].id);
       setDocPreviewUrl(`${API_URL}/${data[0].filePath}`);
     }
+  }
+
+  async function deleteDocument(docId: string, fileLabel: string) {
+    if (!token || !canWriteDocuments) return;
+    if (!window.confirm(`Удалить документ «${fileLabel}»?`)) return;
+    const res = await fetchWithSession(`${API_URL}/api/documents/${encodeURIComponent(docId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось удалить документ");
+      return;
+    }
+    if (selectedDocumentId === docId) {
+      setSelectedDocumentId("");
+      setDocPreviewUrl("");
+    }
+    await loadDocuments();
   }
 
   function openDocumentsForEntity(entityType: "issue" | "operation" | "receipt", entityId: string) {
@@ -4781,7 +4818,13 @@ function App() {
       void loadReceiptRequests();
       void loadDocuments();
     }
-  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, activeObjectId, objectSectionFilter]);
+  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, docWarehouseFilter, activeObjectId, objectSectionFilter]);
+
+  useEffect(() => {
+    if (activeTab === "documents" && activeObjectId && !docWarehouseFilter) {
+      setDocWarehouseFilter(activeObjectId);
+    }
+  }, [activeTab, activeObjectId, docWarehouseFilter]);
 
   useEffect(() => {
     if (token && activeTab === "camp") {
@@ -6611,6 +6654,21 @@ function App() {
                       >
                         {isExpanded ? "Свернуть" : "Подробнее"}
                       </button>
+                      {canWriteCatalog ? (
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          onClick={() => {
+                            void loadChatUsers();
+                            setMaterialEditModal({
+                              materialId: row.materialId,
+                              warehouseId: row.warehouseId
+                            });
+                          }}
+                        >
+                          Карточка
+                        </button>
+                      ) : null}
                       {me?.role === "ADMIN" ? (
                         <button
                           type="button"
@@ -10186,19 +10244,25 @@ function App() {
           { id: "other", label: "Прочее" }
         ];
         const filtersActive =
-          Boolean(docTypeFilter) || Boolean(docEntityType) || Boolean(docEntityId) || Boolean(docSearchQuery.trim());
+          Boolean(docTypeFilter) ||
+          Boolean(docEntityType) ||
+          Boolean(docEntityId) ||
+          Boolean(docWarehouseFilter) ||
+          Boolean(docSearchQuery.trim());
         const search = docSearchQuery.trim().toLowerCase();
-        const visibleDocs = search
-          ? documents.filter((d) => {
-              const shown = displayDocumentFileName(d.fileName, {
-                type: d.type,
-                createdAt: d.createdAt
-              });
-              return (
-                shown.toLowerCase().includes(search) || d.fileName.toLowerCase().includes(search)
-              );
-            })
-          : documents;
+        const visibleDocs = (
+          search
+            ? documents.filter((d) => {
+                const shown = displayDocumentFileName(d.fileName, {
+                  type: d.type,
+                  createdAt: d.createdAt
+                });
+                return (
+                  shown.toLowerCase().includes(search) || d.fileName.toLowerCase().includes(search)
+                );
+              })
+            : documents
+        ).slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         return (
           <div>
             <PageHero
@@ -10228,6 +10292,24 @@ function App() {
             </div>
 
             <div className="form docCenterForm" style={{ marginTop: 8 }}>
+              <label>
+                Объект (склад)
+                <select
+                  value={docWarehouseFilter}
+                  onChange={(e) => {
+                    setDocWarehouseFilter(e.target.value);
+                    setSelectedDocumentId("");
+                    setDocPreviewUrl("");
+                  }}
+                >
+                  <option value="">Все объекты (доступные)</option>
+                  {warehouses.map((w) => (
+                    <option key={`doc-wh-${w.id}`} value={w.id}>
+                      {safeName(w.name)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label>
                 Раздел источника
                 <select
@@ -10323,6 +10405,7 @@ function App() {
                     setDocTypeFilter("");
                     setDocEntityType("");
                     setDocEntityId("");
+                    setDocWarehouseFilter(activeObjectId || "");
                     setDocSearchQuery("");
                     setSelectedDocumentId("");
                     setDocPreviewUrl("");
@@ -10372,7 +10455,9 @@ function App() {
                           <td title={`${d.entityType}:${d.entityId}`}>
                             {d.entityType}:{d.entityId.slice(0, 8)}…
                           </td>
-                          <td>{d.type}</td>
+                          <td>
+                            <span className="badge neutral">{docTypeLabel(d.type)}</span>
+                          </td>
                           <td>
                             <a
                               href={`${API_URL}/${d.filePath}`}
@@ -10407,6 +10492,15 @@ function App() {
                               >
                                 Открыть
                               </a>
+                              {canWriteDocuments ? (
+                                <button
+                                  type="button"
+                                  className="dangerBtn"
+                                  onClick={() => void deleteDocument(d.id, shownName)}
+                                >
+                                  Удалить
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
@@ -13962,6 +14056,29 @@ function App() {
               onClick: () => setMobileNavOpen((v) => !v)
             }
           ]}
+        />
+      ) : null}
+      {materialEditModal && token ? (
+        <MaterialCardModal
+          materialId={materialEditModal.materialId}
+          defaultWarehouseId={materialEditModal.warehouseId || activeObjectId || warehouses[0]?.id || ""}
+          section={objectSectionFilter}
+          apiUrl={API_URL}
+          token={token}
+          fetchWithSession={fetchWithSession}
+          canWrite={canWriteCatalog}
+          canGrantAccess={canGrantWarehouseAccess}
+          employees={chatUsers.map((u) => ({
+            id: u.id,
+            fullName: u.fullName,
+            role: u.role
+          }))}
+          warehouses={warehouses}
+          onClose={() => setMaterialEditModal(null)}
+          onSaved={() => {
+            void loadCatalogData().catch(() => undefined);
+            void loadStocks(q);
+          }}
         />
       ) : null}
       {requestMaterialsModal && token ? (
