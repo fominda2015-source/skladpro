@@ -3887,10 +3887,59 @@ button.whMenuItem:hover,
 }
 
 .whColAct {
-  width: 48px;
+  width: auto;
+  min-width: 96px;
   text-align: right;
   overflow: visible;
   position: relative;
+}
+
+.whActBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.whBtnCard {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8 !important;
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  border-radius: 8px;
+}
+
+.warehouseMode .whBtnCard {
+  color: #9a3412 !important;
+  background: #ffedd5 !important;
+  border-color: #fdba74 !important;
+}
+
+.whBtnCard:hover {
+  background: #dbeafe !important;
+}
+
+.whDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.whDetailMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .whRowMenuWrap:has(.whMenu) {

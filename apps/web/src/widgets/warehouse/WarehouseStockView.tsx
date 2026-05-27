@@ -424,60 +424,79 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                         </td>
                       ) : null}
                       <td className="whColAct" onClick={(e) => e.stopPropagation()}>
-                        <div className="whRowMenuWrap">
-                          <button
-                            type="button"
-                            className="ghostBtn whBtnIcon"
-                            aria-label="Меню позиции"
-                            aria-expanded={rowMenu?.rowId === row.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              setHeaderMenuRect(null);
-                              setRowMenu((prev) =>
-                                prev?.rowId === row.id ? null : { rowId: row.id, rect }
-                              );
-                            }}
-                          >
-                            ⋯
-                          </button>
-                          {rowMenu?.rowId === row.id ? (
-                            <WhFloatingMenu
-                              anchorRect={rowMenu.rect}
-                              onClose={() => setRowMenu(null)}
+                        <div className="whActBtns">
+                          {canOpenMaterialCard ? (
+                            <button
+                              type="button"
+                              className="ghostBtn whBtnCard"
+                              title={
+                                canEditMaterialCard
+                                  ? "Редактировать карточку материала"
+                                  : "Открыть карточку материала"
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenMaterialCard(row.materialId, row.warehouseId);
+                              }}
                             >
-                              {canOpenMaterialCard ? (
-                                <WhMenuAction
-                                  label={
-                                    canEditMaterialCard
-                                      ? "Редактировать карточку"
-                                      : "Карточка материала"
-                                  }
-                                  onActivate={() => {
-                                    setRowMenu(null);
-                                    onOpenMaterialCard(row.materialId, row.warehouseId);
-                                  }}
-                                />
-                              ) : null}
-                              <WhMenuAction
-                                label={expanded ? "Свернуть строку" : "Подробнее по остатку"}
-                                onActivate={() => {
-                                  onToggleExpand(row.id);
-                                  setRowMenu(null);
-                                }}
-                              />
-                              {isAdmin ? (
-                                <WhMenuAction
-                                  label="Удалить из каталога"
-                                  danger
-                                  onActivate={() => {
-                                    setRowMenu(null);
-                                    onDeleteMaterial(row.materialId, row.materialName);
-                                  }}
-                                />
-                              ) : null}
-                            </WhFloatingMenu>
+                              {canEditMaterialCard ? "Карточка" : "Открыть"}
+                            </button>
                           ) : null}
+                          <div className="whRowMenuWrap">
+                            <button
+                              type="button"
+                              className="ghostBtn whBtnIcon"
+                              aria-label="Ещё действия"
+                              aria-expanded={rowMenu?.rowId === row.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setHeaderMenuRect(null);
+                                setRowMenu((prev) =>
+                                  prev?.rowId === row.id ? null : { rowId: row.id, rect }
+                                );
+                              }}
+                            >
+                              ⋯
+                            </button>
+                            {rowMenu?.rowId === row.id ? (
+                              <WhFloatingMenu
+                                anchorRect={rowMenu.rect}
+                                onClose={() => setRowMenu(null)}
+                              >
+                                <WhMenuAction
+                                  label={expanded ? "Свернуть строку" : "Подробнее по остатку"}
+                                  onActivate={() => {
+                                    onToggleExpand(row.id);
+                                    setRowMenu(null);
+                                  }}
+                                />
+                                {canOpenMaterialCard ? (
+                                  <WhMenuAction
+                                    label={
+                                      canEditMaterialCard
+                                        ? "Редактировать карточку"
+                                        : "Карточка материала"
+                                    }
+                                    onActivate={() => {
+                                      setRowMenu(null);
+                                      onOpenMaterialCard(row.materialId, row.warehouseId);
+                                    }}
+                                  />
+                                ) : null}
+                                {isAdmin ? (
+                                  <WhMenuAction
+                                    label="Удалить из каталога"
+                                    danger
+                                    onActivate={() => {
+                                      setRowMenu(null);
+                                      onDeleteMaterial(row.materialId, row.materialName);
+                                    }}
+                                  />
+                                ) : null}
+                              </WhFloatingMenu>
+                            ) : null}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -485,6 +504,52 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                       <tr key={`${row.id}-detail`} className="whDetailRow">
                         <td colSpan={colSpan}>
                           <div className="whDetail">
+                            <div className="whDetailActions">
+                              {canOpenMaterialCard ? (
+                                <button
+                                  type="button"
+                                  className="secondaryBtn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onOpenMaterialCard(row.materialId, row.warehouseId);
+                                  }}
+                                >
+                                  {canEditMaterialCard
+                                    ? "Редактировать карточку"
+                                    : "Открыть карточку материала"}
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="ghostBtn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleExpand(row.id);
+                                }}
+                              >
+                                Свернуть
+                              </button>
+                            </div>
+                            <div className="whDetailMetaGrid">
+                              <span>
+                                <strong>Доступно:</strong> {fmtQty(Number(row.available))} {row.materialUnit}
+                              </span>
+                              <span>
+                                <strong>Остаток:</strong> {fmtQty(Number(row.quantity))}
+                              </span>
+                              <span>
+                                <strong>Резерв:</strong> {fmtQty(Number(row.reserved))}
+                              </span>
+                              <span>
+                                <strong>Место:</strong>{" "}
+                                {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
+                              </span>
+                              {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                                <span style={{ gridColumn: "1 / -1" }}>
+                                  <strong>Цена за ед.:</strong> {fmtQty(Number(row.unitPrice), 2)} ₽
+                                </span>
+                              ) : null}
+                            </div>
                             {(factsCount > 0 || acceptedCount > 0) ? (
                               <section className="whDetailBlock">
                                 <h4>Фактические названия</h4>
