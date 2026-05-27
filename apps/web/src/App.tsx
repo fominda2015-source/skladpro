@@ -8876,18 +8876,20 @@ function App() {
 
                         {isGroup && isExpanded && directMaterials.length > 0 ? (
                           <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
-                            <table className="desktopTable" style={{ fontSize: 12 }}>
+                            <table className="limitMaterialsTable">
                               <thead>
                                 <tr>
                                   <th>Материал</th>
-                                  <th>Ед.</th>
-                                  <th>План</th>
-                                  <th>Приход (учёт)</th>
-                                  <th>Выдано</th>
-                                  <th>Осталось привезти</th>
-                                  <th>В закупке (заявки)</th>
-                                  <th>Остаток на складе</th>
-                                  <th style={{ minWidth: 128 }}>Структура</th>
+                                  <th className="num">Ед.</th>
+                                  <th className="num" title="Плановое количество">План</th>
+                                  <th className="num" title="Приход — операции INCOME по разделу">Приход</th>
+                                  <th className="num" title="Выдано — движения OUT">Выдано</th>
+                                  <th className="num" title="Осталось привезти = План − Приход">Привезти</th>
+                                  <th className="num" title="В закупке — открытые заявки на приход">В закупке</th>
+                                  <th className="num" title="Текущий остаток на складе">На складе</th>
+                                  <th className="structureCell" title="Синим — доля прихода от плана, зелёным — доля выдачи от плана">
+                                    Структура
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -8905,25 +8907,20 @@ function App() {
                                   const overIss = plan > 0 && iss > plan;
                                   return (
                                     <tr key={`mt-${node.id}-${m.id}`}>
-                                      <td>{safeName(String(m.materialName || m.title || ""))}</td>
-                                      <td>{m.unit || "шт"}</td>
-                                      <td>{metricFmt(plan)}</td>
-                                      <td>{m.materialId ? metricFmt(arrived) : "—"}</td>
-                                      <td>{m.materialId ? metricFmt(iss) : "—"}</td>
-                                      <td>{m.materialId ? metricFmt(remain) : "—"}</td>
-                                      <td>{m.materialId ? metricFmt(onOrd) : "—"}</td>
-                                      <td>{m.materialId ? metricFmt(stk) : "—"}</td>
-                                      <td>
+                                      <td className="matName" title={String(m.materialName || m.title || "")}>
+                                        {safeName(String(m.materialName || m.title || ""))}
+                                      </td>
+                                      <td className="num">{m.unit || "шт"}</td>
+                                      <td className="num">{metricFmt(plan)}</td>
+                                      <td className="num">{m.materialId ? metricFmt(arrived) : "—"}</td>
+                                      <td className="num">{m.materialId ? metricFmt(iss) : "—"}</td>
+                                      <td className="num">{m.materialId ? metricFmt(remain) : "—"}</td>
+                                      <td className="num">{m.materialId ? metricFmt(onOrd) : "—"}</td>
+                                      <td className="num">{m.materialId ? metricFmt(stk) : "—"}</td>
+                                      <td className="structureCell">
                                         {m.materialId && plan > 0 ? (
-                                          <div style={{ minWidth: 120 }}>
-                                            <div
-                                              className="muted"
-                                              style={{ fontSize: 10, marginBottom: 2 }}
-                                              title="Синим — доля прихода от плана; зелёным — доля выдачи от плана"
-                                            >
-                                              приход / выдача от плана
-                                            </div>
-                                            <div className="progressWrap" style={{ height: 7, marginBottom: 3 }}>
+                                          <div>
+                                            <div className="progressWrap" style={{ height: 6, marginBottom: 2 }}>
                                               <div
                                                 className="progressBar"
                                                 style={{
@@ -8933,7 +8930,7 @@ function App() {
                                                 }}
                                               />
                                             </div>
-                                            <div className="progressWrap" style={{ height: 7 }}>
+                                            <div className="progressWrap" style={{ height: 6 }}>
                                               <div
                                                 className={`progressBar ${overIss ? "bad" : ""}`}
                                                 style={{
@@ -8944,7 +8941,7 @@ function App() {
                                             </div>
                                           </div>
                                         ) : (
-                                          "—"
+                                          <span className="muted">—</span>
                                         )}
                                       </td>
                                     </tr>
@@ -8953,9 +8950,9 @@ function App() {
                               </tbody>
                             </table>
                             <p className="muted" style={{ margin: "6px 0 0", fontSize: 11 }}>
-                              Учётный раздел объекта: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}. Приход — операции INCOME по
-                              разделу; выдано — движения OUT; «в закупке» — открытые заявки на приход. Структура — доля прихода и доля
-                              выдачи от планового количества по строке.
+                              Раздел объекта: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}.
+                              «Приход» — операции INCOME, «Выдано» — OUT, «В закупке» — открытые заявки на приход.
+                              В колонке «Структура»: верхняя полоса — доля прихода от плана, нижняя — доля выдачи.
                             </p>
                           </div>
                         ) : null}

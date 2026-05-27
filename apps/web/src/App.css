@@ -1420,6 +1420,44 @@ tr.low {
   }
 }
 
+/* Компактная таблица материалов внутри узла лимита. */
+.limitMaterialsTable {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.limitMaterialsTable th,
+.limitMaterialsTable td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f3;
+  white-space: nowrap;
+}
+.limitMaterialsTable th {
+  text-align: left;
+  font-weight: 600;
+  color: #475569;
+  background: #f8fafc;
+  position: sticky;
+  top: 0;
+}
+.limitMaterialsTable td.num,
+.limitMaterialsTable th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 1%;
+}
+.limitMaterialsTable td.matName {
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.limitMaterialsTable tr:hover td {
+  background: #fafbfc;
+}
+.limitMaterialsTable .structureCell {
+  width: 110px;
+}
+
 @media (max-width: 560px) {
   .kpiRow {
     grid-template-columns: 1fr;
