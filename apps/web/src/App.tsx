@@ -36,13 +36,12 @@ import { NotificationsTable, type NotificationRow } from "./widgets/integrations
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { CriticalRecipientAssignedModal } from "./widgets/notifications/CriticalRecipientAssignedModal";
 import { ReceiptOverageModal } from "./widgets/receipts/ReceiptOverageModal";
-import { AnnouncementsBlock } from "./widgets/home/AnnouncementsBlock";
+import { HomeOverview, type HomeObjectRow } from "./widgets/home/HomeOverview";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
-import { CollapsibleSection } from "./widgets/home/CollapsibleSection";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
@@ -296,30 +295,6 @@ type IssuePickCartLine = {
   available: number;
   acceptedQty?: number;
 };
-const HOME_ISSUE_CHART_FILL: Record<IssueStatus, string> = {
-  DRAFT: "#94a3b8",
-  ON_APPROVAL: "#f97316",
-  APPROVED: "#22c55e",
-  REJECTED: "#ef4444",
-  ISSUED: "#3b82f6",
-  CANCELLED: "#cbd5e1"
-};
-const HOME_ISSUE_CHART_LABEL: Record<IssueStatus, string> = {
-  DRAFT: "Черновик",
-  ON_APPROVAL: "На рассмотрении",
-  APPROVED: "Одобрено",
-  REJECTED: "Отклонено",
-  ISSUED: "Выдано",
-  CANCELLED: "Отменено"
-};
-/** Верхние столбцы «день»: градиенты для столбца i. */
-const HOME_TODAY_COLUMN_GRADIENTS: ReadonlyArray<readonly [string, string]> = [
-  ["#38bdf8", "#1d4ed8"],
-  ["#c084fc", "#6d28d9"],
-  ["#34d399", "#047857"],
-  ["#fbbf24", "#d97706"]
-];
-const HOME_ATTENTION_BAR_FILLS = ["#ea580c", "#ca8a04", "#e11d48", "#0284c7", "#6366f1", "#14b8a6", "#8b5cf6", "#dc2626", "#ea580c"] as const;
 type OperationRow = {
   id: string;
   type: "INCOME" | "EXPENSE";
@@ -497,37 +472,10 @@ type DocumentFile = {
   matchedLinkId?: string | null;
 };
 
-type DashboardSummary = {
-  role: string;
+type HomeOverviewResponse = {
   generatedAt: string;
-  warehouse: {
-    receiptsToday: number;
-    issuesOperationsToday: number;
-    issuesRequestsIssuedToday: number;
-    transfersToday: number;
-    pendingApprovals: number;
-    lowStockLines: number;
-    staleOpenIssues: number;
-    toolsInRepair: number;
-    waybillsOpen: number;
-    failedIntegrations24h: number;
-    unreadNotifications: number;
-    errorNotifications24h: number;
-  };
-  project: { projectsCount: number; overspendLimitLines: number };
-  object?: {
-    warehouseId: string | null;
-    warehouseName: string | null;
-    receiptRequestsOpen: number;
-    campItemsCount: number;
-    projectsCount: number;
-    limitsCount: number;
-    materialsInLimits: number;
-    plannedQty: number;
-    issuedQty: number;
-    usagePercent: number;
-  };
-  admin?: { activeUsers: number; auditEvents24h: number };
+  section: "SS" | "EOM";
+  objects: HomeObjectRow[];
 };
 
 type AuditLogRow = {
@@ -749,7 +697,6 @@ function App() {
   const [warehouseName, setWarehouseName] = useState("Главный склад");
   const [warehouseAddress, setWarehouseAddress] = useState("Москва");
   const [opWarehouseId, setOpWarehouseId] = useState("");
-  const [dashboardWarehouseId, setDashboardWarehouseId] = useState("");
   // Legacy-состояния прямого прихода удалены — приёмка идёт через заявки.
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
@@ -1061,8 +1008,10 @@ function App() {
   const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser">("");
-  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
-  const [dashboardError, setDashboardError] = useState("");
+  const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
+  const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
+  const [homeOverviewError, setHomeOverviewError] = useState("");
+  const [homeExpandedId, setHomeExpandedId] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
   const [auditMeta, setAuditMeta] = useState<AuditMetaResponse>({ users: [], entityTypes: [] });
@@ -1586,85 +1535,6 @@ function App() {
     });
   }, []);
 
-  const homeIssueStatusSummary = useMemo(() => {
-    const order: IssueStatus[] = ["DRAFT", "ON_APPROVAL", "APPROVED", "ISSUED", "REJECTED", "CANCELLED"];
-    const counts: Partial<Record<IssueStatus, number>> = {};
-    for (const i of issues) {
-      counts[i.status] = (counts[i.status] ?? 0) + 1;
-    }
-    const total = Math.max(1, issues.length);
-    return order
-      .filter((s) => (counts[s] ?? 0) > 0)
-      .map((s) => ({ status: s, count: counts[s]!, pct: ((counts[s] ?? 0) / total) * 100 }));
-  }, [issues]);
-
-  const homeIssuePieChartData = useMemo(
-    () =>
-      homeIssueStatusSummary.map((s) => ({
-        name: HOME_ISSUE_CHART_LABEL[s.status],
-        value: s.count,
-        status: s.status,
-        fill: HOME_ISSUE_CHART_FILL[s.status]
-      })),
-    [homeIssueStatusSummary]
-  );
-
-  const homeTodayOpsBarRows = useMemo(() => {
-    if (!dashboard) return [];
-    const w = dashboard.warehouse;
-    return [
-      {
-        label: "Приходы (операции)",
-        hint: "Проведено сегодня (UTC)",
-        value: w.receiptsToday
-      },
-      {
-        label: "Расходы (операции)",
-        hint: "",
-        value: w.issuesOperationsToday
-      },
-      {
-        label: "Выдачи заявок",
-        hint: "Статус «Выдано» сегодня",
-        value: w.issuesRequestsIssuedToday
-      },
-      {
-        label: "Трансферы",
-        hint: "Тип перемещение",
-        value: w.transfersToday
-      }
-    ];
-  }, [dashboard]);
-
-  /** Все ключевые ряды показателей контроля (включая нули — для узнаваемости масштаба). */
-  const homeAttentionBarsFull = useMemo(() => {
-    if (!dashboard) return [];
-    const w = dashboard.warehouse;
-    const rows = [
-      { label: "На согласовании", value: w.pendingApprovals },
-      { label: "Долго ≥7 дн.", value: w.staleOpenIssues },
-      { label: "Остаток <5 ед.", value: w.lowStockLines },
-      { label: "ТТН открыты", value: w.waybillsOpen },
-      { label: "Инстр. ремонт", value: w.toolsInRepair }
-    ];
-    rows.push(
-      { label: "Уведомления", value: w.unreadNotifications },
-      { label: "Алерты 24ч", value: w.errorNotifications24h },
-      { label: "Интеграции 24ч", value: w.failedIntegrations24h }
-    );
-    return rows;
-  }, [dashboard]);
-
-  const homeLimitRingData = useMemo(() => {
-    if (!dashboard) return [{ name: "rest", value: 100, fill: "#eef2ff" }];
-    const u = Math.max(0, Math.min(100, dashboard.object?.usagePercent ?? 0));
-    const fill = u >= 92 ? "#ef4444" : u >= 75 ? "#f59e0b" : "#4f46e5";
-    return [
-      { name: "prog", value: u, fill },
-      { name: "rest", value: Math.max(0, 100 - u), fill: "#e8edf6" }
-    ];
-  }, [dashboard]);
-
   const chatTimeLabel = (iso?: string) => {
     if (!iso) return "";
     const date = new Date(iso);
@@ -1792,6 +1662,13 @@ function App() {
   const canWriteMaterialCards = useMemo(() => hasPermission("materials.write"), [me]);
   const canWriteWarehouses = useMemo(() => hasPermission("warehouses.write"), [me]);
   const isAllObjectsView = activeObjectId === ALL_OBJECTS_ID;
+
+  const homeObjectsDisplay = useMemo(() => {
+    const rows = homeOverview?.objects ?? [];
+    if (isAllObjectsView) return rows;
+    if (!activeObjectId) return rows;
+    return rows.filter((o) => o.warehouseId === activeObjectId);
+  }, [homeOverview, isAllObjectsView, activeObjectId]);
   const effectiveWarehouseId = useMemo(() => {
     if (activeObjectId === ALL_OBJECTS_ID) return tabWarehouseFilters[activeTab] || "";
     return activeObjectId || "";
@@ -1847,9 +1724,6 @@ function App() {
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
   const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
   const canManageFeedback = useMemo(() => hasPermission("feedback.manage"), [me]);
-  const canCreateAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
-  const canEditAnnouncements = useMemo(() => hasPermission("announcements.edit"), [me]);
-  const canDeleteAnnouncements = useMemo(() => hasPermission("announcements.delete"), [me]);
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   const unreadNotificationCount = useMemo(
@@ -2156,23 +2030,33 @@ function App() {
     setProfileFullName(data.fullName);
   }
 
-  async function loadDashboardSummary() {
-    if (!token || !canDashboard) {
-      return;
-    }
-    setDashboardError("");
+  async function loadHomeOverview() {
+    if (!token || !canDashboard) return;
+    setHomeOverviewError("");
+    setHomeOverviewLoading(true);
     try {
-      const query = dashboardWarehouseId ? `?warehouseId=${encodeURIComponent(dashboardWarehouseId)}` : "";
-      const r = await fetchWithSession(`${API_URL}/api/dashboard/summary${query}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!r.ok) {
-        throw new Error(`HTTP ${r.status}`);
-      }
-      setDashboard((await r.json()) as DashboardSummary);
+      const r = await fetchWithSession(
+        `${API_URL}/api/dashboard/home-overview?section=${encodeURIComponent(objectSectionFilter)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setHomeOverview((await r.json()) as HomeOverviewResponse);
     } catch (e) {
-      setDashboard(null);
-      setDashboardError(String(e));
+      setHomeOverview(null);
+      setHomeOverviewError(`Не удалось загрузить главную: ${String(e)}`);
+    } finally {
+      setHomeOverviewLoading(false);
+    }
+  }
+
+  function openHomeObjectTab(warehouseId: string, tab: "camp" | "limits" | "tools") {
+    setActiveObjectId(warehouseId);
+    setActiveTab(tab);
+    if (tab === "limits") void loadLimitTemplates();
+    if (tab === "camp") void loadCampItems();
+    if (tab === "tools") {
+      setToolDrilledCard(null);
+      void loadToolGroupCards();
     }
   }
 
@@ -4573,17 +4457,15 @@ function App() {
     void loadLimitTemplates();
     void loadApprovalQueue();
     void loadCatalogData().catch(() => undefined);
-    if (canDashboard) void loadDashboardSummary();
   }, [token, mustPickObject, activeObjectId, objectSectionFilter, tabWarehouseFilters, activeTab]);
 
   useEffect(() => {
-    if (!token || activeTab !== "stocks" || mustPickObject || !activeObjectId) {
+    if (!token || !canDashboard || activeTab !== "stocks") {
+      if (!canDashboard) setHomeOverview(null);
       return;
     }
-    if (canReadOperations) {
-      void loadReceiptRequests();
-    }
-  }, [token, activeTab, activeObjectId, objectSectionFilter, mustPickObject, canReadOperations]);
+    void loadHomeOverview();
+  }, [token, canDashboard, activeTab, objectSectionFilter]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -4595,14 +4477,6 @@ function App() {
       void loadLimitSuggestions(r.id);
     }
   }, [token, receiptRequests, expandedReceiptIds]);
-
-  useEffect(() => {
-    if (!token || !canDashboard) {
-      setDashboard(null);
-      return;
-    }
-    void loadDashboardSummary();
-  }, [token, canDashboard, me, dashboardWarehouseId]);
 
   useEffect(() => {
     if (!token || activeTab !== "audit" || !canReadAudit) {
@@ -4641,12 +4515,6 @@ function App() {
       void loadNotifications();
     }
   }, [token, activeTab, canReadNotifications]);
-
-  useEffect(() => {
-    if (!dashboardWarehouseId && warehouses.length) {
-      setDashboardWarehouseId(activeObjectId || warehouses[0].id);
-    }
-  }, [dashboardWarehouseId, warehouses, activeObjectId]);
 
   useEffect(() => {
     if (!token || !chatWidgetOpen) return;
@@ -5207,7 +5075,6 @@ function App() {
     setIssueWarehouseId(activeObjectId);
     setToolWarehouseId(activeObjectId);
     setToolListWarehouseId(activeObjectId);
-    setDashboardWarehouseId(activeObjectId);
   }, [activeObjectId]);
 
   async function onLoginSubmit(e: FormEvent) {
@@ -5649,1014 +5516,23 @@ function App() {
             ) : null}
           </div>
         </header>
-        {dashboardError && activeTab === "stocks" && <p className="error">{dashboardError}</p>}
         {activeTab === "stocks" && (
-          <div className="homeDashboard simple">
-            <section className="homeStrip">
-              <div className="homeStripText">
-                <strong className="homeStripTitle">
-                  {safeName(
-                    dashboard?.object?.warehouseName ||
-                      warehouses.find((w) => w.id === (activeObjectId || dashboardWarehouseId))?.name
-                  )}
-                </strong>
-                <span className="muted homeStripMeta">
-                  Раздел: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}
-                  {dashboard?.generatedAt
-                    ? ` · Обновлено: ${new Date(dashboard.generatedAt).toLocaleTimeString()}`
-                    : ""}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="ghostBtn homeStripRefresh"
-                onClick={() => {
-                  void loadDashboardSummary();
-                  void loadStocks(q);
-                  void loadIssues();
-                  void loadApprovalQueue();
-                  if (activeObjectId && canReadOperations) void loadReceiptRequests();
-                }}
-                title="Обновить данные"
-              >
-                ↻ Обновить
-              </button>
-            </section>
-
-            {dashboard ? (() => {
-              const w = dashboard.warehouse;
-              const usagePct = Math.max(0, Math.min(100, Math.round(dashboard.object?.usagePercent ?? 0)));
-              const overspend = dashboard.project?.overspendLimitLines || 0;
-              const lowStock = w.lowStockLines || 0;
-              const stockTotal = stocks.length;
-              const onApproval = w.pendingApprovals || 0;
-              const staleIssues = w.staleOpenIssues || 0;
-              const unread = w.unreadNotifications || 0;
-              const errors24h = w.errorNotifications24h || 0;
-
-              return (
-                <section className="kpiHero">
-                  <button
-                    type="button"
-                    className={`kpiHeroCard ${lowStock > 0 ? "warn" : ""}`}
-                    disabled={!canReadStocks}
-                    onClick={() => {
-                      setQ("");
-                      void loadStocks("");
-                      setActiveTab("warehouse");
-                    }}
-                  >
-                    <span className="kpiHeroLabel">Остатки</span>
-                    <span className="kpiHeroValue">{stockTotal.toLocaleString("ru-RU")}</span>
-                    <span className="kpiHeroSub">
-                      позиций
-                      {lowStock > 0 ? <span className="kpiTag warn">низкий остаток: {lowStock}</span> : null}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`kpiHeroCard ${overspend > 0 ? "bad" : usagePct > 80 ? "warn" : ""}`}
-                    disabled={!canReadLimits}
-                    onClick={() => setActiveTab("limits")}
-                  >
-                    <span className="kpiHeroLabel">Лимиты выполнены</span>
-                    <span className="kpiHeroValue">{usagePct}%</span>
-                    <div className="kpiHeroBar">
-                      <div
-                        className="kpiHeroBarFill"
-                        style={{ width: `${Math.min(100, usagePct)}%` }}
-                      />
-                    </div>
-                    <span className="kpiHeroSub">
-                      {dashboard.object
-                        ? `${Math.round(dashboard.object.issuedQty).toLocaleString("ru-RU")} из ${Math.round(dashboard.object.plannedQty).toLocaleString("ru-RU")} ед.`
-                        : "нет данных"}
-                      {overspend > 0 ? <span className="kpiTag bad">перерасход: {overspend}</span> : null}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`kpiHeroCard ${staleIssues > 0 ? "bad" : onApproval > 0 ? "warn" : ""}`}
-                    disabled={!canReadIssues}
-                    onClick={() => {
-                      if (onApproval > 0) {
-                        setIssueStatusFilter("ON_APPROVAL");
-                        setActiveTab("approvals");
-                      } else {
-                        setActiveTab("issues");
-                      }
-                    }}
-                  >
-                    <span className="kpiHeroLabel">Заявки</span>
-                    <span className="kpiHeroValue">{onApproval.toLocaleString("ru-RU")}</span>
-                    <span className="kpiHeroSub">
-                      на согласовании
-                      {staleIssues > 0 ? <span className="kpiTag bad">{staleIssues} висит &gt; 7д</span> : null}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`kpiHeroCard ${errors24h > 0 ? "bad" : unread > 0 ? "warn" : ""}`}
-                    onClick={() => setActiveTab("notifications")}
-                  >
-                    <span className="kpiHeroLabel">Уведомления</span>
-                    <span className="kpiHeroValue">{unread.toLocaleString("ru-RU")}</span>
-                    <span className="kpiHeroSub">
-                      непрочитанных
-                      {errors24h > 0 ? <span className="kpiTag bad">{errors24h} критич. 24ч</span> : null}
-                    </span>
-                  </button>
-                </section>
-              );
-            })() : null}
-
-            {dashboard ? (() => {
-              type AttItem = {
-                id: string;
-                title: string;
-                sub: string;
-                value: number | string;
-                tone: "warn" | "bad" | "ok" | "neutral";
-                ico: string;
-                onClick: () => void;
-                disabled?: boolean;
-                weight: number;
-              };
-              const items: AttItem[] = [];
-              const w = dashboard.warehouse;
-              if ((dashboard.project?.overspendLimitLines || 0) > 0) {
-                items.push({
-                  id: "over",
-                  title: "Перерасход лимитов",
-                  sub: `${dashboard.project.overspendLimitLines} строк превышает план`,
-                  value: dashboard.project.overspendLimitLines,
-                  tone: "bad",
-                  ico: "⚠",
-                  disabled: !canReadLimits,
-                  onClick: () => setActiveTab("limits"),
-                  weight: 100
-                });
-              }
-              if ((w.errorNotifications24h || 0) > 0) {
-                items.push({
-                  id: "errN",
-                  title: "Критичные алерты 24ч",
-                  sub: "Открыть уведомления и интеграции",
-                  value: w.errorNotifications24h,
-                  tone: "bad",
-                  ico: "✖",
-                  disabled: !canReadIntegrations && !canReadNotifications,
-                  onClick: () => setActiveTab("notifications"),
-                  weight: 95
-                });
-              }
-              if ((w.staleOpenIssues || 0) > 0) {
-                items.push({
-                  id: "stale",
-                  title: "Заявки висят > 7 дней",
-                  sub: "Открыть «Заявки на выдачу»",
-                  value: w.staleOpenIssues,
-                  tone: "bad",
-                  ico: "⏰",
-                  disabled: !canReadIssues,
-                  onClick: () => setActiveTab("issues"),
-                  weight: 90
-                });
-              }
-              if ((w.pendingApprovals || 0) > 0) {
-                items.push({
-                  id: "appr",
-                  title: "На согласовании",
-                  sub: "Перейти в очередь согласований",
-                  value: w.pendingApprovals,
-                  tone: "warn",
-                  ico: "✓",
-                  disabled: !canReadIssues,
-                  onClick: () => {
-                    setIssueStatusFilter("ON_APPROVAL");
-                    setActiveTab("approvals");
-                  },
-                  weight: 80
-                });
-              }
-              if ((w.lowStockLines || 0) > 0) {
-                items.push({
-                  id: "low",
-                  title: "Низкий остаток",
-                  sub: "Открыть склад с фильтром",
-                  value: w.lowStockLines,
-                  tone: "warn",
-                  ico: "▼",
-                  disabled: !canReadStocks,
-                  onClick: () => {
-                    setQ("low");
-                    void loadStocks("low");
-                    setActiveTab("warehouse");
-                  },
-                  weight: 70
-                });
-              }
-              if ((w.waybillsOpen || 0) > 0) {
-                items.push({
-                  id: "wbl",
-                  title: "Незакрытые ТТН",
-                  sub: "Открыть «Транспортные накладные»",
-                  value: w.waybillsOpen,
-                  tone: "warn",
-                  ico: "🚚",
-                  disabled: !canReadWaybills,
-                  onClick: () => setActiveTab("waybills"),
-                  weight: 60
-                });
-              }
-              if ((w.toolsInRepair || 0) > 0) {
-                items.push({
-                  id: "tools",
-                  title: "Инструмент в ремонте",
-                  sub: "Открыть карточку инструмента",
-                  value: w.toolsInRepair,
-                  tone: "warn",
-                  ico: "🛠",
-                  disabled: !canReadTools,
-                  onClick: () => {
-                    setToolStatusFilter("IN_REPAIR");
-                    setActiveTab("tools");
-                  },
-                  weight: 50
-                });
-              }
-              if ((w.failedIntegrations24h || 0) > 0) {
-                items.push({
-                  id: "intg",
-                  title: "Сбои интеграций 24ч",
-                  sub: "Открыть «Интеграции»",
-                  value: w.failedIntegrations24h,
-                  tone: "warn",
-                  ico: "🔌",
-                  disabled: !canReadIntegrations,
-                  onClick: () => setActiveTab("integrations"),
-                  weight: 40
-                });
-              }
-              if ((w.unreadNotifications || 0) > 0) {
-                items.push({
-                  id: "ntf",
-                  title: "Непрочитанные уведомления",
-                  sub: "Открыть «Уведомления»",
-                  value: w.unreadNotifications,
-                  tone: "neutral",
-                  ico: "✉",
-                  onClick: () => setActiveTab("notifications"),
-                  weight: 30
-                });
-              }
-              if ((dashboard.object?.receiptRequestsOpen || 0) > 0) {
-                items.push({
-                  id: "rcp",
-                  title: "Приёмки Excel в работе",
-                  sub: "Открыть «Приходы»",
-                  value: dashboard.object?.receiptRequestsOpen || 0,
-                  tone: "neutral",
-                  ico: "📥",
-                  disabled: !canReadOperations,
-                  onClick: () => setActiveTab("operations"),
-                  weight: 20
-                });
-              }
-              items.sort((a, b) => b.weight - a.weight);
-              const top = items.slice(0, 7);
-              return (
-                <section className="card homeBlock">
-                  <header className="homeBlockHead">
-                    <h3>Что требует внимания</h3>
-                    <span className="muted">{items.length ? `${items.length} групп` : "всё спокойно"}</span>
-                  </header>
-                  {top.length === 0 ? (
-                    <div className="attentionEmpty">
-                      Сейчас по объекту нет горячих событий. Можно работать спокойно.
-                    </div>
-                  ) : (
-                    <div className="attentionList">
-                      {top.map((it) => (
-                        <button
-                          key={it.id}
-                          type="button"
-                          className={`attentionItem ${it.tone}`}
-                          onClick={() => {
-                            if (!it.disabled) it.onClick();
-                          }}
-                          disabled={it.disabled}
-                          title={it.disabled ? "Недостаточно прав для перехода" : "Перейти"}
-                        >
-                          <span className="ico" aria-hidden>{it.ico}</span>
-                          <span className="txt">
-                            <span className="ttl">{it.title}</span>
-                            <span className="sub">{it.sub}</span>
-                          </span>
-                          <span className="val">
-                            {typeof it.value === "number" ? it.value.toLocaleString("ru-RU") : it.value}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              );
-            })() : null}
-
-            {dashboard ? (
-              <section className="card homeBlock">
-                <header className="homeBlockHead">
-                  <h3>Активность за день</h3>
-                  <span className="muted">приходы · выдачи · перемещения</span>
-                </header>
-                <ResponsiveContainer width="100%" height={homeTodayOpsBarRows.length ? 220 : 100}>
-                  <BarChart data={homeTodayOpsBarRows} margin={{ top: 12, right: 12, left: 0, bottom: 6 }}>
-                    <defs>
-                      {HOME_TODAY_COLUMN_GRADIENTS.map(([a, b], i) => (
-                        <linearGradient key={i} id={`simpleColGrad${i}`} x1="0" y1="1" x2="0" y2="0">
-                          <stop offset="0%" stopColor={a} stopOpacity={0.88} />
-                          <stop offset="100%" stopColor={b} stopOpacity={1} />
-                        </linearGradient>
-                      ))}
-                    </defs>
-                    <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e8edf5" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} interval={0} tickMargin={8} axisLine={{ stroke: "#dfe7f5" }} />
-                    <YAxis width={40} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={{ stroke: "#dfe7f5" }} allowDecimals={false} />
-                    <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), "Количество"]} />
-                    {homeTodayOpsBarRows.length ? (
-                      <Bar dataKey="value" radius={[8, 8, 4, 4]} barSize={36} animationDuration={600}>
-                        {homeTodayOpsBarRows.map((_, i) => (
-                          <Cell key={i} fill={`url(#simpleColGrad${i % HOME_TODAY_COLUMN_GRADIENTS.length})`} />
-                        ))}
-                      </Bar>
-                    ) : null}
-                  </BarChart>
-                </ResponsiveContainer>
-              </section>
-            ) : null}
-
-            <AnnouncementsBlock
-              token={token}
-              fetchWithSession={fetchWithSession}
-              canCreate={canCreateAnnouncements}
-              canEdit={canEditAnnouncements}
-              canDelete={canDeleteAnnouncements}
-            />
-
-            {!dashboard ? (
-              <p className="muted">Нет данных сводки{dashboardError ? "" : " (ожидание прав или ответа API)"}.</p>
-            ) : (
-              <CollapsibleSection
-                storageKey="home.advanced"
-                title="Подробная аналитика"
-                hint="развернуть для расширенного представления"
-                defaultOpen={false}
-              >
-                <CollapsibleSection
-                  storageKey="home.resources"
-                  title="Объект и ресурсы"
-                  hint="ключевые цифры объекта"
-                  defaultOpen={true}
-                >
-                  <div className="homeInsightGrid">
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadStocks}
-                      onClick={() => {
-                        setQ("");
-                        void loadStocks("");
-                        setActiveTab("warehouse");
-                      }}
-                    >
-                      <span className="homeInsightLabel">Строк складской выборки</span>
-                      <span className="homeInsightValue">{stocks.length.toLocaleString("ru-RU")}</span>
-                      <span className="homeInsightHint">Открыть склад →</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadLimits}
-                      onClick={() => setActiveTab("limits")}
-                    >
-                      <span className="homeInsightLabel">План по лимитам выполнен на</span>
-                      <span className="homeInsightValue">{dashboard.object?.usagePercent ?? 0}%</span>
-                      <span className="homeInsightHint muted">
-                        {dashboard.object ? `${dashboard.object.issuedQty.toLocaleString("ru-RU")} из ${dashboard.object.plannedQty.toLocaleString("ru-RU")} ед.` : ""}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadLimits}
-                      onClick={() => setActiveTab("limits")}
-                    >
-                      <span className="homeInsightLabel">Проектов / лимитов</span>
-                      <span className="homeInsightValue">
-                        {dashboard.object?.projectsCount ?? 0} · {dashboard.object?.limitsCount ?? 0}
-                      </span>
-                      <span className="homeInsightHint">Карточки лимитов →</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadOperations}
-                      onClick={() => setActiveTab("operations")}
-                    >
-                      <span className="homeInsightLabel">Приёмки Excel в работе</span>
-                      <span className="homeInsightValue">{(dashboard.object?.receiptRequestsOpen ?? 0).toLocaleString("ru-RU")}</span>
-                      <span className="homeInsightHint">Вкладка «Приходы» →</span>
-                    </button>
-                    <button type="button" className="homeInsightCard" onClick={() => setActiveTab("camp")}>
-                      <span className="homeInsightLabel">Единиц в городке</span>
-                      <span className="homeInsightValue">{(dashboard.object?.campItemsCount ?? 0).toLocaleString("ru-RU")}</span>
-                      <span className="homeInsightHint">Жилой фонд и контейнеры →</span>
-                    </button>
-                  </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  storageKey="home.today"
-                  title="Сегодня (операционный день, UTC)"
-                  hint="что прошло за день"
-                  defaultOpen={true}
-                >
-                  <div className="homeInsightGrid">
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadOperations}
-                      onClick={() => setActiveTab("operations")}
-                    >
-                      <span className="homeInsightLabel">Проведённые приходы</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.receiptsToday}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadOperations}
-                      onClick={() => setActiveTab("operations")}
-                    >
-                      <span className="homeInsightLabel">Проведённые расходы (операции)</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.issuesOperationsToday}</span>
-                    </button>
-                    <button type="button" className="homeInsightCard" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
-                      <span className="homeInsightLabel">Заявок закрыто «Выдано»</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.issuesRequestsIssuedToday}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadOperations}
-                      onClick={() => setActiveTab("operations")}
-                    >
-                      <span className="homeInsightLabel">Перемещения (тип трансфера)</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.transfersToday}</span>
-                    </button>
-                  </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  storageKey="home.attention"
-                  title="Заявки и контроль"
-                  hint="требует внимания и риски"
-                  count={
-                    (dashboard.warehouse.pendingApprovals || 0) +
-                    (dashboard.warehouse.staleOpenIssues || 0) +
-                    (dashboard.warehouse.lowStockLines || 0) +
-                    (dashboard.warehouse.errorNotifications24h || 0)
-                  }
-                  countTone={
-                    (dashboard.warehouse.errorNotifications24h || 0) > 0 ||
-                    (dashboard.warehouse.staleOpenIssues || 0) > 0
-                      ? "bad"
-                      : (dashboard.warehouse.pendingApprovals || 0) +
-                          (dashboard.warehouse.lowStockLines || 0) >
-                        0
-                      ? "warn"
-                      : "ok"
-                  }
-                  defaultOpen={true}
-                >
-                  <div className="homeInsightGrid">
-                    <button
-                      type="button"
-                      className="homeInsightCard accentWarn"
-                      disabled={!canReadIssues}
-                      onClick={() => {
-                        setIssueStatusFilter("ON_APPROVAL");
-                        setActiveTab("approvals");
-                      }}
-                    >
-                      <span className="homeInsightLabel">На согласовании</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.pendingApprovals}</span>
-                      <span className="homeInsightHint">Открыть лист заявок →</span>
-                    </button>
-                    <button type="button" className="homeInsightCard accentWarn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
-                      <span className="homeInsightLabel">Долго висящие (&gt;7 дней)</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.staleOpenIssues}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadStocks}
-                      onClick={() => {
-                        setQ("low");
-                        void loadStocks("low");
-                        setActiveTab("warehouse");
-                      }}
-                    >
-                      <span className="homeInsightLabel">Позиций с низким остатком</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.lowStockLines}</span>
-                      <span className="homeInsightHint">Фильтр «низкий остаток» →</span>
-                    </button>
-                    <button type="button" className="homeInsightCard" disabled={!canReadWaybills} onClick={() => setActiveTab("waybills")}>
-                      <span className="homeInsightLabel">ТТН не закрыты</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.waybillsOpen}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadTools}
-                      onClick={() => {
-                        setToolStatusFilter("IN_REPAIR");
-                        setActiveTab("tools");
-                      }}
-                    >
-                      <span className="homeInsightLabel">Инструмент в ремонте</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.toolsInRepair}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadIntegrations}
-                      onClick={() => setActiveTab("integrations")}
-                    >
-                      <span className="homeInsightLabel">Сбои интеграций 24ч</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.failedIntegrations24h}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard"
-                      disabled={!canReadIntegrations && !canReadNotifications}
-                      onClick={() => setActiveTab("integrations")}
-                    >
-                      <span className="homeInsightLabel">Непрочитанные уведомления</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.unreadNotifications}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="homeInsightCard accentBad"
-                      disabled={!canReadIntegrations && !canReadNotifications}
-                      onClick={() => setActiveTab("integrations")}
-                    >
-                      <span className="homeInsightLabel">Критичные алерты 24ч</span>
-                      <span className="homeInsightValue">{dashboard.warehouse.errorNotifications24h}</span>
-                    </button>
-                    {dashboard.admin ? (
-                      <button
-                        type="button"
-                        className="homeInsightCard mutedCard"
-                        onClick={() => {
-                          if (canReadAudit) setActiveTab("audit");
-                          else setActiveTab("integrations");
-                        }}
-                      >
-                        <span className="homeInsightLabel">Админ-срез · пользователей / аудит 24ч</span>
-                        <span className="homeInsightValue">
-                          {dashboard.admin.activeUsers} / {dashboard.admin.auditEvents24h}
-                        </span>
-                      </button>
-                    ) : null}
-                  </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  storageKey="home.charts"
-                  title="Графики"
-                  hint="визуализация сводки"
-                  defaultOpen={false}
-                >
-                  <p className="muted homeChartsLead">
-                    Визуализация данных сводки и текущего списка заявок. Клик по сектору кольца отправляет в раздел выдачи с
-                    нужным фильтром; кольцо лимитов — переход к лимитам.
-                  </p>
-                  <div className="homeChartsGridTwo">
-                    <div className="homeChartSheet homeChartSheetPie">
-                      <div className="homeChartSheetHead">
-                        <h4>Заявки по статусам</h4>
-                        <span className="muted">Пончик · список в памяти</span>
-                      </div>
-                      <div className="homePieFrame">
-                        {homeIssuePieChartData.length ? (
-                          <ResponsiveContainer width="100%" height={280}>
-                            <PieChart margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
-                              <Tooltip formatter={(value, name) => [`${value ?? ""} шт.`, String(name ?? "")]} />
-                              <Pie
-                                data={homeIssuePieChartData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={74}
-                                outerRadius={106}
-                                paddingAngle={3}
-                                cornerRadius={6}
-                                stroke="#fff"
-                                strokeWidth={2}
-                                animationDuration={600}
-                                cursor="pointer"
-                                onClick={(d: unknown) => {
-                                  const pay =
-                                    typeof d === "object" && d !== null && "payload" in d
-                                      ? (d as { payload?: { status?: IssueStatus } }).payload
-                                      : undefined;
-                                  const st = pay?.status;
-                                  if (!st) return;
-                                  setIssueStatusFilter(st);
-                                  setActiveTab("issues");
-                                }}
-                              >
-                                {homeIssuePieChartData.map((entry) => (
-                                  <Cell key={entry.status} fill={entry.fill} strokeOpacity={0.94} />
-                                ))}
-                              </Pie>
-                              <Legend layout="horizontal" verticalAlign="bottom" align="center" iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        ) : (
-                          <p className="muted homePieEmpty">Нет заявок в текущей выборке — откройте «Выдачи».</p>
-                        )}
-                        {homeIssuePieChartData.length ? (
-                          <div className="homePieFloatingLabel" aria-hidden>
-                            <strong>{issues.length}</strong>
-                            <span>Всего</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="homeChartSheet">
-                      <div className="homeChartSheetHead">
-                        <h4>Опер. день — UTC</h4>
-                        <span className="muted">Сверка со сводкой API</span>
-                      </div>
-                      <ResponsiveContainer width="100%" height={homeTodayOpsBarRows.length ? 296 : 120}>
-                        <BarChart data={homeTodayOpsBarRows} margin={{ top: 18, right: 12, left: 0, bottom: 6 }}>
-                          <defs>
-                            {HOME_TODAY_COLUMN_GRADIENTS.map(([a, b], i) => (
-                              <linearGradient key={i} id={`homeTodayColGrad${i}`} x1="0" y1="1" x2="0" y2="0">
-                                <stop offset="0%" stopColor={a} stopOpacity={0.88} />
-                                <stop offset="100%" stopColor={b} stopOpacity={1} />
-                              </linearGradient>
-                            ))}
-                          </defs>
-                          <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e8edf5" />
-                          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} interval={0} tickMargin={10} axisLine={{ stroke: "#dfe7f5" }} />
-                          <YAxis width={44} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={{ stroke: "#dfe7f5" }} allowDecimals={false} />
-                          <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), "Количество"]} />
-                          {homeTodayOpsBarRows.length ? (
-                            <Bar dataKey="value" radius={[10, 10, 6, 6]} barSize={40} animationDuration={700}>
-                              {homeTodayOpsBarRows.map((_, i) => (
-                                <Cell key={i} fill={`url(#homeTodayColGrad${i % HOME_TODAY_COLUMN_GRADIENTS.length})`} />
-                              ))}
-                            </Bar>
-                          ) : null}
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  <div className="homeChartsGridTwo homeChartsBottomRow">
-                    <div className="homeChartSheet homeChartSheetRing">
-                      <div className="homeChartSheetHead">
-                        <h4>Ход лимитов</h4>
-                        <span className="muted">Выдано / план объекта</span>
-                      </div>
-                      <div className="homeRingLayout">
-                        <div className="homeRingPieWrap">
-                          <ResponsiveContainer width="100%" height={220}>
-                            <PieChart>
-                              <Pie
-                                data={homeLimitRingData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                startAngle={100}
-                                endAngle={-260}
-                                innerRadius={74}
-                                outerRadius={104}
-                                paddingAngle={0}
-                                stroke="none"
-                                animationDuration={800}
-                              >
-                                {homeLimitRingData.map((slice) => (
-                                  <Cell key={slice.name} fill={slice.fill} stroke={slice.name === "rest" ? "#f1f5f9" : "none"} />
-                                ))}
-                              </Pie>
-                              <Tooltip formatter={(v: unknown) => [`${Number(v)}%`, "Частка"]} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                          <button
-                            type="button"
-                            className="homeRingCenterStack"
-                            disabled={!canReadLimits}
-                            onClick={() => setActiveTab("limits")}
-                          >
-                            <strong className="homeRingPct">{dashboard.object?.usagePercent ?? 0}%</strong>
-                            <span className="muted tiny">
-                              {dashboard.object
-                                ? `${dashboard.object.issuedQty.toLocaleString("ru-RU")} / ${dashboard.object.plannedQty.toLocaleString("ru-RU")}`
-                                : "—"}
-                            </span>
-                            {canReadLimits ? <span className="homeRingLinkHint">Лимиты →</span> : null}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="homeChartSheet homeChartSheetWide">
-                      <div className="homeChartSheetHead">
-                        <h4>Пульс контроля и сигналов</h4>
-                        <span className="muted">Очередь, склад, перевозки, уведомления</span>
-                      </div>
-                      <ResponsiveContainer
-                        width="100%"
-                        height={Math.min(620, Math.max(240, 28 + homeAttentionBarsFull.length * 36))}
-                      >
-                        <BarChart layout="vertical" data={homeAttentionBarsFull} margin={{ top: 8, right: 28, left: 4, bottom: 8 }}>
-                          <defs>
-                            {HOME_ATTENTION_BAR_FILLS.map((c, idx) => (
-                              <linearGradient key={idx} id={`homeAttnBar${idx}`} x1="0" y1="0.5" x2="1" y2="0.5">
-                                <stop offset="0%" stopColor={c} stopOpacity={0.82} />
-                                <stop offset="100%" stopColor={c} stopOpacity={0.35} />
-                              </linearGradient>
-                            ))}
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#eaeef6" />
-                          <XAxis
-                            type="number"
-                            tick={{ fontSize: 11, fill: "#64748b" }}
-                            axisLine={{ stroke: "#dfe7f5" }}
-                            tickLine={{ stroke: "#dfe7f5" }}
-                            allowDecimals={false}
-                          />
-                          <YAxis
-                            type="category"
-                            width={148}
-                            dataKey="label"
-                            tick={{ fontSize: 12, fill: "#334155" }}
-                            interval={0}
-                            axisLine={{ stroke: "#dfe7f5" }}
-                          />
-                          <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), ""]} />
-                          <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={18} animationDuration={750}>
-                            {homeAttentionBarsFull.map((_, i) => (
-                              <Cell key={i} fill={`url(#homeAttnBar${i % HOME_ATTENTION_BAR_FILLS.length})`} stroke="#fff" strokeWidth={1} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </CollapsibleSection>
-              </CollapsibleSection>
-            )}
-
-            <CollapsibleSection
-              storageKey="home.queues"
-              title="Очереди и приёмки"
-              hint="ближайшие согласования, выдачи, приёмки"
-              defaultOpen={false}
-            >
-            <div className="homeSplit">
-              <div className="homeSplitPrimary">
-                <section className="card homeWideCard">
-                  <div className="rightCardHeader">
-                    <h3>Выдачи: доля статусов (текущий список)</h3>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() => {
-                        setIssueStatusFilter("");
-                        setActiveTab("issues");
-                      }}
-                    >
-                      Все заявки
-                    </button>
-                  </div>
-                  {homeIssueStatusSummary.length ? (
-                    <>
-                      <div className="homeStackBar">
-                        {homeIssueStatusSummary.map((seg) => (
-                          <button
-                            key={seg.status}
-                            type="button"
-                            className={`homeStackSegment status-${seg.status}`}
-                            style={{ flexGrow: Math.max(seg.count, 1) }}
-                            title={`${issueStatusLabel(seg.status)}: ${seg.count}`}
-                            onClick={() => {
-                              setIssueStatusFilter(seg.status);
-                              setActiveTab("issues");
-                            }}
-                          >
-                            <span>{seg.count}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="homeStackLegend">
-                        {homeIssueStatusSummary.map((seg) => (
-                          <button
-                            key={seg.status}
-                            type="button"
-                            className="homeLegendItem"
-                            onClick={() => {
-                              setIssueStatusFilter(seg.status);
-                              setActiveTab("issues");
-                            }}
-                          >
-                            <span className={`badge ${statusClass(seg.status)}`}>{issueStatusLabel(seg.status)}</span>
-                            <strong>{seg.count}</strong>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="muted">В выборке нет заявок — откройте вкладку «Выдачи», чтобы загрузить историю.</p>
-                  )}
-                </section>
-
-                <section className="card homeWideCard">
-                  <div className="rightCardHeader">
-                    <h3>Быстрые действия</h3>
-                  </div>
-                  <div className="homeQuickActions">
-                    {canWriteOperations ? (
-                      <button type="button" className="secondaryBtn homeQuickBtn" onClick={() => setActiveTab("operations")}>
-                        Поступление / приёмка
-                      </button>
-                    ) : null}
-                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
-                      Новая выдача
-                    </button>
-                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadDocuments} onClick={() => setActiveTab("documents")}>
-                      Документы объекта
-                    </button>
-                    <button type="button" className="secondaryBtn homeQuickBtn" disabled={!canReadWaybills} onClick={() => setActiveTab("waybills")}>
-                      Перемещения ТТН
-                    </button>
-                    <button type="button" className="ghostBtn homeQuickBtn" onClick={() => setActiveTab("camp")}>
-                      Городок
-                    </button>
-                  </div>
-                </section>
-              </div>
-
-              <aside className="homeSplitAside">
-                <div className="card approvalCard">
-                  <h3>Следующая на согласовании</h3>
-                  {approvalQueue[0] ? (
-                    <>
-                      <p className="muted compactLine">
-                        <strong>{approvalQueue[0].number}</strong>
-                        {" · "}
-                        {approvalQueue[0].requestedBy?.fullName || approvalQueue[0].requestedById}
-                      </p>
-                      <div className="approvalActions">
-                        <button
-                          type="button"
-                          className="dangerBtn"
-                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "reject", { fromApprovals: true })}
-                        >
-                          Отклонить
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "approve", { fromApprovals: true })}
-                        >
-                          Принять
-                        </button>
-                        <button
-                          type="button"
-                          className="secondaryBtn"
-                          onClick={() => void executeIssueAction(approvalQueue[0]!.id, "issue", { fromApprovals: true })}
-                        >
-                          Выдать
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="muted">На сейчас нет заявок в статусе «На рассмотрении».</p>
-                  )}
-                </div>
-
-                <div className="card">
-                  <div className="rightCardHeader">
-                    <h3>Очередь выдачи</h3>
-                    <button type="button" className="ghostBtn" onClick={() => setActiveTab("approvals")}>
-                      Все
-                    </button>
-                  </div>
-                  <div className="queueList">
-                    {(approvalQueue.length ? approvalQueue : issues.filter((i) => i.status !== "ISSUED").slice(0, 6)).map((i) => (
-                      <div key={i.id} className="queueItem">
-                        <div>
-                          <strong>{i.number}</strong>
-                          <p className="muted compactLine">{i.requestedBy?.fullName || i.requestedById}</p>
-                        </div>
-                        <div className="queueActions">
-                          <span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span>
-                          <button
-                            type="button"
-                            className="miniActionBtn"
-                            onClick={() => {
-                              setSelectedIssueId(i.id);
-                              setDrawerMode("issue");
-                            }}
-                          >
-                            Детали
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {!approvalQueue.length && !issues.length ? <p className="muted">Очередь пуста</p> : null}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="rightCardHeader">
-                    <h3>Приёмки по разделу</h3>
-                    <button type="button" className="ghostBtn" disabled={!canReadOperations} onClick={() => setActiveTab("operations")}>
-                      Приходы
-                    </button>
-                  </div>
-                  <div className="queueList">
-                    {receiptRequests
-                      .filter((r) => r.section === objectSectionFilter && r.status !== "RECEIVED" && r.status !== "CANCELLED")
-                      .slice(0, 5)
-                      .map((r) => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          className="queueItem homeQueueClick"
-                          disabled={!canReadOperations}
-                          onClick={() => setActiveTab("operations")}
-                        >
-                          <span>
-                            <strong>{r.number}</strong>
-                            <p className="muted compactLine">
-                              {(r.detectedProjectTitle || r.detectedOrderNumber || r.sourceFileName || "Excel").slice(0, 60)}
-                            </p>
-                          </span>
-                          <span className={`badge ${r.status === "NEW" ? "neutral" : "warn"}`}>
-                            {r.status === "NEW" ? "Новая" : "В работе"}
-                          </span>
-                        </button>
-                      ))}
-                    {!canReadOperations ? (
-                      <p className="muted">Нет прав на приходы по заявке.</p>
-                    ) : !receiptRequests.filter((x) => x.section === objectSectionFilter && x.status !== "RECEIVED" && x.status !== "CANCELLED")
-                        .length ? (
-                      <p className="muted">Активных приёмок в этом разделе нет.</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="rightCardHeader">
-                    <h3>Недавние заявки</h3>
-                    <button type="button" className="ghostBtn" disabled={!canReadIssues} onClick={() => setActiveTab("issues")}>
-                      Выдачи
-                    </button>
-                  </div>
-                  <div className="queueList">
-                    {issues.slice(0, 6).map((i) => (
-                      <button
-                        key={i.id}
-                        type="button"
-                        className="queueItem homeQueueClick"
-                        disabled={!canReadIssues}
-                        onClick={() => {
-                          setSelectedIssueId(i.id);
-                          setDrawerMode("issue");
-                        }}
-                      >
-                        <span>{i.number}</span>
-                        <strong className={statusClass(i.status)}>{issueStatusLabel(i.status)}</strong>
-                      </button>
-                    ))}
-                    {!issues.length ? <p className="muted">Заявки ещё не загружались.</p> : null}
-                  </div>
-                </div>
-              </aside>
-            </div>
-            </CollapsibleSection>
-          </div>
+          <HomeOverview
+            objects={homeObjectsDisplay}
+            loading={homeOverviewLoading}
+            error={homeOverviewError}
+            sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
+            generatedAt={homeOverview?.generatedAt}
+            expandedId={homeExpandedId}
+            onExpand={setHomeExpandedId}
+            onRefresh={() => void loadHomeOverview()}
+            onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
+            onOpenLimits={(id) => openHomeObjectTab(id, "limits")}
+            onOpenTools={(id) => openHomeObjectTab(id, "tools")}
+            canCamp
+            canLimits={canReadLimits}
+            canTools={canReadTools}
+          />
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">

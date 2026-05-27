@@ -21,6 +21,7 @@ import {
   toolWhereFromScope,
   waybillWhereFromScope
 } from "../lib/dataScope.js";
+import { buildHomeOverview } from "../lib/homeOverview.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -263,4 +264,19 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
   };
 
   return res.json(base);
+});
+
+dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : null;
+  if (!section) {
+    return res.status(400).json({ error: "SECTION_REQUIRED" });
+  }
+  const scope = await getRequestDataScope(req);
+  const objects = await buildHomeOverview(scope, section);
+  return res.json({
+    generatedAt: new Date().toISOString(),
+    section,
+    objects
+  });
 });
