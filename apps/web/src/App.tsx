@@ -659,6 +659,7 @@ function App() {
   const [manualStockUnitPrice, setManualStockUnitPrice] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
   const [qrScanError, setQrScanError] = useState("");
   const [qrStream, setQrStream] = useState<MediaStream | null>(null);
@@ -5119,30 +5120,13 @@ function App() {
           <p className="brandSub">Warehouse ERP</p>
         </div>
         <div className="sidebarNavScroll">
-          <p className="navSectionTitle">Операции</p>
           {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
           {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
-          <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
-          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
-          {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
-          {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
-          {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
-
-          <p className="navSectionTitle">Контроль</p>
-          {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
           {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
-          {canMaterialReport && (
-            <button
-              type="button"
-              className={`navBtn ${activeTab === "materialReport" ? "active" : ""}`}
-              onClick={() => setActiveTab("materialReport")}
-            >
-              <span className="navIcon">▪</span>Материальный отчёт
-            </button>
-          )}
-          <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
-          <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка</button>
-          {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи</button>}
+          {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
+          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
+          {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
+          {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
           {canReadNotifications && (
             <button
               className={`navBtn ${activeTab === "notifications" ? "active" : ""}`}
@@ -5151,65 +5135,53 @@ function App() {
             >
               <span className="navIcon">🔔</span>Уведомления
               {unreadNotificationCount > 0 ? (
-                <span
-                  className="navBadgeMuted"
-                  title="Непрочитанные уведомления"
-                  style={{
-                    marginLeft: 6,
-                    fontSize: 11,
-                    lineHeight: "18px",
-                    minWidth: 18,
-                    padding: "0 5px",
-                    borderRadius: 9,
-                    background: "var(--accent, #2563eb)",
-                    color: "#fff",
-                    display: "inline-block",
-                    fontWeight: 700
-                  }}
-                >
+                <span className="navUnreadBadge">
                   {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
                 </span>
               ) : null}
             </button>
           )}
 
-          <p className="navSectionTitle">Сервис</p>
-          {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
-          {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
-          {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR</button>}
-          {(canReadIntegrations || canReadNotifications) && (
-            <button
-              className={`navBtn ${activeTab === "integrations" ? "active" : ""}`}
-              type="button"
-              onClick={() => setActiveTab("integrations")}
-            >
-              <span className="navIcon">⎘</span>
-              {canReadIntegrations ? "Интеграции" : "Уведомления"}
-              {unreadNotificationCount > 0 ? (
-                <span
-                  className="navBadgeMuted"
-                  title="Непрочитанные уведомления"
-                  style={{
-                    marginLeft: 6,
-                    fontSize: 11,
-                    lineHeight: "18px",
-                    minWidth: 18,
-                    padding: "0 5px",
-                    borderRadius: 9,
-                    background: "var(--accent, #2563eb)",
-                    color: "#fff",
-                    display: "inline-block",
-                    fontWeight: 700
-                  }}
-                >
-                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                </span>
-              ) : null}
-            </button>
-          )}
+          <button
+            type="button"
+            className={`navBtn navMoreToggle ${sidebarMoreOpen ? "open" : ""}`}
+            onClick={() => setSidebarMoreOpen((v) => !v)}
+            aria-expanded={sidebarMoreOpen}
+          >
+            <span className="navIcon">{sidebarMoreOpen ? "▾" : "▸"}</span>Ещё
+          </button>
 
-          <p className="navSectionTitle">Администрирование</p>
-          {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
+          {sidebarMoreOpen ? (
+            <div className="navMoreGroup">
+              {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
+              {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
+              {canMaterialReport && (
+                <button
+                  type="button"
+                  className={`navBtn ${activeTab === "materialReport" ? "active" : ""}`}
+                  onClick={() => setActiveTab("materialReport")}
+                >
+                  <span className="navIcon">▪</span>Материальный отчёт
+                </button>
+              )}
+              <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка по объекту</button>
+              <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
+              {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
+              {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR-сканер</button>}
+              {(canReadIntegrations || canReadNotifications) && (
+                <button
+                  className={`navBtn ${activeTab === "integrations" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setActiveTab("integrations")}
+                >
+                  <span className="navIcon">⎘</span>Интеграции
+                </button>
+              )}
+              {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи действий</button>}
+              <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
+              {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
+            </div>
+          ) : null}
         </div>
 
         <div className="sidebarFoot">
@@ -5296,58 +5268,127 @@ function App() {
         </header>
         {dashboardError && activeTab === "stocks" && <p className="error">{dashboardError}</p>}
         {activeTab === "stocks" && (
-          <div className="homeDashboard">
-            <section className="card homeHero">
-              <div className="homeHeroGrid">
-                <div>
-                  <p className="homeHeroKicker">
-                    Выбран раздел · <strong>{objectSectionFilter === "SS" ? "СС" : "ЭОМ"}</strong>
-                  </p>
-                  <h2 className="homeHeroTitle">
-                    {safeName(
-                      dashboard?.object?.warehouseName ||
-                        warehouses.find((w) => w.id === (activeObjectId || dashboardWarehouseId))?.name
-                    )}
-                  </h2>
-                  <p className="muted homeHeroMeta">
-                    Детальный склад, лимиты и отчёт открываются отдельно — здесь оперативные цифры и быстрые переходы.
-                  </p>
-                  <p className="muted homeHeroMeta">
-                    {dashboard?.generatedAt
-                      ? `Сводка API: ${new Date(dashboard.generatedAt).toLocaleString()} · строк остатков в выборке: ${stocks.length}`
-                      : "Запрашиваем сводку с сервера…"}
-                  </p>
-                </div>
-                <div className="homeHeroActions">
-                  <button type="button" className="ghostBtn" onClick={() => setActiveTab("reports")}>
-                    Полная сводка
-                  </button>
+          <div className="homeDashboard simple">
+            <section className="homeStrip">
+              <div className="homeStripText">
+                <strong className="homeStripTitle">
+                  {safeName(
+                    dashboard?.object?.warehouseName ||
+                      warehouses.find((w) => w.id === (activeObjectId || dashboardWarehouseId))?.name
+                  )}
+                </strong>
+                <span className="muted homeStripMeta">
+                  Раздел: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}
+                  {dashboard?.generatedAt
+                    ? ` · Обновлено: ${new Date(dashboard.generatedAt).toLocaleTimeString()}`
+                    : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="ghostBtn homeStripRefresh"
+                onClick={() => {
+                  void loadDashboardSummary();
+                  void loadStocks(q);
+                  void loadIssues();
+                  void loadApprovalQueue();
+                  if (activeObjectId && canReadOperations) void loadReceiptRequests();
+                }}
+                title="Обновить данные"
+              >
+                ↻ Обновить
+              </button>
+            </section>
+
+            {dashboard ? (() => {
+              const w = dashboard.warehouse;
+              const usagePct = Math.max(0, Math.min(100, Math.round(dashboard.object?.usagePercent ?? 0)));
+              const overspend = dashboard.project?.overspendLimitLines || 0;
+              const lowStock = w.lowStockLines || 0;
+              const stockTotal = stocks.length;
+              const onApproval = w.pendingApprovals || 0;
+              const staleIssues = w.staleOpenIssues || 0;
+              const unread = w.unreadNotifications || 0;
+              const errors24h = w.errorNotifications24h || 0;
+
+              return (
+                <section className="kpiHero">
                   <button
                     type="button"
-                    className="primaryBtn"
+                    className={`kpiHeroCard ${lowStock > 0 ? "warn" : ""}`}
+                    disabled={!canReadStocks}
                     onClick={() => {
-                      void loadDashboardSummary();
-                      void loadStocks(q);
-                      void loadIssues();
-                      void loadApprovalQueue();
-                      if (activeObjectId && canReadOperations) void loadReceiptRequests();
+                      setQ("");
+                      void loadStocks("");
+                      setActiveTab("warehouse");
                     }}
                   >
-                    Обновить данные
+                    <span className="kpiHeroLabel">Остатки</span>
+                    <span className="kpiHeroValue">{stockTotal.toLocaleString("ru-RU")}</span>
+                    <span className="kpiHeroSub">
+                      позиций
+                      {lowStock > 0 ? <span className="kpiTag warn">низкий остаток: {lowStock}</span> : null}
+                    </span>
                   </button>
-                </div>
-              </div>
-              {dashboard && dashboard.project.overspendLimitLines > 0 && canReadLimits ? (
-                <div className="homeAlertBanner">
-                  <span>
-                    По лимитам обнаружен перерасход в <strong>{dashboard.project.overspendLimitLines}</strong> строках.
-                  </span>
-                  <button type="button" className="miniActionBtn" onClick={() => setActiveTab("limits")}>
-                    Перейти в лимиты
+
+                  <button
+                    type="button"
+                    className={`kpiHeroCard ${overspend > 0 ? "bad" : usagePct > 80 ? "warn" : ""}`}
+                    disabled={!canReadLimits}
+                    onClick={() => setActiveTab("limits")}
+                  >
+                    <span className="kpiHeroLabel">Лимиты выполнены</span>
+                    <span className="kpiHeroValue">{usagePct}%</span>
+                    <div className="kpiHeroBar">
+                      <div
+                        className="kpiHeroBarFill"
+                        style={{ width: `${Math.min(100, usagePct)}%` }}
+                      />
+                    </div>
+                    <span className="kpiHeroSub">
+                      {dashboard.object
+                        ? `${Math.round(dashboard.object.issuedQty).toLocaleString("ru-RU")} из ${Math.round(dashboard.object.plannedQty).toLocaleString("ru-RU")} ед.`
+                        : "нет данных"}
+                      {overspend > 0 ? <span className="kpiTag bad">перерасход: {overspend}</span> : null}
+                    </span>
                   </button>
-                </div>
-              ) : null}
-            </section>
+
+                  <button
+                    type="button"
+                    className={`kpiHeroCard ${staleIssues > 0 ? "bad" : onApproval > 0 ? "warn" : ""}`}
+                    disabled={!canReadIssues}
+                    onClick={() => {
+                      if (onApproval > 0) {
+                        setIssueStatusFilter("ON_APPROVAL");
+                        setActiveTab("approvals");
+                      } else {
+                        setActiveTab("issues");
+                      }
+                    }}
+                  >
+                    <span className="kpiHeroLabel">Заявки</span>
+                    <span className="kpiHeroValue">{onApproval.toLocaleString("ru-RU")}</span>
+                    <span className="kpiHeroSub">
+                      на согласовании
+                      {staleIssues > 0 ? <span className="kpiTag bad">{staleIssues} висит &gt; 7д</span> : null}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`kpiHeroCard ${errors24h > 0 ? "bad" : unread > 0 ? "warn" : ""}`}
+                    onClick={() => setActiveTab("notifications")}
+                  >
+                    <span className="kpiHeroLabel">Уведомления</span>
+                    <span className="kpiHeroValue">{unread.toLocaleString("ru-RU")}</span>
+                    <span className="kpiHeroSub">
+                      непрочитанных
+                      {errors24h > 0 ? <span className="kpiTag bad">{errors24h} критич. 24ч</span> : null}
+                    </span>
+                  </button>
+                </section>
+              );
+            })() : null}
 
             {dashboard ? (() => {
               type AttItem = {
@@ -5504,18 +5545,12 @@ function App() {
               }
               items.sort((a, b) => b.weight - a.weight);
               const top = items.slice(0, 7);
-              const sumCount = items.reduce((s, x) => s + (Number(x.value) || 0), 0);
-              const tone =
-                items.some((x) => x.tone === "bad") ? "bad" : items.some((x) => x.tone === "warn") ? "warn" : "ok";
               return (
-                <CollapsibleSection
-                  storageKey="home.attentionTop"
-                  title="Что требует внимания"
-                  hint={items.length ? `${items.length} групп · переходы по клику` : "всё в порядке"}
-                  count={sumCount || (items.length ? items.length : "✓")}
-                  countTone={tone}
-                  defaultOpen={true}
-                >
+                <section className="card homeBlock">
+                  <header className="homeBlockHead">
+                    <h3>Что требует внимания</h3>
+                    <span className="muted">{items.length ? `${items.length} групп` : "всё спокойно"}</span>
+                  </header>
                   {top.length === 0 ? (
                     <div className="attentionEmpty">
                       Сейчас по объекту нет горячих событий. Можно работать спокойно.
@@ -5545,23 +5580,52 @@ function App() {
                       ))}
                     </div>
                   )}
-                </CollapsibleSection>
+                </section>
               );
             })() : null}
 
-            <CollapsibleSection
-              storageKey="home.announcements"
-              title="Объявления"
-              count={announcements.length || undefined}
-              defaultOpen={announcements.length > 0}
-            >
-              {canWriteAnnouncements && (
-                <div className="toolbar" style={{ marginBottom: 8 }}>
-                  <button type="button" className="ghostBtn" onClick={() => setAnnouncementComposeOpen((v) => !v)}>
-                    {announcementComposeOpen ? "Закрыть форму" : "Новое объявление"}
-                  </button>
-                </div>
-              )}
+            {dashboard ? (
+              <section className="card homeBlock">
+                <header className="homeBlockHead">
+                  <h3>Активность за день</h3>
+                  <span className="muted">приходы · выдачи · перемещения</span>
+                </header>
+                <ResponsiveContainer width="100%" height={homeTodayOpsBarRows.length ? 220 : 100}>
+                  <BarChart data={homeTodayOpsBarRows} margin={{ top: 12, right: 12, left: 0, bottom: 6 }}>
+                    <defs>
+                      {HOME_TODAY_COLUMN_GRADIENTS.map(([a, b], i) => (
+                        <linearGradient key={i} id={`simpleColGrad${i}`} x1="0" y1="1" x2="0" y2="0">
+                          <stop offset="0%" stopColor={a} stopOpacity={0.88} />
+                          <stop offset="100%" stopColor={b} stopOpacity={1} />
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e8edf5" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} interval={0} tickMargin={8} axisLine={{ stroke: "#dfe7f5" }} />
+                    <YAxis width={40} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={{ stroke: "#dfe7f5" }} allowDecimals={false} />
+                    <Tooltip formatter={(v: unknown) => [Number(v).toLocaleString("ru-RU"), "Количество"]} />
+                    {homeTodayOpsBarRows.length ? (
+                      <Bar dataKey="value" radius={[8, 8, 4, 4]} barSize={36} animationDuration={600}>
+                        {homeTodayOpsBarRows.map((_, i) => (
+                          <Cell key={i} fill={`url(#simpleColGrad${i % HOME_TODAY_COLUMN_GRADIENTS.length})`} />
+                        ))}
+                      </Bar>
+                    ) : null}
+                  </BarChart>
+                </ResponsiveContainer>
+              </section>
+            ) : null}
+
+            {announcements.length > 0 || canWriteAnnouncements ? (
+              <section className="card homeBlock">
+                <header className="homeBlockHead">
+                  <h3>Объявления</h3>
+                  {canWriteAnnouncements ? (
+                    <button type="button" className="ghostBtn" onClick={() => setAnnouncementComposeOpen((v) => !v)}>
+                      {announcementComposeOpen ? "Закрыть форму" : "Новое объявление"}
+                    </button>
+                  ) : null}
+                </header>
               {announcementComposeOpen && canWriteAnnouncements ? (
                 <div className="form card" style={{ marginBottom: 12 }}>
                   <label>
@@ -5612,12 +5676,18 @@ function App() {
                   ))}
                 </div>
               )}
-            </CollapsibleSection>
+              </section>
+            ) : null}
 
             {!dashboard ? (
               <p className="muted">Нет данных сводки{dashboardError ? "" : " (ожидание прав или ответа API)"}.</p>
             ) : (
-              <>
+              <CollapsibleSection
+                storageKey="home.advanced"
+                title="Подробная аналитика"
+                hint="развернуть для расширенного представления"
+                defaultOpen={false}
+              >
                 <CollapsibleSection
                   storageKey="home.resources"
                   title="Объект и ресурсы"
@@ -6027,9 +6097,15 @@ function App() {
                     </div>
                   </div>
                 </CollapsibleSection>
-              </>
+              </CollapsibleSection>
             )}
 
+            <CollapsibleSection
+              storageKey="home.queues"
+              title="Очереди и приёмки"
+              hint="ближайшие согласования, выдачи, приёмки"
+              defaultOpen={false}
+            >
             <div className="homeSplit">
               <div className="homeSplitPrimary">
                 <section className="card homeWideCard">
@@ -6251,6 +6327,7 @@ function App() {
                 </div>
               </aside>
             </div>
+            </CollapsibleSection>
           </div>
         )}
       {activeTab === "warehouse" && (
