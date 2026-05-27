@@ -641,6 +641,7 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [authReady, setAuthReady] = useState(() => !localStorage.getItem(TOKEN_KEY));
   const [authError, setAuthError] = useState("");
   /** Сообщение на экране входа после протухшего JWT / 401 от API. */
   const [sessionExpiredHint, setSessionExpiredHint] = useState("");
@@ -1846,6 +1847,7 @@ function App() {
     setAvailableObjects([]);
     setActiveObjectId("");
     setMustPickObject(false);
+    setAuthReady(true);
     setSessionExpiredHint(
       reason === "session-expired" ? "Сессия истекла или доступ отозван. Войдите снова." : ""
     );
@@ -2001,27 +2003,38 @@ function App() {
 
   async function loadMe() {
     if (!token) {
+      setAuthReady(true);
       return;
     }
-    const res = await fetchWithSession(`${API_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      return;
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        return;
+      }
+      const data = (await res.json()) as MeResponse;
+      setMe(data);
+      setProfileFullName(data.fullName);
+      if (Array.isArray(data.availableObjects)) {
+        setAvailableObjects(data.availableObjects);
+      }
+      if (data.activeWarehouseId) {
+        setActiveObjectId(data.activeWarehouseId);
+      } else if (!data.requireObjectSelection && data.availableObjects && data.availableObjects.length > 1) {
+        setActiveObjectId(ALL_OBJECTS_ID);
+      } else {
+        setActiveObjectId("");
+      }
+      if (data.activeSection) {
+        setObjectSectionFilter(data.activeSection);
+      }
+      setMustPickObject(Boolean(data.requireObjectSelection));
+    } catch {
+      // сеть / неверный ответ API
+    } finally {
+      setAuthReady(true);
     }
-    const data = (await res.json()) as MeResponse;
-    setMe(data);
-    setProfileFullName(data.fullName);
-    if (Array.isArray(data.availableObjects)) {
-      setAvailableObjects(data.availableObjects);
-    }
-    if (data.activeWarehouseId) {
-      setActiveObjectId(data.activeWarehouseId);
-    }
-    if (data.activeSection) {
-      setObjectSectionFilter(data.activeSection);
-    }
-    setMustPickObject(Boolean(data.requireObjectSelection));
   }
 
   async function updateAuthContext(next: { warehouseId: string; section: "SS" | "EOM" }) {
@@ -4460,11 +4473,14 @@ function App() {
   }, [me?.id, me?.fullName]);
 
   useEffect(() => {
-    if (token) {
-      void loadMe();
-      void loadChatUsers();
-      void loadConversations();
+    if (!token) {
+      setAuthReady(true);
+      return;
     }
+    setAuthReady(false);
+    void loadMe();
+    void loadChatUsers();
+    void loadConversations();
   }, [token]);
 
   // Перезагрузка данных при смене объекта или раздела СС/ЭОМ.
@@ -5162,6 +5178,17 @@ function App() {
     } catch (err) {
       setAuthError(String(err));
     }
+  }
+
+  if (token && !authReady) {
+    return (
+      <main className="loginShell">
+        <div className="loginCard card">
+          <h2>СкладПро</h2>
+          <p className="muted">Загрузка сессии…</p>
+        </div>
+      </main>
+    );
   }
 
   if (!isAuthed) {
