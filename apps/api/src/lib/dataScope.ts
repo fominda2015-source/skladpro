@@ -70,6 +70,24 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
   };
 }
 
+export function stockMovementWhereFromScope(scope: DataScope): Prisma.StockMovementWhereInput {
+  if (scope.unrestricted) {
+    return {};
+  }
+  if (scope.sectionScopes.length) {
+    return {
+      OR: scope.sectionScopes.map((s) => ({
+        warehouseId: s.warehouseId,
+        section: s.section
+      }))
+    };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds } };
+  }
+  return { warehouseId: { in: [] } };
+}
+
 export function stockWhereFromScope(scope: DataScope): Prisma.StockWhereInput {
   if (scope.unrestricted) {
     return {};

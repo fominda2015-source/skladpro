@@ -11,38 +11,18 @@ type MaterialDetail = {
   synonyms?: Array<{ id: string; value: string }>;
 };
 
-type EmployeeOption = { id: string; fullName: string; email?: string; role?: string };
-
 type Props = {
   materialId: string;
-  defaultWarehouseId: string;
-  section: "SS" | "EOM";
   apiUrl: string;
   token: string;
   fetchWithSession: typeof fetch;
   canWrite: boolean;
-  canGrantAccess: boolean;
-  employees: EmployeeOption[];
-  warehouses: Array<{ id: string; name: string }>;
   onClose: () => void;
   onSaved: () => void;
 };
 
 export function MaterialCardModal(props: Props) {
-  const {
-    materialId,
-    defaultWarehouseId,
-    section,
-    apiUrl,
-    token,
-    fetchWithSession,
-    canWrite,
-    canGrantAccess,
-    employees,
-    warehouses,
-    onClose,
-    onSaved
-  } = props;
+  const { materialId, apiUrl, token, fetchWithSession, canWrite, onClose, onSaved } = props;
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -55,9 +35,6 @@ export function MaterialCardModal(props: Props) {
   const [newSynonym, setNewSynonym] = useState("");
   const [synonyms, setSynonyms] = useState<Array<{ id: string; value: string }>>([]);
   const [saving, setSaving] = useState(false);
-  const [grantUserId, setGrantUserId] = useState("");
-  const [grantWarehouseId, setGrantWarehouseId] = useState(defaultWarehouseId);
-  const [grantBusy, setGrantBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,33 +139,6 @@ export function MaterialCardModal(props: Props) {
     setSynonyms((prev) => prev.filter((s) => s.id !== synonymId));
   }
 
-  async function grantAccess() {
-    if (!canGrantAccess || !grantUserId || !grantWarehouseId) return;
-    setGrantBusy(true);
-    setMessage("");
-    try {
-      const res = await fetchWithSession(`${apiUrl}/api/warehouses/${grantWarehouseId}/grant-access`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: grantUserId, section })
-      });
-      if (!res.ok) {
-        let err = "Не удалось выдать доступ";
-        try {
-          const j = await res.json();
-          if (typeof j.error === "string") err = j.error;
-        } catch {
-          // ignore
-        }
-        setMessage(err);
-        return;
-      }
-      setMessage("Доступ к объекту выдан сотруднику");
-    } finally {
-      setGrantBusy(false);
-    }
-  }
-
   return (
     <div className="requestMaterialsModalBackdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="card requestMaterialsModalCard" onClick={(e) => e.stopPropagation()}>
@@ -201,7 +151,7 @@ export function MaterialCardModal(props: Props) {
         <div className="requestMaterialsModalBody">
           {loading ? <p className="muted">Загрузка…</p> : null}
           {message ? (
-            <p className="muted" style={{ color: message.includes("Сохранено") || message.includes("выдан") ? "#16a34a" : "#b54708" }}>
+            <p className="muted" style={{ color: message.includes("Сохранено") ? "#16a34a" : "#b54708" }}>
               {message}
             </p>
           ) : null}
@@ -274,54 +224,13 @@ export function MaterialCardModal(props: Props) {
                 ) : null}
               </section>
 
-              {canGrantAccess ? (
-                <section className="requestMaterialsDocs" style={{ marginTop: 16 }}>
-                  <h4 style={{ margin: 0 }}>Выдать доступ к объекту</h4>
-                  <p className="muted" style={{ fontSize: 12, margin: "4px 0 8px" }}>
-                    Сотрудник сможет выбрать объект в шапке и работать в разделе {section}.
-                  </p>
-                  <div className="form grid2">
-                    <label>
-                      Сотрудник
-                      <select value={grantUserId} onChange={(e) => setGrantUserId(e.target.value)}>
-                        <option value="">— выберите —</option>
-                        {employees.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.fullName}
-                            {u.email ? ` (${u.email})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Объект (склад)
-                      <select value={grantWarehouseId} onChange={(e) => setGrantWarehouseId(e.target.value)}>
-                        {warehouses.map((w) => (
-                          <option key={w.id} value={w.id}>
-                            {w.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    className="ghostBtn"
-                    disabled={grantBusy || !grantUserId || !grantWarehouseId}
-                    onClick={() => void grantAccess()}
-                  >
-                    {grantBusy ? "Выдаём…" : "Выдать доступ"}
-                  </button>
-                </section>
-              ) : null}
-
               <div className="toolbar" style={{ marginTop: 16 }}>
                 {canWrite ? (
                   <button type="button" disabled={saving} onClick={() => void saveMaterial()}>
                     {saving ? "Сохранение…" : "Сохранить карточку"}
                   </button>
                 ) : (
-                  <p className="muted">Нет прав на редактирование материалов (materials.write).</p>
+                  <p className="muted">Нет права на редактирование карточек материалов. Выдайте его в «Доступы» → карточка пользователя → «Доступы на действия».</p>
                 )}
               </div>
             </>

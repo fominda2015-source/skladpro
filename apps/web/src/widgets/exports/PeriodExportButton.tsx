@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { downloadExportXlsx } from "../../shared/exportXlsx";
 
 type Section = "stocks" | "limits" | "materialReport" | "tools" | "issues" | "receipts";
 
@@ -10,6 +11,8 @@ type Props = {
   apiUrl: string;
   fetchWithSession: typeof fetch;
   title?: string;
+  warehouseId?: string;
+  sectionFilter?: "SS" | "EOM";
 };
 
 const PERIOD_LABELS: Array<{ id: Period; label: string }> = [
@@ -20,9 +23,15 @@ const PERIOD_LABELS: Array<{ id: Period; label: string }> = [
   { id: "custom", label: "Период…" }
 ];
 
-// Кнопка-виджет «Скачать Excel за период».
-// Период: 1 день / неделя / месяц / год / произвольный (с from/to, не более 366 дней).
-export function PeriodExportButton({ section, token, apiUrl, fetchWithSession, title }: Props) {
+export function PeriodExportButton({
+  section,
+  token,
+  apiUrl,
+  fetchWithSession,
+  title,
+  warehouseId,
+  sectionFilter
+}: Props) {
   const [period, setPeriod] = useState<Period>("month");
   const [from, setFrom] = useState<string>("");
   const [to, setTo] = useState<string>("");
@@ -45,78 +54,39 @@ export function PeriodExportButton({ section, token, apiUrl, fetchWithSession, t
     } else {
       url.searchParams.set("period", period);
     }
-    try {
-      const r = await fetchWithSession(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!r.ok) {
-        const text = await r.text().catch(() => "");
-        setErr(text || `Ошибка ${r.status}`);
-        return;
-      }
-      const blob = await r.blob();
-      const disposition = r.headers.get("Content-Disposition") || "";
-      const match = /filename="?([^";]+)"?/i.exec(disposition);
-      const fileName = match ? decodeURIComponent(match[1]) : `${section}.xlsx`;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    } catch (e) {
-      setErr(String((e as Error).message || e));
-    } finally {
-      setBusy(false);
+    if (warehouseId) {
+      url.searchParams.set("warehouseId", warehouseId);
+      if (sectionFilter) url.searchParams.set("section", sectionFilter);
     }
+    const result = await downloadExportXlsx(fetchWithSession, url.toString(), token, `${section}.xlsx`);
+    if (!result.ok) setErr(result.error);
+    setBusy(false);
   }
 
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: 6,
-        padding: 6,
-        border: "1px solid var(--border, #e5e7eb)",
-        borderRadius: 8,
-        background: "var(--bgSoft, #fafafa)"
-      }}
-    >
-      <span style={{ fontSize: 12, color: "var(--muted, #6b7280)" }}>
-        {title || "Excel за период"}:
-      </span>
+    <div className="periodExportBtn">
+      <span className="periodExportLabel">{title || "Excel за период"}:</span>
       <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
         {PERIOD_LABELS.map((p) => (
-          <option key={p.id} value={p.id}>{p.label}</option>
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
         ))}
       </select>
-      {period === "custom" && (
+      {period === "custom" ? (
         <>
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            style={{ width: 130 }}
-          />
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            style={{ width: 130 }}
-          />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </>
-      )}
+      ) : null}
       <button type="button" onClick={() => void downloadXlsx()} disabled={busy}>
         {busy ? "Готовим…" : "Скачать .xlsx"}
       </button>
-      {err && (
-        <span style={{ fontSize: 12, color: "#b54708" }} title={err}>
-          {err.length > 60 ? err.slice(0, 60) + "…" : err}
+      {err ? (
+        <span className="periodExportErr" title={err}>
+          {err.length > 80 ? `${err.slice(0, 80)}…` : err}
         </span>
-      )}
+      ) : null}
     </div>
   );
 }

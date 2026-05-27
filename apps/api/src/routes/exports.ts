@@ -5,9 +5,10 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   getRequestDataScope,
-  issueWhereFromScope,
+  mergeIssueWhere,
   operationWhereFromScope,
   stockWhereFromScope,
+  stockMovementWhereFromScope,
   toolWhereFromScope,
   projectWhereFromScope,
   type DataScope
@@ -111,10 +112,63 @@ function appendSheet(wb: xlsx.WorkBook, name: string, rows: Array<Record<string,
 
 function sendXlsx(res: import("express").Response, wb: xlsx.WorkBook, fileName: string) {
   const buf = xlsx.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  const safe =
+    fileName.replace(/[^\w\u0400-\u04FF.\-]+/gi, "_").slice(0, 120) || "export.xlsx";
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
   res.setHeader("Content-Length", String(buf.length));
-  res.end(buf);
+  res.send(buf);
+}
+
+function parseExportWarehouseQuery(
+  query: Record<string, unknown>,
+  scope: DataScope
+): { warehouseId?: string; section?: "SS" | "EOM"; error?: string } {
+  const wh = typeof query.warehouseId === "string" ? query.warehouseId.trim() : "";
+  const secRaw = typeof query.section === "string" ? query.section.toUpperCase() : "";
+  const section = secRaw === "EOM" ? "EOM" : secRaw === "SS" ? "SS" : undefined;
+  if (!wh) return {};
+  if (scope.unrestricted || !scope.warehouseIds?.length) {
+    return { warehouseId: wh, section };
+  }
+  if (!scope.warehouseIds.includes(wh)) {
+    return { error: "FORBIDDEN_WAREHOUSE" };
+  }
+  return { warehouseId: wh, section };
+}
+
+function mergeStockWhere(
+  scope: DataScope,
+  exportWh: { warehouseId?: string; section?: "SS" | "EOM" }
+): Prisma.StockWhereInput {
+  const base = stockWhereFromScope(scope);
+  if (!exportWh.warehouseId) return base;
+  const extra: Prisma.StockWhereInput = {
+    warehouseId: exportWh.warehouseId,
+    ...(exportWh.section ? { section: exportWh.section } : {})
+  };
+  if (!Object.keys(base).length) return extra;
+  return { AND: [base, extra] };
+}
+
+function mergeMovementWhere(
+  scope: DataScope,
+  range: Range,
+  exportWh: { warehouseId?: string; section?: "SS" | "EOM" }
+): Prisma.StockMovementWhereInput {
+  const base = stockMovementWhereFromScope(scope);
+  const time = { createdAt: { gte: range.from, lte: range.to } };
+  const wh = exportWh.warehouseId
+    ? {
+        warehouseId: exportWh.warehouseId,
+        ...(exportWh.section ? { section: exportWh.section } : {})
+      }
+    : {};
+  const parts: Prisma.StockMovementWhereInput[] = [time, base, wh].filter(
+    (p) => Object.keys(p).length
+  );
+  if (parts.length === 1) return parts[0] as Prisma.StockMovementWhereInput;
+  return { AND: parts };
 }
 
 function metaSheet(wb: xlsx.WorkBook, title: string, range: Range, userEmail?: string) {
@@ -158,20 +212,17 @@ exportsRouter.get("/stocks.xlsx", requireSectionPerm("stocks"), async (req: Auth
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
 
   const stocks = await prisma.stock.findMany({
-    where: stockWhereFromScope(scope),
+    where: mergeStockWhere(scope, exportWh),
     include: { material: true, warehouse: true },
     take: 50000,
     orderBy: [{ warehouseId: "asc" }, { section: "asc" }]
   });
   const movements = await prisma.stockMovement.findMany({
-    where: {
-      AND: [
-        { createdAt: { gte: range.from, lte: range.to } },
-        scope.unrestricted ? {} : { warehouseId: scope.warehouseIds?.length ? { in: scope.warehouseIds } : undefined }
-      ]
-    },
+    where: mergeMovementWhere(scope, range, exportWh),
     include: { material: true, warehouse: true },
     orderBy: { createdAt: "desc" },
     take: 50000
@@ -220,9 +271,21 @@ exportsRouter.get("/limits.xlsx", requireSectionPerm("limits"), async (req: Auth
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
+
+  const projectWhere: Prisma.ProjectWhereInput = {
+    ...projectWhereFromScope(scope),
+    ...(exportWh.warehouseId
+      ? {
+          warehouseId: exportWh.warehouseId,
+          ...(exportWh.section ? { section: exportWh.section } : {})
+        }
+      : {})
+  };
 
   const projects = await prisma.project.findMany({
-    where: projectWhereFromScope(scope),
+    where: projectWhere,
     select: { id: true, name: true, code: true },
     take: 5000
   });
@@ -257,10 +320,7 @@ exportsRouter.get("/limits.xlsx", requireSectionPerm("limits"), async (req: Auth
   // Выдача за период по StockMovement OUT, в разрезе материала/склада/проекта (через IssueRequest).
   const issuedRows = await prisma.stockMovement.findMany({
     where: {
-      AND: [
-        { createdAt: { gte: range.from, lte: range.to }, direction: "OUT" },
-        scope.unrestricted ? {} : { warehouseId: scope.warehouseIds?.length ? { in: scope.warehouseIds } : undefined }
-      ]
+      AND: [{ direction: "OUT" }, mergeMovementWhere(scope, range, exportWh)]
     },
     include: { material: true, warehouse: true, issueRequest: { include: { project: true } } },
     take: 50000
@@ -303,12 +363,24 @@ exportsRouter.get("/materialReport.xlsx", requireSectionPerm("materialReport"), 
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
 
+  const scopeWh =
+    scope.unrestricted || !scope.warehouseIds?.length
+      ? {}
+      : { warehouseId: { in: scope.warehouseIds } };
   const where: Prisma.MaterialHolderWriteoffWhereInput = {
     AND: [
       { createdAt: { gte: range.from, lte: range.to } },
-      scope.unrestricted ? {} : { warehouseId: scope.warehouseIds?.length ? { in: scope.warehouseIds } : undefined }
-    ]
+      scopeWh,
+      exportWh.warehouseId
+        ? {
+            warehouseId: exportWh.warehouseId,
+            ...(exportWh.section ? { section: exportWh.section } : {})
+          }
+        : {}
+    ].filter((p) => Object.keys(p).length)
   };
   const rows = await prisma.materialHolderWriteoff.findMany({
     where,
@@ -343,9 +415,24 @@ exportsRouter.get("/tools.xlsx", requireSectionPerm("tools"), async (req: Authed
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
+
+  const toolBase = toolWhereFromScope(scope);
+  const toolWhere: Prisma.ToolWhereInput = exportWh.warehouseId
+    ? {
+        AND: [
+          toolBase,
+          {
+            warehouseId: exportWh.warehouseId,
+            ...(exportWh.section ? { section: exportWh.section } : {})
+          }
+        ]
+      }
+    : toolBase;
 
   const tools = await prisma.tool.findMany({
-    where: toolWhereFromScope(scope),
+    where: toolWhere,
     include: { warehouse: true, project: true, category: true },
     orderBy: [{ name: "asc" }, { inventoryNumber: "asc" }],
     take: 50000
@@ -354,7 +441,7 @@ exportsRouter.get("/tools.xlsx", requireSectionPerm("tools"), async (req: Authed
     where: {
       AND: [
         { createdAt: { gte: range.from, lte: range.to } },
-        scope.unrestricted ? {} : { tool: { is: toolWhereFromScope(scope) } }
+        { tool: { is: toolWhere } }
       ]
     },
     include: { tool: { include: { warehouse: true } } },
@@ -402,13 +489,18 @@ exportsRouter.get("/issues.xlsx", requireSectionPerm("issues"), async (req: Auth
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
 
-  const where: Prisma.IssueRequestWhereInput = {
-    AND: [
-      { createdAt: { gte: range.from, lte: range.to } },
-      issueWhereFromScope(scope)
-    ]
-  };
+  const where: Prisma.IssueRequestWhereInput = mergeIssueWhere(scope, {
+    createdAt: { gte: range.from, lte: range.to },
+    ...(exportWh.warehouseId
+      ? {
+          warehouseId: exportWh.warehouseId,
+          ...(exportWh.section ? { section: exportWh.section } : {})
+        }
+      : {})
+  });
   const issues = await prisma.issueRequest.findMany({
     where,
     include: {
@@ -467,13 +559,23 @@ exportsRouter.get("/receipts.xlsx", requireSectionPerm("receipts"), async (req: 
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
   const scope = await getRequestDataScope(req);
+  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  if (exportWh.error) return res.status(403).json({ error: exportWh.error });
+
+  const receiptExtra = exportWh.warehouseId
+    ? {
+        warehouseId: exportWh.warehouseId,
+        ...(exportWh.section ? { section: exportWh.section } : {})
+      }
+    : {};
 
   const receipts = await prisma.receiptRequest.findMany({
     where: {
       AND: [
         { createdAt: { gte: range.from, lte: range.to } },
-        receiptRequestWhereFromScope(scope)
-      ]
+        receiptRequestWhereFromScope(scope),
+        receiptExtra
+      ].filter((p) => Object.keys(p).length)
     },
     include: {
       warehouse: true,
@@ -488,8 +590,9 @@ exportsRouter.get("/receipts.xlsx", requireSectionPerm("receipts"), async (req: 
     where: {
       AND: [
         { type: "INCOME" as const, operationDate: { gte: range.from, lte: range.to } },
-        operationWhereFromScope(scope)
-      ]
+        operationWhereFromScope(scope),
+        receiptExtra
+      ].filter((p) => Object.keys(p).length)
     },
     include: {
       warehouse: true,

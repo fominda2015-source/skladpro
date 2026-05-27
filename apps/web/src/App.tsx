@@ -15,7 +15,15 @@ import {
 } from "recharts";
 import "./App.css";
 import jsQR from "jsqr";
-import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY, resolvePublicFileUrl } from "./app/constants";
+import {
+  ALL_OBJECTS_ID,
+  API_URL,
+  ISSUE_FILTER_KEY,
+  LIST_VIEW_KEY,
+  STOCK_VIEW_KEY,
+  TOKEN_KEY,
+  resolvePublicFileUrl
+} from "./app/constants";
 import { displayDocumentFileName, docTypeLabel } from "./shared/fileName";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
@@ -26,10 +34,13 @@ import {
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
+import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
+import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { CollapsibleSection } from "./widgets/home/CollapsibleSection";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
-import { PageHero, FilterStrip } from "./widgets/ui/PageHero";
+import { PageHero } from "./widgets/ui/PageHero";
+import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -635,6 +646,7 @@ function App() {
   const [sessionExpiredHint, setSessionExpiredHint] = useState("");
   const [availableObjects, setAvailableObjects] = useState<Array<{ id: string; name: string; address?: string | null }>>([]);
   const [activeObjectId, setActiveObjectId] = useState("");
+  const [tabWarehouseFilters, setTabWarehouseFilters] = useState<Record<string, string>>({});
   const [mustPickObject, setMustPickObject] = useState(false);
   const [stocks, setStocks] = useState<StockRow[]>([]);
   const [q, setQ] = useState("");
@@ -1095,20 +1107,40 @@ function App() {
   const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
     { id: "stocks", label: "Главная", permissions: ["dashboard.read"] },
     { id: "warehouse", label: "Склад", permissions: ["stocks.read"] },
-    { id: "operations", label: "Приходы", permissions: ["operations.read", "operations.write"] },
-    { id: "issues", label: "Выдачи", permissions: ["issues.read", "issues.write"] },
-    { id: "approvals", label: "Заявки", permissions: ["issues.approve"] },
-    { id: "waybills", label: "Перемещения", permissions: ["waybills.read", "waybills.write"] },
-    { id: "documents", label: "Документы", permissions: ["documents.read", "documents.write", "documents.upload"] },
-    { id: "limits", label: "Лимиты", permissions: ["limits.read", "limits.edit", "limits.write"] },
-    { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read", "materialReport.write"] },
-    { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read", "materials.write"] },
-    { id: "tools", label: "Инструменты", permissions: ["tools.read", "tools.write"] },
+    { id: "operations", label: "Приходы", permissions: ["operations.read"] },
+    { id: "issues", label: "Выдачи", permissions: ["issues.read"] },
+    { id: "approvals", label: "Заявки на согласование", permissions: ["issues.approve"] },
+    { id: "waybills", label: "Перемещения", permissions: ["waybills.read"] },
+    { id: "documents", label: "Документы", permissions: ["documents.read"] },
+    { id: "limits", label: "Лимиты", permissions: ["limits.read"] },
+    { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read"] },
+    { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read"] },
+    { id: "tools", label: "Инструменты", permissions: ["tools.read"] },
     { id: "qr", label: "QR", permissions: ["tools.read"] },
-    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "integrations.write", "notifications.read"] },
+    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "notifications.read"] },
     { id: "notifications", label: "Уведомления", permissions: ["notifications.read"] },
     { id: "audit", label: "Логи", permissions: ["audit.read"] },
     { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
+  ];
+  const actionAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
+    { id: "materialCards", label: "Редактирование карточек материалов", permissions: ["materials.write"] },
+    { id: "warehousesManage", label: "Создание и изменение складов", permissions: ["warehouses.write"] },
+    { id: "operationsWrite", label: "Проведение приходов и операций", permissions: ["operations.write"] },
+    { id: "issuesWrite", label: "Создание и выдача заявок", permissions: ["issues.write"] },
+    { id: "issuesApprove", label: "Согласование заявок", permissions: ["issues.approve"] },
+    { id: "waybillsWrite", label: "Перемещения (ТН)", permissions: ["waybills.write"] },
+    { id: "documentsWrite", label: "Редактирование документов", permissions: ["documents.write"] },
+    { id: "documentsUpload", label: "Загрузка документов", permissions: ["documents.upload"] },
+    { id: "limitsEdit", label: "Редактирование лимитов", permissions: ["limits.edit", "limits.write"] },
+    { id: "materialReportWrite", label: "Списания в материальном отчёте", permissions: ["materialReport.write"] },
+    { id: "toolsWrite", label: "Управление инструментами", permissions: ["tools.write"] },
+    { id: "integrationsWrite", label: "Настройка интеграций", permissions: ["integrations.write"] },
+    { id: "notificationsWrite", label: "Отправка уведомлений", permissions: ["notifications.write"] },
+    { id: "notificationsRules", label: "Правила уведомлений", permissions: ["notifications.rules.manage"] },
+    { id: "feedbackManage", label: "Модерация обратной связи", permissions: ["feedback.manage"] },
+    { id: "announcementsWrite", label: "Объявления на главной", permissions: ["announcements.write"] },
+    { id: "auditRevert", label: "Откат операций в журнале", permissions: ["audit.revert"] },
+    { id: "adminUsers", label: "Управление пользователями и доступами", permissions: ["admin.users.manage"] }
   ];
   const roleLabel = (role: string) =>
     ({
@@ -1422,6 +1454,18 @@ function App() {
 
   const stockWarehouseIdsInView = useMemo(() => [...new Set(stocks.map((s) => s.warehouseId))], [stocks]);
 
+  const stockWarehouseOptions = useMemo(
+    () =>
+      stockWarehouseIdsInView.map((wid) => {
+        const nm =
+          warehouses.find((w) => w.id === wid)?.name ||
+          stocks.find((s) => s.warehouseId === wid)?.warehouseName ||
+          wid.slice(0, 8);
+        return { id: wid, name: safeName(nm) };
+      }),
+    [stockWarehouseIdsInView, warehouses, stocks]
+  );
+
   const issueFacingRows = useMemo((): IssuePickCartLine[] => {
     const out: IssuePickCartLine[] = [];
     if (!activeObjectId) return out;
@@ -1719,7 +1763,31 @@ function App() {
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
-  const canWriteCatalog = useMemo(() => Boolean(hasPermission("warehouses.write") || hasPermission("materials.write")), [me]);
+  const canWriteCatalog = useMemo(
+    () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
+    [me]
+  );
+  const canOpenMaterialCards = useMemo(() => hasPermission("materials.read"), [me]);
+  const canWriteMaterialCards = useMemo(() => hasPermission("materials.write"), [me]);
+  const canWriteWarehouses = useMemo(() => hasPermission("warehouses.write"), [me]);
+  const isAllObjectsView = activeObjectId === ALL_OBJECTS_ID;
+  const effectiveWarehouseId = useMemo(() => {
+    if (activeObjectId === ALL_OBJECTS_ID) return tabWarehouseFilters[activeTab] || "";
+    return activeObjectId || "";
+  }, [activeObjectId, activeTab, tabWarehouseFilters]);
+  const objectFilterWarehouses = useMemo(
+    () =>
+      (availableObjects.length ? availableObjects : warehouses).map((w) => ({
+        id: w.id,
+        name: safeName(w.name)
+      })),
+    [availableObjects, warehouses]
+  );
+  const exportWarehouseId = useMemo(() => {
+    if (effectiveWarehouseId) return effectiveWarehouseId;
+    if (activeTab === "warehouse" && stockFilterWarehouseId) return stockFilterWarehouseId;
+    return "";
+  }, [effectiveWarehouseId, activeTab, stockFilterWarehouseId]);
   const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
   const canWriteLimits = useMemo(
     () => hasPermission("limits.edit") || hasPermission("limits.write"),
@@ -1750,10 +1818,6 @@ function App() {
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
   const canWriteDocuments = useMemo(
     () => hasPermission("documents.write") || hasPermission("documents.upload"),
-    [me]
-  );
-  const canGrantWarehouseAccess = useMemo(
-    () => hasPermission("warehouses.write") || hasPermission("admin.users.manage"),
     [me]
   );
   const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
@@ -1870,6 +1934,71 @@ function App() {
     }
   }
 
+  async function deleteWarehouseMaterial(materialId: string, materialName: string) {
+    if (!token) return;
+    if (
+      !window.confirm(
+        `Удалить материал «${materialName}» из каталога? Это действие только для админа.`
+      )
+    ) {
+      return;
+    }
+    const tryDel = async (force: boolean) =>
+      fetchWithSession(
+        `${API_URL}/api/materials/${encodeURIComponent(materialId)}${force ? "?force=1" : ""}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+      );
+    let r = await tryDel(false);
+    let body: {
+      error?: string;
+      stockMovements?: number;
+      operationItems?: number;
+      issueItems?: number;
+      receiptItems?: number;
+      limitItems?: number;
+      transferLines?: number;
+      materialReport?: number;
+      mappings?: number;
+    } = {};
+    try {
+      body = await r.json();
+    } catch {
+      // ignore
+    }
+    if (r.status === 409 && body.error === "MATERIAL_HAS_REFERENCES") {
+      const detail = [
+        body.stockMovements ? `движений: ${body.stockMovements}` : "",
+        body.operationItems ? `позиций операций: ${body.operationItems}` : "",
+        body.issueItems ? `позиций выдач: ${body.issueItems}` : "",
+        body.receiptItems ? `позиций приходов: ${body.receiptItems}` : "",
+        body.limitItems ? `строк лимитов: ${body.limitItems}` : "",
+        body.transferLines ? `строк перемещений: ${body.transferLines}` : "",
+        body.materialReport ? `мат. отчёта: ${body.materialReport}` : "",
+        body.mappings ? `сопоставлений: ${body.mappings}` : ""
+      ]
+        .filter(Boolean)
+        .join("; ");
+      if (
+        !window.confirm(
+          `Материал связан с историей (${detail}).\n\nПринудительно удалить ВМЕСТЕ со всеми ссылками? Это нельзя откатить.`
+        )
+      ) {
+        return;
+      }
+      r = await tryDel(true);
+      try {
+        body = await r.json();
+      } catch {
+        body = {};
+      }
+    }
+    if (!r.ok) {
+      window.alert(body.error || `Не удалось удалить материал (HTTP ${r.status})`);
+      return;
+    }
+    await loadStocks(q);
+  }
+
   async function loadMe() {
     if (!token) {
       return;
@@ -1909,10 +2038,49 @@ function App() {
     return true;
   }
 
+  async function clearAuthContextWarehouse(section: "SS" | "EOM") {
+    if (!token) return false;
+    const res = await fetchWithSession(`${API_URL}/api/auth/context`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ warehouseId: null, section })
+    });
+    if (!res.ok) return false;
+    setActiveObjectId(ALL_OBJECTS_ID);
+    setObjectSectionFilter(section);
+    setMustPickObject(false);
+    return true;
+  }
+
+  async function selectTopObject(warehouseId: string) {
+    if (warehouseId === ALL_OBJECTS_ID) {
+      await clearAuthContextWarehouse(objectSectionFilter);
+      return;
+    }
+    await updateAuthContext({ warehouseId, section: objectSectionFilter });
+  }
+
   function setSection(next: "SS" | "EOM") {
     setObjectSectionFilter(next);
-    if (!activeObjectId || !token) return;
+    if (!token) return;
+    if (activeObjectId === ALL_OBJECTS_ID) {
+      void clearAuthContextWarehouse(next);
+      return;
+    }
+    if (!activeObjectId) return;
     void updateAuthContext({ warehouseId: activeObjectId, section: next });
+  }
+
+  function renderTabObjectFilter() {
+    if (!isAllObjectsView || activeTab === "stocks") return null;
+    return (
+      <TabObjectFilter
+        value={tabWarehouseFilters[activeTab] || ""}
+        onChange={(id) => setTabWarehouseFilters((prev) => ({ ...prev, [activeTab]: id }))}
+        warehouses={objectFilterWarehouses}
+        sectionLabel={`Раздел: ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
+      />
+    );
   }
 
   async function uploadProfileAvatar(file: File) {
@@ -2567,12 +2735,14 @@ function App() {
   }
 
   async function loadWarehouseSummarySnapshot() {
-    if (!token || !activeObjectId) return;
+    const wh =
+      activeObjectId === ALL_OBJECTS_ID ? tabWarehouseFilters.reports || "" : activeObjectId;
+    if (!token || !wh) return;
     setReportsSnapshotLoading(true);
     setReportsMessage("");
     try {
       const res = await fetchWithSession(
-        `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/snapshot`,
+        `${API_URL}/api/reports/warehouse/${encodeURIComponent(wh)}/snapshot`,
         {
           headers: { Authorization: `Bearer ${token}` }
         }
@@ -4309,7 +4479,7 @@ function App() {
     void loadApprovalQueue();
     void loadCatalogData().catch(() => undefined);
     if (canDashboard) void loadDashboardSummary();
-  }, [token, mustPickObject, activeObjectId, objectSectionFilter]);
+  }, [token, mustPickObject, activeObjectId, objectSectionFilter, tabWarehouseFilters, activeTab]);
 
   useEffect(() => {
     if (!token || activeTab !== "stocks" || mustPickObject || !activeObjectId) {
@@ -4821,7 +4991,12 @@ function App() {
   }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, docWarehouseFilter, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
-    if (activeTab === "documents" && activeObjectId && !docWarehouseFilter) {
+    if (
+      activeTab === "documents" &&
+      activeObjectId &&
+      activeObjectId !== ALL_OBJECTS_ID &&
+      !docWarehouseFilter
+    ) {
       setDocWarehouseFilter(activeObjectId);
     }
   }, [activeTab, activeObjectId, docWarehouseFilter]);
@@ -4923,22 +5098,28 @@ function App() {
   useEffect(() => {
     if (activeTab !== "waybills" || !warehouses.length) return;
     const to =
-      activeObjectId && warehouses.some((w) => w.id === activeObjectId) ? activeObjectId : warehouses[0].id;
+      activeObjectId &&
+      activeObjectId !== ALL_OBJECTS_ID &&
+      warehouses.some((w) => w.id === activeObjectId)
+        ? activeObjectId
+        : warehouses[0].id;
     setTransferReqToWarehouseId(to);
     const from = warehouses.find((w) => w.id !== to) ?? warehouses[0];
     setTransferReqFromWarehouseId(from.id);
   }, [activeTab, warehouses, activeObjectId]);
 
   useEffect(() => {
-    if (activeObjectId) {
-      setOpWarehouseId(activeObjectId);
-      setIssueWarehouseId(activeObjectId);
-      setToolWarehouseId(activeObjectId);
-      setToolListWarehouseId(activeObjectId);
-      setDashboardWarehouseId(activeObjectId);
-    } else {
-      setToolListWarehouseId("");
+    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
+      if (activeObjectId === ALL_OBJECTS_ID) {
+        setToolListWarehouseId("");
+      }
+      return;
     }
+    setOpWarehouseId(activeObjectId);
+    setIssueWarehouseId(activeObjectId);
+    setToolWarehouseId(activeObjectId);
+    setToolListWarehouseId(activeObjectId);
+    setDashboardWarehouseId(activeObjectId);
   }, [activeObjectId]);
 
   async function onLoginSubmit(e: FormEvent) {
@@ -5041,6 +5222,9 @@ function App() {
               Объект
               <select value={activeObjectId} onChange={(e) => setActiveObjectId(e.target.value)}>
                 <option value="">— выберите —</option>
+                {availableObjects.length > 1 ? (
+                  <option value={ALL_OBJECTS_ID}>Все объекты</option>
+                ) : null}
                 {availableObjects.map((o) => (
                   <option key={o.id} value={o.id}>
                     {safeName(o.name)}
@@ -5072,7 +5256,10 @@ function App() {
               disabled={!activeObjectId}
               onClick={async () => {
                 if (!activeObjectId) return;
-                const ok = await updateAuthContext({ warehouseId: activeObjectId, section: objectSectionFilter });
+                const ok =
+                  activeObjectId === ALL_OBJECTS_ID
+                    ? await clearAuthContextWarehouse(objectSectionFilter)
+                    : await updateAuthContext({ warehouseId: activeObjectId, section: objectSectionFilter });
                 if (!ok) setAuthError("Не удалось сохранить выбор объекта");
               }}
             >
@@ -5315,11 +5502,12 @@ function App() {
             <select
               value={activeObjectId}
               onChange={(e) => {
-                const warehouseId = e.target.value;
-                if (!warehouseId) return;
-                void updateAuthContext({ warehouseId, section: objectSectionFilter });
+                void selectTopObject(e.target.value);
               }}
             >
+              {availableObjects.length > 1 ? (
+                <option value={ALL_OBJECTS_ID}>Все объекты</option>
+              ) : null}
               {availableObjects.map((o) => (
                 <option key={o.id} value={o.id}>
                   Объект: {safeName(o.name)}
@@ -6427,379 +6615,84 @@ function App() {
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">
-          <PageHero
-            icon="📦"
-            title="Склад"
-            subtitle={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"} · ${warehouseDisplayRows.length} из ${warehouseVisibleRows.length} строк`}
-            stats={[
-              {
-                label: "Позиций",
-                value: warehouseVisibleRows.length.toLocaleString("ru-RU")
-              },
-              {
-                label: "Низкий остаток",
-                value: warehouseVisibleRows.filter((r) => r.isLow).length,
-                tone: warehouseVisibleRows.some((r) => r.isLow) ? "warn" : "neutral",
-                onClick: () => setStockOnlyLow(true)
-              },
-              {
-                label: "Есть фактические названия",
-                value: warehouseVisibleRows.filter((r) => (materialMappingsByTargetId.get(r.materialId)?.length || 0) > 0).length
+          {renderTabObjectFilter()}
+          <WarehouseStockView
+            sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
+            rows={warehouseDisplayRows.map((row) => ({
+              ...row,
+              materialName: safeName(row.materialName),
+              warehouseName: safeName(row.warehouseName)
+            }))}
+            totalVisible={warehouseVisibleRows.length}
+            lowCount={warehouseVisibleRows.filter((r) => r.isLow).length}
+            loading={loadingStocks}
+            error={stocksError}
+            limitHint={
+              limitFilterEnabled
+                ? "Показаны материалы лимитов, которые есть на складе. Нулевые позиции из лимитов скрыты."
+                : undefined
+            }
+            manualMessage={manualStockMessage && !manualStockModalOpen ? manualStockMessage : undefined}
+            search={q}
+            onSearchChange={setQ}
+            onSearchSubmit={() => void loadStocks(q)}
+            kindTab={stockShelfKindTab}
+            onKindTabChange={setStockShelfKindTab}
+            warehouseFilterId={stockFilterWarehouseId}
+            onWarehouseFilterChange={setStockFilterWarehouseId}
+            warehouseOptions={stockWarehouseOptions}
+            limitMaterialsOnly={!showAttachedMaterials}
+            onLimitMaterialsOnlyToggle={() => setShowAttachedMaterials((v) => !v)}
+            onlyAvailable={stockOnlyAvailable}
+            onOnlyAvailableChange={setStockOnlyAvailable}
+            onlyLow={stockOnlyLow}
+            onOnlyLowChange={setStockOnlyLow}
+            onlyFactNames={stockOnlyWithFactNames}
+            onOnlyFactNamesChange={setStockOnlyWithFactNames}
+            showSku={showStockSku}
+            onShowSkuChange={setShowStockSku}
+            showReserve={showStockReserve}
+            onShowReserveChange={setShowStockReserve}
+            showPrice={showStockPrice}
+            onShowPriceChange={setShowStockPrice}
+            canWriteOperations={canWriteOperations}
+            canOpenMaterialCard={canOpenMaterialCards}
+            isAdmin={me?.role === "ADMIN"}
+            onAddMaterial={() => {
+              setManualStockMessage("");
+              if (!warehouses.length) {
+                void loadCatalogData().catch(() => undefined);
               }
-            ]}
-            actions={
-              <>
-                <button type="button" className="ghostBtn" onClick={() => void loadStockMovements()}>
-                  Журнал
-                </button>
-                {canWriteOperations ? (
-                  <button
-                    type="button"
-                    className="primaryBtn"
-                    onClick={() => {
-                      setManualStockMessage("");
-                      if (!warehouses.length) {
-                        void loadCatalogData().catch(() => undefined);
-                      }
-                      setManualStockModalOpen(true);
-                    }}
-                  >
-                    + Добавить
-                  </button>
-                ) : null}
-                <PeriodExportButton
-                  section="stocks"
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  title="Склад в Excel"
-                />
-              </>
+              setManualStockModalOpen(true);
+            }}
+            onOpenJournal={() => void loadStockMovements()}
+            exportSlot={
+              <PeriodExportButton
+                section="stocks"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Склад в Excel"
+                warehouseId={exportWarehouseId || undefined}
+                sectionFilter={objectSectionFilter}
+              />
             }
+            expandedRowId={expandedStockRowId}
+            onToggleExpand={(rowId) => {
+              void loadStockMovements();
+              setExpandedStockRowId((prev) => (prev === rowId ? "" : rowId));
+            }}
+            onOpenMaterialCard={(materialId, warehouseId) => {
+              void loadChatUsers();
+              setMaterialEditModal({ materialId, warehouseId });
+            }}
+            onDeleteMaterial={deleteWarehouseMaterial}
+            movementsByKey={movementSlicesByStockKey}
+            mappingsByMaterialId={materialMappingsByTargetId}
+            acceptedByMaterialId={acceptedBySourceByTargetId}
+            movementsLoading={stockMovementsLoading}
+            movementsError={stockMovementsError}
           />
-
-          {manualStockMessage && !manualStockModalOpen ? (
-            <p className="muted" role="status" style={{ margin: "0 0 8px" }}>
-              {manualStockMessage}
-            </p>
-          ) : null}
-
-          <FilterStrip
-            search={
-              <input
-                placeholder="Поиск по материалу, SKU, синониму…"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void loadStocks(q);
-                }}
-              />
-            }
-            actions={
-              <button
-                type="button"
-                className={showAttachedMaterials ? "secondaryBtn" : "ghostBtn"}
-                onClick={() => setShowAttachedMaterials((v) => !v)}
-                title="Переключить между всеми материалами и только лимитными"
-              >
-                {showAttachedMaterials ? "Только лимитные" : "Все материалы"}
-              </button>
-            }
-          >
-            {(
-              [
-                ["ALL", "Все"],
-                ["MATERIAL", "Материалы"],
-                ["CONSUMABLE", "Расходники"],
-                ["WORKWEAR", "Спецодежда"]
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                className={`chip ${stockShelfKindTab === k ? "active" : ""}`}
-                onClick={() => setStockShelfKindTab(k)}
-              >
-                {label}
-              </button>
-            ))}
-            <select
-              value={stockFilterWarehouseId}
-              onChange={(e) => setStockFilterWarehouseId(e.target.value)}
-              aria-label="Склад"
-            >
-              <option value="">Все склады</option>
-              {stockWarehouseIdsInView.map((wid) => {
-                const nm =
-                  warehouses.find((w) => w.id === wid)?.name ||
-                  stocks.find((s) => s.warehouseId === wid)?.warehouseName;
-                return (
-                  <option key={wid} value={wid}>
-                    {safeName(nm || wid.slice(0, 8))}
-                  </option>
-                );
-              })}
-            </select>
-            <label>
-              <input
-                type="checkbox"
-                checked={stockOnlyAvailable}
-                onChange={(e) => setStockOnlyAvailable(e.target.checked)}
-              />
-              С остатком
-            </label>
-            <label>
-              <input type="checkbox" checked={stockOnlyLow} onChange={(e) => setStockOnlyLow(e.target.checked)} />
-              Низкий
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={stockOnlyWithFactNames}
-                onChange={(e) => setStockOnlyWithFactNames(e.target.checked)}
-              />
-              Факт. названия
-            </label>
-            <label>
-              <input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU
-            </label>
-            <label>
-              <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={showStockPrice}
-                onChange={(e) => setShowStockPrice(e.target.checked)}
-              />{" "}
-              Цена
-            </label>
-          </FilterStrip>
-          {limitFilterEnabled && (
-            <p className="muted">
-              В списке показаны только материалы лимитов, которые реально есть на складе. Нулевые позиции из лимитов скрыты.
-            </p>
-          )}
-          {loadingStocks && <p>Загрузка остатков...</p>}
-          {stocksError && <p className="error">{stocksError}</p>}
-          {!loadingStocks && !stocksError && !warehouseDisplayRows.length && (
-            <EmptyState title="По текущим фильтрам ничего не нашлось" hint="Смените фильтры, либо снимите их." />
-          )}
-          {!loadingStocks && !stocksError && warehouseDisplayRows.length > 0 && (
-            <div className="toolsCardGrid" style={{ marginTop: 10 }}>
-              {warehouseDisplayRows.map((row) => {
-                const isExpanded = expandedStockRowId === row.id;
-                const factsCount = materialMappingsByTargetId.get(row.materialId)?.length || 0;
-                const acceptedCount = acceptedBySourceByTargetId.get(row.materialId)?.size || 0;
-                const kindLabel =
-                  row.materialKind === "CONSUMABLE"
-                    ? "расходники"
-                    : row.materialKind === "WORKWEAR"
-                      ? "спецодежда"
-                      : "основной";
-                return (
-                  <article
-                    key={`stock-card-${row.id}`}
-                    className={`toolMiniCard${row.isLow ? " low" : ""}`}
-                    style={{
-                      borderLeft: row.isLow ? "4px solid #ef4444" : "4px solid #94a3b8"
-                    }}
-                  >
-                    <div className="toolMiniCardTop">
-                      <strong className="toolMiniCardTitle" title={row.materialName}>
-                        {safeName(row.materialName)}
-                      </strong>
-                      <span className={`badge ${row.isLow ? "bad" : "ok"}`}>
-                        {Number(row.available).toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {row.materialUnit}
-                      </span>
-                    </div>
-                    <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
-                      {safeName(row.warehouseName)} · {kindLabel}
-                      {row.materialSku ? ` · ${row.materialSku}` : ""}
-                    </p>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 12, marginTop: 6 }}>
-                      <span>
-                        <strong>Остаток:</strong> {Number(row.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                      </span>
-                      <span>
-                        <strong>Резерв:</strong> {Number(row.reserved).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                      </span>
-                      <span>
-                        <strong>Помещ.:</strong> {row.storageRoom || "—"}
-                      </span>
-                      <span>
-                        <strong>Ячейка:</strong> {row.storageCell || "—"}
-                      </span>
-                      {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
-                        <span style={{ gridColumn: "1 / -1" }}>
-                          <strong>Цена за ед.:</strong>{" "}
-                          {Number(row.unitPrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽
-                        </span>
-                      ) : null}
-                    </div>
-                    {(acceptedCount > 0 || factsCount > 0) ? (
-                      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-                        фактических названий: {factsCount}
-                        {acceptedCount ? ` · принято под разными именами: ${acceptedCount}` : ""}
-                      </p>
-                    ) : null}
-                    <div className="toolbar" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() => {
-                          void loadStockMovements();
-                          setExpandedStockRowId((prev) => (prev === row.id ? "" : row.id));
-                        }}
-                      >
-                        {isExpanded ? "Свернуть" : "Подробнее"}
-                      </button>
-                      {canWriteCatalog ? (
-                        <button
-                          type="button"
-                          className="ghostBtn"
-                          onClick={() => {
-                            void loadChatUsers();
-                            setMaterialEditModal({
-                              materialId: row.materialId,
-                              warehouseId: row.warehouseId
-                            });
-                          }}
-                        >
-                          Карточка
-                        </button>
-                      ) : null}
-                      {me?.role === "ADMIN" ? (
-                        <button
-                          type="button"
-                          className="dangerBtn"
-                          onClick={async () => {
-                            if (!token) return;
-                            if (
-                              !window.confirm(
-                                `Удалить материал «${row.materialName}» из каталога? Это действие только для админа.`
-                              )
-                            ) {
-                              return;
-                            }
-                            const tryDel = async (force: boolean) =>
-                              fetchWithSession(
-                                `${API_URL}/api/materials/${encodeURIComponent(row.materialId)}${force ? "?force=1" : ""}`,
-                                { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
-                              );
-                            let r = await tryDel(false);
-                            let body: {
-                              error?: string;
-                              stockMovements?: number;
-                              operationItems?: number;
-                              issueItems?: number;
-                              receiptItems?: number;
-                              limitItems?: number;
-                              transferLines?: number;
-                              materialReport?: number;
-                              mappings?: number;
-                            } = {};
-                            try {
-                              body = await r.json();
-                            } catch {
-                              // ignore
-                            }
-                            if (r.status === 409 && body.error === "MATERIAL_HAS_REFERENCES") {
-                              const detail = [
-                                body.stockMovements ? `движений: ${body.stockMovements}` : "",
-                                body.operationItems ? `позиций операций: ${body.operationItems}` : "",
-                                body.issueItems ? `позиций выдач: ${body.issueItems}` : "",
-                                body.receiptItems ? `позиций приходов: ${body.receiptItems}` : "",
-                                body.limitItems ? `строк лимитов: ${body.limitItems}` : "",
-                                body.transferLines ? `строк перемещений: ${body.transferLines}` : "",
-                                body.materialReport ? `мат. отчёта: ${body.materialReport}` : "",
-                                body.mappings ? `сопоставлений: ${body.mappings}` : ""
-                              ]
-                                .filter(Boolean)
-                                .join("; ");
-                              if (
-                                !window.confirm(
-                                  `Материал связан с историей (${detail}).\n\nПринудительно удалить ВМЕСТЕ со всеми ссылками? Это нельзя откатить.`
-                                )
-                              ) {
-                                return;
-                              }
-                              r = await tryDel(true);
-                              try {
-                                body = await r.json();
-                              } catch {
-                                body = {};
-                              }
-                            }
-                            if (!r.ok) {
-                              window.alert(body.error || `Не удалось удалить материал (HTTP ${r.status})`);
-                              return;
-                            }
-                            await loadStocks(q);
-                          }}
-                        >
-                          Удалить материал
-                        </button>
-                      ) : null}
-                    </div>
-                    {isExpanded && (
-                      <div className="card" style={{ marginTop: 8 }}>
-                        {(acceptedCount > 0 || factsCount > 0) ? (
-                          <>
-                            <h4 style={{ marginTop: 0 }}>Фактические названия</h4>
-                            <ul className="plainList">
-                              {[...(acceptedBySourceByTargetId.get(row.materialId)?.values() || [])].map((x, i) => (
-                                <li key={`actual-q-${row.id}-${i}`}>
-                                  <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) — принято{" "}
-                                  {x.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
-                                </li>
-                              ))}
-                              {(materialMappingsByTargetId.get(row.materialId) || [])
-                                .filter((m) => {
-                                  const bucket = acceptedBySourceByTargetId.get(row.materialId);
-                                  return !bucket?.has(`${m.sourceName}|${m.sourceUnit || ""}`);
-                                })
-                                .map((m) => (
-                                  <li key={`actual-${row.id}-${m.id}`}>
-                                    {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
-                                    <span className="muted">пока не принято</span>
-                                  </li>
-                                ))}
-                            </ul>
-                          </>
-                        ) : null}
-                        <h4>Движения по позиции</h4>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Время</th>
-                              <th>Тип</th>
-                              <th>Кол-во</th>
-                              <th>Источник</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(movementSlicesByStockKey.get(`${row.warehouseId}::${row.materialId}`) || []).map((m) => (
-                              <tr key={`slice-${m.id}`}>
-                                <td>{new Date(m.createdAt).toLocaleString()}</td>
-                                <td>{m.direction === "IN" ? "Приход/возврат" : "Выдача"}</td>
-                                <td>
-                                  {Number.isFinite(Number(m.quantity)) ? Math.round(Number(m.quantity)) : 0}
-                                </td>
-                                <td>{m.operation?.documentNumber || m.issueRequest?.number || m.sourceDocumentType}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-          {stockMovementsLoading && <p>Загрузка движений...</p>}
-          {stockMovementsError && <p className="error">{stockMovementsError}</p>}
         </div>
       )}
 
@@ -6836,6 +6729,7 @@ function App() {
           Boolean(campSearch.trim()) || Boolean(campCategoryFilter) || Boolean(campStatusFilter);
         return (
           <>
+            {renderTabObjectFilter()}
             <PageHero
               icon="▣"
               title="Городок"
@@ -7742,7 +7636,7 @@ function App() {
                   />
                 </label>
                 <button
-                  disabled={!canWriteCatalog}
+                  disabled={!canWriteWarehouses}
                   onClick={async () => {
                     if (!token) return;
                     setCatalogMessage("");
@@ -7782,6 +7676,7 @@ function App() {
 
       {activeTab === "operations" && (
         <div className="receiptsWorkspace">
+          {renderTabObjectFilter()}
           <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 6 }}>
             <button
               type="button"
@@ -7824,6 +7719,8 @@ function App() {
                     apiUrl={API_URL}
                     fetchWithSession={fetchWithSession}
                     title="Поступления в Excel"
+                    warehouseId={exportWarehouseId || undefined}
+                    sectionFilter={objectSectionFilter}
                   />
                 }
               />
@@ -8385,6 +8282,7 @@ function App() {
 
       {activeTab === "issues" && (
         <div className="issuesWorkspace">
+          {renderTabObjectFilter()}
           <PageHero
             icon="⇄"
             title="Выдачи со склада"
@@ -8420,6 +8318,8 @@ function App() {
                 apiUrl={API_URL}
                 fetchWithSession={fetchWithSession}
                 title="Выдачи в Excel"
+                warehouseId={exportWarehouseId || undefined}
+                sectionFilter={objectSectionFilter}
               />
             }
           />
@@ -8953,6 +8853,7 @@ function App() {
 
       {activeTab === "limits" && (
         <div className="limitsWorkspace">
+          {renderTabObjectFilter()}
           <PageHero
             icon="▧"
             title="Лимиты"
@@ -8983,6 +8884,8 @@ function App() {
                   apiUrl={API_URL}
                   fetchWithSession={fetchWithSession}
                   title="Лимиты в Excel"
+                  warehouseId={exportWarehouseId || undefined}
+                  sectionFilter={objectSectionFilter}
                 />
               </>
             }
@@ -9837,6 +9740,7 @@ function App() {
 
       {canMaterialReport && activeTab === "materialReport" && (
         <div>
+          {renderTabObjectFilter()}
           <PageHero
             icon="▪"
             title="Материальный отчёт"
@@ -9857,6 +9761,8 @@ function App() {
                   apiUrl={API_URL}
                   fetchWithSession={fetchWithSession}
                   title="Мат. отчёт в Excel"
+                  warehouseId={exportWarehouseId || undefined}
+                  sectionFilter={objectSectionFilter}
                 />
               </>
             }
@@ -9995,6 +9901,7 @@ function App() {
 
       {activeTab === "approvals" && (
         <div>
+          {renderTabObjectFilter()}
           <PageHero
             icon="☑"
             title="Заявки"
@@ -10265,6 +10172,7 @@ function App() {
         ).slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         return (
           <div>
+            {renderTabObjectFilter()}
             <PageHero
               icon="▤"
               title="Документы"
@@ -10543,6 +10451,7 @@ function App() {
 
       {activeTab === "waybills" && (
         <div>
+          {renderTabObjectFilter()}
           <PageHero
             icon="⇆"
             title="Транспортные накладные"
@@ -11182,6 +11091,30 @@ function App() {
               ))}
             </div>
           </div>
+          <div className="card" style={{ marginTop: 10 }}>
+            <h4>Доступы на действия</h4>
+            <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+              Отдельные права: редактирование карточек материалов, управление складами и т.п.
+            </p>
+            <div className="plainList">
+              {actionAccessOptions.map((opt) => (
+                <label key={`adm-drawer-action-${opt.id}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
+                      } else {
+                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
+                      }
+                    }}
+                  />{" "}
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="toolbar">
             <button
               type="button"
@@ -11377,6 +11310,7 @@ function App() {
 
       {activeTab === "tools" && (
         <div>
+          {renderTabObjectFilter()}
           <PageHero
             icon="⚒"
             title={toolDrilledCard ? toolDrilledCard.label : "Инструменты"}
@@ -11416,6 +11350,8 @@ function App() {
                   apiUrl={API_URL}
                   fetchWithSession={fetchWithSession}
                   title="Инструменты в Excel"
+                  warehouseId={exportWarehouseId || undefined}
+                  sectionFilter={objectSectionFilter}
                 />
               </>
             }
@@ -12373,15 +12309,20 @@ function App() {
             title="Сводка по объекту"
             subtitle="Остатки, заявки, операции, ТН, лимиты — единым отчётом"
           />
+          {renderTabObjectFilter()}
           <div className="card form" style={{ marginBottom: 8 }}>
-            {!activeObjectId ? (
-              <p className="muted">Выберите объект в верхней панели, затем сформируйте сводку.</p>
+            {!effectiveWarehouseId ? (
+              <p className="muted">
+                {isAllObjectsView
+                  ? "Выберите объект в фильтре вкладки или скачайте Excel по всем доступным объектам ниже."
+                  : "Выберите объект в верхней панели, затем сформируйте сводку."}
+              </p>
             ) : (
               <div>
                 <strong>Текущий объект:</strong>{" "}
                 {safeName(
-                  availableObjects.find((o) => o.id === activeObjectId)?.name ||
-                    warehouses.find((w) => w.id === activeObjectId)?.name
+                  availableObjects.find((o) => o.id === effectiveWarehouseId)?.name ||
+                    warehouses.find((w) => w.id === effectiveWarehouseId)?.name
                 )}
                 <span className="muted">
                   {" "}
@@ -12390,22 +12331,32 @@ function App() {
               </div>
             )}
           </div>
+          <ObjectExportsPanel
+            token={token}
+            apiUrl={API_URL}
+            fetchWithSession={fetchWithSession}
+            hasPermission={hasPermission}
+            warehouseId={effectiveWarehouseId || undefined}
+            section={objectSectionFilter}
+            warehouses={objectFilterWarehouses}
+            title="Excel по объектам (все виды отчётов)"
+          />
           <div className="toolbar">
             <button
               type="button"
-              disabled={!token || !activeObjectId || reportsSnapshotLoading}
+              disabled={!token || !effectiveWarehouseId || reportsSnapshotLoading}
               onClick={() => void loadWarehouseSummarySnapshot()}
             >
               {reportsSnapshotLoading ? "Загрузка…" : "Сформировать сводку"}
             </button>
             <button
               type="button"
-              disabled={!token || !activeObjectId}
+              disabled={!token || !effectiveWarehouseId}
               onClick={async () => {
-                if (!token || !activeObjectId) return;
+                if (!token || !effectiveWarehouseId) return;
                 setReportsMessage("");
                 const res = await fetchWithSession(
-                  `${API_URL}/api/reports/warehouse/${encodeURIComponent(activeObjectId)}/summary.pdf`,
+                  `${API_URL}/api/reports/warehouse/${encodeURIComponent(effectiveWarehouseId)}/summary.pdf`,
                   {
                     headers: { Authorization: `Bearer ${token}` }
                   }
@@ -13028,6 +12979,27 @@ function App() {
             <div className="plainList">
               {sidebarAccessOptions.map((opt) => (
                 <label key={`new-perm-${opt.id}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={opt.permissions.some((p) => newUserPermissions.includes(p))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewUserPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
+                      } else {
+                        setNewUserPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
+                      }
+                    }}
+                  />{" "}
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3>Доступы на действия</h3>
+            <div className="plainList">
+              {actionAccessOptions.map((opt) => (
+                <label key={`new-action-${opt.id}`} style={{ display: "block" }}>
                   <input
                     type="checkbox"
                     checked={opt.permissions.some((p) => newUserPermissions.includes(p))}
@@ -14061,19 +14033,10 @@ function App() {
       {materialEditModal && token ? (
         <MaterialCardModal
           materialId={materialEditModal.materialId}
-          defaultWarehouseId={materialEditModal.warehouseId || activeObjectId || warehouses[0]?.id || ""}
-          section={objectSectionFilter}
           apiUrl={API_URL}
           token={token}
           fetchWithSession={fetchWithSession}
-          canWrite={canWriteCatalog}
-          canGrantAccess={canGrantWarehouseAccess}
-          employees={chatUsers.map((u) => ({
-            id: u.id,
-            fullName: u.fullName,
-            role: u.role
-          }))}
-          warehouses={warehouses}
+          canWrite={canWriteMaterialCards}
           onClose={() => setMaterialEditModal(null)}
           onSaved={() => {
             void loadCatalogData().catch(() => undefined);

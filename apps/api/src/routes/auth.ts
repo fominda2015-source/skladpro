@@ -56,7 +56,7 @@ const avatarUpload = multer({
 });
 
 const updateContextSchema = z.object({
-  warehouseId: z.string().min(1),
+  warehouseId: z.string().min(1).nullable(),
   section: z.enum(["SS", "EOM"]).default("SS")
 });
 
@@ -258,8 +258,10 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
   if (!me) return res.status(404).json({ error: "User not found" });
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
   const objects = await getAllowedWarehouses(me.id, permissions);
-  if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
-    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+  if (parsed.data.warehouseId !== null) {
+    if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
+      return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+    }
   }
   const updated = await prisma.user.update({
     where: { id: me.id },
