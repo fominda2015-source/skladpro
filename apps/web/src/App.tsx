@@ -27,6 +27,7 @@ import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { CollapsibleSection } from "./widgets/home/CollapsibleSection";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
+import { PageHero, FilterStrip } from "./widgets/ui/PageHero";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -6331,71 +6332,90 @@ function App() {
           </div>
         )}
       {activeTab === "warehouse" && (
-        <div className="card stockPanel">
-          <div className="stockPanelHead">
-            <div>
-              <h2>Склад: материалы и остатки</h2>
-              <p className="muted" style={{ margin: "6px 0 0" }}>
-                Раздел <strong>{objectSectionFilter === "SS" ? "СС" : "ЭОМ"}</strong>
-                {" · "}
-                Показано <strong>{warehouseDisplayRows.length}</strong> из {warehouseVisibleRows.length} строк в текущей выборке
-              </p>
-            </div>
-            <PeriodExportButton
-              section="stocks"
-              token={token}
-              apiUrl={API_URL}
-              fetchWithSession={fetchWithSession}
-              title="Склад в Excel"
-            />
-          </div>
-          <div className="toolbar stockToolbarPrimary">
-            {manualStockMessage && !manualStockModalOpen ? (
-              <p className="muted" role="status" style={{ gridColumn: "1 / -1", margin: "0 0 6px" }}>
-                {manualStockMessage}
-              </p>
-            ) : null}
-            <input
-              className="stockSearchWide"
-              placeholder="Поиск по материалу, SKU, синониму…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <button type="button" className="primaryBtn" onClick={() => void loadStocks(q)}>
-              Найти
-            </button>
-            <button type="button" onClick={() => void loadStockMovements()}>
-              Журнал движений
-            </button>
-            {canWriteOperations ? (
+        <div className="stockPanel">
+          <PageHero
+            icon="📦"
+            title="Склад"
+            subtitle={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"} · ${warehouseDisplayRows.length} из ${warehouseVisibleRows.length} строк`}
+            stats={[
+              {
+                label: "Позиций",
+                value: warehouseVisibleRows.length.toLocaleString("ru-RU")
+              },
+              {
+                label: "Низкий остаток",
+                value: warehouseVisibleRows.filter((r) => r.isLow).length,
+                tone: warehouseVisibleRows.some((r) => r.isLow) ? "warn" : "neutral",
+                onClick: () => setStockOnlyLow(true)
+              },
+              {
+                label: "Есть фактические названия",
+                value: warehouseVisibleRows.filter((r) => (materialMappingsByTargetId.get(r.materialId)?.length || 0) > 0).length
+              }
+            ]}
+            actions={
+              <>
+                <button type="button" className="ghostBtn" onClick={() => void loadStockMovements()}>
+                  Журнал
+                </button>
+                {canWriteOperations ? (
+                  <button
+                    type="button"
+                    className="primaryBtn"
+                    onClick={() => {
+                      setManualStockMessage("");
+                      if (!warehouses.length) {
+                        void loadCatalogData().catch(() => undefined);
+                      }
+                      setManualStockModalOpen(true);
+                    }}
+                  >
+                    + Добавить
+                  </button>
+                ) : null}
+                <PeriodExportButton
+                  section="stocks"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Склад в Excel"
+                />
+              </>
+            }
+          />
+
+          {manualStockMessage && !manualStockModalOpen ? (
+            <p className="muted" role="status" style={{ margin: "0 0 8px" }}>
+              {manualStockMessage}
+            </p>
+          ) : null}
+
+          <FilterStrip
+            search={
+              <input
+                placeholder="Поиск по материалу, SKU, синониму…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void loadStocks(q);
+                }}
+              />
+            }
+            actions={
               <button
                 type="button"
-                className="secondaryBtn"
-                onClick={() => {
-                  setManualStockMessage("");
-                  // Если справочники не дотянулись (например, медленный мобильный канал) — подгружаем перед открытием модала.
-                  if (!warehouses.length) {
-                    void loadCatalogData().catch(() => undefined);
-                  }
-                  setManualStockModalOpen(true);
-                }}
+                className={showAttachedMaterials ? "secondaryBtn" : "ghostBtn"}
+                onClick={() => setShowAttachedMaterials((v) => !v)}
+                title="Переключить между всеми материалами и только лимитными"
               >
-                Добавить материал вручную
+                {showAttachedMaterials ? "Только лимитные" : "Все материалы"}
               </button>
-            ) : null}
-            <button
-              type="button"
-              className={showAttachedMaterials ? "secondaryBtn" : "ghostBtn"}
-              onClick={() => setShowAttachedMaterials((v) => !v)}
-            >
-              {showAttachedMaterials ? "Только лимитные" : "Все материалы"}
-            </button>
-          </div>
-          <div className="tabs" style={{ flexWrap: "wrap", marginTop: 8 }}>
+            }
+          >
             {(
               [
                 ["ALL", "Все"],
-                ["MATERIAL", "Основные материалы"],
+                ["MATERIAL", "Материалы"],
                 ["CONSUMABLE", "Расходники"],
                 ["WORKWEAR", "Спецодежда"]
               ] as const
@@ -6403,65 +6423,64 @@ function App() {
               <button
                 key={k}
                 type="button"
-                className={stockShelfKindTab === k ? "active" : ""}
+                className={`chip ${stockShelfKindTab === k ? "active" : ""}`}
                 onClick={() => setStockShelfKindTab(k)}
               >
                 {label}
               </button>
             ))}
-          </div>
-          <div className="stockFiltersStrip">
+            <select
+              value={stockFilterWarehouseId}
+              onChange={(e) => setStockFilterWarehouseId(e.target.value)}
+              aria-label="Склад"
+            >
+              <option value="">Все склады</option>
+              {stockWarehouseIdsInView.map((wid) => {
+                const nm =
+                  warehouses.find((w) => w.id === wid)?.name ||
+                  stocks.find((s) => s.warehouseId === wid)?.warehouseName;
+                return (
+                  <option key={wid} value={wid}>
+                    {safeName(nm || wid.slice(0, 8))}
+                  </option>
+                );
+              })}
+            </select>
             <label>
-              Склад
-              <select value={stockFilterWarehouseId} onChange={(e) => setStockFilterWarehouseId(e.target.value)}>
-                <option value="">Все из ответа</option>
-                {stockWarehouseIdsInView.map((wid) => {
-                  const nm =
-                    warehouses.find((w) => w.id === wid)?.name ||
-                    stocks.find((s) => s.warehouseId === wid)?.warehouseName;
-                  return (
-                    <option key={wid} value={wid}>
-                      {safeName(nm || wid.slice(0, 8))}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <label className="toggleLine">
               <input
                 type="checkbox"
                 checked={stockOnlyAvailable}
                 onChange={(e) => setStockOnlyAvailable(e.target.checked)}
               />
-              Только с остатком
+              С остатком
             </label>
-            <label className="toggleLine">
+            <label>
               <input type="checkbox" checked={stockOnlyLow} onChange={(e) => setStockOnlyLow(e.target.checked)} />
-              Низкий остаток
+              Низкий
             </label>
-            <label className="toggleLine">
+            <label>
               <input
                 type="checkbox"
                 checked={stockOnlyWithFactNames}
                 onChange={(e) => setStockOnlyWithFactNames(e.target.checked)}
               />
-              Есть фактические названия
+              Факт. названия
             </label>
-            <label className="toggleLine">
-              <input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU колонкой
+            <label>
+              <input type="checkbox" checked={showStockSku} onChange={(e) => setShowStockSku(e.target.checked)} /> SKU
             </label>
-            <label className="toggleLine">
+            <label>
               <input type="checkbox" checked={showStockReserve} onChange={(e) => setShowStockReserve(e.target.checked)} /> Резерв
             </label>
-            <label className="toggleLine">
+            <label>
               <input
                 type="checkbox"
                 checked={showStockPrice}
                 onChange={(e) => setShowStockPrice(e.target.checked)}
               />{" "}
-              Цена за ед.
+              Цена
             </label>
-          </div>
+          </FilterStrip>
           {limitFilterEnabled && (
             <p className="muted">
               В списке показаны только материалы лимитов, которые реально есть на складе. Нулевые позиции из лимитов скрыты.
@@ -6708,27 +6727,25 @@ function App() {
           Boolean(campSearch.trim()) || Boolean(campCategoryFilter) || Boolean(campStatusFilter);
         return (
           <>
+            <PageHero
+              icon="▣"
+              title="Городок"
+              subtitle="Контейнеры, бытовки, техника и прочее имущество"
+              stats={[
+                { label: "Всего позиций", value: safeItems.length },
+                {
+                  label: "В эксплуатации",
+                  value: safeItems.filter((c) => c.status === "IN_USE").length,
+                  tone: "ok"
+                },
+                {
+                  label: "В ремонте",
+                  value: safeItems.filter((c) => c.status === "REPAIR").length,
+                  tone: safeItems.some((c) => c.status === "REPAIR") ? "warn" : "neutral"
+                }
+              ]}
+            />
             <div className="card">
-              <div className="rightCardHeader" style={{ flexWrap: "wrap", gap: 12 }}>
-                <div>
-                  <h2 style={{ margin: 0 }}>Городок</h2>
-                  <p className="muted">
-                    Контейнеры, бытовки, техника и прочее имущество городка. Карточки с фото — нажми на карточку,
-                    чтобы посмотреть полную информацию, добавить документы и фотографии.
-                  </p>
-                </div>
-                <div className="kpiRow" style={{ margin: 0 }}>
-                  <div className="kpi">
-                    <span>Всего позиций</span>
-                    <strong>{safeItems.length}</strong>
-                  </div>
-                  <div className="kpi">
-                    <span>В эксплуатации</span>
-                    <strong>{safeItems.filter((c) => c.status === "IN_USE").length}</strong>
-                  </div>
-                </div>
-              </div>
-
               {campMessage && (
                 <ResultBanner
                   text={campMessage}
@@ -7243,26 +7260,20 @@ function App() {
       })()}
 
       {activeTab === "audit" && canReadAudit && (
-        <div className="card">
-          <div className="rightCardHeader" style={{ flexWrap: "wrap", gap: 12 }}>
-            <div>
-              <h2 style={{ margin: 0 }}>Логи</h2>
-              <p className="muted">
-                Действия пользователей по всем объектам системы. Доступные действия можно
-                отменить — система автоматически вернёт состояние объекта на момент до изменения.
-              </p>
-            </div>
-            <div className="kpiRow" style={{ margin: 0 }}>
-              <div className="kpi">
-                <span>Записей</span>
-                <strong>{auditLogs.length}</strong>
-              </div>
-              <div className="kpi">
-                <span>Можно отменить</span>
-                <strong>{auditLogs.filter((r) => r.revertable && !r.reverted).length}</strong>
-              </div>
-            </div>
-          </div>
+        <div>
+          <PageHero
+            icon="◉"
+            title="Логи действий"
+            subtitle="Журнал событий и откатов · доступен только админам и аудиторам"
+            stats={[
+              { label: "Записей", value: auditLogs.length },
+              {
+                label: "Можно отменить",
+                value: auditLogs.filter((r) => r.revertable && !r.reverted).length,
+                tone: auditLogs.filter((r) => r.revertable && !r.reverted).length > 0 ? "warn" : "neutral"
+              }
+            ]}
+          />
 
           {auditMessage && (
             <ResultBanner
@@ -7466,10 +7477,22 @@ function App() {
       )}
 
       {activeTab === "integrations" && (canReadIntegrations || canReadNotifications) && (
-        <div className="card">
-          <h2>{canReadIntegrations ? "Интеграции и уведомления" : "Уведомления"}</h2>
+        <div>
+          <PageHero
+            icon="⎘"
+            title={canReadIntegrations ? "Интеграции и уведомления" : "Уведомления"}
+            subtitle="Внешние системы, очередь заданий, готовность"
+            stats={
+              canReadIntegrations
+                ? [
+                    { label: "Заданий в очереди", value: integrationJobs.length },
+                    { label: "Уведомлений", value: notifications.length }
+                  ]
+                : [{ label: "Уведомлений", value: notifications.length }]
+            }
+          />
           {canReadIntegrations && (
-            <>
+            <div className="card">
               <h3 style={{ marginTop: 0 }}>Интеграционные задания</h3>
               <div className="form grid2">
                 <label>
@@ -7503,10 +7526,11 @@ function App() {
               ) : (
                 <EmptyState title="Заданий пока нет." hint="Создай первую integration job и запусти ее." />
               )}
-            </>
+            </div>
           )}
 
-          <h3 style={{ marginTop: canReadIntegrations ? 16 : 0 }}>Уведомления</h3>
+          <div className="card">
+          <h3 style={{ marginTop: 0 }}>Уведомления</h3>
           {canReadNotifications ? (
             <div className="kpiRow" style={{ flexWrap: "wrap", alignItems: "center" }}>
               <div className="kpi">
@@ -7533,28 +7557,66 @@ function App() {
           ) : (
             <EmptyState title="Уведомлений пока нет." />
           )}
+          </div>
         </div>
       )}
 
       {activeTab === "notifications" && canReadNotifications && (
-        <NotificationsTabBlock
-          token={token}
-          notifications={notifications}
-          unreadNotificationCount={unreadNotificationCount}
-          loadNotifications={loadNotifications}
-          markNotificationsRead={markNotificationsRead}
-          openNotificationLinkedEntity={openNotificationLinkedEntity}
-          canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
-          users={users}
-          fetchWithSession={fetchWithSession}
-          apiUrl={API_URL}
-        />
+        <div>
+          <PageHero
+            icon="🔔"
+            title="Уведомления"
+            subtitle="События системы, правила и низкий остаток"
+            stats={[
+              {
+                label: "Непрочитанных",
+                value: unreadNotificationCount,
+                tone: unreadNotificationCount > 0 ? "warn" : "ok"
+              },
+              {
+                label: "Всего в выборке",
+                value: notifications.length
+              }
+            ]}
+            actions={
+              unreadNotificationCount > 0 ? (
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  onClick={() => void markNotificationsRead(notifications.filter((n) => !n.isRead).map((n) => n.id))}
+                >
+                  Прочитать все
+                </button>
+              ) : null
+            }
+          />
+          <NotificationsTabBlock
+            token={token}
+            notifications={notifications}
+            unreadNotificationCount={unreadNotificationCount}
+            loadNotifications={loadNotifications}
+            markNotificationsRead={markNotificationsRead}
+            openNotificationLinkedEntity={openNotificationLinkedEntity}
+            canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
+            users={users}
+            fetchWithSession={fetchWithSession}
+            apiUrl={API_URL}
+          />
+        </div>
       )}
 
       {activeTab === "catalog" && (
-        <div className="card">
-          <h2>Справочники</h2>
-          <div className="grid2">
+        <div>
+          <PageHero
+            icon="▣"
+            title="Справочники"
+            subtitle="Склады и материалы — справочные данные системы"
+            stats={[
+              { label: "Складов", value: warehouses.length },
+              { label: "Материалов", value: materials.length }
+            ]}
+          />
+          <div className="card grid2">
             <div>
               <h3>Создать склад</h3>
               <div className="form">
@@ -7629,42 +7691,39 @@ function App() {
 
           {operationsSubTab === "materialReceipts" && (
             <>
-              <div className="card">
-                <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <h2 style={{ margin: 0 }}>Приём материалов</h2>
-                    <p className="muted">
-                  Раздел {objectSectionFilter}. Материал принимается только из заявок (раздел «Заявки»).
-                  Здесь отметь галочками позиции, которые принимаешь сейчас, проверь количества — после нажатия «Принять отмеченные»
-                  спросим документы (по заявке их может быть несколько приёмок).
-                    </p>
-                  </div>
-              <div className="kpiRow" style={{ margin: 0 }}>
-                <div className="kpi">
-                  <span>Активных заявок</span>
-                  <strong>{receiptRequests.filter((r) => r.status !== "RECEIVED" && r.status !== "CANCELLED").length}</strong>
-                </div>
-                <div className="kpi">
-                  <span>Принято полностью</span>
-                  <strong>{receiptRequests.filter((r) => r.status === "RECEIVED").length}</strong>
-                </div>
-                <PeriodExportButton
-                  section="receipts"
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  title="Поступления в Excel"
-                />
-              </div>
-            </div>
-
-            {opsMessage && (
-              <ResultBanner
-                text={opsMessage}
-                tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"}
+              <PageHero
+                icon="↗"
+                title="Приём материалов"
+                subtitle={`Раздел ${objectSectionFilter} · из заявок (раздел «Заявки»)`}
+                stats={[
+                  {
+                    label: "Активных заявок",
+                    value: receiptRequests.filter((r) => r.status !== "RECEIVED" && r.status !== "CANCELLED").length,
+                    tone: receiptRequests.some((r) => r.status === "IN_PROGRESS") ? "warn" : "neutral"
+                  },
+                  {
+                    label: "Принято полностью",
+                    value: receiptRequests.filter((r) => r.status === "RECEIVED").length,
+                    tone: "ok"
+                  }
+                ]}
+                actions={
+                  <PeriodExportButton
+                    section="receipts"
+                    token={token}
+                    apiUrl={API_URL}
+                    fetchWithSession={fetchWithSession}
+                    title="Поступления в Excel"
+                  />
+                }
               />
-            )}
-          </div>
+
+              {opsMessage && (
+                <ResultBanner
+                  text={opsMessage}
+                  tone={opsMessage.includes("Не удалось") || opsMessage.includes("Ошибка") ? "error" : "neutral"}
+                />
+              )}
 
           {!receiptRequests.length && (
             <EmptyState
@@ -8226,59 +8285,46 @@ function App() {
 
       {activeTab === "issues" && (
         <div className="issuesWorkspace">
+          <PageHero
+            icon="⇄"
+            title="Выдачи со склада"
+            subtitle={`${
+              issueIssuesDomain === "TOOLS"
+                ? "Инструмент"
+                : issueIssuesDomain === "CONSUMABLES"
+                  ? "Расходники"
+                  : issueIssuesDomain === "WORKWEAR"
+                    ? "Спецодежда"
+                    : "Материалы"
+            } · раздел ${objectSectionFilter}${
+              activeObjectId
+                ? ` · ${safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "")}`
+                : ""
+            }`}
+            stats={[
+              ...(issueIssuesDomain !== "TOOLS"
+                ? ([
+                    { label: "В корзине", value: issuePickCart.length, tone: issuePickCart.length > 0 ? "ok" : "neutral" },
+                    { label: "Вариантов на складе", value: issueFacingRows.length }
+                  ] as const)
+                : ([
+                    { label: "К выдаче", value: issueToolPickIds.length, tone: issueToolPickIds.length > 0 ? "ok" : "neutral" },
+                    { label: "В каталоге", value: issueToolCatalog.length }
+                  ] as const)),
+              { label: "В истории заявок", value: issuesTotal }
+            ]}
+            actions={
+              <PeriodExportButton
+                section="issues"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Выдачи в Excel"
+              />
+            }
+          />
+
           <div className="card issueComposer">
-            <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
-              <div>
-                <h2>Выдачи со склада</h2>
-                <p className="muted">
-                  {issueIssuesDomain === "TOOLS"
-                    ? "Инструмент · "
-                    : issueIssuesDomain === "CONSUMABLES"
-                      ? "Расходники · "
-                      : issueIssuesDomain === "WORKWEAR"
-                        ? "Спецодежда · "
-                        : "Материалы · "}
-                  раздел {objectSectionFilter}
-                  {activeObjectId ? ` · ${safeName(availableObjects.find((o) => o.id === activeObjectId)?.name || "")}` : ""}
-                </p>
-              </div>
-              <div className="kpiRow" style={{ margin: 0 }}>
-                {issueIssuesDomain !== "TOOLS" ? (
-                  <>
-                    <div className="kpi">
-                      <span>В корзине</span>
-                      <strong>{issuePickCart.length}</strong>
-                    </div>
-                    <div className="kpi">
-                      <span>Вариантов на складе</span>
-                      <strong>{issueFacingRows.length}</strong>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="kpi">
-                      <span>К выдаче</span>
-                      <strong>{issueToolPickIds.length}</strong>
-                    </div>
-                    <div className="kpi">
-                      <span>В каталоге (на складе)</span>
-                      <strong>{issueToolCatalog.length}</strong>
-                    </div>
-                  </>
-                )}
-                <div className="kpi">
-                  <span>В списке истории</span>
-                  <strong>{issuesTotal}</strong>
-                </div>
-                <PeriodExportButton
-                  section="issues"
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  title="Выдачи в Excel"
-                />
-              </div>
-            </div>
 
             {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
 
@@ -8839,33 +8885,41 @@ function App() {
 
 
       {activeTab === "limits" && (
-        <div className="card limitsWorkspace">
-          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
-            <div>
-              <h2>Лимиты</h2>
-              <p className="muted">Импортированные лимиты по выбранному объекту и разделу. В обычном режиме показываем только структуру и выполнение.</p>
-            </div>
-            <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button type="button" className="ghostBtn" onClick={() => void loadLimitTemplates()}>
-                Обновить
-              </button>
-              <button
-                type="button"
-                className={limitEditMode ? "" : "ghostBtn"}
-                disabled={!canWriteLimits}
-                onClick={() => setLimitEditMode((v) => !v)}
-              >
-                {limitEditMode ? "Завершить правку" : "Редактировать"}
-              </button>
-              <PeriodExportButton
-                section="limits"
-                token={token}
-                apiUrl={API_URL}
-                fetchWithSession={fetchWithSession}
-                title="Лимиты в Excel"
-              />
-            </div>
-          </div>
+        <div className="limitsWorkspace">
+          <PageHero
+            icon="▧"
+            title="Лимиты"
+            subtitle={`Раздел ${objectSectionFilter} · ${limitTemplates.length} шаблон(ов)`}
+            stats={[
+              { label: "Шаблонов", value: limitTemplates.length },
+              {
+                label: "Материалов",
+                value: limitTemplates.reduce((s, t) => s + t.nodes.filter((n) => n.nodeType === "MATERIAL").length, 0)
+              }
+            ]}
+            actions={
+              <>
+                <button type="button" className="ghostBtn" onClick={() => void loadLimitTemplates()}>
+                  ↻ Обновить
+                </button>
+                <button
+                  type="button"
+                  className={limitEditMode ? "primaryBtn" : "ghostBtn"}
+                  disabled={!canWriteLimits}
+                  onClick={() => setLimitEditMode((v) => !v)}
+                >
+                  {limitEditMode ? "Завершить правку" : "Редактировать"}
+                </button>
+                <PeriodExportButton
+                  section="limits"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Лимиты в Excel"
+                />
+              </>
+            }
+          />
 
           {limitsMessage && (
             <ResultBanner
@@ -9715,34 +9769,31 @@ function App() {
       )}
 
       {canMaterialReport && activeTab === "materialReport" && (
-        <div className="card limitsWorkspace">
-          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12 }}>
-            <div>
-              <h2>Материальный отчёт</h2>
-              <p className="muted">
-                Остатки выданных материалов, расходников и спецодежды на ответственных (после статуса «Выдано»: кто утвердил заявку
-                или кто её создал). Учитывается раздел объекта — {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}. Списание здесь не
-                меняет складской остаток, только корректирует учёт «у ответственного» и фиксируется в журнале.
-              </p>
-            </div>
-            <div className="toolbar" style={{ flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="ghostBtn"
-                disabled={!activeObjectId}
-                onClick={() => void loadMaterialReportData()}
-              >
-                Обновить
-              </button>
-              <PeriodExportButton
-                section="materialReport"
-                token={token}
-                apiUrl={API_URL}
-                fetchWithSession={fetchWithSession}
-                title="Мат. отчёт в Excel"
-              />
-            </div>
-          </div>
+        <div>
+          <PageHero
+            icon="▪"
+            title="Материальный отчёт"
+            subtitle={`Что у ответственных · раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  disabled={!activeObjectId}
+                  onClick={() => void loadMaterialReportData()}
+                >
+                  ↻ Обновить
+                </button>
+                <PeriodExportButton
+                  section="materialReport"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Мат. отчёт в Excel"
+                />
+              </>
+            }
+          />
 
           {!activeObjectId ? (
             <p className="muted">Выберите объект в верхней панели.</p>
@@ -9876,27 +9927,32 @@ function App() {
       )}
 
       {activeTab === "approvals" && (
-        <div className="card">
-          <h2>Заявки</h2>
+        <div>
+          <PageHero
+            icon="☑"
+            title="Заявки"
+            subtitle={`Согласование выдач и приёмок · раздел ${objectSectionFilter}`}
+            stats={[
+              {
+                label: `В очереди (${
+                  approvalQueueTab === "TOOLS"
+                    ? "инструмент"
+                    : approvalQueueTab === "CONSUMABLES"
+                      ? "расходники"
+                      : approvalQueueTab === "WORKWEAR"
+                        ? "спецодежда"
+                        : "материалы"
+                })`,
+                value: approvalQueue.length,
+                tone: approvalQueue.length > 0 ? "warn" : "neutral"
+              },
+              {
+                label: "Приходные заявки",
+                value: receiptRequests.length
+              }
+            ]}
+          />
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
-          <div className="kpiRow">
-            <div className="kpi">
-              <span>В очереди (
-              {approvalQueueTab === "TOOLS"
-                ? "инструмент"
-                : approvalQueueTab === "CONSUMABLES"
-                  ? "расходники"
-                  : approvalQueueTab === "WORKWEAR"
-                    ? "спецодежда"
-                    : "материалы"}
-              )</span>
-              <strong>{approvalQueue.length}</strong>
-            </div>
-            <div className="kpi">
-              <span>Приходные заявки</span>
-              <strong>{receiptRequests.length}</strong>
-            </div>
-          </div>
 
           <div
             className="card"
@@ -10070,22 +10126,16 @@ function App() {
           ? documents.filter((d) => d.fileName.toLowerCase().includes(search))
           : documents;
         return (
-          <div className="card">
-            <div className="rightCardHeader" style={{ flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <h2 style={{ margin: 0 }}>Документы</h2>
-                <p className="muted">
-                  Только просмотр загруженных документов. Все файлы создаются в других разделах
-                  (приёмки/выдачи/заявки) — здесь их удобно искать и открывать.
-                </p>
-              </div>
-              <div className="kpiRow" style={{ margin: 0 }}>
-                <div className="kpi">
-                  <span>Найдено</span>
-                  <strong>{visibleDocs.length}</strong>
-                </div>
-              </div>
-            </div>
+          <div>
+            <PageHero
+              icon="▤"
+              title="Документы"
+              subtitle="Поиск и просмотр загруженных файлов системы"
+              stats={[
+                { label: "Найдено", value: visibleDocs.length },
+                { label: "Всего", value: documents.length }
+              ]}
+            />
 
             <div className="tabs" style={{ flexWrap: "wrap", marginTop: 8 }}>
               {docTypeTabs.map((tab) => (
@@ -10307,15 +10357,28 @@ function App() {
       })()}
 
       {activeTab === "waybills" && (
-        <div className="card">
-          <h2>Транспортные накладные</h2>
+        <div>
+          <PageHero
+            icon="⇆"
+            title="Транспортные накладные"
+            subtitle="Перемещения между складами и объектами"
+            stats={[
+              { label: "Всего", value: waybills.length },
+              {
+                label: "В пути",
+                value: waybills.filter((x) => x.status === "SHIPPED").length,
+                tone: waybills.filter((x) => x.status === "SHIPPED").length > 0 ? "warn" : "neutral"
+              },
+              { label: "Черновики", value: waybills.filter((x) => x.status === "DRAFT").length }
+            ]}
+            actions={
+              <button type="button" className="ghostBtn" onClick={() => void loadWaybills()}>
+                ↻ Обновить
+              </button>
+            }
+          />
           {waybillsLoading && <LoadingState text="Загрузка ТН..." />}
           {waybillsError && <ErrorState text={waybillsError} />}
-          <div className="kpiRow">
-            <div className="kpi"><span>Всего</span><strong>{waybills.length}</strong></div>
-            <div className="kpi"><span>В пути</span><strong>{waybills.filter((x) => x.status === "SHIPPED").length}</strong></div>
-            <div className="kpi"><span>Черновики</span><strong>{waybills.filter((x) => x.status === "DRAFT").length}</strong></div>
-          </div>
           <div className="toolbar">
             <select value={waybillStatusFilter} onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}>
               <option value="">Все статусы</option>
@@ -10325,7 +10388,6 @@ function App() {
               <option value="RECEIVED">{waybillStatusLabel("RECEIVED")}</option>
               <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
             </select>
-            <button onClick={() => void loadWaybills()}>Обновить</button>
           </div>
 
           <div className="grid2" style={{ marginBottom: 12 }}>
@@ -11072,9 +11134,13 @@ function App() {
       )}
 
       {activeTab === "qr" && (
-        <div className="card">
-          <h2>QR-сканирование</h2>
-          <div className="toolbar">
+        <div>
+          <PageHero
+            icon="⌁"
+            title="QR-сканирование"
+            subtitle="Найти инструмент по QR-коду или инвентарному номеру"
+          />
+          <div className="card toolbar">
             <input
               placeholder="Вставь QR/код инструмента: TOOL:INV-001 или инв. номер"
               value={qrCode}
@@ -11133,35 +11199,50 @@ function App() {
       )}
 
       {activeTab === "tools" && (
-        <div className="card">
-          <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <h2 style={{ margin: 0 }}>Инструменты</h2>
-              <p className="muted" style={{ margin: "6px 0 0", maxWidth: 720 }}>
-                Сначала выберите категорию. Затем нажмите карточку инструмента, чтобы открыть действия и журнал. Ручное создание — отдельной кнопкой.
-              </p>
-            </div>
-            <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
-              {toolDrilledCard ? (
-                <button type="button" className="ghostBtn" onClick={() => setToolDrilledCard(null)}>
-                  ← Все категории
-                </button>
-              ) : null}
-              {hasPermission("tools.write") && (
-                <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(true)}>
-                  Управление категориями
-                </button>
-              )}
-              <PeriodExportButton
-                section="tools"
-                token={token}
-                apiUrl={API_URL}
-                fetchWithSession={fetchWithSession}
-                title="Инструменты в Excel"
-              />
-            </div>
-          </div>
-          <p className="muted">Текущий раздел: {objectSectionFilter}{toolDrilledCard ? ` · Категория: ${toolDrilledCard.label}` : ""}</p>
+        <div>
+          <PageHero
+            icon="⚒"
+            title={toolDrilledCard ? toolDrilledCard.label : "Инструменты"}
+            subtitle={
+              toolDrilledCard
+                ? `${toolDrilledCard.type === "CATEGORY" ? "Категория" : "Группа по названию"} · раздел ${objectSectionFilter}`
+                : `Категории · раздел ${objectSectionFilter}`
+            }
+            stats={
+              toolDrilledCard
+                ? [
+                    { label: "Всего", value: toolDrilledCard.count },
+                    { label: "На складе", value: toolDrilledCard.inStock, tone: "ok" },
+                    { label: "Выдано", value: toolDrilledCard.issued, tone: "warn" },
+                    { label: "В ремонте", value: toolDrilledCard.inRepair, tone: toolDrilledCard.inRepair > 0 ? "warn" : "neutral" }
+                  ]
+                : [
+                    { label: "Категорий", value: toolGroupCards.length },
+                    { label: "Инструментов", value: toolGroupCards.reduce((s, c) => s + c.count, 0) }
+                  ]
+            }
+            actions={
+              <>
+                {toolDrilledCard ? (
+                  <button type="button" className="ghostBtn" onClick={() => setToolDrilledCard(null)}>
+                    ← К категориям
+                  </button>
+                ) : null}
+                {hasPermission("tools.write") && (
+                  <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(true)}>
+                    Категории…
+                  </button>
+                )}
+                <PeriodExportButton
+                  section="tools"
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  title="Инструменты в Excel"
+                />
+              </>
+            }
+          />
 
           {!toolDrilledCard && (
             <>
@@ -11925,13 +12006,15 @@ function App() {
       )}
 
       {activeTab === "feedback" && (
-        <div className="card">
-          <h2>Обратная связь</h2>
-          <p className="muted">
-            Обращения «ОБ-…» видны автору со статусом; поддержка может оставить ответ и перевести этапы.
-          </p>
+        <div>
+          <PageHero
+            icon="🛠"
+            title="Обратная связь"
+            subtitle="Обращения с автором и статусом · ответы от поддержки"
+            stats={[{ label: "Обращений", value: feedbackTickets.length }]}
+          />
           {feedbackError && <ErrorState text={feedbackError} />}
-          <div className="grid2">
+          <div className="card grid2">
             <div className="card">
               <div className="toolbar">
                 <button
@@ -12107,13 +12190,13 @@ function App() {
       )}
 
       {activeTab === "reports" && (
-        <div className="card">
-          <h2>Сводка по объекту</h2>
-          <p className="muted">
-            Сводка объединяет все учётные данные по <strong>выбранному в шапке объекту</strong> (в базе это склад площадки: остатки, заявки, операции, ТН, лимиты связанных проектов).
-            Раздел СС/ЭОМ в шапке задаёт контур видимости данных — смените объект или раздел там, затем обновите отчёт.
-          </p>
-          <div className="form" style={{ marginBottom: 8 }}>
+        <div>
+          <PageHero
+            icon="📄"
+            title="Сводка по объекту"
+            subtitle="Остатки, заявки, операции, ТН, лимиты — единым отчётом"
+          />
+          <div className="card form" style={{ marginBottom: 8 }}>
             {!activeObjectId ? (
               <p className="muted">Выберите объект в верхней панели, затем сформируйте сводку.</p>
             ) : (
@@ -12386,9 +12469,17 @@ function App() {
       )}
 
       {activeTab === "admin" && canManageUsers && (
-        <div className="card adminWorkspace">
-          <div className="adminWorkspaceHead">
-            <h2>Управление доступами</h2>
+        <div className="adminWorkspace">
+          <PageHero
+            icon="⚙"
+            title="Управление доступами"
+            subtitle="Пользователи · роли · объекты и проекты"
+            stats={[
+              { label: "Пользователей", value: users.length },
+              { label: "Объектов", value: warehouses.length }
+            ]}
+          />
+          <div className="card adminWorkspaceHead">
             <div className="adminWorkspaceTabs" role="tablist">
               <button
                 type="button"

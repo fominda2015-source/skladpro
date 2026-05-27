@@ -2564,6 +2564,332 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   font-size: 13px;
 }
 
+/* ============================================================
+   Дизайн-система: PageHero + FilterStrip + EmptyState
+   Применяется на ВСЕХ вкладках для единого вида
+   ============================================================ */
+
+/* Компактный pageHeader — теперь заголовок страницы живёт в PageHero,
+   старый pageTitleBlock остаётся только как breadcrumb и user-info */
+.pageHeader .pageTitleBlock h1 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin: 0 0 2px;
+}
+.pageHeader .pageTitleBlock .crumbs {
+  display: none;
+}
+@media (max-width: 720px) {
+  .pageHeader .pageTitleBlock h1 {
+    display: none;
+  }
+}
+
+
+.pageHero {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.pageHero.compact {
+  padding: 10px 14px;
+}
+.pageHeroMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pageHeroTitleBlock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.pageHeroIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #1d4ed8 0%, #4f46e5 100%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+.pageHeroTitleText {
+  min-width: 0;
+}
+.pageHeroTitle {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pageHeroSub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.pageHeroActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pageHeroStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pageHeroStat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.pageHeroStat.interactive {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pageHeroStat.interactive:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.pageHeroStat.tone-warn {
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 70%);
+  border-color: #fde68a;
+}
+.pageHeroStat.tone-bad {
+  background: linear-gradient(180deg, #fef2f2 0%, #ffffff 70%);
+  border-color: #fecaca;
+}
+.pageHeroStat.tone-ok {
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 70%);
+  border-color: #bbf7d0;
+}
+.pageHeroStatLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.pageHeroStatValue {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+.pageHeroStat.tone-warn .pageHeroStatValue {
+  color: #b45309;
+}
+.pageHeroStat.tone-bad .pageHeroStatValue {
+  color: #b91c1c;
+}
+.pageHeroStat.tone-ok .pageHeroStatValue {
+  color: #15803d;
+}
+
+/* Filter strip */
+.filterStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.filterStripSearch {
+  flex: 1 1 220px;
+  min-width: 200px;
+  display: flex;
+}
+.filterStripSearch input,
+.filterStripSearch select {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #d8dde7;
+  font-size: 14px;
+  background: #fff;
+}
+.filterStripSearch input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14);
+}
+.filterStripFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.filterStripFilters select,
+.filterStripFilters input {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #d8dde7;
+  background: #fff;
+  font-size: 13px;
+}
+.filterStripFilters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+}
+.filterStripActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Chip-кнопки для сегмент-фильтров */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.chip:hover:not(:disabled) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.chip.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.chip .chipCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  padding: 0 6px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.08);
+  color: inherit;
+  font-weight: 700;
+}
+.chip.active .chipCount {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* Empty state */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 18px;
+  text-align: center;
+  background: #fff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  color: #64748b;
+  margin: 12px 0;
+}
+.emptyStateIcon {
+  font-size: 36px;
+  line-height: 1;
+  margin-bottom: 6px;
+  opacity: 0.7;
+}
+.emptyStateTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.emptyStateDesc {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  max-width: 480px;
+}
+.emptyStateAction {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .pageHero {
+    padding: 12px;
+  }
+  .pageHeroTitle {
+    font-size: 18px;
+  }
+  .pageHeroIcon {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+  .pageHeroStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pageHeroStatValue {
+    font-size: 16px;
+  }
+  .filterStrip {
+    padding: 8px 10px;
+  }
+  .filterStripActions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .chip {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+
 /* Sidebar — упрощённый: главные пункты + раскрывающееся «Ещё» */
 .navMoreToggle {
   margin-top: 10px;
