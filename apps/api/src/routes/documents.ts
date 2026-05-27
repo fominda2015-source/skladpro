@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { Router, type Request } from "express";
 import multer from "multer";
-import type { Prisma } from "@prisma/client";
+import { ObjectSection, type Prisma } from "@prisma/client";
 import { z } from "zod";
 import { config } from "../config.js";
 import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
@@ -43,7 +43,12 @@ documentsRouter.get("/", async (req: AuthedRequest, res) => {
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
+  const section: ObjectSection | undefined =
+    sectionParam === "SS"
+      ? ObjectSection.SS
+      : sectionParam === "EOM"
+        ? ObjectSection.EOM
+        : undefined;
   const includeDeleted = req.query.includeDeleted === "1";
   const hasEntityPair = Boolean(entityType && entityId);
 
