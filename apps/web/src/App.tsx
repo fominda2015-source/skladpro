@@ -1155,6 +1155,10 @@ function App() {
       MANAGEMENT: "Руководство",
       VIEWER: "Наблюдатель"
     })[role] ?? role;
+  const safeName = (value?: string | null) => {
+    if (!value) return "Без названия";
+    return /\?{3,}/.test(value) ? "Без названия" : value;
+  };
   const fileToDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -1644,10 +1648,6 @@ function App() {
     ];
   }, [dashboard]);
 
-  const safeName = (value?: string | null) => {
-    if (!value) return "Без названия";
-    return /\?{3,}/.test(value) ? "Без названия" : value;
-  };
   const chatTimeLabel = (iso?: string) => {
     if (!iso) return "";
     const date = new Date(iso);
