@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
 import type { NotificationRow } from "../integrations/NotificationsTable";
 
 type AuditSnippet = {
@@ -37,37 +38,6 @@ type Props = {
   onOpenLinked: (n: NotificationRow) => void;
   onOpenDocuments?: (entityType: string, entityId: string) => void;
 };
-
-function docTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    upd: "УПД",
-    tn: "ТН",
-    "upd-scan": "Скан УПД / ТН",
-    "receipt-request": "Заявка Excel",
-    photo: "Фото",
-    act: "Акт",
-    other: "Прочее"
-  };
-  return map[type] || type;
-}
-
-function repairUploadedFileName(fileName: string): string {
-  const raw = fileName.trim();
-  if (!raw) return "Документ";
-  try {
-    const bytes = new Uint8Array([...raw].map((ch) => ch.charCodeAt(0) & 0xff));
-    const fixed = new TextDecoder("utf-8").decode(bytes);
-    if (fixed && !fixed.includes("\uFFFD") && !/[ÃÐ][\u00C0-\u00FF]/.test(fixed)) {
-      return fixed.trim();
-    }
-  } catch {
-    // ignore
-  }
-  if (/[ÃÐ]/.test(raw)) {
-    return `${docTypeLabel("other")} · файл`;
-  }
-  return raw;
-}
 
 function levelLabel(level: NotificationRow["level"]): string {
   return ({ INFO: "Инфо", WARNING: "Предупреждение", ERROR: "Ошибка" })[level] ?? level;
@@ -247,7 +217,7 @@ export function NotificationDetailModal(props: Props) {
                           className="requestMaterialsDocLink"
                         >
                           <span className="requestMaterialsDocName" title={d.fileName}>
-                            {repairUploadedFileName(d.fileName)}
+                            {displayDocumentFileName(d.fileName, { type: d.type, createdAt: d.createdAt })}
                           </span>
                           <span className="badge neutral">{docTypeLabel(d.type)}</span>
                         </a>

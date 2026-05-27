@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { NOTIFICATION_EVENTS, isKnownEventCode } from "../lib/notificationEvents.js";
 import { getLowStockThreshold, setLowStockThreshold } from "../lib/notifications.js";
+import { withRepairedFileName } from "../lib/uploadFileName.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const markReadSchema = z.object({
@@ -218,9 +219,9 @@ notificationsRouter.get("/:id/detail", async (req: AuthedRequest, res) => {
       beforeData: row.beforeData,
       afterData: row.afterData
     })),
-    documents: Array.from(docMap.values()).sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-    )
+    documents: Array.from(docMap.values())
+      .map((d) => withRepairedFileName(d))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
   });
 });
 

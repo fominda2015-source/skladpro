@@ -16,6 +16,7 @@ import {
 import "./App.css";
 import jsQR from "jsqr";
 import { API_URL, ISSUE_FILTER_KEY, LIST_VIEW_KEY, STOCK_VIEW_KEY, TOKEN_KEY, resolvePublicFileUrl } from "./app/constants";
+import { displayDocumentFileName } from "./shared/fileName";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
   IntegrationJobsTable,
@@ -3372,14 +3373,20 @@ function App() {
     return true;
   }
 
-  function openUploadedDocument(filePath?: string | null, fileName?: string | null) {
+  function openUploadedDocument(
+    filePath?: string | null,
+    fileName?: string | null,
+    fileMeta?: { type?: string; createdAt?: string }
+  ) {
     if (!filePath) return;
     const url = `${API_URL}/${filePath.replace(/^\/+/, "")}`;
     const a = document.createElement("a");
     a.href = url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
-    if (fileName) a.download = fileName;
+    if (fileName) {
+      a.download = displayDocumentFileName(fileName, fileMeta);
+    }
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -10182,7 +10189,15 @@ function App() {
           Boolean(docTypeFilter) || Boolean(docEntityType) || Boolean(docEntityId) || Boolean(docSearchQuery.trim());
         const search = docSearchQuery.trim().toLowerCase();
         const visibleDocs = search
-          ? documents.filter((d) => d.fileName.toLowerCase().includes(search))
+          ? documents.filter((d) => {
+              const shown = displayDocumentFileName(d.fileName, {
+                type: d.type,
+                createdAt: d.createdAt
+              });
+              return (
+                shown.toLowerCase().includes(search) || d.fileName.toLowerCase().includes(search)
+              );
+            })
           : documents;
         return (
           <div>
@@ -10345,7 +10360,12 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleDocs.map((d) => (
+                      {visibleDocs.map((d) => {
+                        const shownName = displayDocumentFileName(d.fileName, {
+                          type: d.type,
+                          createdAt: d.createdAt
+                        });
+                        return (
                         <tr key={d.id} className={selectedDocumentId === d.id ? "selectedRow" : ""}>
                           <td>{new Date(d.createdAt).toLocaleString()}</td>
                           <td>v{d.version}</td>
@@ -10354,8 +10374,14 @@ function App() {
                           </td>
                           <td>{d.type}</td>
                           <td>
-                            <a href={`${API_URL}/${d.filePath}`} target="_blank" rel="noreferrer">
-                              {d.fileName}
+                            <a
+                              href={`${API_URL}/${d.filePath}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={d.fileName}
+                              download={shownName}
+                            >
+                              {shownName}
                             </a>
                           </td>
                           <td>
@@ -10377,13 +10403,15 @@ function App() {
                                 href={`${API_URL}/${d.filePath}`}
                                 target="_blank"
                                 rel="noreferrer"
+                                download={shownName}
                               >
                                 Открыть
                               </a>
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -10393,7 +10421,11 @@ function App() {
                 {selectedDocument ? (
                   <>
                     <p className="muted">
-                      {selectedDocument.fileName} • v{selectedDocument.version}
+                      {displayDocumentFileName(selectedDocument.fileName, {
+                        type: selectedDocument.type,
+                        createdAt: selectedDocument.createdAt
+                      })}{" "}
+                      • v{selectedDocument.version}
                     </p>
                     <iframe
                       src={docPreviewUrl || `${API_URL}/${selectedDocument.filePath}`}

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
+import { decodeUploadedOriginalName, withRepairedFileName } from "../lib/uploadFileName.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
@@ -18,7 +19,8 @@ if (!fs.existsSync(uploadDirAbs)) {
 const storage = multer.diskStorage({
   destination: (_req: Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => cb(null, uploadDirAbs),
   filename: (_req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const displayName = decodeUploadedOriginalName(file.originalname);
+    const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, "_");
     cb(null, `${Date.now()}_${safe}`);
   }
 });
@@ -78,12 +80,14 @@ documentsRouter.get("/", async (req, res) => {
     take: 200
   });
 
+  const repairedRows = rows.map((r) => withRepairedFileName(r));
+
   if (!hasEntityPair || !entityType || !entityId) {
-    return res.json(rows);
+    return res.json(repairedRows);
   }
 
-  type RowWithLinks = (typeof rows)[number] & { links?: { id: string }[] };
-  const withLinks = rows as RowWithLinks[];
+  type RowWithLinks = (typeof repairedRows)[number] & { links?: { id: string }[] };
+  const withLinks = repairedRows as RowWithLinks[];
   const payload = withLinks.map(({ links, ...f }) => {
     const primaryMatch = f.entityType === entityType && f.entityId === entityId;
     const matchedLinkId =
@@ -135,7 +139,7 @@ documentsRouter.post(
         entityType,
         entityId,
         type,
-        fileName: file.originalname,
+        fileName: decodeUploadedOriginalName(file.originalname),
         filePath,
         mimeType: file.mimetype,
         size: file.size,
@@ -144,7 +148,7 @@ documentsRouter.post(
       }
     });
 
-    return res.status(201).json(created);
+    return res.status(201).json(withRepairedFileName(created));
   }
 );
 
@@ -223,7 +227,7 @@ documentsRouter.post(
         entityType: base.entityType,
         entityId: base.entityId,
         type: base.type,
-        fileName: file.originalname,
+        fileName: decodeUploadedOriginalName(file.originalname),
         filePath,
         mimeType: file.mimetype,
         size: file.size,
@@ -241,7 +245,7 @@ documentsRouter.post(
         data: { documentFileId: created.id }
       })
     ]);
-    return res.status(201).json(created);
+    return res.status(201).json(withRepairedFileName(created));
   }
 );
 

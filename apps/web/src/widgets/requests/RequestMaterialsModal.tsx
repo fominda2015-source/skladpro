@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
 
 type MaterialRow = {
   num: number;
@@ -86,58 +87,8 @@ function num(x: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function docTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    upd: "УПД",
-    tn: "ТН",
-    "upd-scan": "Скан УПД / ТН",
-    "receipt-request": "Заявка Excel",
-    photo: "Фото",
-    act: "Акт",
-    "issue-act": "Акт выдачи",
-    "issue-act-tools": "Акт выдачи (инструмент)",
-    "issue-signed-attachment": "Подписанный документ",
-    other: "Прочее"
-  };
-  return map[type] || type;
-}
-
-/** Multer часто сохраняет UTF-8 имя как latin1 — восстанавливаем кириллицу. */
-function repairUploadedFileName(fileName: string): string {
-  const raw = fileName.trim();
-  if (!raw) return "";
-  try {
-    const bytes = new Uint8Array([...raw].map((ch) => ch.charCodeAt(0) & 0xff));
-    const fixed = new TextDecoder("utf-8").decode(bytes);
-    if (fixed && !fixed.includes("\uFFFD") && !looksLikeMojibake(fixed)) {
-      return fixed.trim();
-    }
-  } catch {
-    // ignore
-  }
-  return raw;
-}
-
-function looksLikeMojibake(s: string): boolean {
-  return /[ÃÐ][\u00C0-\u00FF]/.test(s) || (s.includes("Ð") && /Ð[\u0080-\u00BF]/.test(s));
-}
-
-function formatDocMoment(iso: string): string {
-  return new Date(iso).toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
 function displayDocumentTitle(doc: RequestDoc): string {
-  const repaired = repairUploadedFileName(doc.fileName);
-  if (repaired && !looksLikeMojibake(repaired)) {
-    return repaired;
-  }
-  return `${docTypeLabel(doc.type)} · ${formatDocMoment(doc.createdAt)}`;
+  return displayDocumentFileName(doc.fileName, { type: doc.type, createdAt: doc.createdAt });
 }
 
 function sortAndDedupeDocs(list: RequestDoc[]): RequestDoc[] {
@@ -449,7 +400,7 @@ export function RequestMaterialsModal(props: Props) {
                       <span className="badge neutral">{docTypeLabel(d.type)}</span>
                     </a>
                     <span className="muted requestMaterialsDocDate">
-                      {formatDocMoment(d.createdAt)}
+                      {new Date(d.createdAt).toLocaleString("ru-RU")}
                     </span>
                   </li>
                   );

@@ -12,20 +12,10 @@ import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js
 import { dispatchNotification, notifyUser } from "../lib/notifications.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
-
-/** Имя файла из multipart часто приходит в latin1 вместо UTF-8. */
-function decodeUploadedOriginalName(name: string): string {
-  try {
-    const decoded = Buffer.from(name, "latin1").toString("utf8");
-    if (decoded && !decoded.includes("\uFFFD")) return decoded;
-  } catch {
-    // ignore
-  }
-  return name;
-}
 if (!fs.existsSync(uploadDirAbs)) {
   fs.mkdirSync(uploadDirAbs, { recursive: true });
 }

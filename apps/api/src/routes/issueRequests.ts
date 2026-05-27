@@ -25,6 +25,7 @@ import {
   mergeIssueWhere
 } from "../lib/dataScope.js";
 import { dispatchNotification, getLowStockThreshold, notifyUser } from "../lib/notifications.js";
+import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 
 const cancelSchema = z.object({ reason: z.string().min(1).max(2000) });
 const deleteIssueSchema = z.object({
@@ -95,7 +96,8 @@ if (!fs.existsSync(uploadDirAbs)) {
 const issueUploadStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDirAbs),
   filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const displayName = decodeUploadedOriginalName(file.originalname);
+    const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, "_");
     cb(null, `${Date.now()}_${safe}`);
   }
 });
@@ -411,7 +413,7 @@ async function attachSignedIssueAttachment(params: {
         entityType: "issue",
         entityId: params.issueId,
         type: "issue-signed-attachment",
-        fileName: params.file.originalname || "signed-issue-scan",
+        fileName: decodeUploadedOriginalName(params.file.originalname || "signed-issue-scan"),
         filePath: relPath,
         mimeType: params.file.mimetype || "application/octet-stream",
         size: params.file.size,
