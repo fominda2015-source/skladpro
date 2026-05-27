@@ -1420,13 +1420,14 @@ tr.low {
   }
 }
 
-/* Компактная таблица материалов внутри узла лимита.
-   max-content прижимает столбцы к содержимому, max-width: 100% не даёт вылезти за родителя. */
+/* Таблица материалов внутри узла лимита.
+   Растягивается на 100% родителя, но числовые колонки сжаты до содержимого (width: 1%),
+   а вся «лишняя» ширина уходит «Материалу» и «Структуре» — пустых мест внутри строки не остаётся. */
 .limitMaterialsTable {
-  width: max-content;
-  max-width: 100%;
+  width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: auto;
 }
 .limitMaterialsTable th,
 .limitMaterialsTable td {
@@ -1450,17 +1451,16 @@ tr.low {
   padding: 4px 6px;
 }
 .limitMaterialsTable td.matName {
-  max-width: 360px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 .limitMaterialsTable tr:hover td {
   background: #fafbfc;
 }
 .limitMaterialsTable .structureCell {
-  width: 160px;
-  min-width: 140px;
+  min-width: 220px;
 }
 .limitMaterialsTable .structureCell .progressWrap {
   height: 10px;

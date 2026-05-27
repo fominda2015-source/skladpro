@@ -8466,6 +8466,37 @@ function App() {
                     return agg;
                   };
                   for (const n of tpl.nodes) computeAgg(n.id);
+
+                  // Подсчёт «подразделов» и «материалов» — прямых и всего по поддереву.
+                  // Используется как подсказка (title) на ряду заголовка раздела/подраздела.
+                  type NodeCounts = { subDirect: number; subTotal: number; matDirect: number; matTotal: number };
+                  const countsByNodeId = new Map<string, NodeCounts>();
+                  const computeCounts = (nodeId: string): NodeCounts => {
+                    const cached = countsByNodeId.get(nodeId);
+                    if (cached) return cached;
+                    const kids = childrenByParent.get(nodeId) || [];
+                    let subDirect = 0;
+                    let subTotal = 0;
+                    let matDirect = 0;
+                    let matTotal = 0;
+                    for (const k of kids) {
+                      if (k.nodeType === "GROUP") {
+                        subDirect += 1;
+                        subTotal += 1;
+                        const inner = computeCounts(k.id);
+                        subTotal += inner.subTotal;
+                        matTotal += inner.matTotal;
+                      } else {
+                        matDirect += 1;
+                        matTotal += 1;
+                      }
+                    }
+                    const c: NodeCounts = { subDirect, subTotal, matDirect, matTotal };
+                    countsByNodeId.set(nodeId, c);
+                    return c;
+                  };
+                  for (const n of tpl.nodes) if (n.nodeType === "GROUP") computeCounts(n.id);
+
                   const totalPlanned = materialNodes.reduce((sum, n) => sum + Number(n.plannedQty || 0), 0);
                   const totalIssued = materialNodes.reduce(
                     (sum, n) => sum + (n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0),
@@ -8523,7 +8554,21 @@ function App() {
                     return (
                       <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
                         {isGroup ? (
-                          <div className="limitGroupRow" style={{ gap: 6, padding: "4px 0" }}>
+                          <div
+                            className="limitGroupRow"
+                            style={{ gap: 6, padding: "4px 0" }}
+                            title={(() => {
+                              const c = countsByNodeId.get(node.id);
+                              if (!c) return undefined;
+                              const subText = c.subDirect
+                                ? `Подразделов: ${c.subDirect}${c.subTotal > c.subDirect ? ` (всего по ветке ${c.subTotal})` : ""}`
+                                : "Подразделов: нет";
+                              const matText = c.matDirect || c.matTotal
+                                ? `Материалов: ${c.matDirect}${c.matTotal > c.matDirect ? ` (всего по ветке ${c.matTotal})` : ""}`
+                                : "Материалов: нет";
+                              return `${node.title}\n${subText}\n${matText}`;
+                            })()}
+                          >
                             <button
                               type="button"
                               className="ghostBtn"
@@ -8667,7 +8712,30 @@ function App() {
                             })() : (
                               <>
                                 <strong style={{ color: "#243656" }}>{node.title}</strong>
-                                {children.length ? <span className="muted">{children.length} поз.</span> : null}
+                                {(() => {
+                                  const c = countsByNodeId.get(node.id);
+                                  if (!c) return null;
+                                  const parts: string[] = [];
+                                  if (c.subDirect) {
+                                    parts.push(
+                                      `подразд. ${c.subDirect}${c.subTotal > c.subDirect ? `/${c.subTotal}` : ""}`
+                                    );
+                                  }
+                                  if (c.matTotal) {
+                                    parts.push(
+                                      `мат. ${c.matDirect}${c.matTotal > c.matDirect ? `/${c.matTotal}` : ""}`
+                                    );
+                                  }
+                                  if (!parts.length) return null;
+                                  return (
+                                    <span
+                                      className="muted"
+                                      title={`Прямых подразделов: ${c.subDirect}\nВсего подразделов по ветке: ${c.subTotal}\nПрямых материалов: ${c.matDirect}\nВсего материалов по ветке: ${c.matTotal}`}
+                                    >
+                                      {parts.join(" · ")}
+                                    </span>
+                                  );
+                                })()}
                                 {agg && agg.plan > 0 ? (
                                   <span className="muted" style={{ fontSize: 11 }}>
                                     {metricFmt(agg.issued)} / {metricFmt(agg.plan)} · приход {groupArrivedPct}% · выдача {groupIssuedPct}%
