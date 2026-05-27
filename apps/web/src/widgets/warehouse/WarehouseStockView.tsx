@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
+import { WhFloatingMenu, WhMenuAction } from "./WhFloatingMenu";
 
 export type WarehouseStockRow = {
   id: string;
@@ -65,6 +66,7 @@ export type WarehouseStockViewProps = {
   onShowPriceChange: (v: boolean) => void;
   canWriteOperations: boolean;
   canOpenMaterialCard: boolean;
+  canEditMaterialCard?: boolean;
   isAdmin: boolean;
   onAddMaterial: () => void;
   onOpenJournal: () => void;
@@ -130,6 +132,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     onShowPriceChange,
     canWriteOperations,
     canOpenMaterialCard,
+    canEditMaterialCard = false,
     isAdmin,
     onAddMaterial,
     onOpenJournal,
@@ -146,26 +149,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
   } = props;
 
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [menuRowId, setMenuRowId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!menuRowId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuRowId(null);
-    };
-    const onPointerDown = (e: PointerEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (!el) return;
-      if (el.closest(".whRowMenuWrap, .whOverflow")) return;
-      setMenuRowId(null);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [menuRowId]);
+  const [headerMenuRect, setHeaderMenuRect] = useState<DOMRect | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ rowId: string; rect: DOMRect } | null>(null);
 
   const activeFilters =
     Number(onlyAvailable) +
@@ -207,28 +192,26 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
               aria-label="Дополнительные действия"
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuRowId((id) => (id === "__header__" ? null : "__header__"));
+                const rect = e.currentTarget.getBoundingClientRect();
+                setHeaderMenuRect((prev) => (prev ? null : rect));
+                setRowMenu(null);
               }}
             >
               ⋯
             </button>
-            {menuRowId === "__header__" ? (
-              <div className="whMenu" role="menu" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  className="whMenuItem"
-                  role="menuitem"
-                  onClick={() => {
+            {headerMenuRect ? (
+              <WhFloatingMenu anchorRect={headerMenuRect} onClose={() => setHeaderMenuRect(null)}>
+                <WhMenuAction
+                  label="Журнал движений"
+                  onActivate={() => {
                     onOpenJournal();
-                    setMenuRowId(null);
+                    setHeaderMenuRect(null);
                   }}
-                >
-                  Журнал движений
-                </button>
-                <div className="whMenuExport" onClick={() => setMenuRowId(null)}>
+                />
+                <div className="whMenuExport" style={{ padding: "4px 6px" }}>
                   {exportSlot}
                 </div>
-              </div>
+              </WhFloatingMenu>
             ) : null}
           </div>
         </div>
@@ -446,61 +429,54 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                             type="button"
                             className="ghostBtn whBtnIcon"
                             aria-label="Меню позиции"
-                            aria-expanded={menuRowId === row.id}
+                            aria-expanded={rowMenu?.rowId === row.id}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setMenuRowId((id) => (id === row.id ? null : row.id));
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setHeaderMenuRect(null);
+                              setRowMenu((prev) =>
+                                prev?.rowId === row.id ? null : { rowId: row.id, rect }
+                              );
                             }}
                           >
                             ⋯
                           </button>
-                          {menuRowId === row.id ? (
-                            <div
-                              className="whMenu whMenuRow"
-                              role="menu"
-                              onClick={(e) => e.stopPropagation()}
+                          {rowMenu?.rowId === row.id ? (
+                            <WhFloatingMenu
+                              anchorRect={rowMenu.rect}
+                              onClose={() => setRowMenu(null)}
                             >
-                              <button
-                                type="button"
-                                className="whMenuItem"
-                                role="menuitem"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onToggleExpand(row.id);
-                                  setMenuRowId(null);
-                                }}
-                              >
-                                {expanded ? "Свернуть" : "Подробнее"}
-                              </button>
                               {canOpenMaterialCard ? (
-                                <button
-                                  type="button"
-                                  className="whMenuItem"
-                                  role="menuitem"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setMenuRowId(null);
+                                <WhMenuAction
+                                  label={
+                                    canEditMaterialCard
+                                      ? "Редактировать карточку"
+                                      : "Карточка материала"
+                                  }
+                                  onActivate={() => {
+                                    setRowMenu(null);
                                     onOpenMaterialCard(row.materialId, row.warehouseId);
                                   }}
-                                >
-                                  Карточка материала
-                                </button>
+                                />
                               ) : null}
+                              <WhMenuAction
+                                label={expanded ? "Свернуть строку" : "Подробнее по остатку"}
+                                onActivate={() => {
+                                  onToggleExpand(row.id);
+                                  setRowMenu(null);
+                                }}
+                              />
                               {isAdmin ? (
-                                <button
-                                  type="button"
-                                  className="whMenuItem whMenuDanger"
-                                  role="menuitem"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setMenuRowId(null);
+                                <WhMenuAction
+                                  label="Удалить из каталога"
+                                  danger
+                                  onActivate={() => {
+                                    setRowMenu(null);
                                     onDeleteMaterial(row.materialId, row.materialName);
                                   }}
-                                >
-                                  Удалить из каталога
-                                </button>
+                                />
                               ) : null}
-                            </div>
+                            </WhFloatingMenu>
                           ) : null}
                         </div>
                       </td>

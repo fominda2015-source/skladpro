@@ -3627,6 +3627,13 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   line-height: 1;
 }
 
+.whMenuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1190;
+  background: transparent;
+}
+
 .whOverflow,
 .whRowMenuWrap {
   position: relative;
@@ -3697,9 +3704,15 @@ button.whMenuItem:hover,
   padding: 4px 6px;
 }
 
-.whMenuExport button {
-  width: 100%;
-  text-align: left;
+.whMenuExport button,
+.whMenuExport select {
+  color: #0f172a !important;
+  background: #fff !important;
+}
+
+.whMenuExport .periodExportBtn {
+  background: #f8fafc;
+  border-color: #e2e8f0;
 }
 
 .whBanner {

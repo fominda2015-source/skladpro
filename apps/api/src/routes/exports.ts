@@ -31,6 +31,13 @@ function receiptRequestWhereFromScope(scope: DataScope): Prisma.ReceiptRequestWh
 export const exportsRouter = Router();
 exportsRouter.use(requireAuth);
 
+const EXPORT_ROW_LIMIT = 15_000;
+const EXPORT_ISSUE_LIMIT = 8_000;
+
+exportsRouter.get("/ping", (_req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
 // ----- helpers -----
 
 function num(x: unknown): number {
@@ -218,14 +225,14 @@ exportsRouter.get("/stocks.xlsx", requireSectionPerm("stocks"), async (req: Auth
   const stocks = await prisma.stock.findMany({
     where: mergeStockWhere(scope, exportWh),
     include: { material: true, warehouse: true },
-    take: 50000,
+    take: EXPORT_ROW_LIMIT,
     orderBy: [{ warehouseId: "asc" }, { section: "asc" }]
   });
   const movements = await prisma.stockMovement.findMany({
     where: mergeMovementWhere(scope, range, exportWh),
     include: { material: true, warehouse: true },
     orderBy: { createdAt: "desc" },
-    take: 50000
+    take: EXPORT_ROW_LIMIT
   });
 
   const wb = xlsx.utils.book_new();
@@ -337,7 +344,7 @@ exportsRouter.get("/limits.xlsx", requireSectionPerm("limits"), async (req: Auth
       AND: [{ direction: "OUT" }, mergeMovementWhere(scope, range, exportWh)]
     },
     include: { material: true, warehouse: true, issueRequest: { include: { project: true } } },
-    take: 50000
+    take: EXPORT_ROW_LIMIT
   });
   const issuedAgg = new Map<string, { warehouse: string; project: string; material: string; unit: string; qty: number }>();
   for (const m of issuedRows) {
@@ -400,7 +407,7 @@ exportsRouter.get("/materialReport.xlsx", requireSectionPerm("materialReport"), 
     where,
     include: { material: true, warehouse: true, holderUser: true, actorUser: true },
     orderBy: { createdAt: "desc" },
-    take: 50000
+    take: EXPORT_ROW_LIMIT
   });
 
   const wb = xlsx.utils.book_new();
@@ -449,7 +456,7 @@ exportsRouter.get("/tools.xlsx", requireSectionPerm("tools"), async (req: Authed
     where: toolWhere,
     include: { warehouse: true, project: true, category: true },
     orderBy: [{ name: "asc" }, { inventoryNumber: "asc" }],
-    take: 50000
+    take: EXPORT_ROW_LIMIT
   });
   const events = await prisma.toolEvent.findMany({
     where: {
@@ -460,7 +467,7 @@ exportsRouter.get("/tools.xlsx", requireSectionPerm("tools"), async (req: Authed
     },
     include: { tool: { include: { warehouse: true } } },
     orderBy: { createdAt: "desc" },
-    take: 50000
+    take: EXPORT_ROW_LIMIT
   });
 
   const wb = xlsx.utils.book_new();
@@ -525,7 +532,7 @@ exportsRouter.get("/issues.xlsx", requireSectionPerm("issues"), async (req: Auth
       items: { include: { material: true } }
     },
     orderBy: { createdAt: "desc" },
-    take: 20000
+    take: EXPORT_ISSUE_LIMIT
   });
 
   const header = issues.map((r) => ({
@@ -597,7 +604,7 @@ exportsRouter.get("/receipts.xlsx", requireSectionPerm("receipts"), async (req: 
       items: { include: { mappedMaterial: true } }
     },
     orderBy: { createdAt: "desc" },
-    take: 20000
+    take: EXPORT_ISSUE_LIMIT
   });
 
   const operations = await prisma.operation.findMany({
@@ -614,7 +621,7 @@ exportsRouter.get("/receipts.xlsx", requireSectionPerm("receipts"), async (req: 
       items: { include: { material: true } }
     },
     orderBy: { operationDate: "desc" },
-    take: 20000
+    take: EXPORT_ISSUE_LIMIT
   });
 
   const wb = xlsx.utils.book_new();

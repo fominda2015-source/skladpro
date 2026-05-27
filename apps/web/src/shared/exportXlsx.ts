@@ -8,7 +8,7 @@ export type ExportProgressState = {
 
 export type ExportProgressCallback = (state: ExportProgressState) => void;
 
-const EXPORT_TIMEOUT_MS = 180_000;
+const EXPORT_TIMEOUT_MS = 120_000;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} Б`;
@@ -109,15 +109,28 @@ export async function downloadExportXlsx(
       return { ok: false, error: text || `Ошибка ${r.status}` };
     }
 
-    if (!contentType.includes("spreadsheet") && !contentType.includes("octet-stream")) {
-      const text = await r.text().catch(() => "");
-      if (text.startsWith("{")) {
+    if (
+      contentType.includes("text/html") ||
+      (!contentType.includes("spreadsheet") && !contentType.includes("octet-stream"))
+    ) {
+      const snippet = await r
+        .text()
+        .then((t) => t.slice(0, 280))
+        .catch(() => "");
+      if (snippet.startsWith("{")) {
         try {
-          const j = JSON.parse(text) as { error?: string };
+          const j = JSON.parse(snippet) as { error?: string };
           return { ok: false, error: j.error || "Сервер вернул JSON вместо Excel" };
         } catch {
           // ignore
         }
+      }
+      if (contentType.includes("text/html") || snippet.includes("<!DOCTYPE") || snippet.includes("<html")) {
+        return {
+          ok: false,
+          error:
+            "Сервер вернул HTML вместо Excel. Откройте сайт через основной адрес (nginx) и пересоберите api/web."
+        };
       }
       return { ok: false, error: "Ответ не похож на файл Excel" };
     }
@@ -171,7 +184,7 @@ export async function downloadExportXlsx(
     if (err.name === "AbortError") {
       return {
         ok: false,
-        error: "Превышено время ожидания (3 мин). Сузьте период или объект и попробуйте снова."
+        error: "Превышено время ожидания (2 мин). Сузьте период, выберите один объект или обратитесь к администратору."
       };
     }
     return { ok: false, error: String(err.message || e) };

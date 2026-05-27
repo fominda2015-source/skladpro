@@ -1763,7 +1763,10 @@ function App() {
     () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
     [me]
   );
-  const canOpenMaterialCards = useMemo(() => hasPermission("materials.read"), [me]);
+  const canOpenMaterialCards = useMemo(
+    () => hasPermission("materials.read") || hasPermission("stocks.read"),
+    [me]
+  );
   const canWriteMaterialCards = useMemo(() => hasPermission("materials.write"), [me]);
   const canWriteWarehouses = useMemo(() => hasPermission("warehouses.write"), [me]);
   const isAllObjectsView = activeObjectId === ALL_OBJECTS_ID;
@@ -6600,6 +6603,7 @@ function App() {
             onShowPriceChange={setShowStockPrice}
             canWriteOperations={canWriteOperations}
             canOpenMaterialCard={canOpenMaterialCards}
+            canEditMaterialCard={canWriteMaterialCards}
             isAdmin={me?.role === "ADMIN"}
             onAddMaterial={() => {
               setManualStockMessage("");

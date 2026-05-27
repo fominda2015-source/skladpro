@@ -148,7 +148,18 @@ export function ObjectExportsPanel(props: Props) {
           </button>
         ))}
       </div>
-      {progress ? <ExportProgressBar progress={progress} /> : null}
+      {busyId ? (
+        <ExportProgressBar
+          progress={
+            progress ?? {
+              phase: "waiting",
+              percent: null,
+              elapsedSec: 0,
+              detail: "Формирование отчёта на сервере…"
+            }
+          }
+        />
+      ) : null}
       {message ? (
         <p className="muted" style={{ margin: "10px 0 0", color: message.includes("скачан") ? "#16a34a" : "#b54708" }}>
           {message}

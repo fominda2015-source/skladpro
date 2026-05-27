@@ -92,7 +92,18 @@ export function PeriodExportButton({
       <button type="button" onClick={() => void downloadXlsx()} disabled={busy}>
         {busy ? "Формируем…" : "Скачать .xlsx"}
       </button>
-      {busy && progress ? <ExportProgressBar progress={progress} /> : null}
+      {busy ? (
+        <ExportProgressBar
+          progress={
+            progress ?? {
+              phase: "waiting",
+              percent: null,
+              elapsedSec: 0,
+              detail: "Формирование отчёта на сервере…"
+            }
+          }
+        />
+      ) : null}
       {err ? (
         <span className="periodExportErr" title={err}>
           {err.length > 80 ? `${err.slice(0, 80)}…` : err}
