@@ -90,13 +90,67 @@ function docTypeLabel(type: string): string {
   const map: Record<string, string> = {
     upd: "УПД",
     tn: "ТН",
-    "upd-scan": "Скан УПД",
+    "upd-scan": "Скан УПД / ТН",
     "receipt-request": "Заявка Excel",
     photo: "Фото",
     act: "Акт",
+    "issue-act": "Акт выдачи",
+    "issue-act-tools": "Акт выдачи (инструмент)",
+    "issue-signed-attachment": "Подписанный документ",
     other: "Прочее"
   };
   return map[type] || type;
+}
+
+/** Multer часто сохраняет UTF-8 имя как latin1 — восстанавливаем кириллицу. */
+function repairUploadedFileName(fileName: string): string {
+  const raw = fileName.trim();
+  if (!raw) return "";
+  try {
+    const bytes = new Uint8Array([...raw].map((ch) => ch.charCodeAt(0) & 0xff));
+    const fixed = new TextDecoder("utf-8").decode(bytes);
+    if (fixed && !fixed.includes("\uFFFD") && !looksLikeMojibake(fixed)) {
+      return fixed.trim();
+    }
+  } catch {
+    // ignore
+  }
+  return raw;
+}
+
+function looksLikeMojibake(s: string): boolean {
+  return /[ÃÐ][\u00C0-\u00FF]/.test(s) || (s.includes("Ð") && /Ð[\u0080-\u00BF]/.test(s));
+}
+
+function formatDocMoment(iso: string): string {
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function displayDocumentTitle(doc: RequestDoc): string {
+  const repaired = repairUploadedFileName(doc.fileName);
+  if (repaired && !looksLikeMojibake(repaired)) {
+    return repaired;
+  }
+  return `${docTypeLabel(doc.type)} · ${formatDocMoment(doc.createdAt)}`;
+}
+
+function sortAndDedupeDocs(list: RequestDoc[]): RequestDoc[] {
+  const sorted = [...list].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+  const seenPaths = new Set<string>();
+  return sorted.filter((d) => {
+    const key = d.filePath || d.id;
+    if (seenPaths.has(key)) return false;
+    seenPaths.add(key);
+    return true;
+  });
 }
 
 export function RequestMaterialsModal(props: Props) {
@@ -176,6 +230,8 @@ export function RequestMaterialsModal(props: Props) {
   const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
   const totalAccepted = rows.reduce((s, r) => s + (r.acceptedQty || 0), 0);
   const totalPct = totalQty > 0 ? Math.round((totalAccepted / totalQty) * 1000) / 10 : 0;
+
+  const docsSorted = useMemo(() => sortAndDedupeDocs(docs), [docs]);
 
   function copyAsTsv() {
     const headerCells =
@@ -365,35 +421,39 @@ export function RequestMaterialsModal(props: Props) {
             <div className="requestMaterialsDocsHead">
               <h4 style={{ margin: 0 }}>Документы по заявке</h4>
               <span className="muted" style={{ fontSize: 12 }}>
-                {docsLoading ? "Загрузка…" : `${docs.length} файл(ов)`}
+                {docsLoading ? "Загрузка…" : `${docsSorted.length} файл(ов) · по времени`}
               </span>
             </div>
             {docsError ? <p className="error" style={{ margin: "6px 0" }}>{docsError}</p> : null}
-            {!docsLoading && !docs.length && !docsError ? (
+            {!docsLoading && !docsSorted.length && !docsError ? (
               <p className="muted" style={{ margin: "8px 0 0" }}>
                 Документов пока нет. При приёмке сюда попадут сканы УПД/ТН и исходный Excel.
               </p>
             ) : null}
-            {docs.length ? (
+            {docsSorted.length ? (
               <ul className="requestMaterialsDocsList">
-                {docs.map((d) => (
+                {docsSorted.map((d) => {
+                  const title = displayDocumentTitle(d);
+                  return (
                   <li key={d.id}>
                     <a
                       href={`${apiUrl}/${d.filePath}`}
                       target="_blank"
                       rel="noreferrer"
                       className="requestMaterialsDocLink"
+                      download={title}
                     >
-                      <span className="requestMaterialsDocName" title={d.fileName}>
-                        {d.fileName}
+                      <span className="requestMaterialsDocName" title={title}>
+                        {title}
                       </span>
                       <span className="badge neutral">{docTypeLabel(d.type)}</span>
                     </a>
                     <span className="muted requestMaterialsDocDate">
-                      {new Date(d.createdAt).toLocaleString()}
+                      {formatDocMoment(d.createdAt)}
                     </span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             ) : null}
           </section>

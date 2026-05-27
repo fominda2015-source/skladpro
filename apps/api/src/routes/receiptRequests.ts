@@ -15,6 +15,17 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
+
+/** Имя файла из multipart часто приходит в latin1 вместо UTF-8. */
+function decodeUploadedOriginalName(name: string): string {
+  try {
+    const decoded = Buffer.from(name, "latin1").toString("utf8");
+    if (decoded && !decoded.includes("\uFFFD")) return decoded;
+  } catch {
+    // ignore
+  }
+  return name;
+}
 if (!fs.existsSync(uploadDirAbs)) {
   fs.mkdirSync(uploadDirAbs, { recursive: true });
 }
@@ -207,7 +218,7 @@ receiptRequestsRouter.post(
           number,
           warehouseId: parsed.data.warehouseId,
           section: parsed.data.section,
-          sourceFileName: req.file!.originalname,
+          sourceFileName: decodeUploadedOriginalName(req.file!.originalname),
           createdById: req.user!.userId,
           fromLimit: fromLimitFlag,
           objectLimitTemplateId: attachedTemplateId ?? null,
@@ -232,7 +243,7 @@ receiptRequestsRouter.post(
           entityType: "receipt",
           entityId: receipt.id,
           type: "receipt-request",
-          fileName: req.file!.originalname,
+          fileName: decodeUploadedOriginalName(req.file!.originalname),
           filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
           mimeType: req.file!.mimetype,
           size: req.file!.size,
@@ -597,7 +608,8 @@ receiptRequestsRouter.post(
       // Сохраним опциональные сканы УПД/ТН и прикрепим каждый и к заявке, и к операции.
       for (const f of files) {
         if (!f.buffer || !f.size) continue;
-        const safe = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const displayName = decodeUploadedOriginalName(f.originalname);
+        const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, "_");
         const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
         await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
         const checksum = crypto.createHash("sha256").update(f.buffer).digest("hex");
@@ -609,7 +621,7 @@ receiptRequestsRouter.post(
             entityType: "receipt",
             entityId: row.id,
             type: "upd-scan",
-            fileName: f.originalname,
+            fileName: displayName,
             filePath,
             mimeType: f.mimetype,
             size: f.size,
@@ -624,7 +636,7 @@ receiptRequestsRouter.post(
             entityType: "operation",
             entityId: operation.id,
             type: "upd-scan",
-            fileName: f.originalname,
+            fileName: displayName,
             filePath,
             mimeType: f.mimetype,
             size: f.size,
