@@ -25,6 +25,8 @@ import { NotificationsTable, type NotificationRow } from "./widgets/integrations
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
+import { CollapsibleSection } from "./widgets/home/CollapsibleSection";
+import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -5347,8 +5349,212 @@ function App() {
               ) : null}
             </section>
 
-            <section className="card homeSectionBlock">
-              <h3 className="homeSectionTitle">Объявления</h3>
+            {dashboard ? (() => {
+              type AttItem = {
+                id: string;
+                title: string;
+                sub: string;
+                value: number | string;
+                tone: "warn" | "bad" | "ok" | "neutral";
+                ico: string;
+                onClick: () => void;
+                disabled?: boolean;
+                weight: number;
+              };
+              const items: AttItem[] = [];
+              const w = dashboard.warehouse;
+              if ((dashboard.project?.overspendLimitLines || 0) > 0) {
+                items.push({
+                  id: "over",
+                  title: "Перерасход лимитов",
+                  sub: `${dashboard.project.overspendLimitLines} строк превышает план`,
+                  value: dashboard.project.overspendLimitLines,
+                  tone: "bad",
+                  ico: "⚠",
+                  disabled: !canReadLimits,
+                  onClick: () => setActiveTab("limits"),
+                  weight: 100
+                });
+              }
+              if ((w.errorNotifications24h || 0) > 0) {
+                items.push({
+                  id: "errN",
+                  title: "Критичные алерты 24ч",
+                  sub: "Открыть уведомления и интеграции",
+                  value: w.errorNotifications24h,
+                  tone: "bad",
+                  ico: "✖",
+                  disabled: !canReadIntegrations && !canReadNotifications,
+                  onClick: () => setActiveTab("notifications"),
+                  weight: 95
+                });
+              }
+              if ((w.staleOpenIssues || 0) > 0) {
+                items.push({
+                  id: "stale",
+                  title: "Заявки висят > 7 дней",
+                  sub: "Открыть «Заявки на выдачу»",
+                  value: w.staleOpenIssues,
+                  tone: "bad",
+                  ico: "⏰",
+                  disabled: !canReadIssues,
+                  onClick: () => setActiveTab("issues"),
+                  weight: 90
+                });
+              }
+              if ((w.pendingApprovals || 0) > 0) {
+                items.push({
+                  id: "appr",
+                  title: "На согласовании",
+                  sub: "Перейти в очередь согласований",
+                  value: w.pendingApprovals,
+                  tone: "warn",
+                  ico: "✓",
+                  disabled: !canReadIssues,
+                  onClick: () => {
+                    setIssueStatusFilter("ON_APPROVAL");
+                    setActiveTab("approvals");
+                  },
+                  weight: 80
+                });
+              }
+              if ((w.lowStockLines || 0) > 0) {
+                items.push({
+                  id: "low",
+                  title: "Низкий остаток",
+                  sub: "Открыть склад с фильтром",
+                  value: w.lowStockLines,
+                  tone: "warn",
+                  ico: "▼",
+                  disabled: !canReadStocks,
+                  onClick: () => {
+                    setQ("low");
+                    void loadStocks("low");
+                    setActiveTab("warehouse");
+                  },
+                  weight: 70
+                });
+              }
+              if ((w.waybillsOpen || 0) > 0) {
+                items.push({
+                  id: "wbl",
+                  title: "Незакрытые ТТН",
+                  sub: "Открыть «Транспортные накладные»",
+                  value: w.waybillsOpen,
+                  tone: "warn",
+                  ico: "🚚",
+                  disabled: !canReadWaybills,
+                  onClick: () => setActiveTab("waybills"),
+                  weight: 60
+                });
+              }
+              if ((w.toolsInRepair || 0) > 0) {
+                items.push({
+                  id: "tools",
+                  title: "Инструмент в ремонте",
+                  sub: "Открыть карточку инструмента",
+                  value: w.toolsInRepair,
+                  tone: "warn",
+                  ico: "🛠",
+                  disabled: !canReadTools,
+                  onClick: () => {
+                    setToolStatusFilter("IN_REPAIR");
+                    setActiveTab("tools");
+                  },
+                  weight: 50
+                });
+              }
+              if ((w.failedIntegrations24h || 0) > 0) {
+                items.push({
+                  id: "intg",
+                  title: "Сбои интеграций 24ч",
+                  sub: "Открыть «Интеграции»",
+                  value: w.failedIntegrations24h,
+                  tone: "warn",
+                  ico: "🔌",
+                  disabled: !canReadIntegrations,
+                  onClick: () => setActiveTab("integrations"),
+                  weight: 40
+                });
+              }
+              if ((w.unreadNotifications || 0) > 0) {
+                items.push({
+                  id: "ntf",
+                  title: "Непрочитанные уведомления",
+                  sub: "Открыть «Уведомления»",
+                  value: w.unreadNotifications,
+                  tone: "neutral",
+                  ico: "✉",
+                  onClick: () => setActiveTab("notifications"),
+                  weight: 30
+                });
+              }
+              if ((dashboard.object?.receiptRequestsOpen || 0) > 0) {
+                items.push({
+                  id: "rcp",
+                  title: "Приёмки Excel в работе",
+                  sub: "Открыть «Приходы»",
+                  value: dashboard.object?.receiptRequestsOpen || 0,
+                  tone: "neutral",
+                  ico: "📥",
+                  disabled: !canReadOperations,
+                  onClick: () => setActiveTab("operations"),
+                  weight: 20
+                });
+              }
+              items.sort((a, b) => b.weight - a.weight);
+              const top = items.slice(0, 7);
+              const sumCount = items.reduce((s, x) => s + (Number(x.value) || 0), 0);
+              const tone =
+                items.some((x) => x.tone === "bad") ? "bad" : items.some((x) => x.tone === "warn") ? "warn" : "ok";
+              return (
+                <CollapsibleSection
+                  storageKey="home.attentionTop"
+                  title="Что требует внимания"
+                  hint={items.length ? `${items.length} групп · переходы по клику` : "всё в порядке"}
+                  count={sumCount || (items.length ? items.length : "✓")}
+                  countTone={tone}
+                  defaultOpen={true}
+                >
+                  {top.length === 0 ? (
+                    <div className="attentionEmpty">
+                      Сейчас по объекту нет горячих событий. Можно работать спокойно.
+                    </div>
+                  ) : (
+                    <div className="attentionList">
+                      {top.map((it) => (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className={`attentionItem ${it.tone}`}
+                          onClick={() => {
+                            if (!it.disabled) it.onClick();
+                          }}
+                          disabled={it.disabled}
+                          title={it.disabled ? "Недостаточно прав для перехода" : "Перейти"}
+                        >
+                          <span className="ico" aria-hidden>{it.ico}</span>
+                          <span className="txt">
+                            <span className="ttl">{it.title}</span>
+                            <span className="sub">{it.sub}</span>
+                          </span>
+                          <span className="val">
+                            {typeof it.value === "number" ? it.value.toLocaleString("ru-RU") : it.value}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </CollapsibleSection>
+              );
+            })() : null}
+
+            <CollapsibleSection
+              storageKey="home.announcements"
+              title="Объявления"
+              count={announcements.length || undefined}
+              defaultOpen={announcements.length > 0}
+            >
               {canWriteAnnouncements && (
                 <div className="toolbar" style={{ marginBottom: 8 }}>
                   <button type="button" className="ghostBtn" onClick={() => setAnnouncementComposeOpen((v) => !v)}>
@@ -5406,14 +5612,18 @@ function App() {
                   ))}
                 </div>
               )}
-            </section>
+            </CollapsibleSection>
 
             {!dashboard ? (
               <p className="muted">Нет данных сводки{dashboardError ? "" : " (ожидание прав или ответа API)"}.</p>
             ) : (
               <>
-                <section className="homeSectionBlock">
-                  <h3 className="homeSectionTitle">Объект и ресурсы</h3>
+                <CollapsibleSection
+                  storageKey="home.resources"
+                  title="Объект и ресурсы"
+                  hint="ключевые цифры объекта"
+                  defaultOpen={true}
+                >
                   <div className="homeInsightGrid">
                     <button
                       type="button"
@@ -5469,10 +5679,14 @@ function App() {
                       <span className="homeInsightHint">Жилой фонд и контейнеры →</span>
                     </button>
                   </div>
-                </section>
+                </CollapsibleSection>
 
-                <section className="homeSectionBlock">
-                  <h3 className="homeSectionTitle">Сегодня (операционный день, UTC)</h3>
+                <CollapsibleSection
+                  storageKey="home.today"
+                  title="Сегодня (операционный день, UTC)"
+                  hint="что прошло за день"
+                  defaultOpen={true}
+                >
                   <div className="homeInsightGrid">
                     <button
                       type="button"
@@ -5506,10 +5720,30 @@ function App() {
                       <span className="homeInsightValue">{dashboard.warehouse.transfersToday}</span>
                     </button>
                   </div>
-                </section>
+                </CollapsibleSection>
 
-                <section className="homeSectionBlock">
-                  <h3 className="homeSectionTitle">Заявки и контроль</h3>
+                <CollapsibleSection
+                  storageKey="home.attention"
+                  title="Заявки и контроль"
+                  hint="требует внимания и риски"
+                  count={
+                    (dashboard.warehouse.pendingApprovals || 0) +
+                    (dashboard.warehouse.staleOpenIssues || 0) +
+                    (dashboard.warehouse.lowStockLines || 0) +
+                    (dashboard.warehouse.errorNotifications24h || 0)
+                  }
+                  countTone={
+                    (dashboard.warehouse.errorNotifications24h || 0) > 0 ||
+                    (dashboard.warehouse.staleOpenIssues || 0) > 0
+                      ? "bad"
+                      : (dashboard.warehouse.pendingApprovals || 0) +
+                          (dashboard.warehouse.lowStockLines || 0) >
+                        0
+                      ? "warn"
+                      : "ok"
+                  }
+                  defaultOpen={true}
+                >
                   <div className="homeInsightGrid">
                     <button
                       type="button"
@@ -5601,10 +5835,14 @@ function App() {
                       </button>
                     ) : null}
                   </div>
-                </section>
+                </CollapsibleSection>
 
-                <section className="homeSectionBlock">
-                  <h3 className="homeSectionTitle">Графики</h3>
+                <CollapsibleSection
+                  storageKey="home.charts"
+                  title="Графики"
+                  hint="визуализация сводки"
+                  defaultOpen={false}
+                >
                   <p className="muted homeChartsLead">
                     Визуализация данных сводки и текущего списка заявок. Клик по сектору кольца отправляет в раздел выдачи с
                     нужным фильтром; кольцо лимитов — переход к лимитам.
@@ -5788,7 +6026,7 @@ function App() {
                       </ResponsiveContainer>
                     </div>
                   </div>
-                </section>
+                </CollapsibleSection>
               </>
             )}
 
@@ -13429,6 +13667,52 @@ function App() {
       )}
 
       <PendingAcceptanceModal />
+      {isAuthed && me ? (
+        <MobileBottomNav
+          items={[
+            {
+              id: "stocks",
+              label: "Главная",
+              icon: "⌂",
+              active: activeTab === "stocks",
+              disabled: !canDashboard,
+              onClick: () => setActiveTab("stocks")
+            },
+            {
+              id: "warehouse",
+              label: "Склад",
+              icon: "📦",
+              active: activeTab === "warehouse",
+              disabled: !canReadStocks,
+              onClick: () => setActiveTab("warehouse")
+            },
+            {
+              id: "issues",
+              label: "Заявки",
+              icon: "📝",
+              active: activeTab === "issues" || activeTab === "approvals",
+              disabled: !canReadIssues,
+              onClick: () => setActiveTab("issues")
+            },
+            {
+              id: "operations",
+              label: "Приходы",
+              icon: "📥",
+              active: activeTab === "operations",
+              disabled: !canReadOperations,
+              onClick: () => setActiveTab("operations")
+            },
+            {
+              id: "menu",
+              label: "Меню",
+              icon: "☰",
+              badge: unreadNotificationCount,
+              active: mobileNavOpen,
+              onClick: () => setMobileNavOpen((v) => !v)
+            }
+          ]}
+        />
+      ) : null}
       {requestMaterialsModal ? (
         requestMaterialsModal.kind === "issue" ? (
           <RequestMaterialsModal
