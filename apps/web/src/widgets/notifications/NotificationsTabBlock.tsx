@@ -32,6 +32,8 @@ type Props = {
   users: Array<{ id: string; fullName: string; email: string }>;
   fetchWithSession: typeof fetch;
   apiUrl: string;
+  criticalWarehouseId: string;
+  criticalWarehouseName?: string;
 };
 
 // Универсальный блок вкладки «Уведомления».
@@ -51,7 +53,9 @@ export function NotificationsTabBlock(props: Props) {
     canManageRules,
     users,
     fetchWithSession,
-    apiUrl
+    apiUrl,
+    criticalWarehouseId,
+    criticalWarehouseName
   } = props;
 
   const [events, setEvents] = useState<NotificationEvent[]>([]);
@@ -337,7 +341,13 @@ export function NotificationsTabBlock(props: Props) {
             <p className="muted">Выбери пользователя, чтобы увидеть его правила.</p>
           ) : (
             <div style={{ marginTop: 8 }}>
-              <CriticalRecipientsSettings token={token} apiUrl={apiUrl} fetchWithSession={fetchWithSession} />
+              <CriticalRecipientsSettings
+                token={token}
+                apiUrl={apiUrl}
+                fetchWithSession={fetchWithSession}
+                warehouseId={criticalWarehouseId}
+                warehouseName={criticalWarehouseName}
+              />
               {groupedEvents.map(([group, items]) => (
                 <div key={group} style={{ marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>{group}</div>

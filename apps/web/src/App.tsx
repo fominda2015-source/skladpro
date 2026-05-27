@@ -7612,6 +7612,7 @@ function App() {
 
       {activeTab === "notifications" && canReadNotifications && (
         <div>
+          {renderTabObjectFilter()}
           <PageHero
             icon="🔔"
             title="Уведомления"
@@ -7651,6 +7652,11 @@ function App() {
             users={users.length ? users : chatUsers.map((u) => ({ id: u.id, fullName: u.fullName, email: u.id }))}
             fetchWithSession={fetchWithSession}
             apiUrl={API_URL}
+            criticalWarehouseId={exportWarehouseId}
+            criticalWarehouseName={
+              availableObjects.find((o) => o.id === exportWarehouseId)?.name ||
+              warehouses.find((w) => w.id === exportWarehouseId)?.name
+            }
           />
         </div>
       )}

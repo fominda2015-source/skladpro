@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-type WarehouseRow = { id: string; name: string };
 type UserRow = { id: string; fullName: string; email: string; role?: string; position?: string | null };
 type RecipientRow = { id: string; fullName: string; email: string };
 
@@ -8,17 +7,24 @@ type Props = {
   token: string | null;
   apiUrl: string;
   fetchWithSession: typeof fetch;
+  /** Объект из верхней панели — без отдельного переключателя в блоке. */
+  warehouseId: string;
+  warehouseName?: string;
 };
 
-export function CriticalRecipientsSettings({ token, apiUrl, fetchWithSession }: Props) {
-  const [warehouses, setWarehouses] = useState<WarehouseRow[]>([]);
-  const [warehouseId, setWarehouseId] = useState("");
+export function CriticalRecipientsSettings({
+  token,
+  apiUrl,
+  fetchWithSession,
+  warehouseId,
+  warehouseName
+}: Props) {
   const [warehouseUsers, setWarehouseUsers] = useState<UserRow[]>([]);
   const [recipients, setRecipients] = useState<RecipientRow[]>([]);
   const [pickUserId, setPickUserId] = useState("");
-  const [loadingWh, setLoadingWh] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   const loadRecipients = useCallback(
@@ -27,13 +33,20 @@ export function CriticalRecipientsSettings({ token, apiUrl, fetchWithSession }: 
         setRecipients([]);
         return;
       }
-      const r = await fetchWithSession(
-        `${apiUrl}/api/notifications/settings/critical-recipients?warehouseId=${encodeURIComponent(whId)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (r.ok) {
-        const data = (await r.json()) as { users?: RecipientRow[] };
-        setRecipients(data.users || []);
+      setLoadingRecipients(true);
+      try {
+        const r = await fetchWithSession(
+          `${apiUrl}/api/notifications/settings/critical-recipients?warehouseId=${encodeURIComponent(whId)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (r.ok) {
+          const data = (await r.json()) as { users?: RecipientRow[] };
+          setRecipients(data.users || []);
+        }
+      } catch {
+        setMessage("Не удалось загрузить список получателей");
+      } finally {
+        setLoadingRecipients(false);
       }
     },
     [apiUrl, fetchWithSession, token]
@@ -67,85 +80,68 @@ export function CriticalRecipientsSettings({ token, apiUrl, fetchWithSession }: 
     [apiUrl, fetchWithSession, token]
   );
 
-  useEffect(() => {
-    if (!token) return;
-    setLoadingWh(true);
-    void (async () => {
+  const persistRecipients = useCallback(
+    async (userIds: string[]) => {
+      if (!token || !warehouseId) return false;
+      setBusy(true);
+      setMessage("");
       try {
-        const r = await fetchWithSession(`${apiUrl}/api/notifications/settings/critical-recipients/warehouses`, {
-          headers: { Authorization: `Bearer ${token}` }
+        const r = await fetchWithSession(`${apiUrl}/api/notifications/settings/critical-recipients`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ warehouseId, userIds })
         });
-        if (r.ok) {
-          const rows = (await r.json()) as WarehouseRow[];
-          setWarehouses(rows);
-          if (rows.length === 1) setWarehouseId(rows[0]!.id);
+        if (!r.ok) {
+          setMessage("Не удалось сохранить");
+          return false;
         }
+        const data = (await r.json()) as { addedCount?: number; users?: RecipientRow[] };
+        if (data.users) setRecipients(data.users);
+        else await loadRecipients(warehouseId);
+        if (data.addedCount) {
+          setMessage(`Добавлено. Новым получателям (${data.addedCount}) отправлено уведомление.`);
+        } else {
+          setMessage("Сохранено.");
+        }
+        return true;
       } catch {
-        setMessage("Не удалось загрузить список объектов");
+        setMessage("Сбой сети");
+        return false;
       } finally {
-        setLoadingWh(false);
+        setBusy(false);
       }
-    })();
-  }, [token, apiUrl, fetchWithSession]);
+    },
+    [apiUrl, fetchWithSession, loadRecipients, token, warehouseId]
+  );
 
   useEffect(() => {
+    setPickUserId("");
+    setMessage("");
     if (!warehouseId) {
       setWarehouseUsers([]);
       setRecipients([]);
-      setPickUserId("");
       return;
     }
-    setMessage("");
     void loadWarehouseUsers(warehouseId);
     void loadRecipients(warehouseId);
   }, [warehouseId, loadWarehouseUsers, loadRecipients]);
 
-  function addRecipient() {
-    if (!pickUserId) return;
+  async function addRecipient() {
+    if (!pickUserId || !warehouseId) return;
     const u = warehouseUsers.find((x) => x.id === pickUserId);
     if (!u) return;
     if (recipients.some((r) => r.id === u.id)) {
-      setMessage("Пользователь уже в списке получателей");
+      setMessage("Уже в списке получателей для этого объекта");
       return;
     }
-    setRecipients((prev) => [...prev, { id: u.id, fullName: u.fullName, email: u.email }]);
-    setPickUserId("");
-    setMessage("");
+    const nextIds = [...recipients.map((r) => r.id), u.id];
+    const ok = await persistRecipients(nextIds);
+    if (ok) setPickUserId("");
   }
 
-  function removeRecipient(id: string) {
-    setRecipients((prev) => prev.filter((r) => r.id !== id));
-  }
-
-  async function save() {
-    if (!token || !warehouseId) {
-      setMessage("Сначала выберите объект");
-      return;
-    }
-    setSaving(true);
-    setMessage("");
-    try {
-      const r = await fetchWithSession(`${apiUrl}/api/notifications/settings/critical-recipients`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ warehouseId, userIds: recipients.map((x) => x.id) })
-      });
-      if (!r.ok) {
-        setMessage("Не удалось сохранить");
-        return;
-      }
-      const data = (await r.json()) as { addedCount?: number; users?: RecipientRow[] };
-      if (data.users) setRecipients(data.users);
-      setMessage(
-        data.addedCount
-          ? `Сохранено. Новым получателям (${data.addedCount}) отправлено уведомление.`
-          : "Сохранено."
-      );
-    } catch {
-      setMessage("Сбой сети");
-    } finally {
-      setSaving(false);
-    }
+  async function removeRecipient(id: string) {
+    const nextIds = recipients.filter((r) => r.id !== id).map((r) => r.id);
+    await persistRecipients(nextIds);
   }
 
   const availableToAdd = warehouseUsers.filter((u) => !recipients.some((r) => r.id === u.id));
@@ -154,87 +150,83 @@ export function CriticalRecipientsSettings({ token, apiUrl, fetchWithSession }: 
     <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
       <h3 style={{ marginTop: 0 }}>Критические уведомления</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        По каждому объекту назначьте получателей: приход сверх заявки, списание инструмента, перерасход по лимитам.
-        Дубликат — в чат от «Помощник».
+        Получатели для выбранного объекта (панель сверху): приход сверх заявки, списание инструмента, перерасход по
+        лимитам. Дубликат — в чат от «Помощник».
       </p>
 
-      <div className="form grid2" style={{ alignItems: "end", marginBottom: 12 }}>
-        <label>
-          Объект
-          <select
-            value={warehouseId}
-            disabled={loadingWh}
-            onChange={(e) => setWarehouseId(e.target.value)}
-          >
-            <option value="">— выберите объект —</option>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {warehouseId ? (
-          <label>
-            Пользователь на объекте
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <select
-                value={pickUserId}
-                disabled={loadingUsers || !availableToAdd.length}
-                onChange={(e) => setPickUserId(e.target.value)}
-                style={{ flex: "1 1 200px", minWidth: 160 }}
-              >
-                <option value="">
-                  {loadingUsers
-                    ? "Загрузка…"
-                    : availableToAdd.length
-                      ? "— выберите —"
-                      : "Нет пользователей с доступом к объекту"}
-                </option>
-                {availableToAdd.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.fullName}
-                    {u.position ? ` · ${u.position}` : ""}
-                    {u.role ? ` (${u.role})` : ""}
-                  </option>
-                ))}
-              </select>
-              <button type="button" disabled={!pickUserId} onClick={addRecipient}>
-                Добавить
-              </button>
-            </div>
-          </label>
-        ) : null}
-      </div>
-
       {!warehouseId ? (
-        <p className="muted">Выберите объект, чтобы увидеть пользователей и назначить получателей.</p>
-      ) : recipients.length === 0 ? (
-        <p className="muted">Получатели для этого объекта пока не назначены.</p>
+        <p className="muted">Выберите объект в верхней панели.</p>
       ) : (
-        <ul style={{ margin: "0 0 12px", paddingLeft: 18 }}>
-          {recipients.map((r) => (
-            <li key={r.id} style={{ marginBottom: 6 }}>
-              <strong>{r.fullName}</strong>
-              <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
-                {r.email}
+        <>
+          <p style={{ margin: "0 0 12px", fontSize: 13 }}>
+            <strong>Объект:</strong> {warehouseName || warehouseId}
+            {loadingRecipients || loadingUsers ? (
+              <span className="muted" style={{ marginLeft: 8 }}>
+                обновление…
               </span>
-              <button
-                type="button"
-                className="ghostBtn"
-                style={{ marginLeft: 8, fontSize: 12 }}
-                onClick={() => removeRecipient(r.id)}
-              >
-                Убрать
-              </button>
-            </li>
-          ))}
-        </ul>
+            ) : null}
+          </p>
+
+          <div className="form" style={{ marginBottom: 12, maxWidth: 520 }}>
+            <label>
+              Пользователь на объекте
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                <select
+                  value={pickUserId}
+                  disabled={busy || loadingUsers || !availableToAdd.length}
+                  onChange={(e) => setPickUserId(e.target.value)}
+                  style={{ flex: "1 1 200px", minWidth: 160 }}
+                >
+                  <option value="">
+                    {loadingUsers
+                      ? "Загрузка…"
+                      : availableToAdd.length
+                        ? "— выберите —"
+                        : recipients.length
+                          ? "Все пользователи объекта уже добавлены"
+                          : "Нет пользователей с доступом к объекту"}
+                  </option>
+                  {availableToAdd.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.fullName}
+                      {u.position ? ` · ${u.position}` : ""}
+                      {u.role ? ` (${u.role})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" disabled={busy || !pickUserId} onClick={() => void addRecipient()}>
+                  {busy ? "…" : "Добавить"}
+                </button>
+              </div>
+            </label>
+          </div>
+
+          {recipients.length === 0 ? (
+            <p className="muted">Получатели для этого объекта пока не назначены.</p>
+          ) : (
+            <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+              {recipients.map((r) => (
+                <li key={r.id} style={{ marginBottom: 6 }}>
+                  <strong>{r.fullName}</strong>
+                  <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                    {r.email}
+                  </span>
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    style={{ marginLeft: 8, fontSize: 12 }}
+                    disabled={busy}
+                    onClick={() => void removeRecipient(r.id)}
+                  >
+                    Убрать
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
-      <button type="button" disabled={saving || !warehouseId} onClick={() => void save()}>
-        {saving ? "Сохранение…" : "Сохранить для объекта"}
-      </button>
       {message ? <p className="muted" style={{ marginTop: 8, color: "#b54708" }}>{message}</p> : null}
     </div>
   );
