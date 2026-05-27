@@ -79,7 +79,29 @@ export const NOTIFICATION_EVENTS = [
     code: "LIMIT_OVERRUN",
     label: "Перерасход по лимиту материала",
     defaultLevel: NotificationLevel.ERROR,
-    group: "Лимиты"
+    group: "Критические",
+    critical: true
+  },
+  {
+    code: "RECEIPT_OVER_ORDER",
+    label: "Приход больше, чем в заявке",
+    defaultLevel: NotificationLevel.ERROR,
+    group: "Критические",
+    critical: true
+  },
+  {
+    code: "TOOL_WRITE_OFF",
+    label: "Списание инструмента",
+    defaultLevel: NotificationLevel.ERROR,
+    group: "Критические",
+    critical: true
+  },
+  {
+    code: "CRITICAL_RECIPIENT_ASSIGNED",
+    label: "Назначение получателем критических уведомлений",
+    defaultLevel: NotificationLevel.INFO,
+    group: "Критические",
+    critical: false
   },
   {
     code: "LIMIT_TEMPLATE_UPLOADED",
@@ -120,6 +142,14 @@ export const NOTIFICATION_EVENTS = [
 ] as const;
 
 export type NotificationEventCode = (typeof NOTIFICATION_EVENTS)[number]["code"];
+
+export const CRITICAL_EVENT_CODES = NOTIFICATION_EVENTS.filter(
+  (e) => "critical" in e && e.critical === true
+).map((e) => e.code);
+
+export function isCriticalEventCode(code: string): boolean {
+  return (CRITICAL_EVENT_CODES as readonly string[]).includes(code);
+}
 
 const codes = new Set<string>(NOTIFICATION_EVENTS.map((e) => e.code));
 export function isKnownEventCode(code: string): code is NotificationEventCode {

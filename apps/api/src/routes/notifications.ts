@@ -3,7 +3,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { NOTIFICATION_EVENTS, isKnownEventCode } from "../lib/notificationEvents.js";
-import { getLowStockThreshold, setLowStockThreshold } from "../lib/notifications.js";
+import { getLowStockThreshold, notifyUser, setLowStockThreshold } from "../lib/notifications.js";
+import { getCriticalRecipientUserIds, setCriticalRecipientUserIds } from "../lib/criticalRecipients.js";
 import { withRepairedFileName } from "../lib/uploadFileName.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -26,6 +27,10 @@ const ruleBulkSchema = z.object({
 });
 
 const lowStockSchema = z.object({ value: z.coerce.number().min(0).max(1_000_000) });
+
+const criticalRecipientsSchema = z.object({
+  userIds: z.array(z.string().min(1))
+});
 
 function canManageRules(req: AuthedRequest): boolean {
   const perms = Array.isArray(req.user?.permissions) ? req.user!.permissions : [];
@@ -53,6 +58,48 @@ notificationsRouter.patch("/settings/low-stock", async (req: AuthedRequest, res)
   if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   await setLowStockThreshold(parsed.data.value);
   return res.json({ value: Math.floor(parsed.data.value) });
+});
+
+notificationsRouter.get("/settings/critical-recipients", async (req: AuthedRequest, res) => {
+  if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
+  const userIds = await getCriticalRecipientUserIds();
+  const users =
+    userIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, fullName: true, email: true },
+          orderBy: { fullName: "asc" }
+        })
+      : [];
+  return res.json({ userIds, users });
+});
+
+notificationsRouter.put("/settings/critical-recipients", async (req: AuthedRequest, res) => {
+  if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
+  const parsed = criticalRecipientsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const prev = new Set(await getCriticalRecipientUserIds());
+  const next = await setCriticalRecipientUserIds(parsed.data.userIds);
+  const added = next.filter((id) => !prev.has(id));
+  for (const userId of added) {
+    await notifyUser({
+      userId,
+      title: "Критические уведомления",
+      message:
+        "Вас назначили получателем критических уведомлений склада. Сообщения также приходят в чат от «Помощник».",
+      level: NotificationLevel.INFO,
+      eventCode: "CRITICAL_RECIPIENT_ASSIGNED"
+    }).catch(() => undefined);
+  }
+  const users =
+    next.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: next } },
+          select: { id: true, fullName: true, email: true },
+          orderBy: { fullName: "asc" }
+        })
+      : [];
+  return res.json({ userIds: next, users, addedCount: added.length });
 });
 
 // Правила: список для UI настройки. Доступно тому, кто может ими управлять.

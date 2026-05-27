@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "./lib/prisma.js";
 import { config } from "./config.js";
+import { ASSISTANT_BOT_EMAIL, ensureAssistantBotUserId } from "./lib/criticalRecipients.js";
 
 const baseWarehouseOps = [
   "dashboard.read",
@@ -225,4 +226,7 @@ export async function seedBaseData(adminPasswordOverride?: string) {
       });
     }
   }
+
+  await ensureAssistantBotUserId();
+  console.log(`Assistant bot ready: ${ASSISTANT_BOT_EMAIL}`);
 }

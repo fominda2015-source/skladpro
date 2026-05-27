@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import { dispatchCriticalNotification } from "../lib/notifications.js";
 import {
   assertProjectInScope,
   assertWarehouseInScope,
@@ -476,6 +477,16 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
       before: { status: beforeTool.status, responsible: beforeTool.responsible },
       after: { status: updated.status, responsible: updated.responsible }
     });
+    if (parsed.data.action === "WRITE_OFF") {
+      void dispatchCriticalNotification({
+        eventCode: "TOOL_WRITE_OFF",
+        title: "Списание инструмента",
+        message: `«${beforeTool.name}»${beforeTool.inventoryNumber ? ` (инв. ${beforeTool.inventoryNumber})` : ""} списан.${parsed.data.comment?.trim() ? ` Комментарий: ${parsed.data.comment.trim()}` : ""}`,
+        entityType: "Tool",
+        entityId: id,
+        excludeUserIds: [req.user!.userId]
+      }).catch(() => undefined);
+    }
     return res.json(updated);
   } catch (error) {
     const mapped = handlePrismaError(error);

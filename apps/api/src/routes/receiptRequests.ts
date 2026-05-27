@@ -9,7 +9,11 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
 import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
-import { dispatchNotification, notifyUser } from "../lib/notifications.js";
+import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
+import {
+  ensureMaterialInCurrentLimitTemplate,
+  findLimitNodesAcrossWarehouse
+} from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
@@ -43,7 +47,9 @@ const acceptItemSchema = z.object({
 const acceptSchema = z.object({
   itemMappings: z.array(acceptItemSchema).min(1),
   documentNumber: z.string().max(120).optional(),
-  note: z.string().max(500).optional()
+  note: z.string().max(500).optional(),
+  /** Разрешить принять больше, чем осталось по заявке (критическое уведомление + лимиты). */
+  allowOverage: z.boolean().optional()
 });
 
 const limitLinkSchema = z.object({
@@ -391,6 +397,42 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
   return res.json({ items: result, hasTemplate: true });
 });
 
+receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const itemId = typeof req.query.itemId === "string" ? req.query.itemId : "";
+  const materialIdQ = typeof req.query.materialId === "string" ? req.query.materialId : "";
+  const row = await prisma.receiptRequest.findUnique({
+    where: { id },
+    include: { items: true }
+  });
+  if (!row) return res.status(404).json({ error: "Request not found" });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, row.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const item = itemId ? row.items.find((it) => it.id === itemId) : row.items[0];
+  if (!item) return res.status(400).json({ error: "itemId обязателен" });
+  const materialId = materialIdQ || item.mappedMaterialId || "";
+  const picks = await findLimitNodesAcrossWarehouse(
+    row.warehouseId,
+    materialId,
+    item.sourceName,
+    row.objectLimitTemplateId
+  );
+  return res.json({
+    itemId: item.id,
+    sourceName: item.sourceName,
+    orderedQty: Number(item.quantity),
+    acceptedQty: Number(item.acceptedQty || 0),
+    currentTemplateId: row.objectLimitTemplateId,
+    ...picks
+  });
+});
+
 receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
@@ -466,10 +508,54 @@ receiptRequestsRouter.post(
         });
       }
       const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
-      if (m.acceptedQty > remaining + 1e-6) {
-        return res.status(400).json({
-          error: `По «${it.sourceName}» осталось принять ${remaining}, передали ${m.acceptedQty}`
+      const isOver = m.acceptedQty > remaining + 1e-6;
+      if (isOver && !parsed.data.allowOverage) {
+        let materialId = m.materialId;
+        if (!materialId && m.newMaterialName?.trim()) {
+          const found = await prisma.material.findFirst({
+            where: { name: m.newMaterialName.trim(), unit: m.newMaterialUnit?.trim() || it.sourceUnit || "шт" }
+          });
+          materialId = found?.id;
+        }
+        const picks = await findLimitNodesAcrossWarehouse(
+          row.warehouseId,
+          materialId || "",
+          it.sourceName,
+          row.objectLimitTemplateId
+        );
+        return res.status(409).json({
+          error: "RECEIPT_OVERAGE_NEEDS_CONFIRM",
+          message: `По «${it.sourceName}» в заявке ${Number(it.quantity)}, осталось ${remaining}, передали ${m.acceptedQty}`,
+          itemId: m.itemId,
+          orderedQty: Number(it.quantity),
+          remainingQty: remaining,
+          acceptedQty: m.acceptedQty,
+          suggestions: picks
         });
+      }
+      if (isOver && parsed.data.allowOverage) {
+        let materialId = m.materialId;
+        if (!materialId && m.newMaterialName?.trim()) {
+          const found = await prisma.material.findFirst({
+            where: { name: m.newMaterialName.trim(), unit: m.newMaterialUnit?.trim() || it.sourceUnit || "шт" }
+          });
+          materialId = found?.id;
+        }
+        const picks = await findLimitNodesAcrossWarehouse(
+          row.warehouseId,
+          materialId || "",
+          it.sourceName,
+          row.objectLimitTemplateId
+        );
+        const hasOther = picks.otherSections.length > 0;
+        if (hasOther && !m.limitNodeId) {
+          return res.status(409).json({
+            error: "RECEIPT_OVERAGE_PICK_LIMIT",
+            message: `Превышение по «${it.sourceName}»: выберите раздел лимита для излишка`,
+            itemId: m.itemId,
+            suggestions: picks
+          });
+        }
       }
     }
 
@@ -658,6 +744,73 @@ receiptRequestsRouter.post(
         }
       });
 
+      const overageActions: Array<{
+        itemId: string;
+        sourceName: string;
+        excessQty: number;
+        limitNodeId: string;
+        autoCreated: boolean;
+        targetPath?: string;
+      }> = [];
+
+      for (const r of resolved) {
+        const prevAccepted = Number(r.item.acceptedQty || 0);
+        const newTotal = prevAccepted + r.acceptedQty;
+        const ordered = Number(r.item.quantity);
+        if (newTotal <= ordered + 1e-6) continue;
+
+        const excessQty = newTotal - ordered;
+        let limitNodeId = r.limitNodeId;
+        let autoCreated = false;
+        let targetPath: string | undefined;
+
+        const picks = await findLimitNodesAcrossWarehouse(
+          row.warehouseId,
+          r.materialId,
+          r.item.sourceName,
+          row.objectLimitTemplateId
+        );
+
+        if (!limitNodeId && picks.otherSections.length === 1) {
+          limitNodeId = picks.otherSections[0]!.id;
+          targetPath = picks.otherSections[0]!.path;
+        } else if (!limitNodeId && picks.current.length === 1) {
+          limitNodeId = picks.current[0]!.id;
+          targetPath = picks.current[0]!.path;
+        } else if (!limitNodeId && row.objectLimitTemplateId) {
+          const mat = await tx.material.findUnique({
+            where: { id: r.materialId },
+            select: { name: true, unit: true }
+          });
+          limitNodeId = await ensureMaterialInCurrentLimitTemplate(
+            tx,
+            row.objectLimitTemplateId,
+            r.materialId,
+            mat?.name || r.item.sourceName,
+            mat?.unit || r.sourceUnit,
+            excessQty
+          );
+          autoCreated = true;
+          targetPath = "текущий раздел лимита (добавлено автоматически)";
+        }
+
+        if (limitNodeId) {
+          await tx.receiptRequestItem.update({
+            where: { id: r.item.id },
+            data: { limitNodeId }
+          });
+        }
+
+        overageActions.push({
+          itemId: r.item.id,
+          sourceName: r.item.sourceName,
+          excessQty,
+          limitNodeId: limitNodeId || "",
+          autoCreated,
+          targetPath
+        });
+      }
+
       return {
         operation,
         acceptedItems: resolved.map((r) => ({
@@ -666,7 +819,8 @@ receiptRequestsRouter.post(
           receiptRequestItemId: r.item.id,
           sourceName: r.item.sourceName,
           sourceUnit: r.item.sourceUnit
-        }))
+        })),
+        overageActions
       };
     });
 
@@ -705,7 +859,28 @@ receiptRequestsRouter.post(
       entityId: row.id,
       excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
     }).catch(() => undefined);
-    return res.json({ ok: true, operationId: op.operation.id });
+
+    for (const ov of op.overageActions || []) {
+      const limitHint = ov.targetPath
+        ? `\nЛимит: ${ov.targetPath}${ov.autoCreated ? " (создана позиция)" : ""}`
+        : ov.limitNodeId
+          ? ""
+          : "\nЛимит: не привязан (нет шаблона)";
+      void dispatchCriticalNotification({
+        eventCode: "RECEIPT_OVER_ORDER",
+        title: "Приход больше заявки",
+        message: `Заявка ${row.number}: «${ov.sourceName}» — принято сверх заявки на ${ov.excessQty.toLocaleString("ru-RU")}${limitHint}`,
+        entityType: "ReceiptRequest",
+        entityId: row.id,
+        excludeUserIds: [req.user!.userId]
+      }).catch(() => undefined);
+    }
+
+    return res.json({
+      ok: true,
+      operationId: op.operation.id,
+      overageActions: op.overageActions || []
+    });
   }
 );
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { NotificationsTable, type NotificationRow } from "../integrations/NotificationsTable";
 import { NotificationDetailModal } from "./NotificationDetailModal";
+import { CriticalRecipientsSettings } from "./CriticalRecipientsSettings";
 
 // Минимальный тип события из каталога API.
 type NotificationEvent = {
@@ -336,6 +337,12 @@ export function NotificationsTabBlock(props: Props) {
             <p className="muted">Выбери пользователя, чтобы увидеть его правила.</p>
           ) : (
             <div style={{ marginTop: 8 }}>
+              <CriticalRecipientsSettings
+                token={token}
+                apiUrl={apiUrl}
+                users={users}
+                fetchWithSession={fetchWithSession}
+              />
               {groupedEvents.map(([group, items]) => (
                 <div key={group} style={{ marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>{group}</div>

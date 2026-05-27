@@ -1,4 +1,6 @@
 import { NotificationLevel } from "@prisma/client";
+import { getCriticalRecipientUserIds } from "./criticalRecipients.js";
+import { postAssistantChatMessage } from "./assistantChat.js";
 import { prisma } from "./prisma.js";
 import { NOTIFICATION_EVENTS, type NotificationEventCode } from "./notificationEvents.js";
 
@@ -76,6 +78,51 @@ export async function dispatchNotification(params: DispatchParams): Promise<numb
       .catch(() => null)
   );
   await Promise.all(ops);
+  return recipients.size;
+}
+
+async function mirrorNotificationsToAssistant(
+  recipientUserIds: string[],
+  title: string,
+  message: string
+): Promise<void> {
+  const text = `🔔 ${title}\n\n${message}`;
+  for (const userId of recipientUserIds) {
+    await postAssistantChatMessage(userId, text).catch(() => undefined);
+  }
+}
+
+type CriticalDispatchParams = Omit<DispatchParams, "level" | "forceRecipients"> & {
+  forceRecipients?: string[];
+};
+
+/** Критические события — только назначенные получатели (настройка «Критические уведомления»). */
+export async function dispatchCriticalNotification(params: CriticalDispatchParams): Promise<number> {
+  const fromSettings = await getCriticalRecipientUserIds();
+  const recipients = new Set<string>(params.forceRecipients?.length ? params.forceRecipients : fromSettings);
+  if (params.excludeUserIds?.length) {
+    for (const id of params.excludeUserIds) recipients.delete(id);
+  }
+  if (!recipients.size) return 0;
+
+  const defaultLevel = NotificationLevel.ERROR;
+  const ops = Array.from(recipients).map((userId) =>
+    prisma.notification
+      .create({
+        data: {
+          userId,
+          title: params.title,
+          message: params.message,
+          level: defaultLevel,
+          entityType: params.entityType,
+          entityId: params.entityId,
+          eventCode: String(params.eventCode)
+        }
+      })
+      .catch(() => null)
+  );
+  await Promise.all(ops);
+  await mirrorNotificationsToAssistant(Array.from(recipients), params.title, params.message).catch(() => undefined);
   return recipients.size;
 }
 

@@ -9,6 +9,7 @@ export type NotificationRow = {
   createdAt: string;
   entityType?: string | null;
   entityId?: string | null;
+  eventCode?: string | null;
 };
 
 export function NotificationsTable({

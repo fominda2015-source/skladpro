@@ -34,6 +34,8 @@ import {
 } from "./widgets/integrations/IntegrationJobsTable";
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
+import { CriticalRecipientAssignedModal } from "./widgets/notifications/CriticalRecipientAssignedModal";
+import { ReceiptOverageModal } from "./widgets/receipts/ReceiptOverageModal";
 import { AnnouncementsBlock } from "./widgets/home/AnnouncementsBlock";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
@@ -864,6 +866,24 @@ function App() {
   // Модалка «приложить документы» перед самым приёмом.
   const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
   const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
+  const [receiptOverageModal, setReceiptOverageModal] = useState<null | {
+    row: ReceiptRequestRow;
+    itemId: string;
+    extraFiles: File[];
+    mappings: Array<{
+      itemId: string;
+      materialId?: string;
+      newMaterialName?: string;
+      newMaterialUnit?: string;
+      acceptedQty: number;
+      limitNodeId?: string | null;
+    }>;
+    sourceName: string;
+    orderedQty: number;
+    acceptedQty: number;
+    suggestions: { current: Array<{ id: string; path: string }>; otherSections: Array<{ id: string; path: string }> };
+  }>(null);
+  const [showCriticalAssignedModal, setShowCriticalAssignedModal] = useState(false);
   /** Ручной приход на склад — форма только в модалке. */
   const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
   const [requestMaterialsModal, setRequestMaterialsModal] = useState<
@@ -2294,7 +2314,10 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    setNotifications((await r.json()) as NotificationRow[]);
+    const rows = (await r.json()) as NotificationRow[];
+    setNotifications(rows);
+    const assigned = rows.find((n) => !n.isRead && n.eventCode === "CRITICAL_RECIPIENT_ASSIGNED");
+    if (assigned) setShowCriticalAssignedModal(true);
   }
 
   async function markNotificationsRead(ids: string[]) {
@@ -3172,8 +3195,7 @@ function App() {
     }
   }
 
-  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
-    if (!token) return false;
+  function buildReceiptAcceptanceMappings(row: ReceiptRequestRow) {
     const drafts = acceptanceDrafts[row.id] || {};
     const mappings: Array<{
       itemId: string;
@@ -3189,11 +3211,6 @@ function App() {
       if (!qtyRaw) continue;
       const qty = Number(qtyRaw);
       if (!Number.isFinite(qty) || qty <= 0) continue;
-      const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
-      if (qty - remaining > 1e-6) {
-        setOpsMessage(`По «${it.sourceName}» осталось принять ${remaining}, передали ${qty}`);
-        return false;
-      }
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
       const finalName = explicitName || it.sourceName;
@@ -3205,16 +3222,23 @@ function App() {
         limitNodeId: draft?.limitNodeId || null
       });
     }
-    if (!mappings.length) {
-      setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
-      return false;
-    }
+    return mappings;
+  }
+
+  async function postReceiptAcceptance(
+    row: ReceiptRequestRow,
+    mappings: ReturnType<typeof buildReceiptAcceptanceMappings>,
+    extraFiles: File[],
+    opts?: { allowOverage?: boolean }
+  ): Promise<boolean> {
+    if (!token) return false;
     const form = new FormData();
     form.append(
       "payload",
       JSON.stringify({
         itemMappings: mappings,
-        documentNumber: acceptanceDocNumbers[row.id] || undefined
+        documentNumber: acceptanceDocNumbers[row.id] || undefined,
+        allowOverage: opts?.allowOverage === true
       })
     );
     const filesToSend: File[] = [];
@@ -3231,13 +3255,43 @@ function App() {
       });
       if (!res.ok) {
         let serverMsg = "";
+        let body: Record<string, unknown> = {};
         try {
-          const body = await res.json();
-          serverMsg = typeof body?.error === "string" ? body.error : "";
+          body = (await res.json()) as Record<string, unknown>;
+          serverMsg = typeof body.error === "string" ? body.error : "";
         } catch {
           // ignore
         }
-        setOpsMessage(serverMsg || "Не удалось провести приёмку");
+        if (
+          res.status === 409 &&
+          (body.error === "RECEIPT_OVERAGE_NEEDS_CONFIRM" || body.error === "RECEIPT_OVERAGE_PICK_LIMIT")
+        ) {
+          const itemId = typeof body.itemId === "string" ? body.itemId : mappings[0]?.itemId;
+          const it = row.items.find((x) => x.id === itemId) || row.items[0];
+          const m = mappings.find((x) => x.itemId === it?.id);
+          const suggestions =
+            (body.suggestions as
+              | { current: Array<{ id: string; path: string }>; otherSections: Array<{ id: string; path: string }> }
+              | undefined) ?? { current: [], otherSections: [] };
+          if (it && m) {
+            setReceiptOverageModal({
+              row,
+              itemId: it.id,
+              extraFiles,
+              mappings,
+              sourceName: it.sourceName,
+              orderedQty: Number(body.orderedQty ?? it.quantity),
+              acceptedQty: m.acceptedQty,
+              suggestions
+            });
+            return false;
+          }
+        }
+        setOpsMessage(
+          serverMsg ||
+            (typeof body.message === "string" ? body.message : "") ||
+            "Не удалось провести приёмку"
+        );
         return false;
       }
       setOpsMessage(
@@ -3292,6 +3346,7 @@ function App() {
       await loadMaterialMappings();
       await loadStocks(q);
       await loadOperations();
+      await loadNotifications();
       return true;
     } finally {
       setAcceptanceSubmitting((prev) => {
@@ -3300,6 +3355,48 @@ function App() {
         return next;
       });
     }
+  }
+
+  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
+    const mappings = buildReceiptAcceptanceMappings(row);
+    if (!mappings.length) {
+      setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
+      return false;
+    }
+    for (const m of mappings) {
+      const it = row.items.find((x) => x.id === m.itemId);
+      if (!it) continue;
+      const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
+      if (m.acceptedQty > remaining + 1e-6) {
+        if (!token) return false;
+        try {
+          const r = await fetchWithSession(
+            `${API_URL}/api/receipt-requests/${encodeURIComponent(row.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (r.ok) {
+            const data = (await r.json()) as {
+              current: Array<{ id: string; path: string }>;
+              otherSections: Array<{ id: string; path: string }>;
+            };
+            setReceiptOverageModal({
+              row,
+              itemId: it.id,
+              extraFiles,
+              mappings,
+              sourceName: it.sourceName,
+              orderedQty: Number(it.quantity),
+              acceptedQty: m.acceptedQty,
+              suggestions: { current: data.current || [], otherSections: data.otherSections || [] }
+            });
+            return false;
+          }
+        } catch {
+          // fallback — сервер вернёт 409
+        }
+      }
+    }
+    return postReceiptAcceptance(row, mappings, extraFiles);
   }
 
   async function loadIssues() {
@@ -13503,6 +13600,36 @@ function App() {
           </div>
         </div>
       )}
+
+      {showCriticalAssignedModal ? (
+        <CriticalRecipientAssignedModal
+          onClose={() => {
+            setShowCriticalAssignedModal(false);
+            const ids = notifications
+              .filter((n) => !n.isRead && n.eventCode === "CRITICAL_RECIPIENT_ASSIGNED")
+              .map((n) => n.id);
+            if (ids.length) void markNotificationsRead(ids);
+          }}
+        />
+      ) : null}
+
+      {receiptOverageModal ? (
+        <ReceiptOverageModal
+          sourceName={receiptOverageModal.sourceName}
+          orderedQty={receiptOverageModal.orderedQty}
+          acceptedQty={receiptOverageModal.acceptedQty}
+          suggestions={receiptOverageModal.suggestions}
+          onCancel={() => setReceiptOverageModal(null)}
+          onConfirm={(limitNodeId, allowOverage) => {
+            const { row, itemId, mappings, extraFiles } = receiptOverageModal;
+            const nextMappings = mappings.map((m) =>
+              m.itemId === itemId ? { ...m, limitNodeId: limitNodeId ?? m.limitNodeId } : m
+            );
+            setReceiptOverageModal(null);
+            void postReceiptAcceptance(row, nextMappings, extraFiles, { allowOverage });
+          }}
+        />
+      ) : null}
 
       {materialWriteoffModal && canMaterialWriteoff && activeObjectId && (
         <div

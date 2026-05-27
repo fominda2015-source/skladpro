@@ -24,7 +24,12 @@ import {
   getRequestDataScope,
   mergeIssueWhere
 } from "../lib/dataScope.js";
-import { dispatchNotification, getLowStockThreshold, notifyUser } from "../lib/notifications.js";
+import {
+  dispatchCriticalNotification,
+  dispatchNotification,
+  getLowStockThreshold,
+  notifyUser
+} from "../lib/notifications.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 
 const cancelSchema = z.object({ reason: z.string().min(1).max(2000) });
@@ -1255,7 +1260,7 @@ issueRequestsRouter.patch(
             });
             if (updatedLine && Number(updatedLine.issuedQty) > Number(updatedLine.plannedQty)) {
               // Шинная рассылка о перерасходе. Делаем «вне» транзакции через void.
-              void dispatchNotification({
+              void dispatchCriticalNotification({
                 eventCode: "LIMIT_OVERRUN",
                 title: "Перерасход по лимиту",
                 message: `«${updatedLine.material?.name ?? item.materialId}»: выдано ${Number(updatedLine.issuedQty)} > план ${Number(updatedLine.plannedQty)} ${updatedLine.material?.unit ?? ""}`.trim(),
