@@ -337,12 +337,7 @@ export function NotificationsTabBlock(props: Props) {
             <p className="muted">Выбери пользователя, чтобы увидеть его правила.</p>
           ) : (
             <div style={{ marginTop: 8 }}>
-              <CriticalRecipientsSettings
-                token={token}
-                apiUrl={apiUrl}
-                users={users}
-                fetchWithSession={fetchWithSession}
-              />
+              <CriticalRecipientsSettings token={token} apiUrl={apiUrl} fetchWithSession={fetchWithSession} />
               {groupedEvents.map(([group, items]) => (
                 <div key={group} style={{ marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>{group}</div>

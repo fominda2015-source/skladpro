@@ -4,7 +4,12 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { NOTIFICATION_EVENTS, isKnownEventCode } from "../lib/notificationEvents.js";
 import { getLowStockThreshold, notifyUser, setLowStockThreshold } from "../lib/notifications.js";
-import { getCriticalRecipientUserIds, setCriticalRecipientUserIds } from "../lib/criticalRecipients.js";
+import {
+  getCriticalRecipientUserIds,
+  listUsersOnWarehouse,
+  setCriticalRecipientUserIds
+} from "../lib/criticalRecipients.js";
+import { getRequestDataScope } from "../lib/dataScope.js";
 import { withRepairedFileName } from "../lib/uploadFileName.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -29,6 +34,7 @@ const ruleBulkSchema = z.object({
 const lowStockSchema = z.object({ value: z.coerce.number().min(0).max(1_000_000) });
 
 const criticalRecipientsSchema = z.object({
+  warehouseId: z.string().min(1),
   userIds: z.array(z.string().min(1))
 });
 
@@ -60,9 +66,41 @@ notificationsRouter.patch("/settings/low-stock", async (req: AuthedRequest, res)
   return res.json({ value: Math.floor(parsed.data.value) });
 });
 
+notificationsRouter.get("/settings/critical-recipients/warehouses", async (req: AuthedRequest, res) => {
+  if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
+  const scope = await getRequestDataScope(req);
+  const rows = await prisma.warehouse.findMany({
+    where:
+      scope.unrestricted || !scope.warehouseIds?.length
+        ? {}
+        : { id: { in: scope.warehouseIds } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" }
+  });
+  return res.json(rows);
+});
+
+notificationsRouter.get("/settings/critical-recipients/warehouse-users", async (req: AuthedRequest, res) => {
+  if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : "";
+  if (!warehouseId) return res.status(400).json({ error: "warehouseId обязателен" });
+  const rows = await listUsersOnWarehouse(warehouseId);
+  return res.json(
+    rows.map((u) => ({
+      id: u.id,
+      fullName: u.fullName,
+      email: u.email,
+      role: u.role.name,
+      position: u.position?.name || null
+    }))
+  );
+});
+
 notificationsRouter.get("/settings/critical-recipients", async (req: AuthedRequest, res) => {
   if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
-  const userIds = await getCriticalRecipientUserIds();
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : "";
+  if (!warehouseId) return res.status(400).json({ error: "warehouseId обязателен" });
+  const userIds = await getCriticalRecipientUserIds(warehouseId);
   const users =
     userIds.length > 0
       ? await prisma.user.findMany({
@@ -71,24 +109,29 @@ notificationsRouter.get("/settings/critical-recipients", async (req: AuthedReque
           orderBy: { fullName: "asc" }
         })
       : [];
-  return res.json({ userIds, users });
+  return res.json({ warehouseId, userIds, users });
 });
 
 notificationsRouter.put("/settings/critical-recipients", async (req: AuthedRequest, res) => {
   if (!canManageRules(req)) return res.status(403).json({ error: "Недостаточно прав" });
   const parsed = criticalRecipientsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
-  const prev = new Set(await getCriticalRecipientUserIds());
-  const next = await setCriticalRecipientUserIds(parsed.data.userIds);
+  const { warehouseId, userIds } = parsed.data;
+  const wh = await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { name: true } });
+  if (!wh) return res.status(404).json({ error: "Объект не найден" });
+
+  const prev = new Set(await getCriticalRecipientUserIds(warehouseId));
+  const next = await setCriticalRecipientUserIds(warehouseId, userIds);
   const added = next.filter((id) => !prev.has(id));
   for (const userId of added) {
     await notifyUser({
       userId,
       title: "Критические уведомления",
-      message:
-        "Вас назначили получателем критических уведомлений склада. Сообщения также приходят в чат от «Помощник».",
+      message: `Вас назначили получателем критических уведомлений по объекту «${wh.name}». Дубликаты — в чате от «Помощник».`,
       level: NotificationLevel.INFO,
-      eventCode: "CRITICAL_RECIPIENT_ASSIGNED"
+      eventCode: "CRITICAL_RECIPIENT_ASSIGNED",
+      entityType: "Warehouse",
+      entityId: warehouseId
     }).catch(() => undefined);
   }
   const users =
@@ -99,7 +142,7 @@ notificationsRouter.put("/settings/critical-recipients", async (req: AuthedReque
           orderBy: { fullName: "asc" }
         })
       : [];
-  return res.json({ userIds: next, users, addedCount: added.length });
+  return res.json({ warehouseId, userIds: next, users, addedCount: added.length });
 });
 
 // Правила: список для UI настройки. Доступно тому, кто может ими управлять.

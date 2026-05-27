@@ -93,12 +93,13 @@ async function mirrorNotificationsToAssistant(
 }
 
 type CriticalDispatchParams = Omit<DispatchParams, "level" | "forceRecipients"> & {
+  warehouseId: string;
   forceRecipients?: string[];
 };
 
-/** Критические события — только назначенные получатели (настройка «Критические уведомления»). */
+/** Критические события — получатели, назначенные на объект (склад). */
 export async function dispatchCriticalNotification(params: CriticalDispatchParams): Promise<number> {
-  const fromSettings = await getCriticalRecipientUserIds();
+  const fromSettings = await getCriticalRecipientUserIds(params.warehouseId);
   const recipients = new Set<string>(params.forceRecipients?.length ? params.forceRecipients : fromSettings);
   if (params.excludeUserIds?.length) {
     for (const id of params.excludeUserIds) recipients.delete(id);

@@ -478,14 +478,17 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
       after: { status: updated.status, responsible: updated.responsible }
     });
     if (parsed.data.action === "WRITE_OFF") {
-      void dispatchCriticalNotification({
-        eventCode: "TOOL_WRITE_OFF",
-        title: "Списание инструмента",
-        message: `«${beforeTool.name}»${beforeTool.inventoryNumber ? ` (инв. ${beforeTool.inventoryNumber})` : ""} списан.${parsed.data.comment?.trim() ? ` Комментарий: ${parsed.data.comment.trim()}` : ""}`,
-        entityType: "Tool",
-        entityId: id,
-        excludeUserIds: [req.user!.userId]
-      }).catch(() => undefined);
+      if (beforeTool.warehouseId) {
+        void dispatchCriticalNotification({
+          warehouseId: beforeTool.warehouseId,
+          eventCode: "TOOL_WRITE_OFF",
+          title: "Списание инструмента",
+          message: `«${beforeTool.name}»${beforeTool.inventoryNumber ? ` (инв. ${beforeTool.inventoryNumber})` : ""} списан.${parsed.data.comment?.trim() ? ` Комментарий: ${parsed.data.comment.trim()}` : ""}`,
+          entityType: "Tool",
+          entityId: id,
+          excludeUserIds: [req.user!.userId]
+        }).catch(() => undefined);
+      }
     }
     return res.json(updated);
   } catch (error) {

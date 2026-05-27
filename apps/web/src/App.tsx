@@ -7648,7 +7648,7 @@ function App() {
             openNotificationLinkedEntity={openNotificationLinkedEntity}
             openDocumentsForEntity={openDocumentsForEntity}
             canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
-            users={users}
+            users={users.length ? users : chatUsers.map((u) => ({ id: u.id, fullName: u.fullName, email: u.id }))}
             fetchWithSession={fetchWithSession}
             apiUrl={API_URL}
           />

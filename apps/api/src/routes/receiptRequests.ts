@@ -867,6 +867,7 @@ receiptRequestsRouter.post(
           ? ""
           : "\nЛимит: не привязан (нет шаблона)";
       void dispatchCriticalNotification({
+        warehouseId: row.warehouseId,
         eventCode: "RECEIPT_OVER_ORDER",
         title: "Приход больше заявки",
         message: `Заявка ${row.number}: «${ov.sourceName}» — принято сверх заявки на ${ov.excessQty.toLocaleString("ru-RU")}${limitHint}`,
