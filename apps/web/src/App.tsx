@@ -3153,7 +3153,18 @@ function App() {
       return false;
     }
     const skipIssueConfirm = action === "issue" && Boolean(actualRecipientName);
-    if (!skipIssueConfirm) {
+    // Для отмены — обязательная причина (она пишется в audit и в уведомление).
+    let cancelReason = "";
+    if (action === "cancel") {
+      const r = window.prompt("Укажите причину отмены заявки:");
+      if (r === null) return false;
+      cancelReason = r.trim();
+      if (!cancelReason) {
+        setIssuesMessage("Причина обязательна для отмены заявки.");
+        setIssuesTone("error");
+        return false;
+      }
+    } else if (!skipIssueConfirm) {
       const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
       if (!ok) return false;
     }
@@ -3163,8 +3174,13 @@ function App() {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
-        ...(action === "issue" && !useMultipart ? { "Content-Type": "application/json" } : {})
+        ...(action === "issue" && !useMultipart
+          ? { "Content-Type": "application/json" }
+          : action === "cancel"
+            ? { "Content-Type": "application/json" }
+            : {})
       },
+      ...(action === "cancel" ? { body: JSON.stringify({ reason: cancelReason }) } : {}),
       ...(action === "issue"
         ? useMultipart
           ? (() => {
@@ -3193,6 +3209,129 @@ function App() {
       void loadTools().catch(() => undefined);
       setIssueRecipientSignedFile(null);
     }
+    return true;
+  }
+
+  // Удаление заявки на выдачу. Требуем причину через prompt; админу предлагаем force при 409.
+  async function deleteIssueRequest(issueId: string): Promise<boolean> {
+    if (!token) return false;
+    const reasonRaw = window.prompt("Укажите причину удаления заявки на выдачу:");
+    if (reasonRaw === null) return false;
+    const reason = reasonRaw.trim();
+    if (!reason) {
+      setIssuesMessage("Причина обязательна для удаления заявки.");
+      setIssuesTone("error");
+      return false;
+    }
+    const send = async (force: boolean) =>
+      fetchWithSession(`${API_URL}/api/issues/${encodeURIComponent(issueId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, force })
+      });
+    let r = await send(false);
+    if (r.status === 409 && me?.role === "ADMIN") {
+      let hint = "Заявка уже проведена.";
+      try {
+        const b = await r.json();
+        if (typeof b?.hint === "string") hint = b.hint;
+      } catch {
+        // ignore
+      }
+      if (!window.confirm(`${hint}\n\nПринудительно удалить (force)?`)) return false;
+      r = await send(true);
+    }
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const b = await r.json();
+        detail = typeof b?.error === "string" ? b.error : "";
+      } catch {
+        // ignore
+      }
+      setIssuesMessage(detail || `Не удалось удалить заявку (HTTP ${r.status})`);
+      setIssuesTone("error");
+      return false;
+    }
+    setIssuesMessage("Заявка удалена. Уведомление отправлено.");
+    setIssuesTone("success");
+    setDrawerMode("");
+    await loadIssues();
+    return true;
+  }
+
+  // Удаление заявки на приход. Логика та же: prompt-причина и force для админа.
+  async function deleteReceiptRequest(receiptId: string): Promise<boolean> {
+    if (!token) return false;
+    const reasonRaw = window.prompt("Укажите причину удаления заявки на приход:");
+    if (reasonRaw === null) return false;
+    const reason = reasonRaw.trim();
+    if (!reason) {
+      setOpsMessage("Причина обязательна для удаления заявки.");
+      return false;
+    }
+    const send = async (force: boolean) =>
+      fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, force })
+      });
+    let r = await send(false);
+    if (r.status === 409 && me?.role === "ADMIN") {
+      let hint = "По заявке уже была проведена приёмка.";
+      try {
+        const b = await r.json();
+        if (typeof b?.hint === "string") hint = b.hint;
+      } catch {
+        // ignore
+      }
+      if (!window.confirm(`${hint}\n\nПринудительно удалить (force)?`)) return false;
+      r = await send(true);
+    }
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const b = await r.json();
+        detail = typeof b?.error === "string" ? b.error : "";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(detail || `Не удалось удалить заявку (HTTP ${r.status})`);
+      return false;
+    }
+    setOpsMessage("Заявка на приход удалена. Уведомление отправлено.");
+    await loadReceiptRequests();
+    return true;
+  }
+
+  // Отмена заявки на приход с причиной.
+  async function cancelReceiptRequest(receiptId: string): Promise<boolean> {
+    if (!token) return false;
+    const reasonRaw = window.prompt("Укажите причину отмены заявки на приход:");
+    if (reasonRaw === null) return false;
+    const reason = reasonRaw.trim();
+    if (!reason) {
+      setOpsMessage("Причина обязательна для отмены заявки.");
+      return false;
+    }
+    const r = await fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/cancel`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
+    });
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const b = await r.json();
+        detail = typeof b?.error === "string" ? b.error : "";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(detail || `Не удалось отменить заявку (HTTP ${r.status})`);
+      return false;
+    }
+    setOpsMessage("Заявка на приход отменена. Уведомление отправлено.");
+    await loadReceiptRequests();
     return true;
   }
 
@@ -7284,6 +7423,24 @@ function App() {
                     >
                       {isExpanded ? "Свернуть" : "Развернуть"}
                     </button>
+                    {row.status !== "CANCELLED" && row.status !== "RECEIVED" ? (
+                      <button
+                        type="button"
+                        className="dangerBtn"
+                        onClick={() => void cancelReceiptRequest(row.id)}
+                        title="Отменить заявку. Потребуется указать причину."
+                      >
+                        Отменить
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="dangerBtn"
+                      onClick={() => void deleteReceiptRequest(row.id)}
+                      title="Удалить заявку. Потребуется указать причину."
+                    >
+                      Удалить
+                    </button>
                   </div>
                 </div>
 
@@ -10165,6 +10322,14 @@ function App() {
                   Отменить
                 </button>
               )}
+              <button
+                type="button"
+                className="dangerBtn"
+                onClick={() => void deleteIssueRequest(selectedIssue.id)}
+                title="Удалить заявку. Потребуется указать причину."
+              >
+                Удалить
+              </button>
             </div>
           </div>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>

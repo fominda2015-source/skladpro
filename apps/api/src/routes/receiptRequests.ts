@@ -706,3 +706,147 @@ receiptRequestsRouter.post(
     return res.json({ ok: true, operationId: op.operation.id });
   }
 );
+
+// Отмена заявки на приход (статус CANCELLED) — нельзя отменить уже принятые заявки без force.
+const cancelReceiptSchema = z.object({ reason: z.string().min(1).max(2000) });
+const deleteReceiptSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  force: z.boolean().optional()
+});
+
+receiptRequestsRouter.patch(
+  "/:id/cancel",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    const parsed = cancelReceiptSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "REASON_REQUIRED", details: parsed.error.flatten() });
+    }
+    const reason = parsed.data.reason.trim();
+    const row = await prisma.receiptRequest.findUnique({ where: { id } });
+    if (!row) return res.status(404).json({ error: "Receipt request not found" });
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    if (row.status === "CANCELLED") {
+      return res.json(row);
+    }
+    if (row.status === "RECEIVED") {
+      return res.status(409).json({
+        error: "RECEIPT_ALREADY_DONE",
+        hint: "Заявка уже принята полностью — отмена недоступна."
+      });
+    }
+    const updated = await prisma.receiptRequest.update({
+      where: { id },
+      data: { status: "CANCELLED" }
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "RECEIPT_REQUEST_CANCEL",
+      entityType: "ReceiptRequest",
+      entityId: id,
+      summary: `Заявка на приход ${updated.number} отменена. Причина: ${reason}`,
+      before: { status: row.status },
+      after: { status: updated.status, reason }
+    });
+    if (row.createdById) {
+      await notifyUser({
+        userId: row.createdById,
+        title: "Заявка на приход отменена",
+        message: `${updated.number}\nПричина: ${reason}`,
+        level: NotificationLevel.WARNING,
+        entityType: "ReceiptRequest",
+        entityId: id,
+        eventCode: "RECEIPT_CANCELLED"
+      }).catch(() => undefined);
+    }
+    await dispatchNotification({
+      eventCode: "RECEIPT_CANCELLED",
+      title: "Заявка на приход отменена",
+      message: `${updated.number}\nПричина: ${reason}`,
+      entityType: "ReceiptRequest",
+      entityId: id,
+      excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
+    }).catch(() => undefined);
+    return res.json(updated);
+  }
+);
+
+// Удаление заявки на приход. Без force запрещаем удалять уже принятые/частично принятые.
+receiptRequestsRouter.delete(
+  "/:id",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    const parsed = deleteReceiptSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "REASON_REQUIRED", details: parsed.error.flatten() });
+    }
+    const reason = parsed.data.reason.trim();
+    const wantsForce = Boolean(parsed.data.force);
+    const force = wantsForce && req.user?.role === "ADMIN";
+    const row = await prisma.receiptRequest.findUnique({
+      where: { id },
+      include: { items: true }
+    });
+    if (!row) return res.status(404).json({ error: "Receipt request not found" });
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    const anyAccepted = row.items.some((it) => Number(it.acceptedQty || 0) > 0);
+    if ((anyAccepted || row.status === "RECEIVED") && !force) {
+      return res.status(409).json({
+        error: "RECEIPT_HAS_ACCEPTANCE",
+        hint:
+          "По заявке уже была проведена приёмка. Принудительное удаление доступно только администратору с force=true."
+      });
+    }
+    await prisma.receiptRequest.delete({ where: { id } });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "RECEIPT_REQUEST_DELETE",
+      entityType: "ReceiptRequest",
+      entityId: id,
+      summary: `Заявка на приход ${row.number} удалена. Причина: ${reason}${force ? " (force, ADMIN)" : ""}`,
+      before: {
+        number: row.number,
+        status: row.status,
+        itemsCount: row.items.length,
+        anyAccepted,
+        reason
+      }
+    });
+    if (row.createdById) {
+      await notifyUser({
+        userId: row.createdById,
+        title: "Заявка на приход удалена",
+        message: `${row.number}\nПричина: ${reason}`,
+        level: NotificationLevel.WARNING,
+        entityType: "ReceiptRequest",
+        entityId: id,
+        eventCode: "RECEIPT_DELETED"
+      }).catch(() => undefined);
+    }
+    await dispatchNotification({
+      eventCode: "RECEIPT_DELETED",
+      title: "Заявка на приход удалена",
+      message: `${row.number}\nПричина: ${reason}`,
+      entityType: "ReceiptRequest",
+      entityId: id,
+      excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
+    }).catch(() => undefined);
+    return res.json({ ok: true, force });
+  }
+);

@@ -40,6 +40,30 @@ export const NOTIFICATION_EVENTS = [
     group: "Выдачи"
   },
   {
+    code: "ISSUE_CANCELLED",
+    label: "Заявка на выдачу отменена",
+    defaultLevel: NotificationLevel.WARNING,
+    group: "Выдачи"
+  },
+  {
+    code: "ISSUE_DELETED",
+    label: "Заявка на выдачу удалена",
+    defaultLevel: NotificationLevel.WARNING,
+    group: "Выдачи"
+  },
+  {
+    code: "RECEIPT_CANCELLED",
+    label: "Заявка на приход отменена",
+    defaultLevel: NotificationLevel.WARNING,
+    group: "Приходы"
+  },
+  {
+    code: "RECEIPT_DELETED",
+    label: "Заявка на приход удалена",
+    defaultLevel: NotificationLevel.WARNING,
+    group: "Приходы"
+  },
+  {
     code: "STOCK_LOW",
     label: "Низкий остаток по позиции",
     defaultLevel: NotificationLevel.WARNING,

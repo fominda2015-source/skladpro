@@ -61,7 +61,10 @@ const ACTION_LABELS: Record<string, string> = {
   ISSUE_REQUEST_REJECT: "Заявка отклонена",
   ISSUE_REQUEST_CANCEL: "Заявка отменена",
   ISSUE_REQUEST_ISSUE: "Выдача по заявке",
-  RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке"
+  ISSUE_REQUEST_DELETE: "Заявка на выдачу удалена",
+  RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке",
+  RECEIPT_REQUEST_CANCEL: "Заявка на приход отменена",
+  RECEIPT_REQUEST_DELETE: "Заявка на приход удалена"
 };
 
 const REVERTABLE_ACTIONS = new Set<string>([

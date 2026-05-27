@@ -25,6 +25,12 @@ import {
   mergeIssueWhere
 } from "../lib/dataScope.js";
 import { dispatchNotification, getLowStockThreshold, notifyUser } from "../lib/notifications.js";
+
+const cancelSchema = z.object({ reason: z.string().min(1).max(2000) });
+const deleteIssueSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  force: z.boolean().optional()
+});
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -787,6 +793,12 @@ issueRequestsRouter.patch("/:id/reject", requirePermission("issues.approve"), as
 
 issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  // Причина обязательна — она пишется в audit и рассылается в уведомлениях.
+  const parsed = cancelSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "REASON_REQUIRED", details: parsed.error.flatten() });
+  }
+  const reason = parsed.data.reason.trim();
   const scope = await getRequestDataScope(req);
   const prev = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
   if (!prev) {
@@ -807,19 +819,107 @@ issueRequestsRouter.patch("/:id/cancel", requirePermission("issues.write"), asyn
     action: "ISSUE_REQUEST_CANCEL",
     entityType: "IssueRequest",
     entityId: id,
-    summary: `Заявка ${updated.number} отменена`,
+    summary: `Заявка ${updated.number} отменена. Причина: ${reason}`,
     before: { status: prev.status },
-    after: { status: updated.status }
+    after: { status: updated.status, reason }
   });
   await safeNotify({
     userId: updated.requestedById,
     title: "Заявка отменена",
-    message: `Заявка ${updated.number} отменена.`,
+    message: `Заявка ${updated.number} отменена.\nПричина: ${reason}`,
     level: NotificationLevel.WARNING,
     entityType: "IssueRequest",
-    entityId: updated.id
+    entityId: updated.id,
+    eventCode: "ISSUE_CANCELLED"
   });
+  await dispatchNotification({
+    eventCode: "ISSUE_CANCELLED",
+    title: "Заявка на выдачу отменена",
+    message: `${updated.number}\nПричина: ${reason}`,
+    entityType: "IssueRequest",
+    entityId: updated.id,
+    excludeUserIds: [req.user!.userId, updated.requestedById]
+  }).catch(() => undefined);
   return res.json(updated);
+});
+
+// Удаление заявки на выдачу. Требует причину (она пишется в audit + рассылается).
+// Без force: блокируем, если заявка уже проведена (ISSUED). С force=true и ADMIN — удаляем в любом случае
+// (RESTRICT-связи аккуратно подчищаем; складские движения не откатываются, но запись об удалении остаётся в логе).
+issueRequestsRouter.delete("/:id", requirePermission("issues.write"), async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const parsed = deleteIssueSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "REASON_REQUIRED", details: parsed.error.flatten() });
+  }
+  const reason = parsed.data.reason.trim();
+  const wantsForce = Boolean(parsed.data.force);
+  const force = wantsForce && req.user?.role === "ADMIN";
+  const scope = await getRequestDataScope(req);
+  const row = await prisma.issueRequest.findFirst({
+    where: mergeIssueWhere(scope, { id }),
+    include: { items: true, toolItems: true, operations: { select: { id: true } } }
+  });
+  if (!row) {
+    return res.status(404).json({ error: "Issue request not found" });
+  }
+  if (row.status === IssueRequestStatus.ISSUED && !force) {
+    return res.status(409).json({
+      error: "ISSUE_ALREADY_DONE",
+      hint: "Заявка уже проведена. Принудительное удаление доступно только администратору с force=true."
+    });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (force) {
+      // Снять зависимые наряды/движения, относящиеся к этой заявке.
+      await tx.transportWaybill.deleteMany({ where: { issueRequestId: id } });
+      await tx.stockMovement.deleteMany({ where: { issueRequestId: id } });
+      // Операции, родительские для этой заявки, могут содержать собственные движения/items — почистим их.
+      const opIds = row.operations.map((o) => o.id);
+      if (opIds.length) {
+        await tx.stockMovement.deleteMany({ where: { operationId: { in: opIds } } });
+        await tx.operationItem.deleteMany({ where: { operationId: { in: opIds } } });
+        await tx.operation.deleteMany({ where: { id: { in: opIds } } });
+      }
+    }
+    await tx.issueRequest.delete({ where: { id } });
+  });
+
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "ISSUE_REQUEST_DELETE",
+    entityType: "IssueRequest",
+    entityId: id,
+    summary: `Заявка ${row.number} удалена. Причина: ${reason}${force ? " (force, ADMIN)" : ""}`,
+    before: {
+      number: row.number,
+      status: row.status,
+      warehouseId: row.warehouseId,
+      itemsCount: row.items.length,
+      toolsCount: row.toolItems.length,
+      reason
+    }
+  });
+  await safeNotify({
+    userId: row.requestedById,
+    title: "Заявка удалена",
+    message: `Заявка ${row.number} удалена.\nПричина: ${reason}`,
+    level: NotificationLevel.WARNING,
+    entityType: "IssueRequest",
+    entityId: id,
+    eventCode: "ISSUE_DELETED"
+  });
+  await dispatchNotification({
+    eventCode: "ISSUE_DELETED",
+    title: "Заявка на выдачу удалена",
+    message: `${row.number}\nПричина: ${reason}`,
+    entityType: "IssueRequest",
+    entityId: id,
+    excludeUserIds: [req.user!.userId, row.requestedById]
+  }).catch(() => undefined);
+
+  return res.json({ ok: true, force });
 });
 
 issueRequestsRouter.patch(
