@@ -1420,9 +1420,11 @@ tr.low {
   }
 }
 
-/* Компактная таблица материалов внутри узла лимита. */
+/* Компактная таблица материалов внутри узла лимита.
+   max-content прижимает столбцы к содержимому, max-width: 100% не даёт вылезти за родителя. */
 .limitMaterialsTable {
-  width: auto;
+  width: max-content;
+  max-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -1445,17 +1447,65 @@ tr.low {
   text-align: right;
   font-variant-numeric: tabular-nums;
   width: 1%;
+  padding: 4px 6px;
 }
 .limitMaterialsTable td.matName {
   max-width: 360px;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .limitMaterialsTable tr:hover td {
   background: #fafbfc;
 }
 .limitMaterialsTable .structureCell {
-  width: 110px;
+  width: 160px;
+  min-width: 140px;
+}
+.limitMaterialsTable .structureCell .progressWrap {
+  height: 10px;
+  border-radius: 6px;
+}
+.limitMaterialsTable .structureCell .progressBar {
+  border-radius: 6px;
+}
+.limitMaterialsTable .structureCell .progressRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.limitMaterialsTable .structureCell .progressRow:last-child {
+  margin-bottom: 0;
+}
+.limitMaterialsTable .structureCell .progressRow .progressWrap {
+  flex: 1;
+}
+.limitMaterialsTable .structureCell .progressRow .progressPct {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+  width: 46px;
+  text-align: right;
+}
+.limitMaterialsTable .structureCell .progressRow .progressDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.limitMaterialsTable .structureCell .progressRow.arr .progressDot {
+  background: #2563eb;
+}
+.limitMaterialsTable .structureCell .progressRow.iss .progressDot {
+  background: #16a34a;
+}
+.limitMaterialsTable .structureCell .progressRow.iss.over .progressDot {
+  background: #ef4444;
+}
+.limitMaterialsTable .structureCell .progressRow.iss.over .progressPct {
+  color: #b91c1c;
+  font-weight: 600;
 }
 
 @media (max-width: 560px) {

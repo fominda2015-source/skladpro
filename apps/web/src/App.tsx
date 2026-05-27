@@ -8920,24 +8920,40 @@ function App() {
                                       <td className="structureCell">
                                         {m.materialId && plan > 0 ? (
                                           <div>
-                                            <div className="progressWrap" style={{ height: 6, marginBottom: 2 }}>
-                                              <div
-                                                className="progressBar"
-                                                style={{
-                                                  width: `${pctArr}%`,
-                                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
-                                                  opacity: arrived > 0 ? 1 : 0.25
-                                                }}
-                                              />
+                                            <div className="progressRow arr" title={`Приход: ${pctArr.toFixed(2)}%`}>
+                                              <span className="progressDot" />
+                                              <div className="progressWrap">
+                                                <div
+                                                  className="progressBar"
+                                                  style={{
+                                                    width: `${pctArr}%`,
+                                                    background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
+                                                    opacity: arrived > 0 ? 1 : 0.25
+                                                  }}
+                                                />
+                                              </div>
+                                              <span className="progressPct">{pctArr.toFixed(2)}%</span>
                                             </div>
-                                            <div className="progressWrap" style={{ height: 6 }}>
-                                              <div
-                                                className={`progressBar ${overIss ? "bad" : ""}`}
-                                                style={{
-                                                  width: `${pctIss}%`,
-                                                  ...(overIss ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
-                                                }}
-                                              />
+                                            <div
+                                              className={`progressRow iss${overIss ? " over" : ""}`}
+                                              title={`Выдача: ${pctIss.toFixed(2)}%${overIss ? " (перерасход)" : ""}`}
+                                            >
+                                              <span className="progressDot" />
+                                              <div className="progressWrap">
+                                                <div
+                                                  className={`progressBar ${overIss ? "bad" : ""}`}
+                                                  style={{
+                                                    width: `${pctIss}%`,
+                                                    ...(overIss
+                                                      ? {}
+                                                      : {
+                                                          background:
+                                                            "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)"
+                                                        })
+                                                  }}
+                                                />
+                                              </div>
+                                              <span className="progressPct">{pctIss.toFixed(2)}%</span>
                                             </div>
                                           </div>
                                         ) : (
