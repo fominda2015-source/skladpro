@@ -1468,52 +1468,77 @@ tr.low {
   background: #fafbfc;
 }
 .limitMaterialsTable .structureCell {
-  min-width: 220px;
+  min-width: 200px;
+  max-width: 280px;
 }
-.limitMaterialsTable .structureCell .progressWrap {
-  height: 10px;
+
+.limitStructBars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.limitStructBarCompact .limitStructBarTrack {
+  height: 18px;
+}
+
+.limitStructBarCompact .limitStructBarLabel {
+  height: 18px;
+  font-size: 10px;
+}
+
+.limitStructBarTrack {
+  position: relative;
+  height: 22px;
   border-radius: 6px;
+  background: #e2e8f0;
+  overflow: hidden;
 }
-.limitMaterialsTable .structureCell .progressBar {
+
+.limitStructBarFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
   border-radius: 6px;
+  min-width: 0;
+  transition: width 0.15s ease;
 }
-.limitMaterialsTable .structureCell .progressRow {
+
+.limitStructBarFill.tone-issued {
+  background: linear-gradient(90deg, #fde047 0%, #eab308 100%);
+}
+
+.limitStructBarFill.tone-issued-done {
+  background: linear-gradient(90deg, #4ade80 0%, #16a34a 100%);
+}
+
+.limitStructBarFill.tone-over {
+  background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
+}
+
+.limitStructBarFill.tone-arrived {
+  background: linear-gradient(90deg, #60a5fa 0%, #2563eb 100%);
+}
+
+.limitStructBarLabel {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-}
-.limitMaterialsTable .structureCell .progressRow:last-child {
-  margin-bottom: 0;
-}
-.limitMaterialsTable .structureCell .progressRow .progressWrap {
-  flex: 1;
-}
-.limitMaterialsTable .structureCell .progressRow .progressPct {
+  justify-content: center;
+  height: 22px;
+  padding: 0 6px;
   font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-  color: #475569;
-  width: 46px;
-  text-align: right;
-}
-.limitMaterialsTable .structureCell .progressRow .progressDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.limitMaterialsTable .structureCell .progressRow.arr .progressDot {
-  background: #2563eb;
-}
-.limitMaterialsTable .structureCell .progressRow.iss .progressDot {
-  background: #16a34a;
-}
-.limitMaterialsTable .structureCell .progressRow.iss.over .progressDot {
-  background: #ef4444;
-}
-.limitMaterialsTable .structureCell .progressRow.iss.over .progressPct {
-  color: #b91c1c;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 6px rgba(255, 255, 255, 0.65);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 @media (max-width: 560px) {

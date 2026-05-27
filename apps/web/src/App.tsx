@@ -35,6 +35,7 @@ import {
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { AnnouncementsBlock } from "./widgets/home/AnnouncementsBlock";
+import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
@@ -9034,8 +9035,6 @@ function App() {
                     const arrived = node.materialId
                       ? Number(limitSupplyByMaterialId[node.materialId]?.arrivedQty || 0)
                       : 0;
-                    const pct = planned > 0 ? Math.min(100, Math.round((issued / planned) * 100)) : 0;
-                    const pctArrived = planned > 0 ? Math.min(100, Math.round((arrived / planned) * 100)) : 0;
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
@@ -9045,7 +9044,6 @@ function App() {
                     const agg = isGroup ? aggByNodeId.get(node.id) || { plan: 0, arrived: 0, issued: 0 } : null;
                     const groupArrivedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.arrived / agg.plan) * 100)) : 0;
                     const groupIssuedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.issued / agg.plan) * 100)) : 0;
-                    const groupOver = !!(agg && agg.plan > 0 && agg.issued > agg.plan);
 
                     return (
                       <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
@@ -9242,26 +9240,13 @@ function App() {
                           </div>
                         ) : null}
                         {isGroup && agg && agg.plan > 0 ? (
-                          <div style={{ margin: "2px 0 4px", paddingLeft: 36 }}>
-                            <div className="progressWrap" style={{ height: 5, marginBottom: 2 }}>
-                              <div
-                                className="progressBar"
-                                style={{
-                                  width: `${groupArrivedPct}%`,
-                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
-                                  opacity: agg.arrived > 0 ? 1 : 0.2
-                                }}
-                              />
-                            </div>
-                            <div className="progressWrap" style={{ height: 5 }}>
-                              <div
-                                className={`progressBar ${groupOver ? "bad" : ""}`}
-                                style={{
-                                  width: `${groupIssuedPct}%`,
-                                  ...(groupOver ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
-                                }}
-                              />
-                            </div>
+                          <div style={{ margin: "4px 0 6px", paddingLeft: 36, maxWidth: 320 }}>
+                            <LimitStructureBars
+                              plan={agg.plan}
+                              issued={agg.issued}
+                              arrived={agg.arrived}
+                              compact
+                            />
                           </div>
                         ) : null}
                         {!isGroup ? (
@@ -9416,25 +9401,11 @@ function App() {
                                 <span className={`badge ${isOver ? "bad" : "ok"}`}>{qtyText}</span>
                               </div>
                             )}
-                            <div className="progressWrap" style={{ height: 5, marginBottom: 2, width: "100%" }}>
-                              <div
-                                className="progressBar"
-                                style={{
-                                  width: `${pctArrived}%`,
-                                  background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
-                                  opacity: arrived > 0 ? 1 : 0.2
-                                }}
-                              />
-                            </div>
-                            <div className="progressWrap" style={{ height: 5, width: "100%" }}>
-                              <div
-                                className={`progressBar ${isOver ? "bad" : ""}`}
-                                style={{
-                                  width: `${pct}%`,
-                                  ...(isOver ? {} : { background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" })
-                                }}
-                              />
-                            </div>
+                            {planned > 0 ? (
+                              <div style={{ marginTop: 6, maxWidth: 320 }}>
+                                <LimitStructureBars plan={planned} issued={issued} arrived={arrived} compact />
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
 
@@ -9451,7 +9422,10 @@ function App() {
                                   <th className="num" title="Осталось привезти = План − Приход">Привезти</th>
                                   <th className="num" title="В закупке — открытые заявки на приход">В закупке</th>
                                   <th className="num" title="Текущий остаток на складе">На складе</th>
-                                  <th className="structureCell" title="Синим — доля прихода от плана, зелёным — доля выдачи от плана">
+                                  <th
+                                    className="structureCell"
+                                    title="Жёлтая/зелёная — выдача, красная — перерасход, синяя — приход по заявке"
+                                  >
                                     Структура
                                   </th>
                                 </tr>
@@ -9465,10 +9439,6 @@ function App() {
                                   const onOrd = sm?.onOrderQty ?? 0;
                                   const stk = sm?.stockQty ?? 0;
                                   const remain = Math.max(0, plan - arrived);
-                                  const base = Math.max(plan, 1e-9);
-                                  const pctArr = Math.min(100, (arrived / base) * 100);
-                                  const pctIss = Math.min(100, (iss / base) * 100);
-                                  const overIss = plan > 0 && iss > plan;
                                   return (
                                     <tr key={`mt-${node.id}-${m.id}`}>
                                       <td className="matName" title={String(m.materialName || m.title || "")}>
@@ -9483,43 +9453,7 @@ function App() {
                                       <td className="num">{m.materialId ? metricFmt(stk) : "—"}</td>
                                       <td className="structureCell">
                                         {m.materialId && plan > 0 ? (
-                                          <div>
-                                            <div className="progressRow arr" title={`Приход: ${pctArr.toFixed(2)}%`}>
-                                              <span className="progressDot" />
-                                              <div className="progressWrap">
-                                                <div
-                                                  className="progressBar"
-                                                  style={{
-                                                    width: `${pctArr}%`,
-                                                    background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)",
-                                                    opacity: arrived > 0 ? 1 : 0.25
-                                                  }}
-                                                />
-                                              </div>
-                                              <span className="progressPct">{pctArr.toFixed(2)}%</span>
-                                            </div>
-                                            <div
-                                              className={`progressRow iss${overIss ? " over" : ""}`}
-                                              title={`Выдача: ${pctIss.toFixed(2)}%${overIss ? " (перерасход)" : ""}`}
-                                            >
-                                              <span className="progressDot" />
-                                              <div className="progressWrap">
-                                                <div
-                                                  className={`progressBar ${overIss ? "bad" : ""}`}
-                                                  style={{
-                                                    width: `${pctIss}%`,
-                                                    ...(overIss
-                                                      ? {}
-                                                      : {
-                                                          background:
-                                                            "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)"
-                                                        })
-                                                  }}
-                                                />
-                                              </div>
-                                              <span className="progressPct">{pctIss.toFixed(2)}%</span>
-                                            </div>
-                                          </div>
+                                          <LimitStructureBars plan={plan} issued={iss} arrived={arrived} />
                                         ) : (
                                           <span className="muted">—</span>
                                         )}
@@ -9530,9 +9464,8 @@ function App() {
                               </tbody>
                             </table>
                             <p className="muted" style={{ margin: "6px 0 0", fontSize: 11 }}>
-                              Раздел объекта: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}.
-                              «Приход» — операции INCOME, «Выдано» — OUT, «В закупке» — открытые заявки на приход.
-                              В колонке «Структура»: верхняя полоса — доля прихода от плана, нижняя — доля выдачи.
+                              Раздел: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}. Структура: 1) выдача (жёлтая, при 100%
+                              плана — зелёная), 2) перерасход (красная, только если есть), 3) приход по заявке (синяя).
                             </p>
                           </div>
                         ) : null}
