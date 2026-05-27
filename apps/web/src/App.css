@@ -3448,3 +3448,101 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
     border-radius: 14px;
   }
 }
+
+/* Модал «Электронная таблица заявки» */
+.requestMaterialsModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 70;
+  padding: 16px;
+}
+.requestMaterialsModalCard {
+  max-width: 1100px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+}
+.requestMaterialsModalHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.requestMaterialsModalBody {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.requestMaterialsDocs {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+.requestMaterialsDocsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.requestMaterialsDocsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.requestMaterialsDocsList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.requestMaterialsDocLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
+}
+.requestMaterialsDocLink:hover {
+  text-decoration: underline;
+}
+.requestMaterialsDocName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+.requestMaterialsDocDate {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+@media (max-width: 720px) {
+  .requestMaterialsModalCard {
+    max-height: 96vh;
+    padding: 12px;
+  }
+  .requestMaterialsDocsList li {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .requestMaterialsDocName {
+    max-width: 100%;
+  }
+}

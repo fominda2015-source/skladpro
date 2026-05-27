@@ -3062,6 +3062,31 @@ function App() {
       setOpsMessage(
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
+      setReceiptRequests((prev) =>
+        prev.map((r) => {
+          if (r.id !== row.id) return r;
+          const updatedItems = r.items.map((it) => {
+            const m = mappings.find((x) => x.itemId === it.id);
+            if (!m) return it;
+            return {
+              ...it,
+              acceptedQty: Number(it.acceptedQty || 0) + m.acceptedQty
+            };
+          });
+          let allDone = true;
+          let anyAccepted = false;
+          for (const it of updatedItems) {
+            const acc = Number(it.acceptedQty || 0);
+            if (acc > 0) anyAccepted = true;
+            if (acc + 1e-6 < Number(it.quantity)) allDone = false;
+          }
+          return {
+            ...r,
+            items: updatedItems,
+            status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : r.status
+          };
+        })
+      );
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
         delete next[row.id];
@@ -7748,13 +7773,7 @@ function App() {
                 <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="toolbar" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                      <h3
-                        style={{ margin: 0, cursor: "pointer", textDecoration: "underline dotted" }}
-                        title="Открыть таблицу материалов заявки"
-                        onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
-                      >
-                        {row.number}
-                      </h3>
+                      <h3 style={{ margin: 0 }}>{row.number}</h3>
                       <span
                         className={`badge ${row.status === "RECEIVED" ? "ok" : row.status === "CANCELLED" ? "bad" : ""}`}
                       >
@@ -7799,14 +7818,6 @@ function App() {
                       }}
                     >
                       {row.fromLimit ? "Изменить лимит" : "Связать с лимитом"}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
-                      title="Таблица материалов в этой заявке"
-                    >
-                      Таблица материалов
                     </button>
                     <button
                       type="button"
@@ -7926,6 +7937,11 @@ function App() {
                           </div>
 
                           <div className="desktopTable" style={{ overflowX: "auto", marginTop: 8 }}>
+                            {itemsLeft.length === 0 ? (
+                              <p className="muted" style={{ padding: "8px 0" }}>
+                                Все позиции по этой заявке уже приняты.
+                              </p>
+                            ) : (
                             <table>
                               <thead>
                                 <tr>
@@ -7939,7 +7955,7 @@ function App() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {row.items.map((it) => {
+                                {itemsLeft.map((it) => {
                                   const total = Number(it.quantity);
                                   const accepted = Number(it.acceptedQty || 0);
                                   const remaining = Math.max(0, total - accepted);
@@ -7948,7 +7964,6 @@ function App() {
                                     draft.newName || it.mappedMaterial?.name || it.sourceName;
                                   const defaultUnit =
                                     draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
-                                  const fullyAccepted = remaining <= 1e-6;
                                   const isPicked =
                                     Number(draft.qty || 0) > 0 || (draft.qty || "").trim() !== "";
                                   const toggle = (checked: boolean) =>
@@ -7979,15 +7994,14 @@ function App() {
                                     <tr
                                       key={it.id}
                                       style={{
-                                        background: isPicked ? "rgba(34, 197, 94, 0.08)" : undefined,
-                                        opacity: fullyAccepted ? 0.55 : 1
+                                        background: isPicked ? "rgba(34, 197, 94, 0.08)" : undefined
                                       }}
                                     >
                                       <td>
                                         <input
                                           type="checkbox"
                                           checked={isPicked}
-                                          disabled={finished || fullyAccepted}
+                                          disabled={finished}
                                           onChange={(e) => toggle(e.target.checked)}
                                         />
                                       </td>
@@ -8002,7 +8016,7 @@ function App() {
                                           list={datalistId}
                                           value={defaultName}
                                           placeholder="Как в УПД…"
-                                          disabled={finished || fullyAccepted}
+                                          disabled={finished}
                                           onChange={(e) =>
                                             setAcceptanceDrafts((prev) => ({
                                               ...prev,
@@ -8023,7 +8037,7 @@ function App() {
                                         <input
                                           value={defaultUnit}
                                           placeholder={it.sourceUnit || "шт"}
-                                          disabled={finished || fullyAccepted}
+                                          disabled={finished}
                                           onChange={(e) =>
                                             setAcceptanceDrafts((prev) => ({
                                               ...prev,
@@ -8047,7 +8061,7 @@ function App() {
                                           step={0.001}
                                           max={remaining || undefined}
                                           value={draft.qty}
-                                          disabled={finished || fullyAccepted}
+                                          disabled={finished}
                                           placeholder={remaining ? String(remaining) : ""}
                                           onChange={(e) =>
                                             setAcceptanceDrafts((prev) => ({
@@ -8082,7 +8096,7 @@ function App() {
                                             return (
                                               <select
                                                 value={value}
-                                                disabled={finished || fullyAccepted}
+                                                disabled={finished}
                                                 onChange={(e) =>
                                                   setAcceptanceDrafts((prev) => ({
                                                     ...prev,
@@ -8114,6 +8128,7 @@ function App() {
                                 })}
                               </tbody>
                             </table>
+                            )}
                           </div>
 
                           <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
@@ -8765,25 +8780,7 @@ function App() {
                   <tbody>
                     {issues.map((i) => (
                       <tr key={i.id}>
-                        <td>
-                          <button
-                            type="button"
-                            className="ghostBtn"
-                            style={{
-                              padding: 0,
-                              background: "transparent",
-                              border: "none",
-                              color: "#2563eb",
-                              textDecoration: "underline dotted",
-                              fontWeight: 700,
-                              cursor: "pointer"
-                            }}
-                            title="Открыть таблицу материалов заявки"
-                            onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
-                          >
-                            {i.number}
-                          </button>
-                        </td>
+                        <td><strong>{i.number}</strong></td>
                         <td>
                           <span className="badge neutral">
                             {effectiveIssueDomain(i) === "TOOLS" ? "Инструмент" : "Материалы"}
@@ -8795,14 +8792,6 @@ function App() {
                         <td>{new Date(i.createdAt).toLocaleString()}</td>
                         <td>
                           <div className="toolbar">
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
-                              title="Открыть таблицу материалов в этой заявке"
-                            >
-                              Таблица
-                            </button>
                             <button
                               type="button"
                               className="ghostBtn"
@@ -8826,13 +8815,7 @@ function App() {
                 <div className="mobileCards">
                   {issues.map((i) => (
                     <article key={`m-issue-${i.id}`} className="mobileCard">
-                      <h4
-                        style={{ cursor: "pointer", textDecoration: "underline dotted" }}
-                        onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
-                        title="Открыть таблицу материалов заявки"
-                      >
-                        {i.number}
-                      </h4>
+                      <h4>{i.number}</h4>
                       <p>
                         <strong>Тип:</strong>{" "}
                         <span className="badge neutral">
@@ -8844,7 +8827,6 @@ function App() {
                       <p><strong>Получил:</strong> {i.actualRecipientName || "—"}</p>
                       <p><strong>Дата:</strong> {new Date(i.createdAt).toLocaleString()}</p>
                       <div className="toolbar">
-                        <button type="button" onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}>Таблица</button>
                         <button type="button" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                         <button type="button" onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                       </div>
@@ -10059,16 +10041,40 @@ function App() {
               ) : (
               approvalQueue.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.number}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      style={{
+                        padding: 0,
+                        background: "transparent",
+                        border: "none",
+                        color: "#2563eb",
+                        textDecoration: "underline dotted",
+                        fontWeight: 700,
+                        cursor: "pointer"
+                      }}
+                      title="Электронная таблица материалов заявки"
+                      onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
+                    >
+                      {i.number}
+                    </button>
+                  </td>
                   <td>{i.warehouse?.name || i.warehouseId}</td>
                   <td>{i.requestedBy?.fullName || i.requestedById}</td>
                   <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
                   <td>
                     <div className="toolbar">
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
+                      >
+                        Таблица
+                      </button>
                       <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                       <button onClick={() => void executeIssueAction(i.id, "approve", { fromApprovals: true })}>Одобрить</button>
                       <button onClick={() => void executeIssueAction(i.id, "reject", { fromApprovals: true })}>Отклонить</button>
-                      <button onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                     </div>
                   </td>
                 </tr>
@@ -10090,14 +10096,47 @@ function App() {
             <tbody>
               {receiptRequests.map((row) => (
                 <tr key={`approval-receipt-${row.id}`}>
-                  <td>{row.number}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="ghostBtn"
+                      style={{
+                        padding: 0,
+                        background: "transparent",
+                        border: "none",
+                        color: "#2563eb",
+                        textDecoration: "underline dotted",
+                        fontWeight: 700,
+                        cursor: "pointer"
+                      }}
+                      title="Электронная таблица материалов заявки"
+                      onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
+                    >
+                      {row.number}
+                    </button>
+                  </td>
                   <td>{row.sourceFileName || "—"}</td>
                   <td><span className={`badge ${row.status === "RECEIVED" ? "ok" : "warn"}`}>{row.status}</span></td>
                   <td>{row.items.length}</td>
                   <td>
                     <div className="toolbar">
-                      <button type="button" onClick={() => setActiveTab("operations")}>Открыть приемку</button>
-                      <button type="button" onClick={() => openDocumentsForEntity("receipt", row.id)}>Документы</button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
+                      >
+                        Таблица
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTab("operations");
+                          setOperationsSubTab("materialReceipts");
+                          setExpandedReceiptIds((prev) => ({ ...prev, [row.id]: true }));
+                        }}
+                      >
+                        Открыть приёмку
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -10725,14 +10764,6 @@ function App() {
           <div className="detailDrawerHeader">
             <h3>Карточка заявки {selectedIssue.number}</h3>
             <div className="toolbar" style={{ gap: 6 }}>
-              <button
-                type="button"
-                className="ghostBtn"
-                onClick={() => setRequestMaterialsModal({ kind: "issue", row: selectedIssue })}
-                title="Электронная таблица материалов заявки"
-              >
-                Таблица материалов
-              </button>
               <button onClick={() => setDrawerMode("")}>Закрыть</button>
             </div>
           </div>
@@ -13881,17 +13912,38 @@ function App() {
           ]}
         />
       ) : null}
-      {requestMaterialsModal ? (
+      {requestMaterialsModal && token ? (
         requestMaterialsModal.kind === "issue" ? (
           <RequestMaterialsModal
             kind="issue"
-            row={requestMaterialsModal.row}
+            row={
+              issues.find((x) => x.id === requestMaterialsModal.row.id) ||
+              approvalQueue.find((x) => x.id === requestMaterialsModal.row.id) ||
+              requestMaterialsModal.row
+            }
+            apiUrl={API_URL}
+            token={token}
+            fetchWithSession={fetchWithSession}
+            onOpenDocumentsTab={() => {
+              openDocumentsForEntity("issue", requestMaterialsModal.row.id);
+              setRequestMaterialsModal(null);
+            }}
             onClose={() => setRequestMaterialsModal(null)}
           />
         ) : (
           <RequestMaterialsModal
             kind="receipt"
-            row={requestMaterialsModal.row}
+            row={
+              receiptRequests.find((x) => x.id === requestMaterialsModal.row.id) ||
+              requestMaterialsModal.row
+            }
+            apiUrl={API_URL}
+            token={token}
+            fetchWithSession={fetchWithSession}
+            onOpenDocumentsTab={() => {
+              openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
+              setRequestMaterialsModal(null);
+            }}
             onClose={() => setRequestMaterialsModal(null)}
           />
         )

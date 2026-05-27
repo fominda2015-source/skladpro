@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-// Универсальная строка таблицы для модала.
 type MaterialRow = {
   num: number;
   name: string;
@@ -11,7 +10,17 @@ type MaterialRow = {
   factLabel?: string;
 };
 
+type RequestDoc = {
+  id: string;
+  type: string;
+  fileName: string;
+  filePath: string;
+  mimeType?: string | null;
+  createdAt: string;
+};
+
 type IssueLike = {
+  id: string;
   number: string;
   status: string;
   createdAt: string;
@@ -33,6 +42,7 @@ type IssueLike = {
 };
 
 type ReceiptLike = {
+  id: string;
   number: string;
   status: string;
   createdAt: string;
@@ -49,18 +59,86 @@ type ReceiptLike = {
   }>;
 };
 
+type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 type Props =
-  | { kind: "issue"; row: IssueLike; onClose: () => void }
-  | { kind: "receipt"; row: ReceiptLike; onClose: () => void };
+  | {
+      kind: "issue";
+      row: IssueLike;
+      onClose: () => void;
+      apiUrl: string;
+      token: string;
+      fetchWithSession: FetchFn;
+      onOpenDocumentsTab?: () => void;
+    }
+  | {
+      kind: "receipt";
+      row: ReceiptLike;
+      onClose: () => void;
+      apiUrl: string;
+      token: string;
+      fetchWithSession: FetchFn;
+      onOpenDocumentsTab?: () => void;
+    };
 
 function num(x: unknown): number {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
 }
 
+function docTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    upd: "УПД",
+    tn: "ТН",
+    "upd-scan": "Скан УПД",
+    "receipt-request": "Заявка Excel",
+    photo: "Фото",
+    act: "Акт",
+    other: "Прочее"
+  };
+  return map[type] || type;
+}
+
 export function RequestMaterialsModal(props: Props) {
-  const { onClose } = props;
+  const { onClose, apiUrl, token, fetchWithSession, onOpenDocumentsTab } = props;
   const [highlight, setHighlight] = useState("");
+  const [docs, setDocs] = useState<RequestDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState("");
+
+  const entityType = props.kind === "issue" ? "issue" : "receipt";
+  const entityId = props.row.id;
+
+  useEffect(() => {
+    if (!token || !entityId) return;
+    let cancelled = false;
+    setDocsLoading(true);
+    setDocsError("");
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          entityType,
+          entityId
+        });
+        const res = await fetchWithSession(`${apiUrl}/api/documents?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          if (!cancelled) setDocsError("Не удалось загрузить документы");
+          return;
+        }
+        const data = (await res.json()) as RequestDoc[];
+        if (!cancelled) setDocs(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setDocsError("Ошибка загрузки документов");
+      } finally {
+        if (!cancelled) setDocsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiUrl, entityId, entityType, fetchWithSession, token]);
 
   const rows: MaterialRow[] = useMemo(() => {
     if (props.kind === "issue") {
@@ -108,19 +186,10 @@ export function RequestMaterialsModal(props: Props) {
     for (const r of rows) {
       if (props.kind === "receipt") {
         lines.push(
-          [
-            r.num,
-            r.name,
-            r.unit ?? "",
-            r.quantity,
-            r.acceptedQty ?? 0,
-            r.factLabel || ""
-          ].join("\t")
+          [r.num, r.name, r.unit ?? "", r.quantity, r.acceptedQty ?? 0, r.factLabel || ""].join("\t")
         );
       } else {
-        lines.push(
-          [r.num, r.name, r.sku || "", r.unit ?? "", r.quantity, r.factLabel || ""].join("\t")
-        );
+        lines.push([r.num, r.name, r.sku || "", r.unit ?? "", r.quantity, r.factLabel || ""].join("\t"));
       }
     }
     void navigator.clipboard?.writeText(lines.join("\n")).then(
@@ -130,51 +199,23 @@ export function RequestMaterialsModal(props: Props) {
     setTimeout(() => setHighlight(""), 2500);
   }
 
-  function printTable() {
-    window.print();
-  }
-
-  const filterStr = useMemo(() => {
-    return (s: string) =>
-      String(s || "").replace(/[\u0000-\u001f]/g, "").trim();
-  }, []);
-
   const title =
     props.kind === "issue"
-      ? `Заявка на выдачу ${filterStr(props.row.number)}`
-      : `Заявка на приход ${filterStr(props.row.number)}`;
+      ? `Заявка на выдачу ${props.row.number}`
+      : `Заявка на приход ${props.row.number}`;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15, 23, 42, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 70,
-        padding: 16
-      }}
+      className="requestMaterialsModalBackdrop"
       onClick={onClose}
     >
       <div
-        className="card"
-        style={{ maxWidth: 1100, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        className="card requestMaterialsModalCard"
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 8
-          }}
-        >
+        <div className="requestMaterialsModalHead">
           <div style={{ minWidth: 0 }}>
             <h3 style={{ margin: 0 }}>{title}</h3>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
@@ -204,9 +245,14 @@ export function RequestMaterialsModal(props: Props) {
             <button type="button" className="ghostBtn" onClick={copyAsTsv}>
               Копировать (TSV)
             </button>
-            <button type="button" className="ghostBtn" onClick={printTable}>
+            <button type="button" className="ghostBtn" onClick={() => window.print()}>
               Печать
             </button>
+            {onOpenDocumentsTab ? (
+              <button type="button" className="ghostBtn" onClick={onOpenDocumentsTab}>
+                Раздел «Документы»
+              </button>
+            ) : null}
             <button type="button" className="ghostBtn" onClick={onClose}>
               Закрыть
             </button>
@@ -219,7 +265,7 @@ export function RequestMaterialsModal(props: Props) {
           </p>
         ) : null}
 
-        <div style={{ overflow: "auto", flex: 1 }}>
+        <div className="requestMaterialsModalBody">
           {rows.length ? (
             <table className="limitMaterialsTable" style={{ width: "100%" }}>
               <thead>
@@ -314,6 +360,43 @@ export function RequestMaterialsModal(props: Props) {
               </table>
             </>
           ) : null}
+
+          <section className="requestMaterialsDocs">
+            <div className="requestMaterialsDocsHead">
+              <h4 style={{ margin: 0 }}>Документы по заявке</h4>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {docsLoading ? "Загрузка…" : `${docs.length} файл(ов)`}
+              </span>
+            </div>
+            {docsError ? <p className="error" style={{ margin: "6px 0" }}>{docsError}</p> : null}
+            {!docsLoading && !docs.length && !docsError ? (
+              <p className="muted" style={{ margin: "8px 0 0" }}>
+                Документов пока нет. При приёмке сюда попадут сканы УПД/ТН и исходный Excel.
+              </p>
+            ) : null}
+            {docs.length ? (
+              <ul className="requestMaterialsDocsList">
+                {docs.map((d) => (
+                  <li key={d.id}>
+                    <a
+                      href={`${apiUrl}/${d.filePath}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="requestMaterialsDocLink"
+                    >
+                      <span className="requestMaterialsDocName" title={d.fileName}>
+                        {d.fileName}
+                      </span>
+                      <span className="badge neutral">{docTypeLabel(d.type)}</span>
+                    </a>
+                    <span className="muted requestMaterialsDocDate">
+                      {new Date(d.createdAt).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
         </div>
       </div>
     </div>
