@@ -640,17 +640,31 @@ model MessageAttachment {
 }
 
 model Announcement {
-  id        String    @id @default(cuid())
-  title     String
-  body      String
-  isPinned  Boolean   @default(false)
-  authorId  String?
-  author    User?     @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id          String                   @id @default(cuid())
+  title       String
+  body        String
+  isPinned    Boolean                  @default(false)
+  authorId    String?
+  author      User?                    @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  expiresAt   DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  attachments AnnouncementAttachment[]
 
   @@index([expiresAt, createdAt])
+}
+
+model AnnouncementAttachment {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  fileName       String
+  filePath       String
+  mimeType       String?
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@index([announcementId, sortOrder])
 }
 
 model FeedbackTicket {

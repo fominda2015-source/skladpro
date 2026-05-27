@@ -3628,24 +3628,48 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
-.whMenu button {
+.whMenu button,
+.whMenuItem {
   display: block;
   width: 100%;
   text-align: left;
   padding: 10px 12px;
   border: none;
   border-radius: 8px;
-  background: transparent;
+  background: transparent !important;
+  color: #1e293b !important;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
 }
 
-.whMenu button:hover {
-  background: #f1f5f9;
+.whMenu button:hover,
+.whMenuItem:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.warehouseMode .whMenu button,
+.warehouseMode .whMenuItem,
+.warehouseMode .whMenu button:hover,
+.warehouseMode .whMenuItem:hover {
+  background: transparent !important;
+  color: #1e293b !important;
+}
+
+.warehouseMode .whMenu button:hover,
+.warehouseMode .whMenuItem:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
 }
 
 .whMenuDanger {
   color: #b91c1c !important;
+}
+
+.whMenuDanger:hover {
+  color: #991b1b !important;
+  background: #fef2f2 !important;
 }
 
 .whMenuExport {
@@ -3762,6 +3786,7 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .whTableWrap {
   padding: 0;
   overflow-x: auto;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -3830,6 +3855,12 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .whColAct {
   width: 48px;
   text-align: right;
+  overflow: visible;
+  position: relative;
+}
+
+.whRowMenuWrap:has(.whMenu) {
+  z-index: 50;
 }
 
 .whMatCell {
@@ -3962,14 +3993,67 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 }
 
 .periodExportBtn {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fafafa;
+  min-width: 200px;
+}
+
+.periodExportBtn > .exportProgressWrap {
+  width: 100%;
+}
+
+.exportProgressWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.exportProgressTrack {
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.exportProgressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  transition: width 0.2s ease;
+}
+
+.exportProgressIndeterminate {
+  width: 40% !important;
+  animation: exportProgressPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes exportProgressPulse {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.exportProgressMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.objectExportsPanel .exportProgressWrap {
+  margin-top: 4px;
 }
 
 .periodExportLabel {
@@ -3991,4 +4075,74 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .objectExportsGrid button {
   text-align: left;
   justify-content: flex-start;
+}
+
+.announcementForm .checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-direction: row;
+}
+
+.announcementForm .formActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.announcementCardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.announcementCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.announcementAttachGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.announcementAttachThumb {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.announcementAttachThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.announcementFileList {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.announcementFileList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dangerGhost {
+  color: #b42318;
 }

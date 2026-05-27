@@ -147,17 +147,19 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [menuRowId, setMenuRowId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const headerMenuRef = useRef<HTMLDivElement | null>(null);
+  const rowMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!menuRowId) return;
     const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuRowId(null);
-      }
+      const target = e.target as Node;
+      if (headerMenuRef.current?.contains(target)) return;
+      if (rowMenuRef.current?.contains(target)) return;
+      setMenuRowId(null);
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
   }, [menuRowId]);
 
   const activeFilters =
@@ -193,18 +195,29 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
               + Добавить
             </button>
           ) : null}
-          <div className="whOverflow" ref={menuRef}>
+          <div className="whOverflow" ref={headerMenuRef}>
             <button
               type="button"
               className="ghostBtn whBtnIcon"
               aria-label="Дополнительные действия"
-              onClick={() => setMenuRowId((id) => (id === "__header__" ? null : "__header__"))}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuRowId((id) => (id === "__header__" ? null : "__header__"));
+              }}
             >
               ⋯
             </button>
             {menuRowId === "__header__" ? (
-              <div className="whMenu" role="menu">
-                <button type="button" role="menuitem" onClick={() => { onOpenJournal(); setMenuRowId(null); }}>
+              <div className="whMenu" role="menu" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="whMenuItem"
+                  role="menuitem"
+                  onClick={() => {
+                    onOpenJournal();
+                    setMenuRowId(null);
+                  }}
+                >
                   Журнал движений
                 </button>
                 <div className="whMenuExport" onClick={() => setMenuRowId(null)}>
@@ -399,20 +412,31 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                         </td>
                       ) : null}
                       <td className="whColAct" onClick={(e) => e.stopPropagation()}>
-                        <div className="whRowMenuWrap">
+                        <div
+                          className="whRowMenuWrap"
+                          ref={menuRowId === row.id ? rowMenuRef : undefined}
+                        >
                           <button
                             type="button"
                             className="ghostBtn whBtnIcon"
                             aria-label="Меню позиции"
                             aria-expanded={menuRowId === row.id}
-                            onClick={() => setMenuRowId((id) => (id === row.id ? null : row.id))}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuRowId((id) => (id === row.id ? null : row.id));
+                            }}
                           >
                             ⋯
                           </button>
                           {menuRowId === row.id ? (
-                            <div className="whMenu whMenuRow" role="menu">
+                            <div
+                              className="whMenu whMenuRow"
+                              role="menu"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <button
                                 type="button"
+                                className="whMenuItem"
                                 role="menuitem"
                                 onClick={() => {
                                   onToggleExpand(row.id);
@@ -424,6 +448,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                               {canOpenMaterialCard ? (
                                 <button
                                   type="button"
+                                  className="whMenuItem"
                                   role="menuitem"
                                   onClick={() => {
                                     onOpenMaterialCard(row.materialId, row.warehouseId);
@@ -436,8 +461,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                               {isAdmin ? (
                                 <button
                                   type="button"
+                                  className="whMenuItem whMenuDanger"
                                   role="menuitem"
-                                  className="whMenuDanger"
                                   onClick={() => {
                                     onDeleteMaterial(row.materialId, row.materialName);
                                     setMenuRowId(null);

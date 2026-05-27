@@ -11,6 +11,7 @@ import { UserStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../config.js";
 import { getEffectivePermissions } from "../lib/access.js";
+import { canViewAllObjects, getAllowedWarehouses } from "../lib/userWarehouses.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
 
@@ -111,21 +112,6 @@ async function ensureDefaultAdmin() {
   return findLoginUser(ADMIN_EMAIL);
 }
 
-async function getAllowedWarehouses(userId: string, permissions: string[]) {
-  if (permissions.includes("*")) {
-    return prisma.warehouse.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, address: true }
-    });
-  }
-  const scopes = await prisma.userWarehouseScope.findMany({
-    where: { userId },
-    select: { warehouse: { select: { id: true, name: true, address: true } } }
-  });
-  return scopes.map((x) => x.warehouse);
-}
-
 export const authRouter = Router();
 
 authRouter.post("/login", async (req, res) => {
@@ -163,6 +149,7 @@ authRouter.post("/login", async (req, res) => {
     const roleName = user.role.name as RoleName;
     const permissions = getEffectivePermissions(user.role.permissions, user.customPermissions);
     const allowedWarehouses = await getAllowedWarehouses(user.id, permissions);
+    const viewAllObjects = await canViewAllObjects(user.id, permissions);
     const activeWarehouseId =
       user.activeWarehouseId && allowedWarehouses.some((w) => w.id === user.activeWarehouseId)
         ? user.activeWarehouseId
@@ -193,7 +180,8 @@ authRouter.post("/login", async (req, res) => {
         activeWarehouseId,
         activeSection: user.activeSection || "SS",
         requireObjectSelection: !activeWarehouseId,
-        availableObjects: allowedWarehouses
+        availableObjects: allowedWarehouses,
+        canViewAllObjects: viewAllObjects
       }
     });
   } catch (err) {
@@ -212,6 +200,7 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   }
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
   const allowedWarehouses = await getAllowedWarehouses(me.id, permissions);
+  const viewAllObjects = await canViewAllObjects(me.id, permissions);
   const activeWarehouseId =
     me.activeWarehouseId && allowedWarehouses.some((w) => w.id === me.activeWarehouseId)
       ? me.activeWarehouseId
@@ -227,7 +216,8 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     activeWarehouseId,
     activeSection: me.activeSection || "SS",
     requireObjectSelection: !activeWarehouseId,
-    availableObjects: allowedWarehouses
+    availableObjects: allowedWarehouses,
+    canViewAllObjects: viewAllObjects
   });
 });
 
@@ -258,10 +248,13 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
   if (!me) return res.status(404).json({ error: "User not found" });
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
   const objects = await getAllowedWarehouses(me.id, permissions);
-  if (parsed.data.warehouseId !== null) {
-    if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
-      return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+  if (parsed.data.warehouseId === null) {
+    const okAll = await canViewAllObjects(me.id, permissions);
+    if (!okAll) {
+      return res.status(403).json({ error: "FORBIDDEN_ALL_OBJECTS" });
     }
+  } else if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
+    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
   }
   const updated = await prisma.user.update({
     where: { id: me.id },

@@ -33,6 +33,7 @@ import {
 } from "./widgets/integrations/IntegrationJobsTable";
 import { NotificationsTable, type NotificationRow } from "./widgets/integrations/NotificationsTable";
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
+import { AnnouncementsBlock } from "./widgets/home/AnnouncementsBlock";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
@@ -100,6 +101,7 @@ type LoginResponse = {
     activeSection?: "SS" | "EOM";
     requireObjectSelection?: boolean;
     availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
+    canViewAllObjects?: boolean;
   };
 };
 type StockRow = {
@@ -184,6 +186,7 @@ type MeResponse = {
   activeSection?: "SS" | "EOM";
   requireObjectSelection?: boolean;
   availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
+  canViewAllObjects?: boolean;
 };
 type AdminUser = {
   id: string;
@@ -447,15 +450,6 @@ type FeedbackTicketDetailView = {
   authorId: string;
   authorName: string;
   messages: ChatMessage[];
-};
-type AnnouncementBoardRow = {
-  id: string;
-  title: string;
-  body: string;
-  isPinned: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-  author?: { id: string; fullName: string } | null;
 };
 type TransferRequestApiRow = {
   id: string;
@@ -1085,11 +1079,7 @@ function App() {
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackListLoading, setFeedbackListLoading] = useState(false);
   const [feedbackDetailLoading, setFeedbackDetailLoading] = useState(false);
-  const [announcements, setAnnouncements] = useState<AnnouncementBoardRow[]>([]);
-  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
-  const [announcementComposeOpen, setAnnouncementComposeOpen] = useState(false);
-  const [announcementTitleDraft, setAnnouncementTitleDraft] = useState("");
-  const [announcementBodyDraft, setAnnouncementBodyDraft] = useState("");
+  const [canViewAllObjects, setCanViewAllObjects] = useState(false);
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
   const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
@@ -1103,7 +1093,9 @@ function App() {
       me?.permissions?.includes("*") ||
         me?.permissions?.includes(permission) ||
         (permission === "limits.edit" && Boolean(me?.permissions?.includes("limits.write"))) ||
-        (permission === "limits.write" && Boolean(me?.permissions?.includes("limits.edit")))
+        (permission === "limits.write" && Boolean(me?.permissions?.includes("limits.edit"))) ||
+        (permission === "announcements.edit" && Boolean(me?.permissions?.includes("announcements.write"))) ||
+        (permission === "announcements.delete" && Boolean(me?.permissions?.includes("announcements.write")))
     );
   const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
     { id: "stocks", label: "Главная", permissions: ["dashboard.read"] },
@@ -1139,7 +1131,9 @@ function App() {
     { id: "notificationsWrite", label: "Отправка уведомлений", permissions: ["notifications.write"] },
     { id: "notificationsRules", label: "Правила уведомлений", permissions: ["notifications.rules.manage"] },
     { id: "feedbackManage", label: "Модерация обратной связи", permissions: ["feedback.manage"] },
-    { id: "announcementsWrite", label: "Объявления на главной", permissions: ["announcements.write"] },
+    { id: "announcementsCreate", label: "Публикация объявлений", permissions: ["announcements.write"] },
+    { id: "announcementsEdit", label: "Редактирование объявлений", permissions: ["announcements.edit"] },
+    { id: "announcementsDelete", label: "Удаление объявлений", permissions: ["announcements.delete"] },
     { id: "auditRevert", label: "Откат операций в журнале", permissions: ["audit.revert"] },
     { id: "adminUsers", label: "Управление пользователями и доступами", permissions: ["admin.users.manage"] }
   ];
@@ -1827,7 +1821,9 @@ function App() {
   const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
   const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
   const canManageFeedback = useMemo(() => hasPermission("feedback.manage"), [me]);
-  const canWriteAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
+  const canCreateAnnouncements = useMemo(() => hasPermission("announcements.write"), [me]);
+  const canEditAnnouncements = useMemo(() => hasPermission("announcements.edit"), [me]);
+  const canDeleteAnnouncements = useMemo(() => hasPermission("announcements.delete"), [me]);
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   const unreadNotificationCount = useMemo(
@@ -1845,6 +1841,7 @@ function App() {
     setRoles([]);
     setMe(null);
     setAvailableObjects([]);
+    setCanViewAllObjects(false);
     setActiveObjectId("");
     setMustPickObject(false);
     setAuthReady(true);
@@ -2019,9 +2016,10 @@ function App() {
       if (Array.isArray(data.availableObjects)) {
         setAvailableObjects(data.availableObjects);
       }
+      setCanViewAllObjects(Boolean(data.canViewAllObjects));
       if (data.activeWarehouseId) {
         setActiveObjectId(data.activeWarehouseId);
-      } else if (!data.requireObjectSelection && data.availableObjects && data.availableObjects.length > 1) {
+      } else if (!data.requireObjectSelection && data.canViewAllObjects) {
         setActiveObjectId(ALL_OBJECTS_ID);
       } else {
         setActiveObjectId("");
@@ -2567,28 +2565,6 @@ function App() {
       return;
     }
     await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(ticketId)]);
-  }
-
-  async function loadAnnouncementsBoard() {
-    if (!token) return;
-    setAnnouncementsLoading(true);
-    const res = await fetchWithSession(`${API_URL}/api/announcements`, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) setAnnouncements((await res.json()) as AnnouncementBoardRow[]);
-    setAnnouncementsLoading(false);
-  }
-
-  async function publishAnnouncementDraft() {
-    if (!token || !announcementTitleDraft.trim() || !announcementBodyDraft.trim()) return;
-    const res = await fetchWithSession(`${API_URL}/api/announcements`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ title: announcementTitleDraft.trim(), body: announcementBodyDraft.trim(), isPinned: false })
-    });
-    if (!res.ok) return;
-    setAnnouncementTitleDraft("");
-    setAnnouncementBodyDraft("");
-    setAnnouncementComposeOpen(false);
-    await loadAnnouncementsBoard();
   }
 
   async function loadTransferRequestsList() {
@@ -4518,13 +4494,6 @@ function App() {
   }, [token, receiptRequests, expandedReceiptIds]);
 
   useEffect(() => {
-    if (!token || activeTab !== "stocks" || mustPickObject) {
-      return;
-    }
-    void loadAnnouncementsBoard();
-  }, [token, activeTab, mustPickObject]);
-
-  useEffect(() => {
     if (!token || !canDashboard) {
       setDashboard(null);
       return;
@@ -5167,6 +5136,7 @@ function App() {
       if (Array.isArray(data.user.availableObjects)) {
         setAvailableObjects(data.user.availableObjects);
       }
+      setCanViewAllObjects(Boolean(data.user.canViewAllObjects));
       if (data.user.activeWarehouseId) {
         setActiveObjectId(data.user.activeWarehouseId);
       }
@@ -5249,7 +5219,7 @@ function App() {
               Объект
               <select value={activeObjectId} onChange={(e) => setActiveObjectId(e.target.value)}>
                 <option value="">— выберите —</option>
-                {availableObjects.length > 1 ? (
+                {canViewAllObjects ? (
                   <option value={ALL_OBJECTS_ID}>Все объекты</option>
                 ) : null}
                 {availableObjects.map((o) => (
@@ -5532,7 +5502,7 @@ function App() {
                 void selectTopObject(e.target.value);
               }}
             >
-              {availableObjects.length > 1 ? (
+              {canViewAllObjects ? (
                 <option value={ALL_OBJECTS_ID}>Все объекты</option>
               ) : null}
               {availableObjects.map((o) => (
@@ -5926,68 +5896,13 @@ function App() {
               </section>
             ) : null}
 
-            {announcements.length > 0 || canWriteAnnouncements ? (
-              <section className="card homeBlock">
-                <header className="homeBlockHead">
-                  <h3>Объявления</h3>
-                  {canWriteAnnouncements ? (
-                    <button type="button" className="ghostBtn" onClick={() => setAnnouncementComposeOpen((v) => !v)}>
-                      {announcementComposeOpen ? "Закрыть форму" : "Новое объявление"}
-                    </button>
-                  ) : null}
-                </header>
-              {announcementComposeOpen && canWriteAnnouncements ? (
-                <div className="form card" style={{ marginBottom: 12 }}>
-                  <label>
-                    Заголовок
-                    <input value={announcementTitleDraft} onChange={(e) => setAnnouncementTitleDraft(e.target.value)} />
-                  </label>
-                  <label>
-                    Текст
-                    <textarea
-                      value={announcementBodyDraft}
-                      onChange={(e) => setAnnouncementBodyDraft(e.target.value)}
-                      rows={4}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!announcementTitleDraft.trim() || !announcementBodyDraft.trim()}
-                    onClick={() => void publishAnnouncementDraft()}
-                  >
-                    Опубликовать
-                  </button>
-                </div>
-              ) : null}
-              {announcementsLoading ? (
-                <p className="muted">Загрузка…</p>
-              ) : announcements.length === 0 ? (
-                <p className="muted">Объявлений пока нет.</p>
-              ) : (
-                <div className="homeInsightGrid">
-                  {announcements.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`homeInsightCard ${a.isPinned ? "accentWarn" : ""}`}
-                      style={{ alignItems: "flex-start" }}
-                    >
-                      <span className="homeInsightLabel">
-                        {a.isPinned ? "Закреплено · " : ""}
-                        {a.title}
-                      </span>
-                      <p className="homeInsightHint" style={{ whiteSpace: "pre-wrap" }}>
-                        {a.body}
-                      </p>
-                      <span className="muted" style={{ fontSize: "0.85rem" }}>
-                        {new Date(a.createdAt).toLocaleString()}
-                        {a.author?.fullName ? ` · ${a.author.fullName}` : ""}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              </section>
-            ) : null}
+            <AnnouncementsBlock
+              token={token}
+              fetchWithSession={fetchWithSession}
+              canCreate={canCreateAnnouncements}
+              canEdit={canEditAnnouncements}
+              canDelete={canDeleteAnnouncements}
+            />
 
             {!dashboard ? (
               <p className="muted">Нет данных сводки{dashboardError ? "" : " (ожидание прав или ответа API)"}.</p>

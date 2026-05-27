@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { downloadExportXlsx } from "../../shared/exportXlsx";
+import { downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { ExportProgressBar } from "./ExportProgressBar";
 
 type Section = "stocks" | "limits" | "materialReport" | "tools" | "issues" | "receipts";
 
@@ -37,11 +38,13 @@ export function PeriodExportButton({
   const [to, setTo] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [progress, setProgress] = useState<ExportProgressState | null>(null);
 
   async function downloadXlsx() {
     if (!token) return;
     setBusy(true);
     setErr("");
+    setProgress(null);
     const url = new URL(`${apiUrl}/api/exports/${section}.xlsx`);
     if (period === "custom") {
       if (!from || !to) {
@@ -58,9 +61,16 @@ export function PeriodExportButton({
       url.searchParams.set("warehouseId", warehouseId);
       if (sectionFilter) url.searchParams.set("section", sectionFilter);
     }
-    const result = await downloadExportXlsx(fetchWithSession, url.toString(), token, `${section}.xlsx`);
+    const result = await downloadExportXlsx(
+      fetchWithSession,
+      url.toString(),
+      token,
+      `${section}.xlsx`,
+      setProgress
+    );
     if (!result.ok) setErr(result.error);
     setBusy(false);
+    setTimeout(() => setProgress(null), result.ok ? 2000 : 0);
   }
 
   return (
@@ -80,8 +90,9 @@ export function PeriodExportButton({
         </>
       ) : null}
       <button type="button" onClick={() => void downloadXlsx()} disabled={busy}>
-        {busy ? "Готовим…" : "Скачать .xlsx"}
+        {busy ? "Формируем…" : "Скачать .xlsx"}
       </button>
+      {busy && progress ? <ExportProgressBar progress={progress} /> : null}
       {err ? (
         <span className="periodExportErr" title={err}>
           {err.length > 80 ? `${err.slice(0, 80)}…` : err}

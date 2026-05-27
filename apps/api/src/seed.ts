@@ -31,7 +31,13 @@ const baseWarehouseOps = [
   "materialReport.read"
 ] as const;
 
-const warehouseDeskExtras = ["feedback.manage", "announcements.write", "materialReport.write"] as const;
+const warehouseDeskExtras = [
+  "feedback.manage",
+  "announcements.write",
+  "announcements.edit",
+  "announcements.delete",
+  "materialReport.write"
+] as const;
 
 const defaultRoles = [
   { name: "ADMIN", permissions: ["*"] },

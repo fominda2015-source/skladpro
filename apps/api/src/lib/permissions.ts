@@ -19,5 +19,7 @@ export function hasPermission(permissions: string[], needed: string) {
   if (needed === "notifications.read" && permissions.includes("notifications.write")) return true;
   if (needed === "limits.edit" && permissions.includes("limits.write")) return true;
   if (needed === "limits.write" && permissions.includes("limits.edit")) return true;
+  if (needed === "announcements.edit" && permissions.includes("announcements.write")) return true;
+  if (needed === "announcements.delete" && permissions.includes("announcements.write")) return true;
   return false;
 }

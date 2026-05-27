@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { downloadExportXlsx } from "../../shared/exportXlsx";
+import { downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { ExportProgressBar } from "./ExportProgressBar";
 
 export type ExportSectionId =
   | "stocks"
@@ -53,6 +54,7 @@ export function ObjectExportsPanel(props: Props) {
   const [pickWarehouseId, setPickWarehouseId] = useState(fixedWarehouseId || "");
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
+  const [progress, setProgress] = useState<ExportProgressState | null>(null);
 
   const warehouseId = fixedWarehouseId || pickWarehouseId;
   const allowed = EXPORT_TYPES.filter((t) => hasPermission(t.permission));
@@ -61,6 +63,7 @@ export function ObjectExportsPanel(props: Props) {
     if (!token) return;
     setBusyId(section);
     setMessage("");
+    setProgress(null);
     const url = new URL(`${apiUrl}/api/exports/${section}.xlsx`);
     if (period === "custom") {
       if (!from || !to) {
@@ -77,13 +80,21 @@ export function ObjectExportsPanel(props: Props) {
       url.searchParams.set("warehouseId", warehouseId);
       url.searchParams.set("section", sectionFilter === "EOM" ? "EOM" : "SS");
     }
-    const result = await downloadExportXlsx(fetchWithSession, url.toString(), token, `${section}.xlsx`);
+    const result = await downloadExportXlsx(
+      fetchWithSession,
+      url.toString(),
+      token,
+      `${section}.xlsx`,
+      setProgress
+    );
     setBusyId("");
     if (!result.ok) {
       setMessage(result.error);
+      setProgress(null);
       return;
     }
     setMessage("Файл скачан");
+    setTimeout(() => setProgress(null), 2000);
   }
 
   if (!allowed.length) {
@@ -133,10 +144,11 @@ export function ObjectExportsPanel(props: Props) {
             disabled={Boolean(busyId)}
             onClick={() => void downloadOne(t.id)}
           >
-            {busyId === t.id ? "Готовим…" : t.label}
+            {busyId === t.id ? "Формируем…" : t.label}
           </button>
         ))}
       </div>
+      {progress ? <ExportProgressBar progress={progress} /> : null}
       {message ? (
         <p className="muted" style={{ margin: "10px 0 0", color: message.includes("скачан") ? "#16a34a" : "#b54708" }}>
           {message}

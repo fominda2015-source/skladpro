@@ -289,14 +289,28 @@ exportsRouter.get("/limits.xlsx", requireSectionPerm("limits"), async (req: Auth
     select: { id: true, name: true, code: true },
     take: 5000
   });
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const projectIds = projects.map((p) => p.id);
+
+  const limitsRaw = projectIds.length
+    ? await prisma.projectLimit.findMany({
+        where: { projectId: { in: projectIds } },
+        include: { items: { include: { material: true } } },
+        orderBy: [{ projectId: "asc" }, { version: "desc" }]
+      })
+    : [];
+
+  const latestLimitByProject = new Map<string, (typeof limitsRaw)[number]>();
+  for (const lim of limitsRaw) {
+    if (!latestLimitByProject.has(lim.projectId)) {
+      latestLimitByProject.set(lim.projectId, lim);
+    }
+  }
+
   const allRows: Array<Record<string, unknown>> = [];
-  for (const p of projects) {
-    const limit = await prisma.projectLimit.findFirst({
-      where: { projectId: p.id },
-      orderBy: { version: "desc" },
-      include: { items: { include: { material: true } } }
-    });
-    if (!limit) continue;
+  for (const limit of latestLimitByProject.values()) {
+    const p = projectById.get(limit.projectId);
+    if (!p) continue;
     for (const it of limit.items) {
       const planned = num(it.plannedQty);
       const issued = num(it.issuedQty);
@@ -304,8 +318,8 @@ exportsRouter.get("/limits.xlsx", requireSectionPerm("limits"), async (req: Auth
       allRows.push({
         Проект: p.name,
         "Код проекта": p.code || "",
-        "Лимит": limit.name,
-        "Версия": limit.version,
+        Лимит: limit.name,
+        Версия: limit.version,
         Материал: it.material.name,
         Ед: it.material.unit,
         План: planned,
