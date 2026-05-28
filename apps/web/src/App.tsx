@@ -47,6 +47,7 @@ import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
+import { ActsTab } from "./widgets/acts/ActsTab";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { PageHero } from "./widgets/ui/PageHero";
@@ -658,6 +659,7 @@ function App() {
     | "feedback"
     | "materialReport"
     | "reports"
+    | "acts"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -1080,6 +1082,7 @@ function App() {
     { id: "approvals", label: "Заявки на согласование", permissions: ["issues.approve"] },
     { id: "waybills", label: "Перемещения", permissions: ["waybills.read"] },
     { id: "documents", label: "Документы", permissions: ["documents.read"] },
+    { id: "acts", label: "Акты", permissions: [] },
     { id: "limits", label: "Лимиты", permissions: ["limits.read"] },
     { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read"] },
     { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read"] },
@@ -1612,6 +1615,7 @@ function App() {
     approvals: "Заявки",
     materialReport: "Материальный отчёт",
     documents: "Документы",
+    acts: "Акты",
     waybills: "Транспортные накладные",
     qr: "QR-сканирование",
     tools: "Инструменты",
@@ -1633,6 +1637,7 @@ function App() {
     approvals: "Операции",
     waybills: "Операции",
     documents: "Контроль",
+    acts: "Контроль",
     limits: "Контроль",
     materialReport: "Контроль",
     chat: "Контроль",
@@ -5432,6 +5437,7 @@ function App() {
             <div className="navMoreGroup">
               {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
               {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
+              <button className={`navBtn ${activeTab === "acts" ? "active" : ""}`} onClick={() => setActiveTab("acts")}><span className="navIcon">📋</span>Акты</button>
               {canMaterialReport && (
                 <button
                   type="button"
@@ -11003,6 +11009,8 @@ function App() {
           onRefresh={refreshChatData}
         />
       ) : null}
+
+      {activeTab === "acts" && <ActsTab />}
 
       {activeTab === "feedback" && (
         <div>

@@ -5118,6 +5118,83 @@ button.whMenuItem:hover,
   color: #64748b;
 }
 
+/* Вкладка «Акты» — шаблоны Excel */
+.actsTab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.actsTabLead {
+  margin: 0;
+  font-size: 14px;
+  max-width: 720px;
+}
+.actsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.actsListItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.04);
+}
+.actsListMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.actsListIcon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.actsListText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.actsListText strong {
+  font-size: 15px;
+  color: #0f172a;
+}
+.actsListDesc {
+  font-size: 13px;
+}
+.actsListFile {
+  font-size: 12px;
+}
+.actsDownloadBtn {
+  flex-shrink: 0;
+  width: auto;
+  height: 36px;
+  padding: 0 14px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 640px) {
+  .actsListItem {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .actsDownloadBtn {
+    width: 100%;
+  }
+}
+
 .periodExportErr {
   font-size: 12px;
   color: #b54708;
