@@ -24,6 +24,22 @@ const messageSchema = z.object({
 export const chatRouter = Router();
 chatRouter.use(requireAuth);
 
+function serializeChatUser(u: {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+  role: { name: string };
+  position: { name: string } | null;
+}) {
+  return {
+    id: u.id,
+    fullName: u.fullName,
+    avatarUrl: u.avatarUrl,
+    role: u.role.name,
+    position: u.position?.name || null
+  };
+}
+
 async function ensureParticipant(conversationId: string, userId: string) {
   const p = await prisma.conversationParticipant.findFirst({
     where: { conversationId, userId }
@@ -39,15 +55,7 @@ chatRouter.get("/users", async (req: AuthedRequest, res) => {
     orderBy: { fullName: "asc" },
     take: 500
   });
-  return res.json(
-    rows.map((u) => ({
-      id: u.id,
-      fullName: u.fullName,
-      avatarUrl: u.avatarUrl,
-      role: u.role.name,
-      position: u.position?.name || null
-    }))
-  );
+  return res.json(rows.map((u) => serializeChatUser(u)));
 });
 
 chatRouter.get("/conversations", async (req: AuthedRequest, res) => {
@@ -65,7 +73,18 @@ chatRouter.get("/conversations", async (req: AuthedRequest, res) => {
     orderBy: { updatedAt: "desc" },
     take: 200
   });
-  return res.json(rows);
+  return res.json(
+    rows.map((conv) => ({
+      id: conv.id,
+      kind: conv.kind,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+      participants: conv.participants.map((p) => ({
+        user: serializeChatUser(p.user)
+      })),
+      messages: conv.messages
+    }))
+  );
 });
 
 chatRouter.post("/conversations/dm", async (req: AuthedRequest, res) => {

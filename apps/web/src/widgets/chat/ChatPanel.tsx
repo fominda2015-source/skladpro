@@ -34,6 +34,25 @@ export type Conversation = {
   messages: ChatMessage[];
 };
 
+function formatPosition(position: unknown): string {
+  if (!position) return "";
+  if (typeof position === "string") return position;
+  if (typeof position === "object" && position !== null && "name" in position) {
+    const name = (position as { name?: unknown }).name;
+    return typeof name === "string" ? name : "";
+  }
+  return "";
+}
+
+function formatRole(role: unknown, roleLabel: (r: string) => string): string {
+  if (typeof role === "string") return roleLabel(role);
+  if (typeof role === "object" && role !== null && "name" in role) {
+    const name = (role as { name?: unknown }).name;
+    return typeof name === "string" ? roleLabel(name) : "";
+  }
+  return "";
+}
+
 type Props = {
   meId: string;
   users: ChatUser[];
@@ -180,7 +199,8 @@ export function ChatPanel({
                             <span className="chatContactPreview">
                               {row.last?.text
                                 ? row.last.text.slice(0, 48) + (row.last.text.length > 48 ? "…" : "")
-                                : row.peer.position || roleLabel(row.peer.role)}
+                                : formatPosition(row.peer.position) ||
+                                  formatRole(row.peer.role, roleLabel)}
                             </span>
                           </span>
                           {unread ? <span className="chatContactDot" aria-label="Непрочитано" /> : null}
@@ -216,7 +236,7 @@ export function ChatPanel({
                           <span className="chatContactPreview muted">
                             {last?.text
                               ? last.text.slice(0, 48) + (last.text.length > 48 ? "…" : "")
-                              : u.position || roleLabel(u.role)}
+                              : formatPosition(u.position) || formatRole(u.role, roleLabel)}
                           </span>
                         </span>
                         {unread ? <span className="chatContactDot" aria-label="Непрочитано" /> : null}
@@ -241,7 +261,9 @@ export function ChatPanel({
               <UserAvatar fullName={peer!.fullName} avatarUrl={peer!.avatarUrl} size="lg" />
               <div className="chatThreadHeadText">
                 <strong>{peer!.fullName}</strong>
-                <span className="muted">{peer!.position || roleLabel(peer!.role)}</span>
+                <span className="muted">
+                  {formatPosition(peer!.position) || formatRole(peer!.role, roleLabel)}
+                </span>
               </div>
             </header>
 
