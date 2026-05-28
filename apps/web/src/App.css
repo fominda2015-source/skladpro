@@ -1265,12 +1265,103 @@ tr.low {
   background: #f8fafc;
 }
 .chatThreadComposer {
-  padding: 14px 18px 18px;
+  position: relative;
+  padding: 14px 18px 12px;
   border-top: 1px solid #eef2f7;
   background: #fff;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.chatThreadComposer--drag {
+  outline: 2px dashed #93c5fd;
+  outline-offset: -4px;
+  background: #f8fbff;
+}
+.chatDropOverlay {
+  position: absolute;
+  inset: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.92);
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.chatComposerHint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.chatAttachmentPreviewList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chatAttachmentPreview {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 72px;
+  gap: 4px;
+}
+.chatAttachmentPreviewImg {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+.chatAttachmentPreviewFile {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+.chatAttachmentPreviewName {
+  font-size: 10px;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+}
+.chatAttachmentPreviewRemove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: #64748b;
+}
+.chatBubbleImageLink {
+  display: block;
+  margin-top: 6px;
+  max-width: 100%;
+}
+.chatBubbleImage {
+  display: block;
+  max-width: min(280px, 100%);
+  max-height: 240px;
+  border-radius: 10px;
+  object-fit: contain;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 .chatComposerRow {
   display: flex;

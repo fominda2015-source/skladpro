@@ -47,6 +47,7 @@ import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
+import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
@@ -1040,7 +1041,7 @@ function App() {
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
-  const [chatAttachment, setChatAttachment] = useState<File | null>(null);
+  const [chatAttachments, setChatAttachments] = useState<File[]>([]);
   const [chatError, setChatError] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatPeerUserId, setChatPeerUserId] = useState("");
@@ -2306,6 +2307,7 @@ function App() {
   }
 
   async function openChatPeer(userId: string) {
+    setChatAttachments([]);
     await startDmConversation(userId);
   }
 
@@ -2359,24 +2361,32 @@ function App() {
   }
 
   async function sendConversationMessage() {
-    if (!token || !selectedConversationId || !chatText.trim()) return;
+    if (!token || !selectedConversationId) return;
+    if (!chatText.trim() && !chatAttachments.length) return;
     setChatError("");
-    const attachments = chatAttachment
-      ? [{ fileName: chatAttachment.name, mimeType: chatAttachment.type, dataUrl: await fileToDataUrl(chatAttachment) }]
-      : [];
-    const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${selectedConversationId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ text: chatText.trim(), attachments })
-    });
-    if (!res.ok) {
-      setChatError("Не удалось отправить сообщение");
-      return;
+    try {
+      const attachmentPayloads = await Promise.all(chatAttachments.map((f) => fileToChatAttachmentPayload(f)));
+      const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${selectedConversationId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: chatText.trim(), attachments: attachmentPayloads })
+      });
+      if (!res.ok) {
+        setChatError("Не удалось отправить сообщение");
+        return;
+      }
+      setChatText("");
+      setChatAttachments([]);
+      await loadConversationMessages(selectedConversationId, { silent: true, touchViewedAt: true });
+      await loadConversations();
+    } catch (e) {
+      const msg = String(e);
+      setChatError(
+        msg.includes("FILE_TOO_LARGE")
+          ? "Файл слишком большой (макс. ~350 КБ на вложение). Сожмите изображение или отправьте ссылку."
+          : `Не удалось отправить: ${msg}`
+      );
     }
-    setChatText("");
-    setChatAttachment(null);
-    await loadConversationMessages(selectedConversationId, { silent: true, touchViewedAt: true });
-    await loadConversations();
   }
 
   async function loadFeedbackTickets() {
@@ -10972,7 +10982,7 @@ function App() {
           peerUserId={chatPeerUserId}
           search={chatSearch}
           text={chatText}
-          attachment={chatAttachment}
+          attachments={chatAttachments}
           error={chatError}
           loading={chatLoading}
           unreadTotal={chatUnreadTotal}
@@ -10982,9 +10992,13 @@ function App() {
           timeLabel={chatTimeLabel}
           onSearchChange={setChatSearch}
           onTextChange={setChatText}
-          onAttachmentChange={setChatAttachment}
+          onAttachmentsChange={setChatAttachments}
+          onFileReject={(reason) => setChatError(reason)}
           onSelectPeer={(userId) => void openChatPeer(userId)}
-          onBackToList={() => setChatPeerUserId("")}
+          onBackToList={() => {
+            setChatPeerUserId("");
+            setChatAttachments([]);
+          }}
           onSend={() => void sendConversationMessage()}
           onRefresh={refreshChatData}
         />

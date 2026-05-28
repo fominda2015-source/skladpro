@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "./UserAvatar";
+import { ChatComposer } from "./ChatComposer";
+import { isImageAttachment } from "./chatFiles";
 
 export type ChatUser = {
   id: string;
@@ -64,7 +66,7 @@ type Props = {
   peerUserId: string;
   search: string;
   text: string;
-  attachment: File | null;
+  attachments: File[];
   error: string;
   loading: boolean;
   unreadTotal: number;
@@ -74,7 +76,8 @@ type Props = {
   timeLabel: (iso?: string) => string;
   onSearchChange: (v: string) => void;
   onTextChange: (v: string) => void;
-  onAttachmentChange: (f: File | null) => void;
+  onAttachmentsChange: (files: File[]) => void;
+  onFileReject?: (reason: string) => void;
   onSelectPeer: (userId: string) => void | Promise<void>;
   onBackToList: () => void;
   onSend: () => void | Promise<void>;
@@ -105,7 +108,7 @@ export function ChatPanel({
   peerUserId,
   search,
   text,
-  attachment,
+  attachments,
   error,
   loading,
   unreadTotal,
@@ -115,7 +118,8 @@ export function ChatPanel({
   timeLabel,
   onSearchChange,
   onTextChange,
-  onAttachmentChange,
+  onAttachmentsChange,
+  onFileReject,
   onSelectPeer,
   onBackToList,
   onSend,
@@ -123,9 +127,9 @@ export function ChatPanel({
 }: Props) {
   const isMobile = useIsMobileChat();
   const messagesRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const peer = useMemo(() => users.find((u) => u.id === peerUserId), [users, peerUserId]);
+  const canSend = Boolean(text.trim() || attachments.length);
   const showThread = Boolean(peerUserId && peer);
   const showList = !isMobile || !showThread;
 
@@ -289,17 +293,29 @@ export function ChatPanel({
                         <span className="chatBubbleSender">{row.item.sender.fullName}</span>
                       ) : null}
                       {row.item.text ? <p className="chatBubbleText">{row.item.text}</p> : null}
-                      {row.item.attachments?.map((a) => (
-                        <a
-                          key={a.id}
-                          href={a.dataUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="chatAttachmentLink"
-                        >
-                          📎 {a.fileName}
-                        </a>
-                      ))}
+                      {row.item.attachments?.map((a) =>
+                        isImageAttachment(a.mimeType, a.fileName) ? (
+                          <a
+                            key={a.id}
+                            href={a.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="chatBubbleImageLink"
+                          >
+                            <img src={a.dataUrl} alt={a.fileName} className="chatBubbleImage" loading="lazy" />
+                          </a>
+                        ) : (
+                          <a
+                            key={a.id}
+                            href={a.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="chatAttachmentLink"
+                          >
+                            📎 {a.fileName}
+                          </a>
+                        )
+                      )}
                       <time className="chatBubbleTime">{timeLabel(row.item.createdAt)}</time>
                     </div>
                   )
@@ -311,61 +327,16 @@ export function ChatPanel({
               )}
             </div>
 
-            <footer className="chatThreadComposer">
-              <div className="chatQuickReplies">
-                {quickReplies.map((q) => (
-                  <button key={q} type="button" className="ghostBtn" onClick={() => onTextChange(q)}>
-                    {q}
-                  </button>
-                ))}
-              </div>
-              <div className="chatComposerRow">
-                <button
-                  type="button"
-                  className="ghostBtn chatAttachBtn"
-                  title="Вложение"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  📎
-                </button>
-                <input
-                  ref={fileInputRef}
-                  className="chatHiddenFile"
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={(e) => onAttachmentChange(e.target.files?.[0] || null)}
-                />
-                <textarea
-                  className="chatComposerInput"
-                  value={text}
-                  onChange={(e) => onTextChange(e.target.value)}
-                  placeholder="Сообщение…"
-                  rows={1}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void onSend();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="primaryBtn chatSendBtn"
-                  disabled={!text.trim() && !attachment}
-                  onClick={() => void onSend()}
-                >
-                  Отправить
-                </button>
-              </div>
-              {attachment ? (
-                <div className="chatAttachmentBar">
-                  <span>{attachment.name}</span>
-                  <button type="button" className="ghostBtn" onClick={() => onAttachmentChange(null)}>
-                    Убрать
-                  </button>
-                </div>
-              ) : null}
-            </footer>
+            <ChatComposer
+              text={text}
+              attachments={attachments}
+              quickReplies={quickReplies}
+              canSend={canSend}
+              onTextChange={onTextChange}
+              onAttachmentsChange={onAttachmentsChange}
+              onSend={onSend}
+              onFileReject={onFileReject}
+            />
           </section>
         ) : (
           <section className="chatThread chatThread--placeholder" aria-hidden={isMobile}>

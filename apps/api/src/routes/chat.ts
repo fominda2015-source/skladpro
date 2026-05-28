@@ -8,18 +8,22 @@ const dmSchema = z.object({
   userId: z.string().min(1)
 });
 
-const messageSchema = z.object({
-  text: z.string().min(1).max(4000),
-  attachments: z
-    .array(
-      z.object({
-        fileName: z.string().min(1),
-        mimeType: z.string().optional(),
-        dataUrl: z.string().min(1).max(500000)
-      })
-    )
-    .default([])
-});
+const messageSchema = z
+  .object({
+    text: z.string().max(4000).optional().default(""),
+    attachments: z
+      .array(
+        z.object({
+          fileName: z.string().min(1),
+          mimeType: z.string().optional(),
+          dataUrl: z.string().min(1).max(500000)
+        })
+      )
+      .default([])
+  })
+  .refine((d) => d.text.trim().length > 0 || d.attachments.length > 0, {
+    message: "MESSAGE_EMPTY"
+  });
 
 export const chatRouter = Router();
 chatRouter.use(requireAuth);
