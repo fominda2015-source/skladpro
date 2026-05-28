@@ -4,6 +4,7 @@ export type ToolGroupCardRow = {
   key: string;
   label: string;
   type: "CATEGORY" | "NAME";
+  categoryId: string | null;
   icon: string | null;
   count: number;
   inStock: number;

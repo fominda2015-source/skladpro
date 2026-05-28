@@ -25,7 +25,7 @@ import {
   TOKEN_KEY,
   resolvePublicFileUrl
 } from "./app/constants";
-import { displayDocumentFileName, docTypeLabel } from "./shared/fileName";
+import { displayDocumentFileName } from "./shared/fileName";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
@@ -9059,7 +9059,9 @@ function App() {
                     : "материалы"
             }`}
             onOpenTable={(i) => {
-              setRequestMaterialsModal({ kind: "issue", row: i });
+              const row = approvalQueue.find((x) => x.id === i.id) ?? issues.find((x) => x.id === i.id);
+              if (!row) return;
+              setRequestMaterialsModal({ kind: "issue", row });
               setDrawerMode("requestMaterials");
             }}
             onOpenDetails={(id) => {
@@ -9072,7 +9074,9 @@ function App() {
           <ApprovalsReceiptRequestsTable
             rows={receiptRequests}
             onOpenTable={(row) => {
-              setRequestMaterialsModal({ kind: "receipt", row });
+              const full = receiptRequests.find((r) => r.id === row.id);
+              if (!full) return;
+              setRequestMaterialsModal({ kind: "receipt", row: full });
               setDrawerMode("requestMaterials");
             }}
             onOpenReceipt={(id) => {

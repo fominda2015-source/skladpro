@@ -118,13 +118,6 @@ function shortName(name: string, max = 14) {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-function limitTone(percent: number, overCount: number): "neutral" | "warn" | "bad" | "ok" {
-  if (overCount > 0) return "bad";
-  if (percent >= 100) return "ok";
-  if (percent >= 80) return "warn";
-  return "neutral";
-}
-
 function chartTooltipQty(value: unknown): [string, string] {
   const n = typeof value === "number" ? value : Number(value);
   return [Number.isFinite(n) ? n.toLocaleString("ru-RU") : "—", ""];
@@ -421,6 +414,11 @@ export function HomeOverview({
         {canLimits && focusWarehouseId ? (
           <button type="button" className="ghostBtn" onClick={() => onOpenLimits(focusWarehouseId, "SS")}>
             Лимиты
+          </button>
+        ) : null}
+        {onCreateRequest ? (
+          <button type="button" className="ghostBtn" onClick={onCreateRequest}>
+            Заявка
           </button>
         ) : null}
         {onOpenApprovals ? (

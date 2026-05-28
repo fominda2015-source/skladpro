@@ -65,7 +65,7 @@ export function DocumentsTabView({
   onWarehouseChange,
   docEntityType,
   onEntityTypeChange,
-  docEntityId,
+  docEntityId: _docEntityId,
   entitySelect,
   docSearchQuery,
   onSearchChange,
