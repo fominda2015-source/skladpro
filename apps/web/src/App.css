@@ -3392,6 +3392,112 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .homeOverviewMeta {
   font-weight: 400;
 }
+.homeTableSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.homeTableSectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+.homeTableSectionHead h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.homeTableSectionAction {
+  margin-left: auto;
+}
+.homeTableWrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+.homeDataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.homeDataTable th,
+.homeDataTable td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.homeDataTable thead th {
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+.homeDataTableSubhead th {
+  font-weight: 500;
+  font-size: 11px;
+  padding-top: 0;
+}
+.homeDataTable tbody tr:hover {
+  background: #fafbfc;
+}
+.homeDataTable tbody tr.highlight {
+  background: #eff6ff;
+}
+.homeDataTableFoot td {
+  background: #f8fafc;
+  font-weight: 600;
+  border-bottom: none;
+}
+.homeTableObject strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+.homeTableDetail {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.homeTablePct {
+  font-weight: 700;
+}
+.homeTablePct.tone-ok,
+.homeTableLink.tone-ok {
+  color: #15803d;
+}
+.homeTablePct.tone-warn,
+.homeTableLink.tone-warn {
+  color: #b45309;
+}
+.homeTablePct.tone-bad,
+.homeTableLink.tone-bad {
+  color: #b91c1c;
+}
+.homeTablePct.tone-muted,
+.homeTableLink.tone-muted {
+  color: #94a3b8;
+  font-weight: 500;
+}
+.homeTableLink {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.homeTableLink:hover {
+  opacity: 0.85;
+}
+.homeTableEmpty {
+  margin: 0;
+  padding: 12px 0;
+}
+.homeToolIcon {
+  margin-right: 4px;
+}
 .homeInsightRow {
   display: flex;
   flex-wrap: wrap;

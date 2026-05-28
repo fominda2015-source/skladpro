@@ -480,7 +480,6 @@ type DocumentFile = {
 
 type HomeOverviewResponse = {
   generatedAt: string;
-  section: "SS" | "EOM";
   summary: HomeOverviewSummary;
   objects: HomeObjectRow[];
 };
@@ -1018,7 +1017,6 @@ function App() {
   const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
   const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
   const [homeOverviewError, setHomeOverviewError] = useState("");
-  const [homeExpandedId, setHomeExpandedId] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
   const [auditMeta, setAuditMeta] = useState<AuditMetaResponse>({ users: [], entityTypes: [] });
@@ -2035,10 +2033,9 @@ function App() {
     setHomeOverviewError("");
     setHomeOverviewLoading(true);
     try {
-      const r = await fetchWithSession(
-        `${API_URL}/api/dashboard/home-overview?section=${encodeURIComponent(objectSectionFilter)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setHomeOverview((await r.json()) as HomeOverviewResponse);
     } catch (e) {
@@ -4487,7 +4484,7 @@ function App() {
       return;
     }
     void loadHomeOverview();
-  }, [token, canDashboard, activeTab, objectSectionFilter]);
+  }, [token, canDashboard, activeTab]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -5555,29 +5552,25 @@ function App() {
             summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}
-            sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
             generatedAt={homeOverview?.generatedAt}
-            expandedId={homeExpandedId}
-            onExpand={setHomeExpandedId}
             onRefresh={() => void loadHomeOverview()}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
-            onOpenLimits={(id) => openHomeObjectTab(id, "limits")}
-            onOpenTools={(id) => openHomeObjectTab(id, "tools")}
-            onOpenWarehouse={(id) => {
-              setActiveObjectId(id);
-              setActiveTab("warehouse");
-              void loadStocks(q);
+            onOpenLimits={(id, section) => {
+              setObjectSectionFilter(section);
+              openHomeObjectTab(id, "limits");
             }}
-            onOpenOperations={(id) => {
-              setActiveObjectId(id);
-              setActiveTab("operations");
-              void loadReceiptRequests();
+            onOpenTools={() => {
+              if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
+                openHomeObjectTab(activeObjectId, "tools");
+              } else {
+                setActiveTab("tools");
+                setToolDrilledCard(null);
+                void loadToolGroupCards();
+              }
             }}
             canCamp
             canLimits={canReadLimits}
             canTools={canReadTools}
-            canWarehouse={canReadStocks}
-            canOperations={canReadOperations}
           />
         )}
       {activeTab === "warehouse" && (

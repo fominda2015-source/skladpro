@@ -267,16 +267,10 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
 });
 
 dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
-  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : null;
-  if (!section) {
-    return res.status(400).json({ error: "SECTION_REQUIRED" });
-  }
   const scope = await getRequestDataScope(req);
-  const { objects, summary } = await buildHomeOverview(scope, section);
+  const { objects, summary } = await buildHomeOverview(scope);
   return res.json({
     generatedAt: new Date().toISOString(),
-    section,
     summary,
     objects
   });
