@@ -3684,6 +3684,53 @@ button.homeInsightPill:hover:not(:disabled) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
+.homeObjectMetrics4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 1100px) {
+  .homeObjectMetrics4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .homeObjectMetrics4 {
+    grid-template-columns: 1fr;
+  }
+}
+.homeToolsGlobal {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.homeToolsGlobalHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.homeToolsGlobalHead h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.homeToolChipsGlobal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.homeToolChipStatic {
+  cursor: default;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 120px;
+}
+.homeToolChipMeta {
+  font-size: 10px;
+  line-height: 1.2;
+}
 .homeMetric {
   display: flex;
   flex-direction: column;

@@ -1,6 +1,7 @@
 import { LimitNodeType, ReceiptRequestStatus, ToolStatus, type Prisma } from "@prisma/client";
 import {
   objectLimitTemplateWhereFromScope,
+  stockWhereFromScope,
   toolWhereFromScope,
   warehouseWhereFromScope,
   type DataScope
@@ -30,10 +31,14 @@ export type HomeOverviewSummary = {
   campTotal: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
+  limitsOverLines: number;
+  objectsWithoutTemplate: number;
   toolsTotal: number;
   toolsInStock: number;
   toolsIssued: number;
   toolsInRepair: number;
+  stockLines: number;
+  receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
 };
 
@@ -42,8 +47,17 @@ export type HomeObjectOverview = {
   name: string;
   campSs: number;
   campEom: number;
+  stockLines: number;
+  receiptOpen: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
+  tools: {
+    total: number;
+    inStock: number;
+    issued: number;
+    inRepair: number;
+    categories: HomeToolCategory[];
+  };
 };
 
 function movementScopeWhere(scope: DataScope): Prisma.StockMovementWhereInput {
@@ -168,10 +182,14 @@ const emptySummary = (): HomeOverviewSummary => ({
   campTotal: 0,
   limitsSs: { hasTemplate: false, plannedQty: 0, issuedQty: 0, percent: 0, overCount: 0 },
   limitsEom: { hasTemplate: false, plannedQty: 0, issuedQty: 0, percent: 0, overCount: 0 },
+  limitsOverLines: 0,
+  objectsWithoutTemplate: 0,
   toolsTotal: 0,
   toolsInStock: 0,
   toolsIssued: 0,
   toolsInRepair: 0,
+  stockLines: 0,
+  receiptOpen: 0,
   toolsByCategory: []
 });
 
@@ -199,6 +217,13 @@ export async function buildHomeOverview(
     AND: [toolWhereFromScope(scope), { warehouseId: { in: warehouseIds } }]
   };
 
+  const stockScoped = stockWhereFromScope(scope);
+  const stockWhere: Prisma.StockWhereInput = {
+    ...(Object.keys(stockScoped).length ? { AND: [stockScoped] } : {}),
+    warehouseId: { in: warehouseIds },
+    section: { in: ["SS", "EOM"] }
+  };
+
   const campWhere: Prisma.CampItemWhereInput =
     scope.sectionScopes.length > 0
       ? {
@@ -209,7 +234,8 @@ export async function buildHomeOverview(
         }
       : { warehouseId: { in: warehouseIds } };
 
-  const [templatesSs, templatesEom, issuedSs, issuedEom, campGroups, toolRows, categories] = await Promise.all([
+  const [templatesSs, templatesEom, issuedSs, issuedEom, campGroups, toolRows, categories, stockGroups, receiptGroups] =
+    await Promise.all([
     prisma.objectLimitTemplate.findMany({
       where: { ...tmplBase, section: "SS" },
       include: {
@@ -249,7 +275,21 @@ export async function buildHomeOverview(
       where: toolWhere,
       select: { warehouseId: true, name: true, categoryId: true, status: true, section: true }
     }),
-    prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] })
+    prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] }),
+    prisma.stock.groupBy({
+      by: ["warehouseId"],
+      where: stockWhere,
+      _count: { materialId: true }
+    }),
+    prisma.receiptRequest.groupBy({
+      by: ["warehouseId"],
+      where: {
+        warehouseId: { in: warehouseIds },
+        section: { in: ["SS", "EOM"] },
+        status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
+      },
+      _count: { id: true }
+    })
   ]);
 
   const latestTmplSs = new Map<string, (typeof templatesSs)[0]>();
@@ -278,20 +318,55 @@ export async function buildHomeOverview(
     campByWhSec.set(`${g.warehouseId}:${g.section}`, g._count._all);
   }
 
-  const objects: HomeObjectOverview[] = warehouses.map((wh) => ({
-    warehouseId: wh.id,
-    name: wh.name,
-    campSs: campByWhSec.get(`${wh.id}:SS`) ?? 0,
-    campEom: campByWhSec.get(`${wh.id}:EOM`) ?? 0,
-    limitsSs: computeLimitSlice(wh.id, latestTmplSs.get(wh.id), issuedSsMap),
-    limitsEom: computeLimitSlice(wh.id, latestTmplEom.get(wh.id), issuedEomMap)
-  }));
+  const toolsByWh = new Map<string, typeof toolRows>();
+  for (const t of toolRows) {
+    if (!t.warehouseId) continue;
+    const list = toolsByWh.get(t.warehouseId) || [];
+    list.push(t);
+    toolsByWh.set(t.warehouseId, list);
+  }
+
+  const stockByWh = new Map(stockGroups.map((g) => [g.warehouseId, g._count.materialId]));
+  const receiptByWh = new Map(receiptGroups.map((g) => [g.warehouseId, g._count.id]));
+
+  const objects: HomeObjectOverview[] = warehouses.map((wh) => {
+    const whTools = toolsByWh.get(wh.id) || [];
+    const cats = buildToolCategories(whTools, categories);
+    return {
+      warehouseId: wh.id,
+      name: wh.name,
+      campSs: campByWhSec.get(`${wh.id}:SS`) ?? 0,
+      campEom: campByWhSec.get(`${wh.id}:EOM`) ?? 0,
+      stockLines: stockByWh.get(wh.id) ?? 0,
+      receiptOpen: receiptByWh.get(wh.id) ?? 0,
+      limitsSs: computeLimitSlice(wh.id, latestTmplSs.get(wh.id), issuedSsMap),
+      limitsEom: computeLimitSlice(wh.id, latestTmplEom.get(wh.id), issuedEomMap),
+      tools: {
+        total: whTools.length,
+        inStock: whTools.filter((t) => t.status === ToolStatus.IN_STOCK).length,
+        issued: whTools.filter((t) => t.status === ToolStatus.ISSUED).length,
+        inRepair: whTools.filter((t) => t.status === ToolStatus.IN_REPAIR).length,
+        categories: cats.slice(0, 8)
+      }
+    };
+  });
 
   const toolsByCategory = buildToolCategories(toolRows, categories);
   const toolsTotal = toolRows.length;
   const toolsInStock = toolRows.filter((t) => t.status === ToolStatus.IN_STOCK).length;
   const toolsIssued = toolRows.filter((t) => t.status === ToolStatus.ISSUED).length;
   const toolsInRepair = toolRows.filter((t) => t.status === ToolStatus.IN_REPAIR).length;
+
+  let limitsOverLines = 0;
+  let objectsWithoutTemplate = 0;
+  let stockLines = 0;
+  let receiptOpen = 0;
+  for (const o of objects) {
+    limitsOverLines += o.limitsSs.overCount + o.limitsEom.overCount;
+    if (!o.limitsSs.hasTemplate && !o.limitsEom.hasTemplate) objectsWithoutTemplate += 1;
+    stockLines += o.stockLines;
+    receiptOpen += o.receiptOpen;
+  }
 
   return {
     objects,
@@ -300,10 +375,14 @@ export async function buildHomeOverview(
       campTotal: objects.reduce((s, o) => s + o.campSs + o.campEom, 0),
       limitsSs: aggregateLimitSlices(objects, (o) => o.limitsSs),
       limitsEom: aggregateLimitSlices(objects, (o) => o.limitsEom),
+      limitsOverLines,
+      objectsWithoutTemplate,
       toolsTotal,
       toolsInStock,
       toolsIssued,
       toolsInRepair,
+      stockLines,
+      receiptOpen,
       toolsByCategory
     }
   };

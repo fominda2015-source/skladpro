@@ -1017,6 +1017,7 @@ function App() {
   const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
   const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
   const [homeOverviewError, setHomeOverviewError] = useState("");
+  const [homeExpandedId, setHomeExpandedId] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [auditMessage, setAuditMessage] = useState("");
   const [auditMeta, setAuditMeta] = useState<AuditMetaResponse>({ users: [], entityTypes: [] });
@@ -5553,24 +5554,30 @@ function App() {
             loading={homeOverviewLoading}
             error={homeOverviewError}
             generatedAt={homeOverview?.generatedAt}
+            expandedId={homeExpandedId}
+            onExpand={setHomeExpandedId}
             onRefresh={() => void loadHomeOverview()}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {
               setObjectSectionFilter(section);
               openHomeObjectTab(id, "limits");
             }}
-            onOpenTools={() => {
-              if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
-                openHomeObjectTab(activeObjectId, "tools");
-              } else {
-                setActiveTab("tools");
-                setToolDrilledCard(null);
-                void loadToolGroupCards();
-              }
+            onOpenTools={(id) => openHomeObjectTab(id, "tools")}
+            onOpenWarehouse={(id) => {
+              setActiveObjectId(id);
+              setActiveTab("warehouse");
+              void loadStocks(q);
+            }}
+            onOpenOperations={(id) => {
+              setActiveObjectId(id);
+              setActiveTab("operations");
+              void loadReceiptRequests();
             }}
             canCamp
             canLimits={canReadLimits}
             canTools={canReadTools}
+            canWarehouse={canReadStocks}
+            canOperations={canReadOperations}
           />
         )}
       {activeTab === "warehouse" && (
