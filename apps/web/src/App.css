@@ -5280,3 +5280,264 @@ button.whMenuItem:hover,
 .dangerGhost {
   color: #b42318;
 }
+
+/* Главная — объявления */
+.homeAnnouncements {
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 48px);
+  border: 1px solid #fde68a;
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.08);
+}
+.homeAnnHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.homeAnnHeadText {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.homeAnnTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #92400e;
+}
+.homeAnnCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 700;
+}
+.homeAnnComposeToggle.active {
+  border-color: #fbbf24;
+  background: #fffbeb;
+}
+.homeAnnCompose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px dashed #fcd34d;
+  border-radius: 12px;
+}
+.homeAnnComposeLabel {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.homeAnnInput,
+.homeAnnTextarea {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font-size: 14px;
+}
+.homeAnnTextarea {
+  min-height: 88px !important;
+  resize: vertical;
+  line-height: 1.45;
+}
+.homeAnnCheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #475569;
+}
+.homeAnnCheck input {
+  width: auto;
+  height: auto;
+}
+.homeAnnComposeFiles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.homeAnnFileHint {
+  font-size: 12px;
+}
+.homeAnnComposeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.homeAnnComposeActions .primaryBtn {
+  width: auto;
+  height: 36px;
+  padding: 0 16px;
+}
+.homeAnnEmpty {
+  margin: 0;
+  font-size: 13px;
+}
+.homeAnnFeed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.homeAnnPinnedGroup,
+.homeAnnRegularGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.homeAnnCard {
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+.homeAnnCard--pinned {
+  border-color: #fcd34d;
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
+}
+.homeAnnCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.homeAnnCardTitleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.homeAnnPin {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.homeAnnCardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+}
+.homeAnnCardMenu {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+.homeAnnCard:hover .homeAnnCardMenu {
+  opacity: 1;
+}
+.homeAnnIconBtn {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: #475569;
+}
+.homeAnnIconBtn--danger {
+  color: #b91c1c;
+}
+.homeAnnIconBtn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.homeAnnCardBody {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #334155;
+  white-space: pre-wrap;
+}
+.homeAnnCardBody.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.homeAnnCardBody.expanded {
+  display: block;
+}
+.homeAnnExpandBtn {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 0 8px;
+  font: inherit;
+  font-size: 13px;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.homeAnnPhotos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.homeAnnPhoto {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.homeAnnPhoto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.homeAnnPhoto--edit {
+  position: relative;
+}
+.homeAnnPhotoRemove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.homeAnnCardMeta {
+  font-size: 12px;
+}
+.homeAnnShowMore {
+  align-self: center;
+  margin-top: 4px;
+  border-radius: 999px;
+  font-size: 13px;
+}

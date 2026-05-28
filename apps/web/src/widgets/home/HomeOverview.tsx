@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -86,6 +86,7 @@ type Props = {
   canTools?: boolean;
   canWarehouse?: boolean;
   canOperations?: boolean;
+  announcements?: ReactNode;
 };
 
 const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
@@ -168,7 +169,8 @@ export function HomeOverview({
   canLimits = true,
   canTools = true,
   canWarehouse = true,
-  canOperations = true
+  canOperations = true,
+  announcements = null
 }: Props) {
   const totals = useMemo(() => {
     if (summary) {
@@ -381,6 +383,8 @@ export function HomeOverview({
           { label: "Инструменты", value: totals.tools, tone: "neutral" }
         ]}
       />
+
+      {announcements}
 
       {showCharts ? (
         <div className="homeInsightRow">

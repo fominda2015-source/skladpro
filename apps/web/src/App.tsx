@@ -36,6 +36,7 @@ import { NotificationsTable, type NotificationRow } from "./widgets/integrations
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { CriticalRecipientAssignedModal } from "./widgets/notifications/CriticalRecipientAssignedModal";
 import { ReceiptOverageModal } from "./widgets/receipts/ReceiptOverageModal";
+import { HomeAnnouncements } from "./widgets/home/HomeAnnouncements";
 import {
   HomeOverview,
   type HomeObjectRow,
@@ -5563,6 +5564,15 @@ function App() {
             generatedAt={homeOverview?.generatedAt}
             expandedId={homeExpandedId}
             onExpand={setHomeExpandedId}
+            announcements={
+              <HomeAnnouncements
+                token={token}
+                fetchWithSession={fetchWithSession}
+                canCreate={hasPermission("announcements.write")}
+                canEdit={hasPermission("announcements.edit")}
+                canDelete={hasPermission("announcements.delete")}
+              />
+            }
             onRefresh={() => void loadHomeOverview()}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {
