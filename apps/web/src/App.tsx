@@ -46,6 +46,7 @@ import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
+import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
@@ -1042,8 +1043,7 @@ function App() {
   const [chatAttachment, setChatAttachment] = useState<File | null>(null);
   const [chatError, setChatError] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
-  const [chatWidgetUserId, setChatWidgetUserId] = useState("");
+  const [chatPeerUserId, setChatPeerUserId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
   const [chatViewedAt, setChatViewedAt] = useState<Record<string, string>>({});
   const [feedbackTickets, setFeedbackTickets] = useState<FeedbackTicketListItem[]>([]);
@@ -1060,8 +1060,6 @@ function App() {
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
   const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
-  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
-  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
@@ -2305,9 +2303,22 @@ function App() {
     }
     const row = (await res.json()) as { id: string };
     setSelectedConversationId(row.id);
+    setChatPeerUserId(userId);
     await loadConversationMessages(row.id);
     await loadConversations();
     return row.id;
+  }
+
+  async function openChatPeer(userId: string) {
+    await startDmConversation(userId);
+  }
+
+  function refreshChatData() {
+    void loadChatUsers();
+    void loadConversations();
+    if (selectedConversationId) {
+      void loadConversationMessages(selectedConversationId, { silent: true, touchViewedAt: false });
+    }
   }
 
   async function loadConversationMessages(
@@ -4521,31 +4532,28 @@ function App() {
     }
   }, [token, activeTab, canReadNotifications]);
 
+  const chatTabActive = activeTab === "chat";
+
   useEffect(() => {
-    if (!token || !chatWidgetOpen) return;
+    if (!token || !chatTabActive) return;
     void loadChatUsers();
     void loadConversations();
     const timer = window.setInterval(() => {
       void loadConversations();
-      if (selectedConversationId)
+      if (selectedConversationId) {
         void loadConversationMessages(selectedConversationId, {
           silent: true,
           touchViewedAt: false
         });
+      }
     }, 10000);
     return () => window.clearInterval(timer);
-  }, [token, chatWidgetOpen, selectedConversationId]);
+  }, [token, chatTabActive, selectedConversationId]);
 
   useEffect(() => {
-    if (!token || !chatWidgetOpen || !selectedConversationId) return;
+    if (!token || !chatTabActive || !selectedConversationId) return;
     void loadConversationMessages(selectedConversationId);
-  }, [token, chatWidgetOpen, selectedConversationId]);
-
-  useEffect(() => {
-    const node = chatMessagesRef.current;
-    if (!node) return;
-    node.scrollTop = node.scrollHeight;
-  }, [chatMessages, selectedConversationId]);
+  }, [token, chatTabActive, selectedConversationId]);
 
   useEffect(() => {
     if (!token || activeTab !== "feedback") return;
@@ -4603,6 +4611,7 @@ function App() {
     visibleTabs.add("camp");
     if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
     if (canReadNotifications) visibleTabs.add("notifications");
+    visibleTabs.add("chat");
     visibleTabs.add("feedback");
     visibleTabs.add("reports");
     if (canReadAudit) visibleTabs.add("audit");
@@ -5395,6 +5404,16 @@ function App() {
               ) : null}
             </button>
           )}
+          <button
+            type="button"
+            className={`navBtn ${activeTab === "chat" ? "active" : ""}`}
+            onClick={() => setActiveTab("chat")}
+          >
+            <span className="navIcon">💬</span>Чат
+            {chatUnreadTotal > 0 ? (
+              <span className="navUnreadBadge">{chatUnreadTotal > 99 ? "99+" : chatUnreadTotal}</span>
+            ) : null}
+          </button>
 
           <button
             type="button"
@@ -10942,61 +10961,35 @@ function App() {
         </div>
       )}
 
-      {activeTab === "chat" && (
-        <div className="card">
-          <h2>Личные сообщения</h2>
-          {chatError && <ErrorState text={chatError} />}
-          <div className="grid2">
-            <div className="card">
-              <h3>Пользователи</h3>
-              <div className="plainList">
-                {chatUsers.map((u) => (
-                  <div key={u.id} className="toolbar">
-                    <span>{u.fullName} ({roleLabel(u.role)})</span>
-                    <button type="button" onClick={() => void startDmConversation(u.id)}>Открыть чат</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="card">
-              <h3>Диалоги</h3>
-              <select value={selectedConversationId} onChange={(e) => setSelectedConversationId(e.target.value)}>
-                <option value="">Выбери диалог</option>
-                {chatConversations.map((c) => {
-                  const peer = c.participants.map((p) => p.user.fullName).join(", ");
-                  return <option key={c.id} value={c.id}>{peer}</option>;
-                })}
-              </select>
-              <div className="plainList" style={{ maxHeight: 280, overflow: "auto", marginTop: 10 }}>
-                {chatMessages.map((m) => (
-                  <div key={m.id} className="card" style={{ marginBottom: 8 }}>
-                    <p><strong>{m.sender.fullName}</strong> · {new Date(m.createdAt).toLocaleString()}</p>
-                    <p>{m.text}</p>
-                    {m.attachments?.map((a) => (
-                      <p key={a.id}><a href={a.dataUrl} target="_blank" rel="noreferrer">{a.fileName}</a></p>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <div className="form">
-                <label>
-                  Сообщение
-                  <textarea value={chatText} onChange={(e) => setChatText(e.target.value)} />
-                </label>
-                <label>
-                  Скриншот (опционально)
-                  <input type="file" accept="image/*" onChange={(e) => setChatAttachment(e.target.files?.[0] || null)} />
-                </label>
-              </div>
-              <div className="toolbar">
-                <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
-                  Отправить
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {activeTab === "chat" && me ? (
+        <ChatPanel
+          meId={me.id}
+          users={chatUsers}
+          filteredUsers={filteredChatUsers}
+          recent={chatRecent}
+          dmByUserId={dmByUserId}
+          messages={chatMessages}
+          groupedMessages={groupedChatMessages}
+          peerUserId={chatPeerUserId}
+          search={chatSearch}
+          text={chatText}
+          attachment={chatAttachment}
+          error={chatError}
+          loading={chatLoading}
+          unreadTotal={chatUnreadTotal}
+          viewedAt={chatViewedAt}
+          quickReplies={chatQuickReplies}
+          roleLabel={roleLabel}
+          timeLabel={chatTimeLabel}
+          onSearchChange={setChatSearch}
+          onTextChange={setChatText}
+          onAttachmentChange={setChatAttachment}
+          onSelectPeer={(userId) => void openChatPeer(userId)}
+          onBackToList={() => setChatPeerUserId("")}
+          onSend={() => void sendConversationMessage()}
+          onRefresh={refreshChatData}
+        />
+      ) : null}
 
       {activeTab === "feedback" && (
         <div>
@@ -12183,194 +12176,6 @@ function App() {
           {passMessage && <p className="muted">{passMessage}</p>}
         </div>
       )}
-      {isAuthed && (
-        <div className={`chatWidget ${chatWidgetOpen ? "open" : ""}`}>
-          {!chatWidgetOpen ? (
-            <button type="button" className="chatWidgetFab" onClick={() => setChatWidgetOpen(true)}>
-              💬
-              {chatUnreadTotal > 0 ? <span className="chatFabUnread">{chatUnreadTotal}</span> : null}
-            </button>
-          ) : (
-            <div className="chatWidgetPanel card">
-              <div className="chatWidgetHeader">
-                <div>
-                  <strong>Чат команды</strong>
-                  <p className="muted">Выбери сотрудника и начни диалог</p>
-                </div>
-                <button type="button" onClick={() => setChatWidgetOpen(false)}>×</button>
-              </div>
-              {!chatWidgetUserId ? (
-                <>
-                  <input
-                    value={chatSearch}
-                    onChange={(e) => setChatSearch(e.target.value)}
-                    placeholder="Поиск сотрудника..."
-                  />
-                  {chatRecent.length > 0 ? (
-                    <div className="chatRecentList">
-                      {chatRecent.slice(0, 4).map((row) => {
-                        if (!row.peer) return null;
-                        const isUnread =
-                          row.last &&
-                          row.last.senderId !== me?.id &&
-                          new Date(row.last.createdAt) > new Date(chatViewedAt[row.conversation.id] || 0);
-                        return (
-                          <button
-                            key={`recent-${row.conversation.id}`}
-                            type="button"
-                            className={`chatRecentItem ${isUnread ? "unread" : ""}`}
-                            onClick={async () => {
-                              await startDmConversation(row.peer!.id);
-                              setChatWidgetUserId(row.peer!.id);
-                            }}
-                          >
-                            <span>{row.peer.fullName}</span>
-                            <small>{chatTimeLabel(row.last?.createdAt)}</small>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="chatUserList">
-                  {filteredChatUsers.map((u) => {
-                    const conv = dmByUserId.get(u.id);
-                    const last = conv?.messages?.[0];
-                    const unread =
-                      conv && last && last.senderId !== me?.id && new Date(last.createdAt) > new Date(chatViewedAt[conv.id] || 0)
-                        ? 1
-                        : 0;
-                    return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      className="chatUserItem"
-                      onClick={async () => {
-                        const convId = await startDmConversation(u.id);
-                        if (convId) setChatViewedAt((prev) => ({ ...prev, [convId]: new Date().toISOString() }));
-                        setChatWidgetUserId(u.id);
-                      }}
-                    >
-                      <span className="userAvatar">
-                        <UserAvatarChip
-                          fullName={u.fullName}
-                          avatarUrl={u.avatarUrl}
-                          imageClassName="userAvatarImage"
-                          imageAlt={u.fullName}
-                        />
-                      </span>
-                      <span className="chatUserMeta">
-                        <strong>
-                          {u.fullName}
-                          {unread > 0 ? <em className="chatUnreadBadge">{unread}</em> : null}
-                        </strong>
-                        <small>
-                          {last?.text ? `${last.text.slice(0, 34)}${last.text.length > 34 ? "..." : ""}` : (u.position || roleLabel(u.role))}
-                        </small>
-                      </span>
-                      <span className="chatUserTime">{chatTimeLabel(last?.createdAt)}</span>
-                    </button>
-                  );})}
-                  {!filteredChatUsers.length ? <p className="muted">Сотрудники не найдены</p> : null}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="chatThreadHead">
-                    <button type="button" className="ghostBtn" onClick={() => setChatWidgetUserId("")}>← К списку</button>
-                    <strong>{chatUsers.find((u) => u.id === chatWidgetUserId)?.fullName || "Диалог"}</strong>
-                  </div>
-                  <div className="chatMessages" ref={chatMessagesRef}>
-                    {chatLoading ? (
-                      <>
-                        <div className="chatSkeleton" />
-                        <div className="chatSkeleton short" />
-                        <div className="chatSkeleton" />
-                      </>
-                    ) : groupedChatMessages.length ? (
-                      groupedChatMessages.map((row, idx) =>
-                        row.type === "date" ? (
-                          <div key={`date-${idx}`} className="chatDateDivider">{row.label}</div>
-                        ) : (
-                          <div key={row.item.id} className={`chatBubble ${row.item.senderId === me?.id ? "mine" : ""}`}>
-                            <p>{row.item.text}</p>
-                            {row.item.attachments.map((a) => (
-                              <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="chatAttachmentLink">
-                                Вложение
-                              </a>
-                            ))}
-                            {row.item.senderId === me?.id ? (
-                              <small className="chatDeliveryState">
-                                {Date.now() - new Date(row.item.createdAt).getTime() > 8000 ? "Доставлено" : "Отправлено"}
-                              </small>
-                            ) : null}
-                          </div>
-                        )
-                      )
-                    ) : (
-                      <p className="muted">Пока нет сообщений. Начни диалог первым.</p>
-                    )}
-                  </div>
-                  <div className="chatComposer">
-                    <div className="chatQuickReplies">
-                      {chatQuickReplies.map((text) => (
-                        <button
-                          key={`quick-${text}`}
-                          type="button"
-                          className="ghostBtn"
-                          onClick={() => setChatText(text)}
-                        >
-                          {text}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      value={chatText}
-                      onChange={(e) => setChatText(e.target.value)}
-                      placeholder="Введите сообщение"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          void sendConversationMessage();
-                        }
-                      }}
-                    />
-                    <div className="chatComposerActions">
-                      <button
-                        type="button"
-                        className="ghostBtn chatAttachBtn"
-                        onClick={() => chatFileInputRef.current?.click()}
-                        title="Добавить вложение"
-                      >
-                        📎
-                      </button>
-                      <input
-                        ref={chatFileInputRef}
-                        className="chatHiddenFile"
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => setChatAttachment(e.target.files?.[0] || null)}
-                      />
-                      <button type="button" onClick={() => void sendConversationMessage()} disabled={!selectedConversationId}>
-                        Отправить
-                      </button>
-                    </div>
-                    {chatAttachment ? (
-                      <div className="chatAttachmentBar">
-                        <small>{chatAttachment.name}</small>
-                        <button type="button" className="ghostBtn" onClick={() => setChatAttachment(null)}>
-                          Убрать
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  {chatError ? <p className="error">{chatError}</p> : null}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {issueRecipientModal && (
         <div
           role="dialog"
@@ -12922,12 +12727,15 @@ function App() {
               onClick: () => setActiveTab("issues")
             },
             {
-              id: "operations",
-              label: "Приходы",
-              icon: "📥",
-              active: activeTab === "operations",
-              disabled: !canReadOperations,
-              onClick: () => setActiveTab("operations")
+              id: "chat",
+              label: "Чат",
+              icon: "💬",
+              active: activeTab === "chat",
+              badge: chatUnreadTotal,
+              onClick: () => {
+                setMobileNavOpen(false);
+                setActiveTab("chat");
+              }
             },
             {
               id: "menu",
