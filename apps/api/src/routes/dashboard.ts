@@ -273,10 +273,11 @@ dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "SECTION_REQUIRED" });
   }
   const scope = await getRequestDataScope(req);
-  const objects = await buildHomeOverview(scope, section);
+  const { objects, summary } = await buildHomeOverview(scope, section);
   return res.json({
     generatedAt: new Date().toISOString(),
     section,
+    summary,
     objects
   });
 });

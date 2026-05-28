@@ -2970,6 +2970,141 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .homeOverviewMeta {
   font-weight: 400;
 }
+.homeInsightRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.homeInsightPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+button.homeInsightPill {
+  cursor: pointer;
+}
+button.homeInsightPill:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #f0f7ff;
+}
+.homeInsightPill.tone-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.homeInsightPill.tone-bad {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.homeInsightPillLabel {
+  font-size: 12px;
+  color: #64748b;
+}
+.homeInsightPill strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+.homeAttentionStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.homeAttentionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 13px;
+  cursor: default;
+}
+.homeAttentionChip.warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.homeAttentionChip.bad {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.homeAttentionChip:disabled {
+  opacity: 0.85;
+}
+.homeAttentionChip:not(:disabled) {
+  cursor: pointer;
+}
+.homeAttentionChip:not(:disabled):hover {
+  filter: brightness(0.98);
+}
+.homeAttentionChip strong {
+  font-weight: 700;
+}
+.homeChartsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.homeChartCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.homeChartCardWide {
+  grid-column: 1 / -1;
+}
+.homeChartHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.homeChartHead h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.homeChartHead .muted {
+  font-size: 11px;
+}
+.homeChartEmpty {
+  margin: 24px 0;
+  text-align: center;
+  font-size: 13px;
+}
+.homeObjectListTitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.homeObjectMeta {
+  margin-left: auto;
+  font-size: 11px;
+}
+.homeObjectMeta.warn {
+  color: #b45309;
+  font-weight: 600;
+}
+@media (max-width: 900px) {
+  .homeChartsGrid {
+    grid-template-columns: 1fr;
+  }
+  .homeChartCardWide {
+    grid-column: auto;
+  }
+}
 .homeObjectList {
   display: flex;
   flex-direction: column;

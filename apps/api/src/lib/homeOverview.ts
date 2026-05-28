@@ -1,6 +1,7 @@
-import { LimitNodeType, ToolStatus, type Prisma } from "@prisma/client";
+import { LimitNodeType, ReceiptRequestStatus, ToolStatus, type Prisma } from "@prisma/client";
 import {
   objectLimitTemplateWhereFromScope,
+  stockWhereFromScope,
   toolWhereFromScope,
   warehouseWhereFromScope,
   type DataScope
@@ -17,10 +18,29 @@ export type HomeToolCategory = {
   inRepair: number;
 };
 
+export type HomeOverviewSummary = {
+  objectCount: number;
+  campTotal: number;
+  limitsPlanned: number;
+  limitsIssued: number;
+  limitsPercent: number;
+  limitsOverLines: number;
+  objectsWithoutTemplate: number;
+  toolsTotal: number;
+  toolsInStock: number;
+  toolsIssued: number;
+  toolsInRepair: number;
+  stockLines: number;
+  receiptOpen: number;
+  topToolCategories: HomeToolCategory[];
+};
+
 export type HomeObjectOverview = {
   warehouseId: string;
   name: string;
   campCount: number;
+  stockLines: number;
+  receiptOpen: number;
   limits: {
     hasTemplate: boolean;
     plannedQty: number;
@@ -92,17 +112,60 @@ function buildToolCategories(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
 }
 
+function aggregateTopToolCategories(
+  objects: HomeObjectOverview[],
+  limit = 8
+): HomeToolCategory[] {
+  const merged = new Map<string, HomeToolCategory>();
+  for (const obj of objects) {
+    for (const c of obj.tools.categories) {
+      const prev = merged.get(c.key);
+      if (!prev) {
+        merged.set(c.key, { ...c });
+      } else {
+        prev.count += c.count;
+        prev.inStock += c.inStock;
+        prev.issued += c.issued;
+        prev.inRepair += c.inRepair;
+      }
+    }
+  }
+  return [...merged.values()]
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"))
+    .slice(0, limit);
+}
+
 export async function buildHomeOverview(
   scope: DataScope,
   section: "SS" | "EOM"
-): Promise<HomeObjectOverview[]> {
+): Promise<{ objects: HomeObjectOverview[]; summary: HomeOverviewSummary }> {
   const whWhere = warehouseWhereFromScope(scope);
   const warehouses = await prisma.warehouse.findMany({
     where: { isActive: true, ...(Object.keys(whWhere).length ? whWhere : {}) },
     select: { id: true, name: true },
     orderBy: { name: "asc" }
   });
-  if (!warehouses.length) return [];
+  if (!warehouses.length) {
+    return {
+      objects: [],
+      summary: {
+        objectCount: 0,
+        campTotal: 0,
+        limitsPlanned: 0,
+        limitsIssued: 0,
+        limitsPercent: 0,
+        limitsOverLines: 0,
+        objectsWithoutTemplate: 0,
+        toolsTotal: 0,
+        toolsInStock: 0,
+        toolsIssued: 0,
+        toolsInRepair: 0,
+        stockLines: 0,
+        receiptOpen: 0,
+        topToolCategories: []
+      }
+    };
+  }
 
   const warehouseIds = warehouses.map((w) => w.id);
   const tmplScoped = objectLimitTemplateWhereFromScope(scope);
@@ -138,7 +201,15 @@ export async function buildHomeOverview(
     AND: [toolWhereFromScope(scope), { warehouseId: { in: warehouseIds }, section }]
   };
 
-  const [templates, issuedRows, campGroups, toolRows, categories] = await Promise.all([
+  const stockScoped = stockWhereFromScope(scope);
+  const stockWhere: Prisma.StockWhereInput = {
+    ...(Object.keys(stockScoped).length ? { AND: [stockScoped] } : {}),
+    warehouseId: { in: warehouseIds },
+    section
+  };
+
+  const [templates, issuedRows, campGroups, toolRows, categories, stockGroups, receiptGroups] =
+    await Promise.all([
     prisma.objectLimitTemplate.findMany({
       where: tmplWhere,
       include: {
@@ -163,7 +234,21 @@ export async function buildHomeOverview(
       where: toolWhere,
       select: { warehouseId: true, name: true, categoryId: true, status: true }
     }),
-    prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] })
+    prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] }),
+    prisma.stock.groupBy({
+      by: ["warehouseId"],
+      where: stockWhere,
+      _count: { materialId: true }
+    }),
+    prisma.receiptRequest.groupBy({
+      by: ["warehouseId"],
+      where: {
+        warehouseId: { in: warehouseIds },
+        section,
+        status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
+      },
+      _count: { id: true }
+    })
   ]);
 
   const latestTemplateByWh = new Map<string, (typeof templates)[0]>();
@@ -189,8 +274,14 @@ export async function buildHomeOverview(
   const campByWh = new Map(
     campGroups.map((g) => [g.warehouseId || "", g._count._all])
   );
+  const stockByWh = new Map(
+    stockGroups.map((g) => [g.warehouseId, g._count.materialId])
+  );
+  const receiptByWh = new Map(
+    receiptGroups.map((g) => [g.warehouseId, g._count.id])
+  );
 
-  return warehouses.map((wh) => {
+  const objects: HomeObjectOverview[] = warehouses.map((wh) => {
     const tmpl = latestTemplateByWh.get(wh.id);
     const materialNodes = tmpl?.nodes || [];
     const plannedQty = materialNodes.reduce((s, n) => s + Number(n.plannedQty || 0), 0);
@@ -215,6 +306,8 @@ export async function buildHomeOverview(
       warehouseId: wh.id,
       name: wh.name,
       campCount: campByWh.get(wh.id) ?? 0,
+      stockLines: stockByWh.get(wh.id) ?? 0,
+      receiptOpen: receiptByWh.get(wh.id) ?? 0,
       limits: {
         hasTemplate: Boolean(tmpl),
         plannedQty,
@@ -231,4 +324,51 @@ export async function buildHomeOverview(
       }
     };
   });
+
+  let campTotal = 0;
+  let limitsPlanned = 0;
+  let limitsIssued = 0;
+  let limitsOverLines = 0;
+  let objectsWithoutTemplate = 0;
+  let toolsTotal = 0;
+  let toolsInStock = 0;
+  let toolsIssued = 0;
+  let toolsInRepair = 0;
+  let stockLines = 0;
+  let receiptOpen = 0;
+  for (const o of objects) {
+    campTotal += o.campCount;
+    limitsPlanned += o.limits.plannedQty;
+    limitsIssued += o.limits.issuedQty;
+    limitsOverLines += o.limits.overCount;
+    if (!o.limits.hasTemplate) objectsWithoutTemplate += 1;
+    toolsTotal += o.tools.total;
+    toolsInStock += o.tools.inStock;
+    toolsIssued += o.tools.issued;
+    toolsInRepair += o.tools.inRepair;
+    stockLines += o.stockLines;
+    receiptOpen += o.receiptOpen;
+  }
+  const limitsPercent =
+    limitsPlanned > 0 ? Math.min(100, Math.round((limitsIssued / limitsPlanned) * 100)) : 0;
+
+  return {
+    objects,
+    summary: {
+      objectCount: objects.length,
+      campTotal,
+      limitsPlanned,
+      limitsIssued,
+      limitsPercent,
+      limitsOverLines,
+      objectsWithoutTemplate,
+      toolsTotal,
+      toolsInStock,
+      toolsIssued,
+      toolsInRepair,
+      stockLines,
+      receiptOpen,
+      topToolCategories: aggregateTopToolCategories(objects)
+    }
+  };
 }

@@ -36,7 +36,11 @@ import { NotificationsTable, type NotificationRow } from "./widgets/integrations
 import { NotificationsTabBlock } from "./widgets/notifications/NotificationsTabBlock";
 import { CriticalRecipientAssignedModal } from "./widgets/notifications/CriticalRecipientAssignedModal";
 import { ReceiptOverageModal } from "./widgets/receipts/ReceiptOverageModal";
-import { HomeOverview, type HomeObjectRow } from "./widgets/home/HomeOverview";
+import {
+  HomeOverview,
+  type HomeObjectRow,
+  type HomeOverviewSummary
+} from "./widgets/home/HomeOverview";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
@@ -475,6 +479,7 @@ type DocumentFile = {
 type HomeOverviewResponse = {
   generatedAt: string;
   section: "SS" | "EOM";
+  summary: HomeOverviewSummary;
   objects: HomeObjectRow[];
 };
 
@@ -5519,6 +5524,7 @@ function App() {
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
+            summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}
             sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
@@ -5529,9 +5535,21 @@ function App() {
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id) => openHomeObjectTab(id, "limits")}
             onOpenTools={(id) => openHomeObjectTab(id, "tools")}
+            onOpenWarehouse={(id) => {
+              setActiveObjectId(id);
+              setActiveTab("warehouse");
+              void loadStocks(q);
+            }}
+            onOpenOperations={(id) => {
+              setActiveObjectId(id);
+              setActiveTab("operations");
+              void loadReceiptRequests();
+            }}
             canCamp
             canLimits={canReadLimits}
             canTools={canReadTools}
+            canWarehouse={canReadStocks}
+            canOperations={canReadOperations}
           />
         )}
       {activeTab === "warehouse" && (
