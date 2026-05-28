@@ -4611,6 +4611,7 @@ function App() {
     if (canReadWaybills) visibleTabs.add("waybills");
     if (canReadStocks || canWriteCatalog) visibleTabs.add("catalog");
     if (canReadDocuments) visibleTabs.add("documents");
+    visibleTabs.add("acts");
     if (canReadTools) {
       visibleTabs.add("tools");
       visibleTabs.add("qr");
