@@ -3451,6 +3451,10 @@ button.homeInsightPill:hover:not(:disabled) {
 .homeObjectCard.expanded {
   border-color: #bfdbfe;
 }
+.homeObjectCard.current {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px #bfdbfe;
+}
 .homeObjectHead {
   display: flex;
   align-items: center;

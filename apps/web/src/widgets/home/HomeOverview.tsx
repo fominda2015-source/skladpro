@@ -65,6 +65,7 @@ export type HomeObjectRow = {
 
 type Props = {
   objects: HomeObjectRow[];
+  highlightWarehouseId?: string;
   summary?: HomeOverviewSummary | null;
   loading: boolean;
   error: string;
@@ -111,6 +112,7 @@ function chartTooltipQty(value: unknown): [string, string] {
 
 export function HomeOverview({
   objects,
+  highlightWarehouseId = "",
   summary,
   loading,
   error,
@@ -516,7 +518,12 @@ export function HomeOverview({
           const expanded = expandedId === obj.warehouseId;
           const lt = limitTone(obj.limits.percent, obj.limits.overCount);
           return (
-            <article key={obj.warehouseId} className={`homeObjectCard ${expanded ? "expanded" : ""}`}>
+            <article
+              key={obj.warehouseId}
+              className={`homeObjectCard ${expanded ? "expanded" : ""} ${
+                highlightWarehouseId && highlightWarehouseId === obj.warehouseId ? "current" : ""
+              }`}
+            >
               <header className="homeObjectHead">
                 <button
                   type="button"

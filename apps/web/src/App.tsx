@@ -1666,12 +1666,8 @@ function App() {
   const canWriteWarehouses = useMemo(() => hasPermission("warehouses.write"), [me]);
   const isAllObjectsView = activeObjectId === ALL_OBJECTS_ID;
 
-  const homeObjectsDisplay = useMemo(() => {
-    const rows = homeOverview?.objects ?? [];
-    if (isAllObjectsView) return rows;
-    if (!activeObjectId) return rows;
-    return rows.filter((o) => o.warehouseId === activeObjectId);
-  }, [homeOverview, isAllObjectsView, activeObjectId]);
+  /** Главная «по объектам» — всегда все доступные объекты, независимо от выбора в шапке. */
+  const homeObjectsDisplay = useMemo(() => homeOverview?.objects ?? [], [homeOverview]);
   const effectiveWarehouseId = useMemo(() => {
     if (activeObjectId === ALL_OBJECTS_ID) return tabWarehouseFilters[activeTab] || "";
     return activeObjectId || "";
@@ -5543,6 +5539,9 @@ function App() {
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
+            highlightWarehouseId={
+              activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : ""
+            }
             summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}
