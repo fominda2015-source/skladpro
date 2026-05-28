@@ -5563,21 +5563,27 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            <select
-              value={activeObjectId}
-              onChange={(e) => {
-                void selectTopObject(e.target.value);
-              }}
-            >
-              {canViewAllObjects ? (
-                <option value={ALL_OBJECTS_ID}>Все объекты</option>
-              ) : null}
-              {availableObjects.map((o) => (
-                <option key={o.id} value={o.id}>
-                  Объект: {safeName(o.name)}
-                </option>
-              ))}
-            </select>
+            {activeTab !== "stocks" ? (
+              <select
+                value={activeObjectId}
+                onChange={(e) => {
+                  void selectTopObject(e.target.value);
+                }}
+              >
+                {canViewAllObjects ? (
+                  <option value={ALL_OBJECTS_ID}>Все объекты</option>
+                ) : null}
+                {availableObjects.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    Объект: {safeName(o.name)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="homeToolbarHint muted" title="На главной показана сводка по всем объектам">
+                Все объекты
+              </span>
+            )}
             <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
               <button
                 type="button"
@@ -5616,9 +5622,6 @@ function App() {
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
-            highlightWarehouseId={
-              activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : ""
-            }
             summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}
@@ -5651,6 +5654,33 @@ function App() {
               setActiveTab("operations");
               void loadReceiptRequests();
             }}
+            onOpenWarehouseTab={
+              canReadStocks
+                ? () => {
+                    if (canViewAllObjects) setActiveObjectId(ALL_OBJECTS_ID);
+                    setActiveTab("warehouse");
+                    void loadStocks(q);
+                  }
+                : undefined
+            }
+            onOpenLimitsTab={canReadLimits ? () => setActiveTab("limits") : undefined}
+            onOpenToolsTab={
+              canReadTools
+                ? () => {
+                    if (canViewAllObjects) setActiveObjectId(ALL_OBJECTS_ID);
+                    setActiveTab("tools");
+                  }
+                : undefined
+            }
+            onOpenOperationsTab={
+              canReadOperations
+                ? () => {
+                    if (canViewAllObjects) setActiveObjectId(ALL_OBJECTS_ID);
+                    setActiveTab("operations");
+                    void loadReceiptRequests();
+                  }
+                : undefined
+            }
             canCamp
             canLimits={canReadLimits}
             canTools={canReadTools}

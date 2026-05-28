@@ -78,7 +78,6 @@ export type HomeObjectRow = {
 
 type Props = {
   objects: HomeObjectRow[];
-  highlightWarehouseId?: string;
   summary?: HomeOverviewSummary | null;
   loading: boolean;
   error: string;
@@ -90,7 +89,11 @@ type Props = {
   onOpenLimits: (warehouseId: string, section: "SS" | "EOM") => void;
   onOpenTools: (warehouseId: string) => void;
   onOpenWarehouse?: (warehouseId: string) => void;
+  onOpenWarehouseTab?: () => void;
+  onOpenLimitsTab?: () => void;
+  onOpenToolsTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
+  onOpenOperationsTab?: () => void;
   canCamp?: boolean;
   canLimits?: boolean;
   canTools?: boolean;
@@ -125,7 +128,6 @@ function chartTooltipQty(value: unknown): [string, string] {
 
 export function HomeOverview({
   objects,
-  highlightWarehouseId = "",
   summary,
   loading,
   error,
@@ -137,7 +139,11 @@ export function HomeOverview({
   onOpenLimits,
   onOpenTools,
   onOpenWarehouse,
+  onOpenWarehouseTab,
+  onOpenLimitsTab,
+  onOpenToolsTab,
   onOpenOperations,
+  onOpenOperationsTab,
   canCamp = true,
   canLimits = true,
   canTools = true,
@@ -297,7 +303,7 @@ export function HomeOverview({
         label: "Перерасход лимитов",
         value: totals.overLines,
         tone: "bad",
-        onClick: canLimits && objects[0] ? () => onOpenLimits(objects[0].warehouseId, "SS") : undefined
+        onClick: canLimits ? onOpenLimitsTab : undefined
       });
     }
     if (totals.withoutTemplate > 0) {
@@ -314,7 +320,7 @@ export function HomeOverview({
         label: "Инструмент в ремонте",
         value: totals.toolsInRepair,
         tone: "warn",
-        onClick: canTools && objects[0] ? () => onOpenTools(objects[0].warehouseId) : undefined
+        onClick: canTools ? onOpenToolsTab : undefined
       });
     }
     if (totals.receiptOpen > 0) {
@@ -323,10 +329,7 @@ export function HomeOverview({
         label: "Приёмки в работе",
         value: totals.receiptOpen,
         tone: "warn",
-        onClick:
-          canOperations && objects[0] && onOpenOperations
-            ? () => onOpenOperations(objects[0].warehouseId)
-            : undefined
+        onClick: canOperations ? onOpenOperationsTab : undefined
       });
     }
     const calOver = summary?.toolsCalibrationOverdue ?? 0;
@@ -340,7 +343,17 @@ export function HomeOverview({
       });
     }
     return items;
-  }, [totals, objects, summary, canLimits, canTools, canOperations, onOpenLimits, onOpenTools, onOpenOperations, onOpenVerifications]);
+  }, [
+    totals,
+    summary,
+    canLimits,
+    canTools,
+    canOperations,
+    onOpenLimitsTab,
+    onOpenToolsTab,
+    onOpenOperationsTab,
+    onOpenVerifications
+  ]);
 
   const showCharts = objects.length > 0 && !loading;
 
@@ -358,7 +371,7 @@ export function HomeOverview({
     return [...objects].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "ru"));
   }, [objects]);
 
-  const focusWarehouseId = highlightWarehouseId || sortedObjects[0]?.warehouseId || "";
+  const objectCount = summary?.objectCount ?? objects.length;
 
   return (
     <div className="homeOverview tabShell">
@@ -368,7 +381,7 @@ export function HomeOverview({
         title="Главная"
         subtitle={
           <>
-            Сводка по всем объектам · лимиты СС и ЭОМ
+            {objectCount > 0 ? `${objectCount} объектов` : "Нет доступных объектов"} · сводка СС и ЭОМ по всем площадкам
             {generatedAt ? (
               <span className="homeOverviewMeta"> · обновлено {new Date(generatedAt).toLocaleTimeString()}</span>
             ) : null}
@@ -380,7 +393,19 @@ export function HomeOverview({
           </button>
         }
         stats={[
-          { label: "Позиций на складе", value: fmtQty(totals.stockLines), tone: "neutral" },
+          {
+            label: "Лимиты СС",
+            value: totals.ss.hasTemplate ? `${totals.ss.percent}%` : "—",
+            tone: totals.ss.overCount > 0 ? "bad" : totals.ss.percent >= 80 ? "warn" : "ok",
+            onClick: canLimits ? onOpenLimitsTab : undefined
+          },
+          {
+            label: "Лимиты ЭОМ",
+            value: totals.eom.hasTemplate ? `${totals.eom.percent}%` : "—",
+            tone: totals.eom.overCount > 0 ? "bad" : totals.eom.percent >= 80 ? "warn" : "ok",
+            onClick: canLimits ? onOpenLimitsTab : undefined
+          },
+          { label: "Позиций на складе", value: fmtQty(totals.stockLines), tone: "neutral", onClick: onOpenWarehouseTab },
           { label: "Инструменты", value: totals.tools, tone: "neutral" },
           {
             label: "На складе",
@@ -405,14 +430,16 @@ export function HomeOverview({
         ]}
       />
 
+      {announcements ? <div className="homeAnnouncementsTop">{announcements}</div> : null}
+
       <div className="erpQuickActions">
-        {canWarehouse && focusWarehouseId ? (
-          <button type="button" className="primaryBtn" onClick={() => onOpenWarehouse?.(focusWarehouseId)}>
-            Открыть склад
+        {canWarehouse && onOpenWarehouseTab ? (
+          <button type="button" className="primaryBtn" onClick={onOpenWarehouseTab}>
+            Склад
           </button>
         ) : null}
-        {canLimits && focusWarehouseId ? (
-          <button type="button" className="ghostBtn" onClick={() => onOpenLimits(focusWarehouseId, "SS")}>
+        {canLimits && onOpenLimitsTab ? (
+          <button type="button" className="ghostBtn" onClick={onOpenLimitsTab}>
             Лимиты
           </button>
         ) : null}
@@ -431,13 +458,13 @@ export function HomeOverview({
             Выдача
           </button>
         ) : null}
-        {canTools && focusWarehouseId ? (
-          <button type="button" className="ghostBtn" onClick={() => onOpenTools(focusWarehouseId)}>
+        {canTools && onOpenToolsTab ? (
+          <button type="button" className="ghostBtn" onClick={onOpenToolsTab}>
             Инструменты
           </button>
         ) : null}
-        {canOperations && focusWarehouseId ? (
-          <button type="button" className="ghostBtn" onClick={() => onOpenOperations?.(focusWarehouseId)}>
+        {canOperations && onOpenOperationsTab ? (
+          <button type="button" className="ghostBtn" onClick={onOpenOperationsTab}>
             Приходы
           </button>
         ) : null}
@@ -457,47 +484,6 @@ export function HomeOverview({
           </button>
         ) : null}
       </div>
-
-      <div className="homeDashboard">
-        <div className="homeDashboardMain">
-      {showCharts ? (
-        <div className="homeInsightRow">
-          {canWarehouse && totals.stockLines > 0 ? (
-            <button
-              type="button"
-              className="homeInsightPill"
-              onClick={() => onOpenWarehouse?.(objects[0]?.warehouseId || "")}
-              disabled={!onOpenWarehouse}
-            >
-              <span className="homeInsightPillLabel">Позиций на складе</span>
-              <strong>{fmtQty(totals.stockLines)}</strong>
-            </button>
-          ) : null}
-          {totals.receiptOpen > 0 ? (
-            <button
-              type="button"
-              className="homeInsightPill"
-              disabled={!canOperations || !onOpenOperations}
-              onClick={() => onOpenOperations?.(objects[0]?.warehouseId || "")}
-            >
-              <span className="homeInsightPillLabel">Приёмки в работе</span>
-              <strong>{totals.receiptOpen}</strong>
-            </button>
-          ) : null}
-          {totals.overLines > 0 ? (
-            <span className="homeInsightPill tone-bad">
-              <span className="homeInsightPillLabel">Перерасход</span>
-              <strong>{totals.overLines}</strong>
-            </span>
-          ) : null}
-          {totals.toolsInRepair > 0 ? (
-            <span className="homeInsightPill tone-warn">
-              <span className="homeInsightPillLabel">В ремонте</span>
-              <strong>{totals.toolsInRepair}</strong>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
 
       {attentionItems.length > 0 ? (
         <section className="homeAttentionStrip">
@@ -519,7 +505,7 @@ export function HomeOverview({
       {showCharts ? (
         <div className="homeChartsGrid">
           {movementChartRows.length > 0 ? (
-            <section className="homeChartCard" style={{ gridColumn: "1 / -1" }}>
+            <section className="homeChartCard homeChartCardWide">
               <header className="homeChartHead">
                 <h3>Движение за 30 дней</h3>
                 <span className="muted">приход и расход по складам</span>
@@ -681,14 +667,7 @@ export function HomeOverview({
                   const expanded = expandedId === obj.warehouseId;
                   const camp = obj.campSs + obj.campEom;
                   const tone = objectRiskStatus(obj);
-                  const rowClass =
-                    highlightWarehouseId === obj.warehouseId
-                      ? "rowHighlight"
-                      : tone === "bad"
-                        ? "rowBad"
-                        : tone === "warn"
-                          ? "rowRisk"
-                          : "";
+                  const rowClass = tone === "bad" ? "rowBad" : tone === "warn" ? "rowRisk" : "";
                   return (
                     <Fragment key={obj.warehouseId}>
                       <tr className={rowClass}>
@@ -799,10 +778,6 @@ export function HomeOverview({
       ) : !loading && !error ? (
         <p className="muted">Нет доступных объектов для отображения.</p>
       ) : null}
-        </div>
-
-        <aside className="homeDashboardAside">{announcements}</aside>
-      </div>
     </div>
   );
 }

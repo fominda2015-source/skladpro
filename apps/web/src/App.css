@@ -3616,8 +3616,17 @@ button.homeInsightPill:hover:not(:disabled) {
 }
 .homeChartsGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+.homeChartsGrid > .homeChartCard {
+  grid-column: span 6;
+}
+.homeChartsGrid > .homeChartCardWide {
+  grid-column: span 12;
+}
+.homeChartsGrid > .homeChartCard[style*="grid-column"] {
+  grid-column: 1 / -1;
 }
 .homeChartCard {
   background: #fff;
@@ -3665,12 +3674,9 @@ button.homeInsightPill:hover:not(:disabled) {
   color: #b45309;
   font-weight: 600;
 }
-@media (max-width: 900px) {
-  .homeChartsGrid {
-    grid-template-columns: 1fr;
-  }
-  .homeChartCardWide {
-    grid-column: auto;
+@media (max-width: 1100px) {
+  .homeChartsGrid > .homeChartCard {
+    grid-column: span 12;
   }
 }
 .homeObjectList {
