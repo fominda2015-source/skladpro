@@ -197,9 +197,12 @@ const emptySummary = (): HomeOverviewSummary => ({
   toolsInStock: 0,
   toolsIssued: 0,
   toolsInRepair: 0,
+  toolsCalibrationOverdue: 0,
+  toolsCalibrationDueSoon: 0,
   stockLines: 0,
   receiptOpen: 0,
-  toolsByCategory: []
+  toolsByCategory: [],
+  movementTrend30d: []
 });
 
 export async function buildHomeOverview(
