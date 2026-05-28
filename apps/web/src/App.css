@@ -1368,21 +1368,28 @@ tr.low {
   align-items: flex-end;
   gap: 10px;
 }
-.chatComposerInput {
-  flex: 1;
-  min-height: 44px;
-  max-height: 120px;
-  padding: 11px 14px;
+.chatComposerRow textarea.chatComposerInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  min-height: 52px;
+  max-height: 140px;
+  padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   font-size: 15px;
-  line-height: 1.4;
-  resize: none;
+  line-height: 1.45;
+  resize: vertical;
+  overflow-y: auto;
   font-family: inherit;
+  box-sizing: border-box;
+  field-sizing: content;
 }
 .chatSendBtn {
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 52px;
+  align-self: flex-end;
   padding-left: 18px;
   padding-right: 18px;
 }
