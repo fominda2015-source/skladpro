@@ -62,25 +62,25 @@ type ReceiptLike = {
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+type PropsBase = {
+  onClose: () => void;
+  apiUrl: string;
+  token: string;
+  fetchWithSession: FetchFn;
+  onOpenDocumentsTab?: () => void;
+  /** Встроенный режим — без полноэкранного backdrop (side-panel) */
+  embedded?: boolean;
+};
+
 type Props =
-  | {
+  | ({
       kind: "issue";
       row: IssueLike;
-      onClose: () => void;
-      apiUrl: string;
-      token: string;
-      fetchWithSession: FetchFn;
-      onOpenDocumentsTab?: () => void;
-    }
-  | {
+    } & PropsBase)
+  | ({
       kind: "receipt";
       row: ReceiptLike;
-      onClose: () => void;
-      apiUrl: string;
-      token: string;
-      fetchWithSession: FetchFn;
-      onOpenDocumentsTab?: () => void;
-    };
+    } & PropsBase);
 
 function num(x: unknown): number {
   const n = Number(x);
@@ -105,7 +105,7 @@ function sortAndDedupeDocs(list: RequestDoc[]): RequestDoc[] {
 }
 
 export function RequestMaterialsModal(props: Props) {
-  const { onClose, apiUrl, token, fetchWithSession, onOpenDocumentsTab } = props;
+  const { onClose, apiUrl, token, fetchWithSession, onOpenDocumentsTab, embedded = false } = props;
   const [highlight, setHighlight] = useState("");
   const [docs, setDocs] = useState<RequestDoc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
@@ -211,15 +211,9 @@ export function RequestMaterialsModal(props: Props) {
       ? `Заявка на выдачу ${props.row.number}`
       : `Заявка на приход ${props.row.number}`;
 
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="requestMaterialsModalBackdrop"
-      onClick={onClose}
-    >
+  const card = (
       <div
-        className="card requestMaterialsModalCard"
+        className={`card requestMaterialsModalCard${embedded ? " requestMaterialsModalCard--embedded" : ""}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="requestMaterialsModalHead">
@@ -410,6 +404,15 @@ export function RequestMaterialsModal(props: Props) {
           </section>
         </div>
       </div>
+  );
+
+  if (embedded) {
+    return card;
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" className="requestMaterialsModalBackdrop" onClick={onClose}>
+      {card}
     </div>
   );
 }

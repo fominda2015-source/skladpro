@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import { auditRouter } from "./routes/audit.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { contractsRouter } from "./routes/contracts.js";
+import { actsRouter } from "./routes/acts.js";
 import { documentsRouter } from "./routes/documents.js";
 import { integrationsRouter } from "./routes/integrations.js";
 import { issueRequestsRouter } from "./routes/issueRequests.js";
@@ -100,6 +101,7 @@ app.use("/api/feedback", feedbackRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/exports", exportsRouter);
 app.use("/api/contracts", contractsRouter);
+app.use("/api/acts", actsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);

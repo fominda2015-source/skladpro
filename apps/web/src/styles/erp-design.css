@@ -1,0 +1,239 @@
+/* ERP UX/UI — общая дизайн-система (по ТЗ редизайна) */
+
+.tabShell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tabToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.tabToolbarPrimary,
+.tabToolbarSecondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.erpQuickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.erpQuickActions .primaryBtn,
+.erpQuickActions .ghostBtn {
+  width: auto;
+  height: 34px;
+  font-size: 13px;
+  padding: 0 14px;
+}
+
+.erpStatus {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.erpStatus--ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+.erpStatus--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+.erpStatus--bad {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.erpStatus--doc {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.erpStatus--neutral {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.erpTableWrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+.erpTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.erpTable thead th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.erpTable tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.erpTable tbody tr:hover {
+  background: #fafbfc;
+}
+.erpTable tbody tr.rowHighlight {
+  background: #eff6ff;
+}
+.erpTable tbody tr.rowRisk {
+  background: #fffbeb;
+}
+.erpTable tbody tr.rowBad {
+  background: #fef2f2;
+}
+.erpTableExpand td {
+  padding: 0 12px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.erpTableExpandInner {
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.erpRowToggle {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 12px;
+  color: #475569;
+}
+.erpRowToggle:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.erpCellActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.erpCellActions .ghostBtn {
+  height: 28px;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+/* Главная — дашборд */
+.homeDashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 12px;
+  align-items: start;
+}
+.homeDashboardMain {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.homeDashboardAside {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .homeDashboard {
+    grid-template-columns: 1fr;
+  }
+  .homeDashboardAside {
+    order: -1;
+  }
+}
+
+.homePanel {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+.homePanelHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.homePanelHead h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.card.erpPanel {
+  border-radius: 14px;
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+.docCenterSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 12px;
+  align-items: start;
+  margin-top: 8px;
+}
+.docCenterList {
+  min-height: 200px;
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+.docCenterPreview {
+  position: sticky;
+  top: 8px;
+}
+@media (max-width: 960px) {
+  .docCenterSplit {
+    grid-template-columns: 1fr;
+  }
+  .docCenterPreview {
+    position: static;
+  }
+}
+
+.detailDrawerTool {
+  max-width: 420px;
+}

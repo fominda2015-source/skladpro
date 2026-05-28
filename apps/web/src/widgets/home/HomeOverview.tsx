@@ -1,4 +1,5 @@
-import { useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
+import { StatusBadge, objectRiskLabel, objectRiskStatus } from "../../shared/ui/StatusBadge";
 import {
   Bar,
   BarChart,
@@ -32,6 +33,12 @@ export type HomeLimitSlice = {
   overCount: number;
 };
 
+export type HomeMovementTrendRow = {
+  day: string;
+  income: number;
+  outcome: number;
+};
+
 export type HomeOverviewSummary = {
   objectCount: number;
   campTotal: number;
@@ -43,9 +50,12 @@ export type HomeOverviewSummary = {
   toolsInStock: number;
   toolsIssued: number;
   toolsInRepair: number;
+  toolsCalibrationOverdue?: number;
+  toolsCalibrationDueSoon?: number;
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  movementTrend30d?: HomeMovementTrendRow[];
 };
 
 export type HomeObjectRow = {
@@ -87,6 +97,12 @@ type Props = {
   canWarehouse?: boolean;
   canOperations?: boolean;
   announcements?: ReactNode;
+  onOpenQr?: () => void;
+  onOpenIssues?: () => void;
+  onOpenApprovals?: () => void;
+  onOpenVerifications?: () => void;
+  onCreateRequest?: () => void;
+  onAcceptReturn?: () => void;
 };
 
 const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
@@ -114,42 +130,6 @@ function chartTooltipQty(value: unknown): [string, string] {
   return [Number.isFinite(n) ? n.toLocaleString("ru-RU") : "—", ""];
 }
 
-function LimitMetric({
-  label,
-  slice,
-  disabled,
-  onClick
-}: {
-  label: string;
-  slice: HomeLimitSlice;
-  disabled?: boolean;
-  onClick?: () => void;
-}) {
-  const lt = limitTone(slice.percent, slice.overCount);
-  return (
-    <button
-      type="button"
-      className={`homeMetric tone-${lt}`}
-      disabled={disabled}
-      onClick={onClick}
-      title={`Открыть лимиты · ${label}`}
-    >
-      <span className="homeMetricLabel">{label}</span>
-      <span className="homeMetricValue">{slice.hasTemplate ? `${slice.percent}%` : "—"}</span>
-      <span className="homeMetricHint muted">
-        {slice.hasTemplate
-          ? `${fmtQty(slice.issuedQty)} / ${fmtQty(slice.plannedQty)}`
-          : "нет шаблона"}
-      </span>
-      {slice.hasTemplate ? (
-        <span className="homeMetricBar" aria-hidden>
-          <span className="homeMetricBarFill" style={{ width: `${slice.percent}%` }} />
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
 export function HomeOverview({
   objects,
   highlightWarehouseId = "",
@@ -170,7 +150,13 @@ export function HomeOverview({
   canTools = true,
   canWarehouse = true,
   canOperations = true,
-  announcements = null
+  announcements = null,
+  onOpenQr,
+  onOpenIssues,
+  onOpenApprovals,
+  onOpenVerifications,
+  onCreateRequest,
+  onAcceptReturn
 }: Props) {
   const totals = useMemo(() => {
     if (summary) {
@@ -286,6 +272,15 @@ export function HomeOverview({
     ].filter((s) => s.value > 0);
   }, [summary, totals]);
 
+  const movementChartRows = useMemo(() => {
+    const src = summary?.movementTrend30d;
+    if (!src?.length) return [];
+    return src.map((r) => ({
+      ...r,
+      label: r.day.slice(5).replace("-", ".")
+    }));
+  }, [summary?.movementTrend30d]);
+
   const topToolsRows = useMemo(() => {
     const src = summary?.toolsByCategory?.length
       ? summary.toolsByCategory
@@ -299,8 +294,6 @@ export function HomeOverview({
         count: c.count
       }));
   }, [objects, summary]);
-
-  const globalToolCategories = summary?.toolsByCategory ?? [];
 
   const attentionItems = useMemo(() => {
     const items: Array<{ id: string; label: string; value: number; tone: "bad" | "warn"; onClick?: () => void }> =
@@ -343,13 +336,39 @@ export function HomeOverview({
             : undefined
       });
     }
+    const calOver = summary?.toolsCalibrationOverdue ?? 0;
+    if (calOver > 0) {
+      items.push({
+        id: "cal",
+        label: "Просрочены поверки",
+        value: calOver,
+        tone: "bad",
+        onClick: onOpenVerifications
+      });
+    }
     return items;
-  }, [totals, objects, canLimits, canTools, canOperations, onOpenLimits, onOpenTools, onOpenOperations]);
+  }, [totals, objects, summary, canLimits, canTools, canOperations, onOpenLimits, onOpenTools, onOpenOperations, onOpenVerifications]);
 
   const showCharts = objects.length > 0 && !loading;
 
+  const sortedObjects = useMemo(() => {
+    const score = (o: HomeObjectRow) => {
+      const over = o.limitsSs.overCount + o.limitsEom.overCount;
+      if (over > 0) return 100;
+      if (o.receiptOpen > 0) return 50;
+      const pct = Math.max(
+        o.limitsSs.hasTemplate ? o.limitsSs.percent : 0,
+        o.limitsEom.hasTemplate ? o.limitsEom.percent : 0
+      );
+      return pct;
+    };
+    return [...objects].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "ru"));
+  }, [objects]);
+
+  const focusWarehouseId = highlightWarehouseId || sortedObjects[0]?.warehouseId || "";
+
   return (
-    <div className="homeOverview">
+    <div className="homeOverview tabShell">
       <PageHero
         variant="compact"
         icon="⌂"
@@ -368,24 +387,81 @@ export function HomeOverview({
           </button>
         }
         stats={[
-          { label: "Объектов", value: objects.length, tone: "neutral" },
-          { label: "Городок", value: totals.camp, tone: "neutral" },
+          { label: "Позиций на складе", value: fmtQty(totals.stockLines), tone: "neutral" },
+          { label: "Инструменты", value: totals.tools, tone: "neutral" },
           {
-            label: "Лимиты СС",
-            value: totals.ss.hasTemplate ? `${totals.ss.percent}%` : "—",
-            tone: limitTone(totals.ss.percent, totals.ss.overCount)
+            label: "На складе",
+            value: summary?.toolsInStock ?? totals.toolsInStock,
+            tone: "ok"
           },
           {
-            label: "Лимиты ЭОМ",
-            value: totals.eom.hasTemplate ? `${totals.eom.percent}%` : "—",
-            tone: limitTone(totals.eom.percent, totals.eom.overCount)
+            label: "Выдано",
+            value: summary?.toolsIssued ?? totals.toolsIssued,
+            tone: "neutral"
           },
-          { label: "Инструменты", value: totals.tools, tone: "neutral" }
+          {
+            label: "В ремонте",
+            value: summary?.toolsInRepair ?? totals.toolsInRepair,
+            tone: totals.toolsInRepair > 0 ? "warn" : "neutral"
+          },
+          {
+            label: "Приёмки",
+            value: totals.receiptOpen,
+            tone: totals.receiptOpen > 0 ? "warn" : "neutral"
+          }
         ]}
       />
 
-      {announcements}
+      <div className="erpQuickActions">
+        {canWarehouse && focusWarehouseId ? (
+          <button type="button" className="primaryBtn" onClick={() => onOpenWarehouse?.(focusWarehouseId)}>
+            Открыть склад
+          </button>
+        ) : null}
+        {canLimits && focusWarehouseId ? (
+          <button type="button" className="ghostBtn" onClick={() => onOpenLimits(focusWarehouseId, "SS")}>
+            Лимиты
+          </button>
+        ) : null}
+        {onOpenApprovals ? (
+          <button type="button" className="ghostBtn" onClick={onOpenApprovals}>
+            Заявки
+          </button>
+        ) : null}
+        {onOpenIssues ? (
+          <button type="button" className="ghostBtn" onClick={onOpenIssues}>
+            Выдача
+          </button>
+        ) : null}
+        {canTools && focusWarehouseId ? (
+          <button type="button" className="ghostBtn" onClick={() => onOpenTools(focusWarehouseId)}>
+            Инструменты
+          </button>
+        ) : null}
+        {canOperations && focusWarehouseId ? (
+          <button type="button" className="ghostBtn" onClick={() => onOpenOperations?.(focusWarehouseId)}>
+            Приходы
+          </button>
+        ) : null}
+        {onOpenQr ? (
+          <button type="button" className="ghostBtn" onClick={onOpenQr}>
+            QR-сканер
+          </button>
+        ) : null}
+        {onOpenVerifications ? (
+          <button type="button" className="ghostBtn" onClick={onOpenVerifications}>
+            Поверки
+          </button>
+        ) : null}
+        {onAcceptReturn ? (
+          <button type="button" className="ghostBtn" onClick={onAcceptReturn}>
+            Принять возврат
+          </button>
+        ) : null}
+      </div>
 
+      <div className="homeDashboard">
+        <div className="homeDashboardMain">
       {showCharts ? (
         <div className="homeInsightRow">
           {canWarehouse && totals.stockLines > 0 ? (
@@ -444,6 +520,25 @@ export function HomeOverview({
 
       {showCharts ? (
         <div className="homeChartsGrid">
+          {movementChartRows.length > 0 ? (
+            <section className="homeChartCard" style={{ gridColumn: "1 / -1" }}>
+              <header className="homeChartHead">
+                <h3>Движение за 30 дней</h3>
+                <span className="muted">приход и расход по складам</span>
+              </header>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={movementChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e8edf3" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={chartTooltipQty} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="income" name="Приход" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="outcome" name="Расход" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </section>
+          ) : null}
           <section className="homeChartCard">
             <header className="homeChartHead">
               <h3>Выполнение лимитов</h3>
@@ -560,171 +655,155 @@ export function HomeOverview({
         </div>
       ) : null}
 
-      {globalToolCategories.length > 0 ? (
-        <section className="homeToolsGlobal">
-          <header className="homeToolsGlobalHead">
-            <h3>Инструменты в общем</h3>
-            <span className="muted">
-              всего {totals.tools} · на складе {summary?.toolsInStock ?? totals.toolsInStock} · выдано{" "}
-              {summary?.toolsIssued ?? totals.toolsIssued}
-              {(summary?.toolsInRepair ?? totals.toolsInRepair) > 0
-                ? ` · в ремонте ${summary?.toolsInRepair ?? totals.toolsInRepair}`
-                : ""}
-            </span>
-          </header>
-          <div className="homeToolChips homeToolChipsGlobal">
-            {globalToolCategories.map((c) => (
-              <span key={c.key} className="homeToolChip homeToolChipStatic">
-                {c.icon ? <span aria-hidden>{c.icon}</span> : null}
-                <span>{c.label}</span>
-                <strong>{c.count}</strong>
-                <span className="homeToolChipMeta muted">
-                  скл. {c.inStock} · выд. {c.issued}
-                  {c.inRepair > 0 ? ` · рем. ${c.inRepair}` : ""}
-                </span>
-              </span>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       {error ? <p className="error">{error}</p> : null}
       {loading && !objects.length ? <p className="muted">Загрузка…</p> : null}
 
-      {!loading && !objects.length && !error ? (
+      {!loading && sortedObjects.length > 0 ? (
+        <section className="homePanel">
+          <header className="homePanelHead">
+            <h3>Объекты</h3>
+            <span className="muted">проблемные выше · ▾ детали</span>
+          </header>
+          <div className="erpTableWrap">
+            <table className="erpTable desktopTable">
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }} />
+                  <th>Объект</th>
+                  <th>СС</th>
+                  <th>ЭОМ</th>
+                  <th>Городок</th>
+                  <th>Инструм.</th>
+                  <th>Статус</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedObjects.map((obj) => {
+                  const expanded = expandedId === obj.warehouseId;
+                  const camp = obj.campSs + obj.campEom;
+                  const tone = objectRiskStatus(obj);
+                  const rowClass =
+                    highlightWarehouseId === obj.warehouseId
+                      ? "rowHighlight"
+                      : tone === "bad"
+                        ? "rowBad"
+                        : tone === "warn"
+                          ? "rowRisk"
+                          : "";
+                  return (
+                    <Fragment key={obj.warehouseId}>
+                      <tr className={rowClass}>
+                        <td>
+                          <button
+                            type="button"
+                            className="erpRowToggle"
+                            onClick={() => onExpand(expanded ? null : obj.warehouseId)}
+                            aria-expanded={expanded}
+                          >
+                            {expanded ? "▾" : "▸"}
+                          </button>
+                        </td>
+                        <td>
+                          <strong>{obj.name}</strong>
+                          {obj.stockLines > 0 ? (
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              {obj.stockLines} поз. склада
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          {obj.limitsSs.hasTemplate ? (
+                            <button
+                              type="button"
+                              className="homeTableLink"
+                              disabled={!canLimits}
+                              onClick={() => canLimits && onOpenLimits(obj.warehouseId, "SS")}
+                            >
+                              {obj.limitsSs.percent}%
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {obj.limitsEom.hasTemplate ? (
+                            <button
+                              type="button"
+                              className="homeTableLink"
+                              disabled={!canLimits}
+                              onClick={() => canLimits && onOpenLimits(obj.warehouseId, "EOM")}
+                            >
+                              {obj.limitsEom.percent}%
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>{camp || "—"}</td>
+                        <td>{obj.tools.total}</td>
+                        <td>
+                          <StatusBadge tone={tone}>{objectRiskLabel(tone)}</StatusBadge>
+                        </td>
+                        <td>
+                          <div className="erpCellActions">
+                            {canWarehouse ? (
+                              <button type="button" className="ghostBtn" onClick={() => onOpenWarehouse?.(obj.warehouseId)}>
+                                Склад
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                      {expanded ? (
+                        <tr key={`${obj.warehouseId}-exp`} className="erpTableExpand">
+                          <td colSpan={8}>
+                            <div className="erpTableExpandInner">
+                              {canCamp ? (
+                                <button type="button" className="ghostBtn" onClick={() => onOpenCamp(obj.warehouseId)}>
+                                  Городок ({camp})
+                                </button>
+                              ) : null}
+                              {canLimits && obj.limitsSs.hasTemplate ? (
+                                <button type="button" className="ghostBtn" onClick={() => onOpenLimits(obj.warehouseId, "SS")}>
+                                  Лимиты СС
+                                </button>
+                              ) : null}
+                              {canLimits && obj.limitsEom.hasTemplate ? (
+                                <button type="button" className="ghostBtn" onClick={() => onOpenLimits(obj.warehouseId, "EOM")}>
+                                  Лимиты ЭОМ
+                                </button>
+                              ) : null}
+                              {canTools ? (
+                                <button type="button" className="ghostBtn" onClick={() => onOpenTools(obj.warehouseId)}>
+                                  Инструменты ({obj.tools.total})
+                                </button>
+                              ) : null}
+                              {canOperations && obj.receiptOpen > 0 ? (
+                                <button type="button" className="ghostBtn" onClick={() => onOpenOperations?.(obj.warehouseId)}>
+                                  Приёмки ({obj.receiptOpen})
+                                </button>
+                              ) : null}
+                              {obj.limitsSs.overCount + obj.limitsEom.overCount > 0 ? (
+                                <span className="muted">Перерасход по лимитам</span>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : !loading && !error ? (
         <p className="muted">Нет доступных объектов для отображения.</p>
       ) : null}
+        </div>
 
-      <div className="homeObjectList">
-        <h3 className="homeObjectListTitle">По объектам</h3>
-        {objects.map((obj) => {
-          const expanded = expandedId === obj.warehouseId;
-          const camp = obj.campSs + obj.campEom;
-          const overTotal = obj.limitsSs.overCount + obj.limitsEom.overCount;
-          return (
-            <article
-              key={obj.warehouseId}
-              className={`homeObjectCard ${expanded ? "expanded" : ""} ${
-                highlightWarehouseId && highlightWarehouseId === obj.warehouseId ? "current" : ""
-              }`}
-            >
-              <header className="homeObjectHead">
-                <button
-                  type="button"
-                  className="homeObjectExpand"
-                  onClick={() => onExpand(expanded ? null : obj.warehouseId)}
-                  aria-expanded={expanded}
-                  title={expanded ? "Свернуть" : "Подробнее"}
-                >
-                  {expanded ? "▾" : "▸"}
-                </button>
-                <span className="homeObjectName">{obj.name}</span>
-                {obj.stockLines > 0 ? (
-                  <span className="homeObjectMeta muted">{obj.stockLines} поз. склада</span>
-                ) : null}
-                {obj.receiptOpen > 0 ? (
-                  <span className="homeObjectMeta warn">{obj.receiptOpen} приём.</span>
-                ) : null}
-              </header>
-
-              <div className="homeObjectMetrics homeObjectMetrics4">
-                <button
-                  type="button"
-                  className="homeMetric"
-                  disabled={!canCamp}
-                  onClick={() => canCamp && onOpenCamp(obj.warehouseId)}
-                  title="Открыть городок"
-                >
-                  <span className="homeMetricLabel">Городок</span>
-                  <span className="homeMetricValue">{camp}</span>
-                  <span className="homeMetricHint muted">
-                    СС {obj.campSs} · ЭОМ {obj.campEom}
-                  </span>
-                </button>
-
-                <LimitMetric
-                  label="Лимиты СС"
-                  slice={obj.limitsSs}
-                  disabled={!canLimits || !obj.limitsSs.hasTemplate}
-                  onClick={() => canLimits && obj.limitsSs.hasTemplate && onOpenLimits(obj.warehouseId, "SS")}
-                />
-
-                <LimitMetric
-                  label="Лимиты ЭОМ"
-                  slice={obj.limitsEom}
-                  disabled={!canLimits || !obj.limitsEom.hasTemplate}
-                  onClick={() => canLimits && obj.limitsEom.hasTemplate && onOpenLimits(obj.warehouseId, "EOM")}
-                />
-
-                <button
-                  type="button"
-                  className="homeMetric"
-                  disabled={!canTools}
-                  onClick={() => canTools && onOpenTools(obj.warehouseId)}
-                  title="Открыть инструменты"
-                >
-                  <span className="homeMetricLabel">Инструменты</span>
-                  <span className="homeMetricValue">{obj.tools.total}</span>
-                  <span className="homeMetricHint muted">
-                    склад {obj.tools.inStock} · выд. {obj.tools.issued}
-                    {obj.tools.inRepair > 0 ? ` · рем. ${obj.tools.inRepair}` : ""}
-                  </span>
-                </button>
-              </div>
-
-              {expanded ? (
-                <div className="homeObjectDetail">
-                  {obj.tools.categories.length ? (
-                    <div className="homeDetailBlock">
-                      <span className="homeDetailTitle">Категории инструментов</span>
-                      <ResponsiveContainer width="100%" height={Math.min(160, 28 + obj.tools.categories.length * 22)}>
-                        <BarChart
-                          data={obj.tools.categories.map((c) => ({
-                            name: shortName(c.label, 14),
-                            count: c.count
-                          }))}
-                          layout="vertical"
-                          margin={{ top: 0, right: 8, left: 0, bottom: 0 }}
-                        >
-                          <XAxis type="number" hide />
-                          <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 10, fill: "#64748b" }} />
-                          <Bar dataKey="count" fill="#818cf8" radius={[0, 4, 4, 0]} barSize={12} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                      <div className="homeToolChips">
-                        {obj.tools.categories.map((c) => (
-                          <button
-                            key={c.key}
-                            type="button"
-                            className="homeToolChip"
-                            disabled={!canTools}
-                            onClick={() => canTools && onOpenTools(obj.warehouseId)}
-                          >
-                            {c.icon ? <span aria-hidden>{c.icon}</span> : null}
-                            <span>{c.label}</span>
-                            <strong>{c.count}</strong>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="muted homeDetailFoot">Инструменты не заведены.</p>
-                  )}
-                  {overTotal > 0 ? (
-                    <p className="homeDetailWarn">
-                      Перерасход: {overTotal} {overTotal === 1 ? "позиция" : "позиций"} сверх плана
-                      {obj.limitsSs.overCount > 0 && obj.limitsEom.overCount > 0
-                        ? ` (СС ${obj.limitsSs.overCount}, ЭОМ ${obj.limitsEom.overCount})`
-                        : obj.limitsSs.overCount > 0
-                          ? " (СС)"
-                          : " (ЭОМ)"}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </article>
-          );
-        })}
+        <aside className="homeDashboardAside">{announcements}</aside>
       </div>
     </div>
   );

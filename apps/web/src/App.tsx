@@ -43,15 +43,30 @@ import {
   type HomeOverviewSummary
 } from "./widgets/home/HomeOverview";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
+import { LimitsRiskTable } from "./widgets/limits/LimitsRiskTable";
+import { ToolsCategoryTable } from "./widgets/tools/ToolsCategoryTable";
+import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
+import {
+  ApprovalsIssueQueueTable,
+  ApprovalsReceiptRequestsTable
+} from "./widgets/approvals/ApprovalsQueueTables";
+import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
+import { receiptStatusLabel, receiptStatusTone } from "./widgets/receipts/receiptLabels";
+import { ReportsSnapshotHero } from "./widgets/reports/ReportsSnapshotHero";
+import { StatusBadge } from "./shared/ui/StatusBadge";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
+import { VerificationsTab } from "./widgets/verifications/VerificationsTab";
+import { ToolDetailDrawer } from "./widgets/tools/ToolDetailDrawer";
+import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
+import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
-import { PageHero } from "./widgets/ui/PageHero";
+import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
@@ -330,6 +345,7 @@ type ToolItem = {
   warehouse?: { id: string; name: string } | null;
   responsible?: string | null;
   note?: string | null;
+  calibrationDueAt?: string | null;
   createdAt: string;
 };
 type ToolWarehouseSummaryRow = {
@@ -661,6 +677,7 @@ function App() {
     | "materialReport"
     | "reports"
     | "acts"
+    | "verifications"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -775,6 +792,7 @@ function App() {
     Record<string, Pick<LimitSupplyMetricRow, "arrivedQty" | "issuedQty" | "onOrderQty" | "stockQty">>
   >({});
   const [limitEditMode, setLimitEditMode] = useState(false);
+  const [limitShowOnlyRisk, setLimitShowOnlyRisk] = useState(false);
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
   // Локальные «черновики» правки строк лимита: ключ — id узла шаблона.
   const [limitNodeDrafts, setLimitNodeDrafts] = useState<
@@ -1016,7 +1034,8 @@ function App() {
   const [transferReqNote, setTransferReqNote] = useState("");
   const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
-  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser">("");
+  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser" | "tool" | "requestMaterials">("");
+  const [toolCalibrationDraft, setToolCalibrationDraft] = useState("");
   const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
   const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
   const [homeOverviewError, setHomeOverviewError] = useState("");
@@ -2053,6 +2072,21 @@ function App() {
     }
   }
 
+  function openToolDrawer(toolId: string) {
+    setToolDetailModalId(toolId);
+    setSelectedToolForEvents(toolId);
+    setDrawerMode("tool");
+    void loadToolEvents(toolId);
+    const t =
+      (toolDetailRecord?.id === toolId ? toolDetailRecord : null) || tools.find((x) => x.id === toolId);
+    if (t?.calibrationDueAt) {
+      const d = new Date(t.calibrationDueAt);
+      setToolCalibrationDraft(Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10));
+    } else {
+      setToolCalibrationDraft("");
+    }
+  }
+
   function openHomeObjectTab(warehouseId: string, tab: "camp" | "limits" | "tools") {
     setActiveObjectId(warehouseId);
     setActiveTab(tab);
@@ -2247,6 +2281,24 @@ function App() {
     }
     if (entityType === "toolevent" || entityType === "tool") {
       setActiveTab("tools");
+      if (notification.entityId) openToolDrawer(notification.entityId);
+      return;
+    }
+    if (entityType.includes("warehouse") || entityType === "stock") {
+      if (notification.entityId) {
+        setActiveObjectId(notification.entityId);
+        setTabWarehouseFilters((prev) => ({ ...prev, warehouse: notification.entityId! }));
+      }
+      setActiveTab("warehouse");
+      return;
+    }
+    if (entityType === "operation" || entityType === "stockmovement") {
+      setActiveTab("warehouse");
+      return;
+    }
+    if (entityType.includes("camp")) {
+      if (notification.entityId) setActiveObjectId(notification.entityId);
+      setActiveTab("camp");
       return;
     }
     if (entityType === "feedbackticket") {
@@ -4365,6 +4417,13 @@ function App() {
     if (["REJECTED", "LOST", "DAMAGED", "WRITTEN_OFF", "DISPUTED"].includes(s)) return "bad";
     return "neutral";
   }
+  const issueStatusTone = (status: string): "ok" | "warn" | "bad" | "neutral" => {
+    const c = statusClass(status);
+    if (c === "ok") return "ok";
+    if (c === "warn") return "warn";
+    if (c === "bad") return "bad";
+    return "neutral";
+  };
 
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
@@ -4616,6 +4675,7 @@ function App() {
     if (canReadTools) {
       visibleTabs.add("tools");
       visibleTabs.add("qr");
+      visibleTabs.add("verifications");
     }
     if (canReadLimits) visibleTabs.add("limits");
     if (canMaterialReport) visibleTabs.add("materialReport");
@@ -5395,12 +5455,13 @@ function App() {
         </div>
         <div className="sidebarNavScroll">
           {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
-          {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▦</span>Склад</button>}
-          {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">▧</span>Лимиты</button>}
+          {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▤</span>Склад</button>}
+          {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">⚑</span>Лимиты</button>}
           {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
-          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↗</span>Приходы</button>}
+          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↙</span>Приходы</button>}
           {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
           {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
+          {canReadTools && <button className={`navBtn ${activeTab === "verifications" ? "active" : ""}`} onClick={() => setActiveTab("verifications")}><span className="navIcon">◷</span>Поверки</button>}
           {canReadNotifications && (
             <button
               className={`navBtn ${activeTab === "notifications" ? "active" : ""}`}
@@ -5437,9 +5498,9 @@ function App() {
 
           {sidebarMoreOpen ? (
             <div className="navMoreGroup">
-              {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">⇆</span>Перемещения</button>}
-              {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▤</span>Документы</button>}
-              <button className={`navBtn ${activeTab === "acts" ? "active" : ""}`} onClick={() => setActiveTab("acts")}><span className="navIcon">📋</span>Акты</button>
+              {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">↔</span>Перемещения</button>}
+              {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▣</span>Документы</button>}
+              <button className={`navBtn ${activeTab === "acts" ? "active" : ""}`} onClick={() => setActiveTab("acts")}><span className="navIcon">▣</span>Акты</button>
               {canMaterialReport && (
                 <button
                   type="button"
@@ -5595,6 +5656,25 @@ function App() {
             canTools={canReadTools}
             canWarehouse={canReadStocks}
             canOperations={canReadOperations}
+            onOpenQr={canReadTools ? () => setActiveTab("qr") : undefined}
+            onOpenIssues={canReadIssues ? () => setActiveTab("issues") : undefined}
+            onOpenApprovals={canReadIssues ? () => setActiveTab("approvals") : undefined}
+            onOpenVerifications={canReadTools ? () => setActiveTab("verifications") : undefined}
+            onCreateRequest={
+              canReadIssues
+                ? () => {
+                    setActiveTab("approvals");
+                  }
+                : undefined
+            }
+            onAcceptReturn={
+              canReadOperations
+                ? () => {
+                    setActiveTab("operations");
+                    setOperationsSubTab("toolReceipt");
+                  }
+                : undefined
+            }
           />
         )}
       {activeTab === "warehouse" && (
@@ -5677,6 +5757,15 @@ function App() {
             acceptedByMaterialId={acceptedBySourceByTargetId}
             movementsLoading={stockMovementsLoading}
             movementsError={stockMovementsError}
+          />
+          <WarehouseZonesTable
+            rows={warehouseVisibleRows.map((r) => ({
+              storageRoom: r.storageRoom,
+              storageCell: r.storageCell,
+              materialName: r.materialName,
+              quantity: r.quantity,
+              unit: r.materialUnit
+            }))}
           />
         </div>
       )}
@@ -6730,6 +6819,20 @@ function App() {
             />
           )}
 
+          {receiptRequests.length > 0 ? (
+            <div className="erpTableWrap" style={{ marginTop: 12 }}>
+              <table className="erpTable desktopTable">
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }} />
+                    <th>Заявка</th>
+                    <th>Статус</th>
+                    <th>Прогресс</th>
+                    <th style={{ width: 72 }}>Поз.</th>
+                    <th style={{ width: 200 }}>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
           {receiptRequests.map((row) => {
             const isExpanded = expandedReceiptIds[row.id] !== false; // по умолчанию открыты
             const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
@@ -6742,87 +6845,74 @@ function App() {
             const datalistId = `receipt-mat-suggest-${row.id}`;
             const linkedTplNodes = linkedTemplate?.nodes?.filter((n) => n.nodeType === "MATERIAL") || [];
             return (
-              <div key={`receipt-${row.id}`} className="card" style={{ marginTop: 12 }}>
-                <div className="rightCardHeader" style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="toolbar" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                      <h3 style={{ margin: 0 }}>{row.number}</h3>
-                      <span
-                        className={`badge ${row.status === "RECEIVED" ? "ok" : row.status === "CANCELLED" ? "bad" : ""}`}
-                      >
-                        {row.status === "NEW"
-                          ? "Новая"
-                          : row.status === "IN_PROGRESS"
-                          ? "Частично принята"
-                          : row.status === "RECEIVED"
-                          ? "Принята полностью"
-                          : "Отменена"}
-                      </span>
-                      {row.fromLimit && (
-                        <span className="badge ok">
-                          Из лимита{linkedTemplate ? ` · ${safeName(linkedTemplate.title)}` : ""}
-                        </span>
-                      )}
-                    </div>
-                    <p className="muted" style={{ margin: "4px 0 0" }}>
-                      {row.section} · позиций {row.items.length} ·{" "}
-                      принято {acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} из{" "}
+              <>
+                <tr key={`receipt-h-${row.id}`} className={isExpanded ? "rowHighlight" : undefined}>
+                  <td>
+                    <button
+                      type="button"
+                      className="erpRowToggle"
+                      aria-label={isExpanded ? "Свернуть" : "Развернуть"}
+                      onClick={() => setExpandedReceiptIds((prev) => ({ ...prev, [row.id]: !isExpanded }))}
+                    >
+                      {isExpanded ? "▼" : "▶"}
+                    </button>
+                  </td>
+                  <td>
+                    <strong>{row.number}</strong>
+                    {row.fromLimit ? (
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        Из лимита{linkedTemplate ? ` · ${safeName(linkedTemplate.title)}` : ""}
+                      </div>
+                    ) : null}
+                    {row.sourceFileName ? (
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {row.sourceFileName}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    <StatusBadge tone={receiptStatusTone(row.status)}>{receiptStatusLabel(row.status)}</StatusBadge>
+                  </td>
+                  <td>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
                       {totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} ({donePct}%)
-                      {row.sourceFileName ? ` · файл: ${row.sourceFileName}` : ""}
-                    </p>
-                    <div className="progressWrap" style={{ width: "100%", marginTop: 6 }}>
+                    </div>
+                    <div className="progressWrap" style={{ width: "100%", marginTop: 4, maxWidth: 160 }}>
                       <div className="progressBar" style={{ width: `${donePct}%` }} />
                     </div>
-                  </div>
-                  <div className="toolbar" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() => openDocumentsForEntity("receipt", row.id)}
-                    >
-                      Документы
-                    </button>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() => {
-                        setLimitPromptTemplateId(row.objectLimitTemplateId || "");
-                        setLimitPromptRequest(row);
-                      }}
-                    >
-                      {row.fromLimit ? "Изменить лимит" : "Связать с лимитом"}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      onClick={() =>
-                        setExpandedReceiptIds((prev) => ({ ...prev, [row.id]: !isExpanded }))
-                      }
-                    >
-                      {isExpanded ? "Свернуть" : "Развернуть"}
-                    </button>
-                    {row.status !== "CANCELLED" && row.status !== "RECEIVED" ? (
+                  </td>
+                  <td>{row.items.length}</td>
+                  <td>
+                    <div className="erpCellActions">
+                      <button type="button" className="ghostBtn" onClick={() => openDocumentsForEntity("receipt", row.id)}>
+                        Док.
+                      </button>
                       <button
                         type="button"
-                        className="dangerBtn"
-                        onClick={() => void cancelReceiptRequest(row.id)}
-                        title="Отменить заявку. Потребуется указать причину."
+                        className="ghostBtn"
+                        onClick={() => {
+                          setLimitPromptTemplateId(row.objectLimitTemplateId || "");
+                          setLimitPromptRequest(row);
+                        }}
                       >
-                        Отменить
+                        Лимит
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="dangerBtn"
-                      onClick={() => void deleteReceiptRequest(row.id)}
-                      title="Удалить заявку. Потребуется указать причину."
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                </div>
-
-                {isExpanded && (
+                      {!finished ? (
+                        <button type="button" className="ghostBtn" onClick={() => void cancelReceiptRequest(row.id)}>
+                          Отмена
+                        </button>
+                      ) : null}
+                      <button type="button" className="ghostBtn" onClick={() => void deleteReceiptRequest(row.id)}>
+                        Удал.
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {isExpanded ? (
+                  <tr key={`receipt-e-${row.id}`} className="erpTableExpand">
+                    <td colSpan={6}>
+                      <div className="erpTableExpandInner" style={{ display: "block", width: "100%" }}>
                   <>
                     <datalist id={datalistId}>
                       {materials.map((m) => (
@@ -6909,13 +6999,13 @@ function App() {
                             </label>
                           </div>
 
-                          <div className="desktopTable" style={{ overflowX: "auto", marginTop: 8 }}>
+                          <div className="erpTableWrap" style={{ marginTop: 8 }}>
                             {itemsLeft.length === 0 ? (
                               <p className="muted" style={{ padding: "8px 0" }}>
                                 Все позиции по этой заявке уже приняты.
                               </p>
                             ) : (
-                            <table>
+                            <table className="erpTable desktopTable">
                               <thead>
                                 <tr>
                                   <th style={{ width: 36 }}>✓</th>
@@ -7138,15 +7228,27 @@ function App() {
                       );
                     })()}
                   </>
-                )}
-              </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </>
             );
           })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
 
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Последние приходы</h3>
-            <p className="muted">Каждая приёмка по заявке создаёт операцию INCOME — здесь видна история и прикреплённые сканы.</p>
-            <table className="desktopTable">
+          <div className="homePanel" style={{ marginTop: 12 }}>
+            <div className="homePanelHead">
+              <h3>Последние приходы</h3>
+            </div>
+            <p className="muted" style={{ margin: "0 0 8px" }}>
+              Каждая приёмка по заявке создаёт операцию INCOME — история и прикреплённые сканы.
+            </p>
+            <div className="erpTableWrap">
+            <table className="erpTable desktopTable">
               <thead>
                 <tr><th>Документ</th><th>Дата</th><th>Файлы</th></tr>
               </thead>
@@ -7160,6 +7262,7 @@ function App() {
                 ))}
               </tbody>
             </table>
+            </div>
             <div className="mobileCards">
               {operations.filter((o) => o.type === "INCOME").slice(0, 20).map((o) => (
                 <article key={`m-op-${o.id}`} className="mobileCard">
@@ -7741,7 +7844,8 @@ function App() {
             )}
             {!issuesLoading && !issuesError && issues.length > 0 && (
               <>
-                <table className="desktopTable issueHistoryTable">
+                <div className="erpTableWrap">
+                <table className="erpTable desktopTable issueHistoryTable">
                   <thead>
                     <tr>
                       <th>Номер</th>
@@ -7788,6 +7892,7 @@ function App() {
                     ))}
                   </tbody>
                 </table>
+                </div>
                 <div className="mobileCards">
                   {issues.map((i) => (
                     <article key={`m-issue-${i.id}`} className="mobileCard">
@@ -7954,6 +8059,20 @@ function App() {
           {limitTemplatesLoading && <LoadingState text="Загрузка лимитов..." />}
           {!limitTemplatesLoading && !limitTemplates.length && (
             <EmptyState title="Лимиты не загружены" hint="Импортируйте Excel-файл, чтобы увидеть дерево разделов и материалов." />
+          )}
+
+          {!limitTemplatesLoading && limitTemplates.length > 0 && (
+            <LimitsRiskTable
+              templates={limitTemplates}
+              issuedTotalsByMaterialId={issuedTotalsByMaterialId}
+              limitSupplyByMaterialId={limitSupplyByMaterialId}
+              showOnlyRisk={limitShowOnlyRisk}
+              onShowOnlyRiskChange={setLimitShowOnlyRisk}
+              onOpenMaterial={(materialId) => {
+                const warehouseId = exportWarehouseId || activeObjectId || "";
+                if (warehouseId) setMaterialEditModal({ materialId, warehouseId });
+              }}
+            />
           )}
 
           {limitTemplates.map((tpl) => (
@@ -8926,141 +9045,42 @@ function App() {
               Согласование: инструмент
             </button>
           </div>
-          <h3>Очередь на выдачу</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Показаны заявки со статусом «на рассмотрении» для выбранного типа (
-            {approvalQueueTab === "TOOLS"
-              ? "инструмент"
-              : approvalQueueTab === "CONSUMABLES"
-                ? "расходники"
-                : approvalQueueTab === "WORKWEAR"
-                  ? "спецодежда"
-                  : "материалы"}
-            ).
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>Номер</th>
-                <th>Склад</th>
-                <th>Инициатор</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {approvalQueue.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="muted">
-                    В очереди ничего нет для этого типа.
-                  </td>
-                </tr>
-              ) : (
-              approvalQueue.map((i) => (
-                <tr key={i.id}>
-                  <td>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      style={{
-                        padding: 0,
-                        background: "transparent",
-                        border: "none",
-                        color: "#2563eb",
-                        textDecoration: "underline dotted",
-                        fontWeight: 700,
-                        cursor: "pointer"
-                      }}
-                      title="Электронная таблица материалов заявки"
-                      onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
-                    >
-                      {i.number}
-                    </button>
-                  </td>
-                  <td>{i.warehouse?.name || i.warehouseId}</td>
-                  <td>{i.requestedBy?.fullName || i.requestedById}</td>
-                  <td><span className={`badge ${statusClass(i.status)}`}>{issueStatusLabel(i.status)}</span></td>
-                  <td>
-                    <div className="toolbar">
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() => setRequestMaterialsModal({ kind: "issue", row: i })}
-                      >
-                        Таблица
-                      </button>
-                      <button onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
-                      <button onClick={() => void executeIssueAction(i.id, "approve", { fromApprovals: true })}>Одобрить</button>
-                      <button onClick={() => void executeIssueAction(i.id, "reject", { fromApprovals: true })}>Отклонить</button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-              )}
-            </tbody>
-          </table>
-          <h3 style={{ marginTop: 18 }}>Приходные заявки</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Номер</th>
-                <th>Файл</th>
-                <th>Статус</th>
-                <th>Позиции</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {receiptRequests.map((row) => (
-                <tr key={`approval-receipt-${row.id}`}>
-                  <td>
-                    <button
-                      type="button"
-                      className="ghostBtn"
-                      style={{
-                        padding: 0,
-                        background: "transparent",
-                        border: "none",
-                        color: "#2563eb",
-                        textDecoration: "underline dotted",
-                        fontWeight: 700,
-                        cursor: "pointer"
-                      }}
-                      title="Электронная таблица материалов заявки"
-                      onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
-                    >
-                      {row.number}
-                    </button>
-                  </td>
-                  <td>{row.sourceFileName || "—"}</td>
-                  <td><span className={`badge ${row.status === "RECEIVED" ? "ok" : "warn"}`}>{row.status}</span></td>
-                  <td>{row.items.length}</td>
-                  <td>
-                    <div className="toolbar">
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() => setRequestMaterialsModal({ kind: "receipt", row })}
-                      >
-                        Таблица
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveTab("operations");
-                          setOperationsSubTab("materialReceipts");
-                          setExpandedReceiptIds((prev) => ({ ...prev, [row.id]: true }));
-                        }}
-                      >
-                        Открыть приёмку
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!receiptRequests.length && <p className="muted">Приходных заявок пока нет.</p>}
+          <ApprovalsIssueQueueTable
+            rows={approvalQueue}
+            issueStatusLabel={issueStatusLabel}
+            statusTone={issueStatusTone}
+            domainLabel={`На рассмотрении · ${
+              approvalQueueTab === "TOOLS"
+                ? "инструмент"
+                : approvalQueueTab === "CONSUMABLES"
+                  ? "расходники"
+                  : approvalQueueTab === "WORKWEAR"
+                    ? "спецодежда"
+                    : "материалы"
+            }`}
+            onOpenTable={(i) => {
+              setRequestMaterialsModal({ kind: "issue", row: i });
+              setDrawerMode("requestMaterials");
+            }}
+            onOpenDetails={(id) => {
+              setSelectedIssueId(id);
+              setDrawerMode("issue");
+            }}
+            onApprove={(id) => void executeIssueAction(id, "approve", { fromApprovals: true })}
+            onReject={(id) => void executeIssueAction(id, "reject", { fromApprovals: true })}
+          />
+          <ApprovalsReceiptRequestsTable
+            rows={receiptRequests}
+            onOpenTable={(row) => {
+              setRequestMaterialsModal({ kind: "receipt", row });
+              setDrawerMode("requestMaterials");
+            }}
+            onOpenReceipt={(id) => {
+              setActiveTab("operations");
+              setOperationsSubTab("materialReceipts");
+              setExpandedReceiptIds((prev) => ({ ...prev, [id]: true }));
+            }}
+          />
         </div>
       )}
 
@@ -9095,282 +9115,114 @@ function App() {
               })
             : documents
         ).slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        return (
-          <div>
-            {renderTabObjectFilter()}
-            <PageHero
-              icon="▤"
-              title="Документы"
-              subtitle="Поиск и просмотр загруженных файлов системы"
-              stats={[
-                { label: "Найдено", value: visibleDocs.length },
-                { label: "Всего", value: documents.length }
-              ]}
-            />
-
-            <div className="tabs" style={{ flexWrap: "wrap", marginTop: 8 }}>
-              {docTypeTabs.map((tab) => (
-                <button
-                  key={tab.id || "all"}
-                  className={docTypeFilter === tab.id ? "active" : ""}
-                  onClick={() => {
-                    setDocTypeFilter(tab.id);
-                    setSelectedDocumentId("");
-                    setDocPreviewUrl("");
-                  }}
-                >
-                  {tab.label}
-                </button>
+        const entitySelect =
+          docEntityType === "issue" ? (
+            <select
+              value={docEntityId}
+              onChange={(e) => {
+                setDocEntityId(e.target.value);
+                setSelectedDocumentId("");
+                setDocPreviewUrl("");
+              }}
+              aria-label="Заявка на выдачу"
+            >
+              <option value="">Все заявки</option>
+              {issues.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.number} ({issueStatusLabel(i.status)})
+                </option>
               ))}
-            </div>
+            </select>
+          ) : docEntityType === "operation" ? (
+            <select
+              value={docEntityId}
+              onChange={(e) => {
+                setDocEntityId(e.target.value);
+                setSelectedDocumentId("");
+                setDocPreviewUrl("");
+              }}
+              aria-label="Операция"
+            >
+              <option value="">Все операции</option>
+              {operations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.documentNumber || o.id.slice(0, 8)} [{o.type}]
+                </option>
+              ))}
+            </select>
+          ) : docEntityType === "receipt" ? (
+            <select
+              value={docEntityId}
+              onChange={(e) => {
+                setDocEntityId(e.target.value);
+                setSelectedDocumentId("");
+                setDocPreviewUrl("");
+              }}
+              aria-label="Приходная заявка"
+            >
+              <option value="">Все приходные заявки</option>
+              {receiptRequests.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.number} ({receiptStatusLabel(r.status)})
+                </option>
+              ))}
+            </select>
+          ) : null;
 
-            <div className="form docCenterForm" style={{ marginTop: 8 }}>
-              <label>
-                Объект (склад)
-                <select
-                  value={docWarehouseFilter}
-                  onChange={(e) => {
-                    setDocWarehouseFilter(e.target.value);
-                    setSelectedDocumentId("");
-                    setDocPreviewUrl("");
-                  }}
-                >
-                  <option value="">Все объекты (доступные)</option>
-                  {warehouses.map((w) => (
-                    <option key={`doc-wh-${w.id}`} value={w.id}>
-                      {safeName(w.name)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Раздел источника
-                <select
-                  value={docEntityType}
-                  onChange={(e) => {
-                    setDocEntityType(e.target.value as "" | "operation" | "issue" | "receipt");
-                    setDocEntityId("");
-                    setSelectedDocumentId("");
-                    setDocPreviewUrl("");
-                  }}
-                >
-                  <option value="">Все разделы</option>
-                  <option value="issue">Заявки на выдачу</option>
-                  <option value="operation">Операции (приходы/выдачи)</option>
-                  <option value="receipt">Приходные заявки</option>
-                </select>
-              </label>
-              <label>
-                Конкретный документ
-                {docEntityType === "issue" ? (
-                  <select
-                    value={docEntityId}
-                    onChange={(e) => {
-                      setDocEntityId(e.target.value);
-                      setSelectedDocumentId("");
-                      setDocPreviewUrl("");
-                    }}
-                  >
-                    <option value="">Все заявки на выдачу</option>
-                    {issues.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.number} ({issueStatusLabel(i.status)})
-                      </option>
-                    ))}
-                  </select>
-                ) : docEntityType === "operation" ? (
-                  <select
-                    value={docEntityId}
-                    onChange={(e) => {
-                      setDocEntityId(e.target.value);
-                      setSelectedDocumentId("");
-                      setDocPreviewUrl("");
-                    }}
-                  >
-                    <option value="">Все операции</option>
-                    {operations.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {(o.documentNumber || o.id.slice(0, 8))} [{o.type}]
-                      </option>
-                    ))}
-                  </select>
-                ) : docEntityType === "receipt" ? (
-                  <select
-                    value={docEntityId}
-                    onChange={(e) => {
-                      setDocEntityId(e.target.value);
-                      setSelectedDocumentId("");
-                      setDocPreviewUrl("");
-                    }}
-                  >
-                    <option value="">Все приходные заявки</option>
-                    {receiptRequests.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.number} ({r.status})
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <select disabled>
-                    <option>Сначала выбери раздел</option>
-                  </select>
-                )}
-              </label>
-              <label>
-                Поиск по имени файла
-                <input
-                  value={docSearchQuery}
-                  onChange={(e) => setDocSearchQuery(e.target.value)}
-                  placeholder="часть имени файла…"
-                />
-              </label>
-            </div>
-
-            <div className="toolbar" style={{ flexWrap: "wrap" }}>
-              <button type="button" onClick={() => void loadDocuments()}>
-                Обновить список
-              </button>
-              {filtersActive && (
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  onClick={() => {
-                    setDocTypeFilter("");
-                    setDocEntityType("");
-                    setDocEntityId("");
-                    setDocWarehouseFilter(activeObjectId || "");
-                    setDocSearchQuery("");
-                    setSelectedDocumentId("");
-                    setDocPreviewUrl("");
-                  }}
-                >
-                  Сбросить фильтры
-                </button>
-              )}
-            </div>
-
-            {documentsMessage && <p className="muted">{documentsMessage}</p>}
-
-            <div className="docCenterSplit" style={{ marginTop: 8 }}>
-              <div className="card">
-                {!visibleDocs.length ? (
-                  <EmptyState
-                    title="Ничего не нашлось"
-                    hint={
-                      filtersActive
-                        ? "Попробуй сбросить фильтры или поменять раздел/вид документа."
-                        : "Файлы появятся здесь автоматически после приёмки или выдачи."
-                    }
-                  />
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Дата</th>
-                        <th>Версия</th>
-                        <th>Источник</th>
-                        <th>Вид</th>
-                        <th>Файл</th>
-                        <th>Размер</th>
-                        <th>Действия</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleDocs.map((d) => {
-                        const shownName = displayDocumentFileName(d.fileName, {
-                          type: d.type,
-                          createdAt: d.createdAt
-                        });
-                        return (
-                        <tr key={d.id} className={selectedDocumentId === d.id ? "selectedRow" : ""}>
-                          <td>{new Date(d.createdAt).toLocaleString()}</td>
-                          <td>v{d.version}</td>
-                          <td title={`${d.entityType}:${d.entityId}`}>
-                            {d.entityType}:{d.entityId.slice(0, 8)}…
-                          </td>
-                          <td>
-                            <span className="badge neutral">{docTypeLabel(d.type)}</span>
-                          </td>
-                          <td>
-                            <a
-                              href={`${API_URL}/${d.filePath}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={d.fileName}
-                              download={shownName}
-                            >
-                              {shownName}
-                            </a>
-                          </td>
-                          <td>
-                            {d.size ? `${Math.max(1, Math.ceil(d.size / 1024))} КБ` : "—"}
-                          </td>
-                          <td>
-                            <div className="toolbar">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedDocumentId(d.id);
-                                  setDocPreviewUrl(`${API_URL}/${d.filePath}`);
-                                }}
-                              >
-                                Превью
-                              </button>
-                              <a
-                                className="ghostBtn"
-                                href={`${API_URL}/${d.filePath}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                download={shownName}
-                              >
-                                Открыть
-                              </a>
-                              {canWriteDocuments ? (
-                                <button
-                                  type="button"
-                                  className="dangerBtn"
-                                  onClick={() => void deleteDocument(d.id, shownName)}
-                                >
-                                  Удалить
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-              <div className="card">
-                <h3>Панель предпросмотра</h3>
-                {selectedDocument ? (
-                  <>
-                    <p className="muted">
-                      {displayDocumentFileName(selectedDocument.fileName, {
-                        type: selectedDocument.type,
-                        createdAt: selectedDocument.createdAt
-                      })}{" "}
-                      • v{selectedDocument.version}
-                    </p>
-                    <iframe
-                      src={docPreviewUrl || `${API_URL}/${selectedDocument.filePath}`}
-                      title="document-preview"
-                      style={{
-                        width: "100%",
-                        minHeight: 420,
-                        border: "1px solid #d8dee9",
-                        borderRadius: 8
-                      }}
-                    />
-                  </>
-                ) : (
-                  <p className="muted">Выбери документ из списка слева.</p>
-                )}
-              </div>
-            </div>
-          </div>
+        return (
+          <DocumentsTabView
+            objectFilter={renderTabObjectFilter()}
+            documents={documents}
+            visibleDocs={visibleDocs}
+            selectedDocumentId={selectedDocumentId}
+            selectedDocument={selectedDocument}
+            docPreviewUrl={docPreviewUrl}
+            apiUrl={API_URL}
+            docTypeTabs={docTypeTabs}
+            docTypeFilter={docTypeFilter}
+            onDocTypeChange={(id) => {
+              setDocTypeFilter(id);
+              setSelectedDocumentId("");
+              setDocPreviewUrl("");
+            }}
+            docWarehouseFilter={docWarehouseFilter}
+            warehouses={warehouses}
+            onWarehouseChange={(id) => {
+              setDocWarehouseFilter(id);
+              setSelectedDocumentId("");
+              setDocPreviewUrl("");
+            }}
+            docEntityType={docEntityType}
+            onEntityTypeChange={(t) => {
+              setDocEntityType(t);
+              setDocEntityId("");
+              setSelectedDocumentId("");
+              setDocPreviewUrl("");
+            }}
+            docEntityId={docEntityId}
+            entitySelect={entitySelect}
+            docSearchQuery={docSearchQuery}
+            onSearchChange={setDocSearchQuery}
+            filtersActive={filtersActive}
+            onResetFilters={() => {
+              setDocTypeFilter("");
+              setDocEntityType("");
+              setDocEntityId("");
+              setDocWarehouseFilter(activeObjectId || "");
+              setDocSearchQuery("");
+              setSelectedDocumentId("");
+              setDocPreviewUrl("");
+            }}
+            onRefresh={() => void loadDocuments()}
+            documentsMessage={documentsMessage}
+            canWriteDocuments={canWriteDocuments}
+            onSelectPreview={(d) => {
+              setSelectedDocumentId(d.id);
+              setDocPreviewUrl(`${API_URL}/${d.filePath}`);
+            }}
+            onDelete={(id, shownName) => void deleteDocument(id, shownName)}
+            safeName={safeName}
+          />
         );
       })()}
 
@@ -9378,17 +9230,17 @@ function App() {
         <div>
           {renderTabObjectFilter()}
           <PageHero
-            icon="⇆"
-            title="Транспортные накладные"
-            subtitle="Перемещения между складами и объектами"
+            icon="↔"
+            title="Перемещения"
+            subtitle="Транспортные накладные и заявки между складами"
             stats={[
-              { label: "Всего", value: waybills.length },
+              { label: "ТН всего", value: waybills.length },
               {
                 label: "В пути",
                 value: waybills.filter((x) => x.status === "SHIPPED").length,
                 tone: waybills.filter((x) => x.status === "SHIPPED").length > 0 ? "warn" : "neutral"
               },
-              { label: "Черновики", value: waybills.filter((x) => x.status === "DRAFT").length }
+              { label: "Заявок", value: transferRequests.length }
             ]}
             actions={
               <button type="button" className="ghostBtn" onClick={() => void loadWaybills()}>
@@ -9398,16 +9250,16 @@ function App() {
           />
           {waybillsLoading && <LoadingState text="Загрузка ТН..." />}
           {waybillsError && <ErrorState text={waybillsError} />}
-          <div className="toolbar">
+          <FilterStrip>
             <select value={waybillStatusFilter} onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}>
-              <option value="">Все статусы</option>
+              <option value="">Все статусы ТН</option>
               <option value="DRAFT">{waybillStatusLabel("DRAFT")}</option>
               <option value="FORMED">{waybillStatusLabel("FORMED")}</option>
               <option value="SHIPPED">{waybillStatusLabel("SHIPPED")}</option>
               <option value="RECEIVED">{waybillStatusLabel("RECEIVED")}</option>
               <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
             </select>
-          </div>
+          </FilterStrip>
 
           <div className="grid2" style={{ marginBottom: 12 }}>
             <div className="card">
@@ -9421,7 +9273,8 @@ function App() {
               ) : peerSummaries.length === 0 ? (
                 <p className="muted">Нет сумм по другим складам (в доступе один объект или нет строк остатков).</p>
               ) : (
-                <table>
+                <div className="erpTableWrap">
+                <table className="erpTable desktopTable">
                   <thead>
                     <tr>
                       <th>Склад</th>
@@ -9439,6 +9292,7 @@ function App() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
             <div className="card">
@@ -9501,7 +9355,8 @@ function App() {
             {transferRequests.length === 0 ? (
               <p className="muted">Заявок нет.</p>
             ) : (
-              <table>
+              <div className="erpTableWrap">
+              <table className="erpTable desktopTable">
                 <thead>
                   <tr>
                     <th>Номер</th>
@@ -9514,8 +9369,8 @@ function App() {
                 <tbody>
                   {transferRequests.map((tr) => (
                     <tr key={tr.id}>
-                      <td>{tr.number}</td>
-                      <td>{transferRequestStatusLabel(tr.status)}</td>
+                      <td><strong>{tr.number}</strong></td>
+                      <td><StatusBadge tone="neutral">{transferRequestStatusLabel(tr.status)}</StatusBadge></td>
                       <td>
                         {safeName(tr.fromWarehouseName || tr.fromWarehouseId)} → {safeName(tr.toWarehouseName || tr.toWarehouseId)} ·{" "}
                         {tr.section}
@@ -9559,6 +9414,7 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
 
@@ -9656,7 +9512,8 @@ function App() {
                 </select>
                 <button onClick={() => void loadWaybillEvents(selectedWaybillId)}>История статусов</button>
               </div>
-              <table>
+              <div className="erpTableWrap">
+              <table className="erpTable desktopTable">
                 <thead>
                   <tr>
                     <th>Номер</th>
@@ -9668,8 +9525,8 @@ function App() {
                 <tbody>
                   {waybills.map((w) => (
                     <tr key={w.id}>
-                      <td>{w.number}</td>
-                      <td><span className={`badge ${statusClass(w.status)}`}>{waybillStatusLabel(w.status)}</span></td>
+                      <td><strong>{w.number}</strong></td>
+                      <td><StatusBadge tone={issueStatusTone(w.status)}>{waybillStatusLabel(w.status)}</StatusBadge></td>
                       <td>{w.toLocation}</td>
                       <td>
                         <div className="toolbar">
@@ -9685,8 +9542,10 @@ function App() {
                   ))}
                 </tbody>
               </table>
-              <h3>История статусов</h3>
-              <table>
+              </div>
+              <h3 style={{ marginTop: 12 }}>История статусов</h3>
+              <div className="erpTableWrap">
+              <table className="erpTable desktopTable">
                 <thead>
                   <tr>
                     <th>Дата</th>
@@ -9704,6 +9563,7 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="toolbar">
                 <span className="muted">
                   Показано {Math.min((waybillsPage - 1) * waybillsPageSize + 1, waybillsTotal)}-
@@ -9839,6 +9699,67 @@ function App() {
           </div>
         </aside>
       )}
+
+      {drawerMode === "tool" && toolDetailModalId && (() => {
+        const d = toolDetailRecord?.id === toolDetailModalId ? toolDetailRecord : null;
+        const t = d || tools.find((x) => x.id === toolDetailModalId) || null;
+        return (
+          <ToolDetailDrawer
+            tool={t}
+            loading={!t}
+            events={selectedToolForEvents === toolDetailModalId ? toolEvents : []}
+            eventsLoading={selectedToolForEvents === toolDetailModalId && !toolEvents.length}
+            statusLabel={toolStatusLabel}
+            actionLabel={toolActionLabel}
+            safeName={safeName}
+            calibrationDraft={toolCalibrationDraft}
+            onCalibrationDraftChange={setToolCalibrationDraft}
+            canWrite={hasPermission("tools.write")}
+            onClose={() => {
+              setDrawerMode("");
+              setToolDetailModalId(null);
+            }}
+            onSaveCalibration={async () => {
+              if (!token || !toolDetailModalId) return;
+              const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  calibrationDueAt: toolCalibrationDraft ? `${toolCalibrationDraft}T12:00:00.000Z` : null
+                })
+              });
+              if (!res.ok) {
+                setToolsMessage("Не удалось сохранить дату поверки");
+                setToolsTone("error");
+                return;
+              }
+              setToolsMessage("Дата поверки сохранена");
+              setToolsTone("neutral");
+              await loadTools().catch(() => undefined);
+            }}
+            onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
+            onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
+            onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
+            onDispute={() => t && openToolActionDialog(t.id, "MARK_DISPUTED")}
+            onWriteOff={() => t && openToolActionDialog(t.id, "WRITE_OFF")}
+            onShowQr={async () => {
+              if (!token || !t) return;
+              const res = await fetchWithSession(`${API_URL}/api/tools/${t.id}/qr`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (!res.ok) return;
+              const data = (await res.json()) as { id: string; dataUrl: string; qrCode: string };
+              setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
+            }}
+            onRefreshEvents={() => t && void loadToolEvents(t.id)}
+            qrPreview={
+              toolQrPreview && toolQrPreview.toolId === t?.id ? (
+                <img src={toolQrPreview.dataUrl} alt="QR" style={{ maxWidth: 160, marginTop: 8 }} />
+              ) : null
+            }
+          />
+        );
+      })()}
 
       {drawerMode === "waybill" && selectedWaybill && (
         <aside className="detailDrawer">
@@ -10292,42 +10213,13 @@ function App() {
                   hint="Импортируйте или добавьте инструменты — по их названиям соберутся карточки автоматически. Можно создать свою категорию."
                 />
               ) : (
-                <div className="toolsCardGrid" style={{ marginTop: 8 }}>
-                  {toolGroupCards.map((card) => (
-                    <article
-                      key={`tcat-${card.key}`}
-                      className="toolMiniCard"
-                      style={{ cursor: "pointer", borderLeft: `4px solid ${card.type === "CATEGORY" ? "#2563eb" : "#94a3b8"}` }}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setToolDrilledCard(card);
-                          setToolsPage(1);
-                        }
-                      }}
-                      onClick={() => {
-                        setToolDrilledCard(card);
-                        setToolsPage(1);
-                      }}
-                    >
-                      <div className="toolMiniCardTop">
-                        <strong className="toolMiniCardTitle">
-                          {card.icon ? `${card.icon} ` : ""}{card.label}
-                        </strong>
-                        <span className="badge ok">{card.count}</span>
-                      </div>
-                      <p className="muted toolMiniCardMeta">
-                        {card.type === "CATEGORY" ? "Категория (ручная)" : "Группа по названию"}
-                      </p>
-                      <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
-                        на складе {card.inStock} · выдано {card.issued}
-                        {card.inRepair ? ` · в ремонте ${card.inRepair}` : ""}
-                      </p>
-                    </article>
-                  ))}
-                </div>
+                <ToolsCategoryTable
+                  cards={toolGroupCards}
+                  onOpen={(card) => {
+                    setToolDrilledCard(card);
+                    setToolsPage(1);
+                  }}
+                />
               )}
             </>
           )}
@@ -10365,12 +10257,69 @@ function App() {
           {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
           {toolsError && <ErrorState text={toolsError} />}
 
-          <div className="toolbar" style={{ flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            <input
-              placeholder="Поиск (название, инв. номер, QR)"
-              value={toolSearch}
-              onChange={(e) => setToolSearch(e.target.value)}
-            />
+          <FilterStrip
+            search={
+              <input
+                placeholder="Поиск (название, инв. номер, QR)"
+                value={toolSearch}
+                onChange={(e) => setToolSearch(e.target.value)}
+              />
+            }
+            actions={
+              <>
+                <button type="button" className="ghostBtn" onClick={() => void loadTools().then(() => loadToolWarehouseSummary())}>
+                  ↻ Обновить
+                </button>
+                {hasPermission("tools.write") && (
+                  <button
+                    type="button"
+                    className="primaryBtn"
+                    onClick={() => {
+                      setToolsMessage("");
+                      setToolsTone("neutral");
+                      setToolName("");
+                      setToolSerialNumber("");
+                      setToolResponsible("");
+                      setToolInventoryNumber(`INV-${Date.now()}`);
+                      if (activeObjectId) setToolWarehouseId(activeObjectId);
+                      setToolManualModalOpen(true);
+                    }}
+                  >
+                    + Добавить
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  onClick={async () => {
+                    if (!token || !selectedToolIds.length) {
+                      setToolsMessage("Отметьте строки для печати QR");
+                      setToolsTone("conflict");
+                      return;
+                    }
+                    const res = await fetchWithSession(
+                      `${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`,
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    if (!res.ok) {
+                      setToolsMessage("Не удалось сформировать PDF");
+                      setToolsTone("error");
+                      return;
+                    }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "tool-labels.pdf";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Печать QR
+                </button>
+              </>
+            }
+          >
             <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
               <option value="">Все статусы</option>
               <option value="IN_STOCK">{toolStatusLabel("IN_STOCK")}</option>
@@ -10381,71 +10330,20 @@ function App() {
               <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
               <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
             </select>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0 }}>
-              <span className="muted">Объект</span>
-              <select value={toolListWarehouseId} onChange={(e) => setToolListWarehouseId(e.target.value)}>
-                <option value="">Все в зоне доступа</option>
-                {warehouses.map((w) => (
-                  <option key={`twf-${w.id}`} value={w.id}>
-                    {safeName(w.name)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <select value={toolListWarehouseId} onChange={(e) => setToolListWarehouseId(e.target.value)} aria-label="Объект">
+              <option value="">Все объекты</option>
+              {warehouses.map((w) => (
+                <option key={`twf-${w.id}`} value={w.id}>
+                  {safeName(w.name)}
+                </option>
+              ))}
+            </select>
             <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)}>
               <option value="created_desc">Сначала новые</option>
-              <option value="inventory">По инвентарному номеру</option>
+              <option value="inventory">По инв. номеру</option>
               <option value="status">По статусу</option>
             </select>
-            <button type="button" onClick={() => void loadTools().then(() => loadToolWarehouseSummary())}>
-              Обновить список
-            </button>
-            {hasPermission("tools.write") && (
-              <button
-                type="button"
-                className="primaryBtn"
-                onClick={() => {
-                  setToolsMessage("");
-                  setToolsTone("neutral");
-                  setToolName("");
-                  setToolSerialNumber("");
-                  setToolResponsible("");
-                  setToolInventoryNumber(`INV-${Date.now()}`);
-                  if (activeObjectId) setToolWarehouseId(activeObjectId);
-                  setToolManualModalOpen(true);
-                }}
-              >
-                Добавить вручную
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={async () => {
-                if (!token || !selectedToolIds.length) {
-                  setToolsMessage("Отметьте карточки для печати или откройте одну и сохраните");
-                  setToolsTone("conflict");
-                  return;
-                }
-                const res = await fetchWithSession(`${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`, {
-                  headers: { Authorization: `Bearer ${token}` }
-                });
-                if (!res.ok) {
-                  setToolsMessage("Не удалось сформировать PDF");
-                  setToolsTone("error");
-                  return;
-                }
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "tool-labels.pdf";
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              Печать QR (PDF)
-            </button>
-          </div>
+          </FilterStrip>
           {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
           {!toolsLoading && !toolsError && !tools.length && (
             <EmptyState title="Инструменты не найдены" hint="Смените фильтры или добавьте карточку вручную." />
@@ -10458,59 +10356,21 @@ function App() {
           )}
           {!toolsLoading && !toolsError && tools.length > 0 && (
             <>
-              <p className="muted" style={{ marginBottom: 8 }}>
-                Отметьте позиции для массовой печати QR. Клик по карточке открывает детали.
+              <p className="muted" style={{ margin: "8px 0" }}>
+                Отметьте строки для печати QR. Клик по строке — карточка инструмента.
               </p>
-              <div className="toolsCardGrid">
-                {tools.map((t) => (
-                  <article
-                    key={`tc-${t.id}`}
-                    className="toolMiniCard"
-                    style={{ cursor: "pointer" }}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setToolDetailModalId(t.id);
-                        setSelectedToolForEvents(t.id);
-                        void loadToolEvents(t.id);
-                      }
-                    }}
-                    onClick={() => {
-                      setToolDetailModalId(t.id);
-                      setSelectedToolForEvents(t.id);
-                      void loadToolEvents(t.id);
-                    }}
-                  >
-                    <div className="toolMiniCardTop">
-                      <label className="toolMiniCardCheck" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selectedToolIds.includes(t.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedToolIds((prev) => [...prev, t.id]);
-                            } else {
-                              setSelectedToolIds((prev) => prev.filter((id) => id !== t.id));
-                            }
-                          }}
-                        />
-                      </label>
-                      <strong className="toolMiniCardTitle">{safeName(t.name)}</strong>
-                      <span className={`badge ${statusClass(t.status)}`}>{toolStatusLabel(t.status)}</span>
-                    </div>
-                    <p className="muted toolMiniCardMeta">
-                      Инв. <strong>{t.inventoryNumber}</strong>
-                      {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
-                      {t.warehouse?.name ? ` · ${safeName(t.warehouse.name)}` : ""}
-                    </p>
-                    <p className="muted toolMiniCardMeta" style={{ fontSize: 12 }}>
-                      Нажмите карточку, чтобы выдать, вернуть или открыть журнал
-                    </p>
-                  </article>
-                ))}
-              </div>
+              <ToolsListTable
+                tools={tools}
+                selectedIds={selectedToolIds}
+                onToggleSelect={(id, checked) => {
+                  if (checked) setSelectedToolIds((prev) => [...prev, id]);
+                  else setSelectedToolIds((prev) => prev.filter((x) => x !== id));
+                }}
+                onOpen={(id) => openToolDrawer(id)}
+                statusLabel={toolStatusLabel}
+                statusTone={toolStatusTone}
+                safeName={safeName}
+              />
               <div className="toolbar">
                 <span className="muted">
                   Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
@@ -10808,159 +10668,6 @@ function App() {
             </div>
           )}
 
-          {toolDetailModalId && (
-            <div
-              role="dialog"
-              aria-modal="true"
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(15, 23, 42, 0.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 56,
-                padding: 16,
-                overflowY: "auto"
-              }}
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setToolDetailModalId(null);
-              }}
-            >
-              <div
-                className="card"
-                style={{ maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                {(() => {
-                  const d = toolDetailRecord && toolDetailRecord.id === toolDetailModalId ? toolDetailRecord : null;
-                  const t =
-                    d || tools.find((x) => x.id === toolDetailModalId);
-                  if (!t) {
-                    return (
-                      <>
-                        <h3 style={{ marginTop: 0 }}>Карточка инструмента</h3>
-                        <p className="muted">Загрузка данных…</p>
-                        <div className="toolbar">
-                          <button type="button" className="ghostBtn" onClick={() => setToolDetailModalId(null)}>
-                            Закрыть
-                          </button>
-                        </div>
-                      </>
-                    );
-                  }
-                  return (
-                    <>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                        <h3 style={{ marginTop: 0 }}>{safeName(t.name)}</h3>
-                        <button type="button" className="ghostBtn" onClick={() => setToolDetailModalId(null)}>
-                          Закрыть
-                        </button>
-                      </div>
-                      <p className="muted">
-                        Инв. <strong>{t.inventoryNumber}</strong>
-                        {t.serialNumber ? ` · с/н ${t.serialNumber}` : ""}
-                        {t.qrCode ? ` · ${t.qrCode}` : ""}
-                      </p>
-                      <p className="muted">
-                        Статус: <strong>{toolStatusLabel(t.status)}</strong>
-                        {t.warehouse?.name ? ` · объект: ${safeName(t.warehouse.name)}` : ""}
-                        {t.responsible ? ` · ответственный: ${t.responsible}` : ""}
-                      </p>
-                      <div className="toolbar" style={{ flexWrap: "wrap" }}>
-                        {t.status !== "ISSUED" && (
-                          <button type="button" onClick={() => openToolActionDialog(t.id, "ISSUE")}>
-                            Выдать
-                          </button>
-                        )}
-                        {t.status !== "IN_STOCK" && (
-                          <button type="button" onClick={() => openToolActionDialog(t.id, "RETURN")}>
-                            На склад
-                          </button>
-                        )}
-                        {t.status !== "IN_REPAIR" && (
-                          <button type="button" onClick={() => openToolActionDialog(t.id, "SEND_TO_REPAIR")}>
-                            В ремонт
-                          </button>
-                        )}
-                        {t.status !== "DISPUTED" && (
-                          <button type="button" onClick={() => openToolActionDialog(t.id, "MARK_DISPUTED")}>
-                            Спор
-                          </button>
-                        )}
-                        {t.status !== "WRITTEN_OFF" && (
-                          <button type="button" className="dangerBtn" onClick={() => openToolActionDialog(t.id, "WRITE_OFF")}>
-                            Списать
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="ghostBtn"
-                          onClick={async () => {
-                            if (!token) return;
-                            const res = await fetchWithSession(`${API_URL}/api/tools/${t.id}/qr`, {
-                              headers: { Authorization: `Bearer ${token}` }
-                            });
-                            if (!res.ok) {
-                              setToolsMessage("Не удалось получить QR");
-                              setToolsTone("error");
-                              return;
-                            }
-                            const data = (await res.json()) as { id: string; dataUrl: string; qrCode: string };
-                            setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
-                            setQrCode(data.qrCode);
-                          }}
-                        >
-                          Показать QR
-                        </button>
-                      </div>
-                      <h4 style={{ marginBottom: 8 }}>Журнал</h4>
-                      <div className="toolbar">
-                        <button type="button" onClick={() => void loadToolEvents(t.id)}>
-                          Обновить журнал
-                        </button>
-                      </div>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Дата</th>
-                            <th>Действие</th>
-                            <th>Статус</th>
-                            <th>Комментарий</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedToolForEvents !== t.id ? (
-                            <tr>
-                              <td colSpan={4} className="muted">
-                                Загрузка журнала…
-                              </td>
-                            </tr>
-                          ) : toolEvents.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="muted">
-                                Записей пока нет
-                              </td>
-                            </tr>
-                          ) : (
-                            toolEvents.map((e) => (
-                              <tr key={e.id}>
-                                <td>{new Date(e.createdAt).toLocaleString()}</td>
-                                <td>{toolActionLabel(e.action)}</td>
-                                <td>{toolStatusLabel(e.status)}</td>
-                                <td>{e.comment || "-"}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-
           {toolAction && (
             <div className="card">
               <h3>Подтверждение действия: {toolActionLabel(toolAction.action)}</h3>
@@ -11021,7 +10728,32 @@ function App() {
         />
       ) : null}
 
-      {activeTab === "acts" && <ActsTab />}
+      {activeTab === "acts" && (
+        <ActsTab
+          token={token}
+          apiUrl={API_URL}
+          fetchWithSession={fetchWithSession}
+          canUpload={canWriteDocuments}
+        />
+      )}
+
+      {activeTab === "verifications" && canReadTools && (
+        <>
+          {renderTabObjectFilter()}
+          <VerificationsTab
+            token={token}
+            apiUrl={API_URL}
+            section={objectSectionFilter}
+            warehouseId={effectiveWarehouseId || ""}
+            warehouses={warehouses}
+            fetchWithSession={fetchWithSession}
+            onOpenTool={openToolDrawer}
+            statusLabel={toolStatusLabel}
+            statusTone={toolStatusTone}
+            safeName={safeName}
+          />
+        </>
+      )}
 
       {activeTab === "feedback" && (
         <div>
@@ -11209,46 +10941,25 @@ function App() {
 
       {activeTab === "reports" && (
         <div>
-          <PageHero
-            icon="📄"
-            title="Сводка по объекту"
-            subtitle="Остатки, заявки, операции, ТН, лимиты — единым отчётом"
-          />
           {renderTabObjectFilter()}
-          <div className="card form" style={{ marginBottom: 8 }}>
-            {!effectiveWarehouseId ? (
-              <p className="muted">
-                {isAllObjectsView
-                  ? "Выберите объект в фильтре вкладки или скачайте Excel по всем доступным объектам ниже."
-                  : "Выберите объект в верхней панели, затем сформируйте сводку."}
-              </p>
-            ) : (
-              <div>
-                <strong>Текущий объект:</strong>{" "}
-                {safeName(
-                  availableObjects.find((o) => o.id === effectiveWarehouseId)?.name ||
-                    warehouses.find((w) => w.id === effectiveWarehouseId)?.name
-                )}
-                <span className="muted">
-                  {" "}
-                  · Раздел в шапке: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"}
-                </span>
-              </div>
-            )}
-          </div>
-          <ObjectExportsPanel
-            token={token}
-            apiUrl={API_URL}
-            fetchWithSession={fetchWithSession}
-            hasPermission={hasPermission}
-            warehouseId={effectiveWarehouseId || undefined}
-            section={objectSectionFilter}
-            warehouses={objectFilterWarehouses}
-            title="Excel по объектам (все виды отчётов)"
-          />
-          <div className="toolbar">
+          <ReportsSnapshotHero
+            warehouseName={
+              effectiveWarehouseId
+                ? safeName(
+                    availableObjects.find((o) => o.id === effectiveWarehouseId)?.name ||
+                      warehouses.find((w) => w.id === effectiveWarehouseId)?.name ||
+                      ""
+                  )
+                : isAllObjectsView
+                  ? "Все объекты — выберите объект для сводки"
+                  : "Объект не выбран"
+            }
+            generatedAt={warehouseSnapshot?.generatedAt || new Date().toISOString()}
+            counts={warehouseSnapshot?.counts ?? null}
+          >
             <button
               type="button"
+              className="primaryBtn"
               disabled={!token || !effectiveWarehouseId || reportsSnapshotLoading}
               onClick={() => void loadWarehouseSummarySnapshot()}
             >
@@ -11256,15 +10967,14 @@ function App() {
             </button>
             <button
               type="button"
+              className="ghostBtn"
               disabled={!token || !effectiveWarehouseId}
               onClick={async () => {
                 if (!token || !effectiveWarehouseId) return;
                 setReportsMessage("");
                 const res = await fetchWithSession(
                   `${API_URL}/api/reports/warehouse/${encodeURIComponent(effectiveWarehouseId)}/summary.pdf`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` }
-                  }
+                  { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (!res.ok) {
                   setReportsMessage("Не удалось сформировать PDF");
@@ -11284,8 +10994,43 @@ function App() {
             >
               Скачать PDF
             </button>
-          </div>
+          </ReportsSnapshotHero>
+          {!effectiveWarehouseId ? (
+            <p className="muted" style={{ margin: "0 0 8px" }}>
+              {isAllObjectsView
+                ? "Выберите объект в фильтре или скачайте Excel по всем доступным объектам ниже."
+                : "Выберите объект в шапке, затем сформируйте сводку."}
+            </p>
+          ) : null}
+          <ObjectExportsPanel
+            token={token}
+            apiUrl={API_URL}
+            fetchWithSession={fetchWithSession}
+            hasPermission={hasPermission}
+            warehouseId={effectiveWarehouseId || undefined}
+            section={objectSectionFilter}
+            warehouses={objectFilterWarehouses}
+            title="Excel по объектам (все виды отчётов)"
+          />
           {reportsMessage && <ResultBanner text={reportsMessage} tone={reportsMessage.includes("Не удалось") ? "error" : "neutral"} />}
+
+          <ReportsRiskPanel
+            limitsOver={homeOverview?.summary?.limitsOverLines ?? 0}
+            calibrationOverdue={homeOverview?.summary?.toolsCalibrationOverdue ?? 0}
+            receiptOpen={warehouseSnapshot?.counts?.receiptRequests?.total ?? homeOverview?.summary?.receiptOpen ?? 0}
+            waybillsOpen={warehouseSnapshot?.counts?.waybillsOpen ?? 0}
+            onOpenLimits={() => {
+              if (effectiveWarehouseId) setActiveObjectId(effectiveWarehouseId);
+              setActiveTab("limits");
+            }}
+            onOpenVerifications={() => setActiveTab("verifications")}
+            onOpenReceipts={() => {
+              setActiveTab("operations");
+              setOperationsSubTab("materialReceipts");
+            }}
+            onOpenWaybills={() => setActiveTab("waybills")}
+            onOpenDocuments={() => setActiveTab("documents")}
+          />
 
           {reportsSnapshotLoading && !warehouseSnapshot ? <LoadingState text="Загружаем сводку…" /> : null}
 
@@ -12797,41 +12542,53 @@ function App() {
             document.body
           )
         : null}
-      {requestMaterialsModal && token ? (
-        requestMaterialsModal.kind === "issue" ? (
-          <RequestMaterialsModal
-            kind="issue"
-            row={
-              issues.find((x) => x.id === requestMaterialsModal.row.id) ||
-              approvalQueue.find((x) => x.id === requestMaterialsModal.row.id) ||
-              requestMaterialsModal.row
-            }
-            apiUrl={API_URL}
-            token={token}
-            fetchWithSession={fetchWithSession}
-            onOpenDocumentsTab={() => {
-              openDocumentsForEntity("issue", requestMaterialsModal.row.id);
-              setRequestMaterialsModal(null);
-            }}
-            onClose={() => setRequestMaterialsModal(null)}
-          />
-        ) : (
-          <RequestMaterialsModal
-            kind="receipt"
-            row={
-              receiptRequests.find((x) => x.id === requestMaterialsModal.row.id) ||
-              requestMaterialsModal.row
-            }
-            apiUrl={API_URL}
-            token={token}
-            fetchWithSession={fetchWithSession}
-            onOpenDocumentsTab={() => {
-              openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
-              setRequestMaterialsModal(null);
-            }}
-            onClose={() => setRequestMaterialsModal(null)}
-          />
-        )
+      {drawerMode === "requestMaterials" && requestMaterialsModal && token ? (
+        <aside className="detailDrawer detailDrawerRequestMaterials">
+          {requestMaterialsModal.kind === "issue" ? (
+            <RequestMaterialsModal
+              embedded
+              kind="issue"
+              row={
+                issues.find((x) => x.id === requestMaterialsModal.row.id) ||
+                approvalQueue.find((x) => x.id === requestMaterialsModal.row.id) ||
+                requestMaterialsModal.row
+              }
+              apiUrl={API_URL}
+              token={token}
+              fetchWithSession={fetchWithSession}
+              onOpenDocumentsTab={() => {
+                openDocumentsForEntity("issue", requestMaterialsModal.row.id);
+                setRequestMaterialsModal(null);
+                setDrawerMode("");
+              }}
+              onClose={() => {
+                setRequestMaterialsModal(null);
+                setDrawerMode("");
+              }}
+            />
+          ) : (
+            <RequestMaterialsModal
+              embedded
+              kind="receipt"
+              row={
+                receiptRequests.find((x) => x.id === requestMaterialsModal.row.id) ||
+                requestMaterialsModal.row
+              }
+              apiUrl={API_URL}
+              token={token}
+              fetchWithSession={fetchWithSession}
+              onOpenDocumentsTab={() => {
+                openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
+                setRequestMaterialsModal(null);
+                setDrawerMode("");
+              }}
+              onClose={() => {
+                setRequestMaterialsModal(null);
+                setDrawerMode("");
+              }}
+            />
+          )}
+        </aside>
       ) : null}
       </section>
     </main>

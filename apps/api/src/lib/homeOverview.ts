@@ -26,6 +26,12 @@ export type HomeLimitSlice = {
   overCount: number;
 };
 
+export type HomeMovementTrendRow = {
+  day: string;
+  income: number;
+  outcome: number;
+};
+
 export type HomeOverviewSummary = {
   objectCount: number;
   campTotal: number;
@@ -37,9 +43,12 @@ export type HomeOverviewSummary = {
   toolsInStock: number;
   toolsIssued: number;
   toolsInRepair: number;
+  toolsCalibrationOverdue: number;
+  toolsCalibrationDueSoon: number;
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  movementTrend30d: HomeMovementTrendRow[];
 };
 
 export type HomeObjectOverview = {
@@ -234,8 +243,18 @@ export async function buildHomeOverview(
         }
       : { warehouseId: { in: warehouseIds } };
 
-  const [templatesSs, templatesEom, issuedSs, issuedEom, campGroups, toolRows, categories, stockGroups, receiptGroups] =
-    await Promise.all([
+  const [
+    templatesSs,
+    templatesEom,
+    issuedSs,
+    issuedEom,
+    campGroups,
+    toolRows,
+    movementRows,
+    categories,
+    stockGroups,
+    receiptGroups
+  ] = await Promise.all([
     prisma.objectLimitTemplate.findMany({
       where: { ...tmplBase, section: "SS" },
       include: {
@@ -273,7 +292,21 @@ export async function buildHomeOverview(
     }),
     prisma.tool.findMany({
       where: toolWhere,
-      select: { warehouseId: true, name: true, categoryId: true, status: true, section: true }
+      select: {
+        warehouseId: true,
+        name: true,
+        categoryId: true,
+        status: true,
+        section: true,
+        calibrationDueAt: true
+      }
+    }),
+    prisma.stockMovement.findMany({
+      where: {
+        ...movementScopeWhere(scope),
+        createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+      },
+      select: { createdAt: true, direction: true, quantity: true }
     }),
     prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] }),
     prisma.stock.groupBy({
@@ -356,6 +389,38 @@ export async function buildHomeOverview(
   const toolsInStock = toolRows.filter((t) => t.status === ToolStatus.IN_STOCK).length;
   const toolsIssued = toolRows.filter((t) => t.status === ToolStatus.ISSUED).length;
   const toolsInRepair = toolRows.filter((t) => t.status === ToolStatus.IN_REPAIR).length;
+  const now = new Date();
+  const soonLimit = new Date(now);
+  soonLimit.setDate(soonLimit.getDate() + 30);
+  let toolsCalibrationOverdue = 0;
+  let toolsCalibrationDueSoon = 0;
+  for (const t of toolRows) {
+    if (!t.calibrationDueAt) continue;
+    const due = new Date(t.calibrationDueAt);
+    if (due < now) toolsCalibrationOverdue += 1;
+    else if (due <= soonLimit) toolsCalibrationDueSoon += 1;
+  }
+
+  const trendMap = new Map<string, { income: number; outcome: number }>();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    trendMap.set(key, { income: 0, outcome: 0 });
+  }
+  for (const m of movementRows) {
+    const key = new Date(m.createdAt).toISOString().slice(0, 10);
+    const bucket = trendMap.get(key);
+    if (!bucket) continue;
+    const q = Math.abs(Number(m.quantity) || 0);
+    if (m.direction === "IN") bucket.income += q;
+    else bucket.outcome += q;
+  }
+  const movementTrend30d = Array.from(trendMap.entries()).map(([day, v]) => ({
+    day,
+    income: Math.round(v.income * 1000) / 1000,
+    outcome: Math.round(v.outcome * 1000) / 1000
+  }));
 
   let limitsOverLines = 0;
   let objectsWithoutTemplate = 0;
@@ -381,9 +446,12 @@ export async function buildHomeOverview(
       toolsInStock,
       toolsIssued,
       toolsInRepair,
+      toolsCalibrationOverdue,
+      toolsCalibrationDueSoon,
       stockLines,
       receiptOpen,
-      toolsByCategory
+      toolsByCategory,
+      movementTrend30d
     }
   };
 }

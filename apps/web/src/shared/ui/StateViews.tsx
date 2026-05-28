@@ -6,17 +6,21 @@ export function LoadingState({ text = "Загрузка..." }: { text?: string }
 
 export function EmptyState({
   title = "Нет данных",
-  hint
+  hint,
+  icon = "📭",
+  action
 }: {
   title?: string;
   hint?: ReactNode;
+  icon?: ReactNode;
+  action?: ReactNode;
 }) {
   return (
-    <div className="card">
-      <p className="muted">
-        <strong>{title}</strong>
-      </p>
-      {hint ? <p className="muted">{hint}</p> : null}
+    <div className="emptyState">
+      {icon ? <span className="emptyStateIcon" aria-hidden>{icon}</span> : null}
+      <p className="emptyStateTitle">{title}</p>
+      {hint ? <p className="emptyStateDesc">{hint}</p> : null}
+      {action ? <div className="emptyStateAction">{action}</div> : null}
     </div>
   );
 }
