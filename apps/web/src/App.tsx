@@ -65,7 +65,7 @@ import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal"
 import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
 import { VerificationsTab } from "./widgets/verifications/VerificationsTab";
-import { ToolDetailDrawer } from "./widgets/tools/ToolDetailDrawer";
+import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
@@ -708,7 +708,14 @@ function App() {
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
   const [newPassword, setNewPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
-  const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects">("users");
+  const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects" | "demo">("users");
+  const [demoDataStatus, setDemoDataStatus] = useState<{
+    ready: boolean;
+    warehouse?: { id: string; name: string; address?: string | null } | null;
+    users: Array<{ id: string; email: string; fullName: string; role: string }>;
+    password: string;
+  } | null>(null);
+  const [demoDataLoading, setDemoDataLoading] = useState(false);
   const [adminUserFilter, setAdminUserFilter] = useState("");
   const [expandedAdminObjectId, setExpandedAdminObjectId] = useState("");
   const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
@@ -989,6 +996,7 @@ function App() {
   const [toolActionResponsible, setToolActionResponsible] = useState("");
   const [toolActionComment, setToolActionComment] = useState("");
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
+  const [toolSaving, setToolSaving] = useState(false);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
   const [waybillsTone, setWaybillsTone] = useState<ResultTone>("neutral");
@@ -1027,7 +1035,6 @@ function App() {
   const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser" | "tool" | "requestMaterials">("");
-  const [toolCalibrationDraft, setToolCalibrationDraft] = useState("");
   const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
   const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
   const [homeOverviewError, setHomeOverviewError] = useState("");
@@ -2070,13 +2077,60 @@ function App() {
     setActiveTab("tools");
     setDrawerMode("tool");
     void loadToolEvents(toolId);
-    const t =
-      (toolDetailRecord?.id === toolId ? toolDetailRecord : null) || tools.find((x) => x.id === toolId);
-    if (t?.calibrationDueAt) {
-      const d = new Date(t.calibrationDueAt);
-      setToolCalibrationDraft(Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10));
-    } else {
-      setToolCalibrationDraft("");
+  }
+
+  async function saveToolCard(toolId: string, patch: ToolEditPatch): Promise<boolean> {
+    if (!token) return false;
+    setToolSaving(true);
+    setToolsMessage("");
+    setToolsTone("neutral");
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/tools/${toolId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: patch.name.trim(),
+          brand: patch.brand.trim(),
+          toolType: patch.toolType.trim(),
+          categoryId: patch.categoryId,
+          serialNumber: patch.serialNumber.trim() || null,
+          warehouseId: patch.warehouseId || null,
+          section: patch.section,
+          responsible: patch.responsible.trim() || null,
+          note: patch.note.trim() || null,
+          calibrationDueAt: patch.calibrationDueAt ? `${patch.calibrationDueAt}T12:00:00.000Z` : null
+        })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось сохранить карточку");
+        setToolsTone("error");
+        return false;
+      }
+      const updated = (await res.json()) as ToolItem;
+      setToolDetailRecord(updated);
+      setToolsMessage("Карточка инструмента сохранена");
+      setToolsTone("success");
+      await loadTools().catch(() => undefined);
+      await loadToolWarehouseSummary().catch(() => undefined);
+      return true;
+    } finally {
+      setToolSaving(false);
+    }
+  }
+
+  async function loadDemoDataStatus() {
+    if (!token || !canManageUsers) return;
+    setDemoDataLoading(true);
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/admin/demo-data`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setDemoDataStatus((await res.json()) as typeof demoDataStatus);
+      }
+    } finally {
+      setDemoDataLoading(false);
     }
   }
 
@@ -4126,34 +4180,18 @@ function App() {
         loading={!t}
         events={selectedToolForEvents === toolDetailModalId ? toolEvents : []}
         eventsLoading={selectedToolForEvents === toolDetailModalId && !toolEvents.length}
+        categories={toolCategories}
+        warehouses={warehouses.map((w) => ({ id: w.id, name: w.name }))}
         statusLabel={toolStatusLabel}
         actionLabel={toolActionLabel}
         safeName={safeName}
-        calibrationDraft={toolCalibrationDraft}
-        onCalibrationDraftChange={setToolCalibrationDraft}
         canWrite={hasPermission("tools.write")}
+        saving={toolSaving}
         onClose={() => {
           setDrawerMode("");
           setToolDetailModalId(null);
         }}
-        onSaveCalibration={async () => {
-          if (!token || !toolDetailModalId) return;
-          const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
-            method: "PATCH",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              calibrationDueAt: toolCalibrationDraft ? `${toolCalibrationDraft}T12:00:00.000Z` : null
-            })
-          });
-          if (!res.ok) {
-            setToolsMessage("Не удалось сохранить дату поверки");
-            setToolsTone("error");
-            return;
-          }
-          setToolsMessage("Дата поверки сохранена");
-          setToolsTone("neutral");
-          await loadTools().catch(() => undefined);
-        }}
+        onSave={(patch) => (toolDetailModalId ? saveToolCard(toolDetailModalId, patch) : false)}
         onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
         onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
         onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
@@ -4644,8 +4682,11 @@ function App() {
       void loadAdminData();
       void loadCatalogData().catch(() => undefined);
       void loadProjects().catch(() => undefined);
+      if (adminWorkspaceTab === "demo") {
+        void loadDemoDataStatus();
+      }
     }
-  }, [token, canManageUsers, activeTab]);
+  }, [token, canManageUsers, activeTab, adminWorkspaceTab]);
 
   useEffect(() => {
     const visibleTabs = new Set<string>();
@@ -11138,8 +11179,141 @@ function App() {
               >
                 Объекты
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={adminWorkspaceTab === "demo"}
+                className={`adminTabBtn${adminWorkspaceTab === "demo" ? " adminTabBtnActive" : ""}`}
+                onClick={() => {
+                  setAdminWorkspaceTab("demo");
+                  void loadDemoDataStatus();
+                }}
+              >
+                Тестовые данные
+              </button>
             </div>
           </div>
+          {adminWorkspaceTab === "demo" && (
+            <div className="card adminInsetCard">
+              <h4>Изолированный sandbox для проверки</h4>
+              <p className="muted">
+                Создаёт объект с префиксом «[Тест]» и пользователей с почтой{" "}
+                <code>@demo.skladpro.local</code>. Данные можно удалить одной кнопкой — они не смешиваются с
+                рабочими объектами.
+              </p>
+              {demoDataLoading ? <p className="muted">Загрузка…</p> : null}
+              {demoDataStatus?.ready ? (
+                <>
+                  <p>
+                    <strong>{demoDataStatus.warehouse?.name}</strong>
+                    {demoDataStatus.warehouse?.address ? ` · ${demoDataStatus.warehouse.address}` : ""}
+                  </p>
+                  <table className="desktopTable" style={{ marginTop: 10 }}>
+                    <thead>
+                      <tr>
+                        <th>Роль</th>
+                        <th>ФИО</th>
+                        <th>Email</th>
+                        <th>Пароль</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demoDataStatus.users.map((u) => (
+                        <tr key={`demo-u-${u.id}`}>
+                          <td>{u.role}</td>
+                          <td>{u.fullName}</td>
+                          <td>{u.email}</td>
+                          <td>{demoDataStatus.password}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : (
+                <p className="muted">Тестовые данные ещё не созданы.</p>
+              )}
+              <div className="toolbar" style={{ marginTop: 12, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="primaryBtn"
+                  disabled={demoDataLoading}
+                  onClick={async () => {
+                    if (!token) return;
+                    setDemoDataLoading(true);
+                    setAdminMessage("");
+                    try {
+                      const res = await fetchWithSession(`${API_URL}/api/admin/demo-data`, {
+                        method: "POST",
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      const body = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        setAdminMessage(typeof body?.error === "string" ? body.error : "Не удалось создать тестовые данные");
+                        return;
+                      }
+                      setDemoDataStatus(body as typeof demoDataStatus);
+                      setAdminMessage(
+                        body.created ? "Тестовый объект и пользователи созданы" : "Тестовые данные уже существуют"
+                      );
+                      await loadAdminData();
+                      await loadCatalogData().catch(() => undefined);
+                    } finally {
+                      setDemoDataLoading(false);
+                    }
+                  }}
+                >
+                  Создать тестовый объект и пользователей
+                </button>
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  disabled={demoDataLoading || !demoDataStatus?.ready}
+                  onClick={async () => {
+                    if (!token || !window.confirm("Удалить все тестовые объекты и пользователей (@demo.skladpro.local)?")) return;
+                    setDemoDataLoading(true);
+                    setAdminMessage("");
+                    try {
+                      let force = false;
+                      let res = await fetchWithSession(`${API_URL}/api/admin/demo-data`, {
+                        method: "DELETE",
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      let body = (await res.json().catch(() => ({}))) as {
+                        skippedUsers?: string[];
+                        deletedUsers?: number;
+                      };
+                      if (body.skippedUsers?.length && !force) {
+                        if (
+                          window.confirm(
+                            `Некоторые тестовые пользователи уже создали записи (${body.skippedUsers.length}). Удалить принудительно?`
+                          )
+                        ) {
+                          force = true;
+                          res = await fetchWithSession(`${API_URL}/api/admin/demo-data?force=1`, {
+                            method: "DELETE",
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          body = (await res.json().catch(() => ({}))) as typeof body;
+                        }
+                      }
+                      if (!res.ok) {
+                        setAdminMessage("Не удалось удалить тестовые данные");
+                        return;
+                      }
+                      setAdminMessage("Тестовые данные удалены");
+                      await loadDemoDataStatus();
+                      await loadAdminData();
+                      await loadCatalogData().catch(() => undefined);
+                    } finally {
+                      setDemoDataLoading(false);
+                    }
+                  }}
+                >
+                  Удалить тестовые данные
+                </button>
+              </div>
+            </div>
+          )}
           {adminWorkspaceTab === "objects" && (
             <>
               <div className="card adminInsetCard">

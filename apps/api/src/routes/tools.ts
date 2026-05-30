@@ -470,6 +470,19 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
       data: {
         ...rest,
         ...(calibrationDueAt !== undefined ? { calibrationDueAt } : {})
+      },
+      include: { warehouse: true, project: true, category: true }
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_UPDATE",
+      entityType: "Tool",
+      entityId: updated.id,
+      summary: `Обновлена карточка инструмента: ${updated.name} (инв. ${updated.inventoryNumber})`,
+      after: {
+        id: updated.id,
+        name: updated.name,
+        categoryId: updated.categoryId
       }
     });
     return res.json(updated);

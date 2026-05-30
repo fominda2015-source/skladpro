@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
-import { isManualToolCategory } from "./toolDefaults";
+import { buildToolDisplayName, isManualToolCategory, pickDefaultCategories } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
 export type ToolDrawerRecord = {
@@ -10,12 +10,32 @@ export type ToolDrawerRecord = {
   serialNumber?: string | null;
   qrCode: string;
   status: string;
+  section?: "SS" | "EOM";
   calibrationDueAt?: string | null;
   brand?: string | null;
   toolType?: string | null;
+  categoryId?: string | null;
   category?: { id: string; name: string } | null;
+  warehouseId?: string | null;
   warehouse?: { name: string } | null;
   responsible?: string | null;
+  note?: string | null;
+};
+
+export type ToolCategoryOption = { id: string; name: string; icon?: string | null };
+export type ToolWarehouseOption = { id: string; name: string };
+
+export type ToolEditPatch = {
+  name: string;
+  brand: string;
+  toolType: string;
+  categoryId: string;
+  serialNumber: string;
+  warehouseId: string;
+  section: "SS" | "EOM";
+  responsible: string;
+  note: string;
+  calibrationDueAt: string | null;
 };
 
 export type ToolEventRow = {
@@ -31,14 +51,15 @@ type Props = {
   loading?: boolean;
   events: ToolEventRow[];
   eventsLoading: boolean;
+  categories: ToolCategoryOption[];
+  warehouses: ToolWarehouseOption[];
   statusLabel: (s: string) => string;
   actionLabel: (a: string) => string;
   safeName: (n: string) => string;
-  calibrationDraft: string;
-  onCalibrationDraftChange: (v: string) => void;
   canWrite: boolean;
+  saving?: boolean;
   onClose: () => void;
-  onSaveCalibration: () => void;
+  onSave: (patch: ToolEditPatch) => boolean | void | Promise<boolean | void>;
   onIssue: () => void;
   onReturn: () => void;
   onRepair: () => void;
@@ -49,19 +70,41 @@ type Props = {
   qrPreview?: ReactNode;
 };
 
+function calibrationInputValue(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
+  return {
+    name: tool.name || "",
+    brand: tool.brand || "",
+    toolType: tool.toolType || "",
+    categoryId: tool.categoryId || tool.category?.id || "",
+    serialNumber: tool.serialNumber || "",
+    warehouseId: tool.warehouseId || "",
+    section: tool.section === "EOM" ? "EOM" : "SS",
+    responsible: tool.responsible || "",
+    note: tool.note || "",
+    calibrationDueAt: calibrationInputValue(tool.calibrationDueAt)
+  };
+}
+
 export function ToolDetailDrawer({
   tool,
   loading,
   events,
   eventsLoading,
+  categories,
+  warehouses,
   statusLabel,
   actionLabel,
   safeName,
-  calibrationDraft,
-  onCalibrationDraftChange,
   canWrite,
+  saving,
   onClose,
-  onSaveCalibration,
+  onSave,
   onIssue,
   onReturn,
   onRepair,
@@ -71,7 +114,25 @@ export function ToolDetailDrawer({
   onRefreshEvents,
   qrPreview
 }: Props) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ToolEditPatch | null>(null);
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(tool ? buildDraft(tool) : null);
+  }, [tool?.id]);
+
+  useEffect(() => {
+    if (tool && !editing) {
+      setDraft(buildDraft(tool));
+    }
+  }, [tool, editing]);
+
   if (!tool && !loading) return null;
+
+  const categoryOptions = pickDefaultCategories(categories);
+  const canSave =
+    Boolean(draft?.categoryId && draft.name.trim() && draft.brand.trim() && draft.toolType.trim()) && !saving;
 
   return (
     <aside className="detailDrawer detailDrawerTool detailDrawerSticky">
@@ -81,8 +142,156 @@ export function ToolDetailDrawer({
           Закрыть
         </button>
       </div>
-      {loading || !tool ? (
+      {loading || !tool || !draft ? (
         <p className="muted">Загрузка карточки…</p>
+      ) : editing ? (
+        <>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Инв. <strong>{tool.inventoryNumber}</strong> · QR {tool.qrCode}
+          </p>
+          <div className="form" style={{ gap: 10 }}>
+            <label>
+              Категория
+              <select
+                value={draft.categoryId}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, categoryId: e.target.value } : prev))}
+              >
+                {categoryOptions.map((c) => (
+                  <option key={`ted-${c.id}`} value={c.id}>
+                    {c.icon ? `${c.icon} ` : ""}
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Марка
+              <input
+                value={draft.brand}
+                onChange={(e) => {
+                  const brand = e.target.value;
+                  setDraft((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          brand,
+                          name: buildToolDisplayName(brand, prev.toolType)
+                        }
+                      : prev
+                  );
+                }}
+              />
+            </label>
+            <label>
+              Вид инструмента
+              <input
+                value={draft.toolType}
+                onChange={(e) => {
+                  const toolType = e.target.value;
+                  setDraft((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          toolType,
+                          name: buildToolDisplayName(prev.brand, toolType)
+                        }
+                      : prev
+                  );
+                }}
+              />
+            </label>
+            <label>
+              Наименование
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+              />
+            </label>
+            <label>
+              Серийный номер
+              <input
+                value={draft.serialNumber}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, serialNumber: e.target.value } : prev))}
+              />
+            </label>
+            <label>
+              Объект (склад)
+              <select
+                value={draft.warehouseId}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, warehouseId: e.target.value } : prev))}
+              >
+                <option value="">Не указан</option>
+                {warehouses.map((w) => (
+                  <option key={`tew-${w.id}`} value={w.id}>
+                    {safeName(w.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Раздел
+              <select
+                value={draft.section}
+                onChange={(e) =>
+                  setDraft((prev) => (prev ? { ...prev, section: e.target.value as "SS" | "EOM" } : prev))
+                }
+              >
+                <option value="SS">СС</option>
+                <option value="EOM">ЭОМ</option>
+              </select>
+            </label>
+            <label>
+              Ответственный
+              <input
+                value={draft.responsible}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, responsible: e.target.value } : prev))}
+              />
+            </label>
+            <label>
+              Примечание
+              <input
+                value={draft.note}
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
+              />
+            </label>
+            <label>
+              Поверка до
+              <input
+                type="date"
+                value={draft.calibrationDueAt || ""}
+                onChange={(e) =>
+                  setDraft((prev) => (prev ? { ...prev, calibrationDueAt: e.target.value || null } : prev))
+                }
+              />
+            </label>
+          </div>
+          <div className="erpCellActions" style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="primaryBtn"
+              disabled={!canSave}
+              onClick={() => {
+                void (async () => {
+                  const ok = await onSave(draft);
+                  if (ok !== false) setEditing(false);
+                })();
+              }}
+            >
+              {saving ? "Сохранение…" : "Сохранить"}
+            </button>
+            <button
+              type="button"
+              className="ghostBtn"
+              disabled={saving}
+              onClick={() => {
+                setDraft(buildDraft(tool));
+                setEditing(false);
+              }}
+            >
+              Отмена
+            </button>
+          </div>
+        </>
       ) : (
         <>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -93,6 +302,7 @@ export function ToolDetailDrawer({
             <StatusBadge tone={toolStatusTone(tool.status)}>{statusLabel(tool.status)}</StatusBadge>
             {tool.category?.name ? ` · ${tool.category.name}` : ""}
             {tool.warehouse?.name ? ` · ${safeName(tool.warehouse.name)}` : ""}
+            {tool.section ? ` · ${tool.section}` : ""}
             {tool.responsible ? ` · ${tool.responsible}` : ""}
           </p>
           {tool.brand || tool.toolType ? (
@@ -102,25 +312,22 @@ export function ToolDetailDrawer({
               {tool.toolType ? `Вид: ${tool.toolType}` : ""}
             </p>
           ) : null}
-          {canWrite ? (
-            <label className="muted" style={{ display: "block", fontSize: 13, marginTop: 8 }}>
-              Поверка до
-              <input
-                type="date"
-                value={calibrationDraft}
-                onChange={(e) => onCalibrationDraftChange(e.target.value)}
-                style={{ display: "block", marginTop: 4, width: "100%" }}
-              />
-              <button type="button" className="ghostBtn" style={{ marginTop: 6 }} onClick={onSaveCalibration}>
-                Сохранить дату поверки
-              </button>
-            </label>
-          ) : tool.calibrationDueAt ? (
+          {tool.note ? (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Примечание: {tool.note}
+            </p>
+          ) : null}
+          {tool.calibrationDueAt ? (
             <p className="muted" style={{ fontSize: 13 }}>
               Поверка до: {new Date(tool.calibrationDueAt).toLocaleDateString("ru-RU")}
             </p>
           ) : null}
           <div className="erpCellActions" style={{ marginTop: 10 }}>
+            {canWrite ? (
+              <button type="button" className="ghostBtn" onClick={() => setEditing(true)}>
+                Редактировать
+              </button>
+            ) : null}
             {tool.status !== "ISSUED" && canWrite ? (
               <button type="button" className="primaryBtn" onClick={onIssue}>
                 Выдать

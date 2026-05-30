@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import { createDemoData, deleteDemoData, getDemoDataStatus } from "../lib/demoData.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizePermissions } from "../lib/permissions.js";
 import { getEffectivePermissions } from "../lib/access.js";
@@ -725,4 +726,22 @@ adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {
     after: { userIds: parsed.data.userIds }
   });
   return res.json({ ok: true });
+});
+
+adminRouter.get("/demo-data", async (_req, res) => {
+  const status = await getDemoDataStatus();
+  return res.json(status);
+});
+
+adminRouter.post("/demo-data", async (_req, res) => {
+  const result = await createDemoData();
+  return res.status(result.created ? 201 : 200).json(result);
+});
+
+adminRouter.delete("/demo-data", async (req, res) => {
+  const force =
+    String(req.query.force ?? "").toLowerCase() === "1" ||
+    String(req.query.force ?? "").toLowerCase() === "true";
+  const result = await deleteDemoData({ force });
+  return res.json(result);
 });
