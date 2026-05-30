@@ -3,6 +3,7 @@
   grid-template-columns: 260px 1fr;
   min-height: 100vh;
   background: #f3f6fa;
+  align-items: start;
 }
 
 .sidebar {
@@ -14,6 +15,15 @@
   gap: 6px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
+}
+
+@media (min-width: 901px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+  }
 }
 
 .sidebarNavScroll {
@@ -624,23 +634,6 @@ button:hover {
   background: #fff;
 }
 
-.detailDrawerSticky {
-  position: sticky;
-  top: 80px;
-  align-self: start;
-  width: 100%;
-  max-width: 420px;
-  max-height: calc(100vh - 100px);
-  z-index: 5;
-}
-.detailDrawer.detailDrawerSticky {
-  position: sticky;
-  right: auto;
-  top: 80px;
-  width: 100%;
-  box-shadow: 0 8px 24px rgba(11, 31, 68, 0.12);
-}
-
 .toolsWorkspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -656,11 +649,6 @@ button:hover {
 @media (max-width: 960px) {
   .toolsWorkspace--drawer {
     grid-template-columns: 1fr;
-  }
-  .detailDrawerSticky {
-    position: relative;
-    top: auto;
-    max-width: none;
   }
 }
 
@@ -679,6 +667,27 @@ button:hover {
   box-shadow: 0 18px 38px rgba(11, 31, 68, 0.24);
   z-index: 20;
   backdrop-filter: blur(3px);
+}
+
+/* Карточка инструмента — в потоке страницы, sticky при прокрутке списка (не fixed к viewport). */
+.detailDrawer.detailDrawerTool.detailDrawerSticky {
+  position: sticky !important;
+  top: 88px;
+  right: auto !important;
+  left: auto !important;
+  bottom: auto !important;
+  align-self: start;
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 108px);
+  z-index: 5;
+  box-shadow: 0 8px 24px rgba(11, 31, 68, 0.12);
+}
+@media (max-width: 960px) {
+  .detailDrawer.detailDrawerTool.detailDrawerSticky {
+    top: 72px;
+    max-width: none;
+  }
 }
 
 .detailDrawerHeader {
@@ -1082,23 +1091,51 @@ tr.low {
 /* ============================================================
    Чат — полноэкранная вкладка
    ============================================================ */
+.canvas--chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 8px);
+  max-height: calc(100dvh - 8px);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.canvas--chat .pageHeader {
+  flex-shrink: 0;
+}
+.canvas--chat .chatPage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.chatPage > .pageHero {
+  flex-shrink: 0;
+}
+
 .chatPage {
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 .chatLayout {
   display: grid;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 14px;
-  min-height: min(72vh, calc(100dvh - 220px));
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   align-items: stretch;
 }
 .chatSidebar {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  max-height: 100%;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
@@ -1244,11 +1281,14 @@ tr.low {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  max-height: 100%;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  position: relative;
 }
 .chatThreadHead {
   display: flex;
@@ -1276,13 +1316,37 @@ tr.low {
 }
 .chatThreadMessages {
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   background: linear-gradient(180deg, #f8fafc 0%, #fff 120px);
+}
+.chatScrollDownBtn {
+  position: absolute;
+  right: 18px;
+  bottom: 96px;
+  z-index: 4;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid #dbeafe;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
+  color: #1d4ed8;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.chatScrollDownBtn:hover {
+  background: #eff6ff;
 }
 .chatThreadLoading {
   display: grid;
@@ -1512,24 +1576,28 @@ tr.low {
 }
 
 @media (max-width: 720px) {
+  .canvas--chat {
+    height: calc(100dvh - 64px);
+    max-height: calc(100dvh - 64px);
+  }
   .chatPage--thread .pageHero {
     display: none;
   }
   .chatLayout {
     grid-template-columns: 1fr;
-    min-height: calc(100dvh - 160px);
     gap: 0;
   }
   .chatSidebar {
     border-radius: 14px;
-    max-height: none;
+    max-height: 100%;
   }
   .chatPage--thread .chatLayout {
-    min-height: calc(100dvh - 88px);
+    height: 100%;
   }
   .chatPage--thread .chatThread {
     border-radius: 14px;
-    min-height: calc(100dvh - 100px);
+    height: 100%;
+    max-height: 100%;
   }
   .chatThread--placeholder {
     display: none;
@@ -4347,9 +4415,9 @@ button.homeInsightPill:hover:not(:disabled) {
   }
 }
 
-/* Drawer заявки → bottom-sheet на ≤720 */
+/* Drawer заявки → bottom-sheet на ≤720 (кроме sticky-карточки инструмента) */
 @media (max-width: 720px) {
-  .detailDrawer {
+  .detailDrawer:not(.detailDrawerSticky) {
     position: fixed;
     left: 0 !important;
     right: 0 !important;
@@ -4368,7 +4436,7 @@ button.homeInsightPill:hover:not(:disabled) {
     animation: sheetUp 0.22s ease;
     overflow: hidden;
   }
-  .detailDrawer::before {
+  .detailDrawer:not(.detailDrawerSticky)::before {
     content: "";
     position: absolute;
     top: 6px;
@@ -4405,9 +4473,17 @@ button.homeInsightPill:hover:not(:disabled) {
     padding-left: 14px;
     padding-right: 14px;
   }
-  .detailDrawer {
+  .detailDrawer:not(.detailDrawerSticky) {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+  }
+  .detailDrawer.detailDrawerTool.detailDrawerSticky {
+    position: sticky !important;
+    top: 72px;
+    height: auto;
+    max-height: min(70vh, calc(100dvh - 120px));
+    border-radius: 16px;
+    padding: 16px;
   }
   .detailDrawer .processCard {
     position: sticky;

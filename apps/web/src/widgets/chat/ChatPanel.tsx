@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "./UserAvatar";
@@ -127,22 +127,65 @@ export function ChatPanel({
 }: Props) {
   const isMobile = useIsMobileChat();
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   const peer = useMemo(() => users.find((u) => u.id === peerUserId), [users, peerUserId]);
   const canSend = Boolean(text.trim() || attachments.length);
   const showThread = Boolean(peerUserId && peer);
   const showList = !isMobile || !showThread;
 
+  const updateScrollDownVisibility = useCallback(() => {
+    const node = messagesRef.current;
+    if (!node) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    const atBottom = distance < 72;
+    setShowScrollDown(!atBottom);
+    stickToBottomRef.current = atBottom;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const node = messagesRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
+    bottomRef.current?.scrollIntoView({ block: "end", behavior });
+    updateScrollDownVisibility();
+  }, [updateScrollDownVisibility]);
+
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    setShowScrollDown(false);
+  }, [peerUserId]);
+
+  useEffect(() => {
+    if (!showThread || loading) return;
+    stickToBottomRef.current = true;
+    scrollToBottom("auto");
+    const timers = [0, 50, 150, 350].map((ms) => window.setTimeout(() => scrollToBottom("auto"), ms));
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+    };
+  }, [peerUserId, loading, showThread, scrollToBottom]);
+
+  useEffect(() => {
+    if (!showThread || loading || !stickToBottomRef.current) return;
+    scrollToBottom("auto");
+  }, [messages, groupedMessages, showThread, loading, scrollToBottom]);
+
   useEffect(() => {
     const node = messagesRef.current;
-    if (!node || !showThread || loading) return;
-    const scrollBottom = () => {
-      node.scrollTop = node.scrollHeight;
-    };
-    requestAnimationFrame(() => {
-      requestAnimationFrame(scrollBottom);
+    if (!node || !showThread) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        scrollToBottom("auto");
+      } else {
+        updateScrollDownVisibility();
+      }
     });
-  }, [messages, showThread, peerUserId, loading]);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [showThread, scrollToBottom, updateScrollDownVisibility]);
 
   const isPeerUnread = (convId: string, last?: ChatMessage) =>
     Boolean(
@@ -276,7 +319,11 @@ export function ChatPanel({
               </div>
             </header>
 
-            <div className="chatThreadMessages" ref={messagesRef}>
+            <div
+              className="chatThreadMessages"
+              ref={messagesRef}
+              onScroll={updateScrollDownVisibility}
+            >
               {loading ? (
                 <div className="chatThreadLoading">
                   <div className="chatSkeleton" />
@@ -330,7 +377,23 @@ export function ChatPanel({
                   <p>Начните диалог — напишите первое сообщение.</p>
                 </div>
               )}
+              <div ref={bottomRef} aria-hidden="true" style={{ height: 1, flexShrink: 0 }} />
             </div>
+
+            {showScrollDown ? (
+              <button
+                type="button"
+                className="chatScrollDownBtn"
+                aria-label="Прокрутить к последним сообщениям"
+                title="К последним сообщениям"
+                onClick={() => {
+                  stickToBottomRef.current = true;
+                  scrollToBottom("smooth");
+                }}
+              >
+                ↓
+              </button>
+            ) : null}
 
             <ChatComposer
               text={text}

@@ -5533,7 +5533,7 @@ function App() {
           aria-label="Закрыть меню"
         />
       )}
-      <section className="canvas">
+      <section className={`canvas${activeTab === "chat" ? " canvas--chat" : ""}`}>
         <header className="pageHeader">
           <button
             type="button"
