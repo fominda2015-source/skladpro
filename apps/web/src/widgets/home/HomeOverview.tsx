@@ -200,6 +200,32 @@ function ObjectDrillTable({
     </div>
   );
 }
+
+function HomeDrillByObjects({
+  objectCount,
+  chart,
+  note,
+  children
+}: {
+  objectCount: number;
+  chart?: ReactNode;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="homeDrillStack">
+      {chart ? <div className="homeDrillChartBlock">{chart}</div> : null}
+      {note ? <p className="muted homeDrillNote">{note}</p> : null}
+      <h4 className="homeDrillSectionTitle">По объектам · {objectCount}</h4>
+      {children}
+    </div>
+  );
+}
+
+function pctCell(has: boolean, percent: number, over: number) {
+  if (!has) return "—";
+  return over > 0 ? `${percent}% ⚠` : `${percent}%`;
+}
 const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
 const LIMIT_SS_COLOR = "#4f46e5";
 const LIMIT_EOM_COLOR = "#0ea5e9";
@@ -730,25 +756,21 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "В ремонте"]}
-            rows={objects
-              .filter((o) => o.tools.inRepair > 0)
-              .map((o) => ({
-                key: o.warehouseId,
-                cells: [o.name, o.tools.inRepair]
-              }))}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, o.tools.inRepair]
+            }))}
           />
         );
       }
       if (drill.key === "receipts") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Приёмки"]}
-            rows={objects
-              .filter((o) => o.receiptOpen > 0)
-              .map((o) => ({
-                key: o.warehouseId,
-                cells: [o.name, o.receiptOpen]
-              }))}
+            columns={["Объект", "Приёмки в работе"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, o.receiptOpen]
+            }))}
           />
         );
       }
@@ -756,40 +778,136 @@ export function HomeOverview({
     if (drill.kind === "chart") {
       if (drill.key === "movement") {
         return (
-          <HomeScrollChart height={240} maxPreview={CHART_MODAL_H}>
-            {renderMovementChart(240)}
-          </HomeScrollChart>
+          <HomeDrillByObjects
+            objectCount={objects.length}
+            chart={
+              movementChartRows.length ? (
+                <HomeScrollChart height={220} maxPreview={CHART_MODAL_H}>
+                  {renderMovementChart(220)}
+                </HomeScrollChart>
+              ) : undefined
+            }
+            note="График — суммарное движение по всем складам за 30 дней. Ниже — показатели по каждому объекту."
+          >
+            <ObjectDrillTable
+              columns={["Объект", "Позиций на складе", "Приёмки"]}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
+              }))}
+            />
+          </HomeDrillByObjects>
         );
       }
-      if (drill.key === "limits" && limitsChartRows.length) {
+      if (drill.key === "limits") {
         return (
-          <HomeScrollChart height={limitsChartH} maxPreview={CHART_MODAL_H}>
-            {renderLimitsChart(limitsChartH, 160, true)}
-          </HomeScrollChart>
+          <HomeDrillByObjects objectCount={objects.length}>
+            <ObjectDrillTable
+              columns={["Объект", "Лимиты СС", "Лимиты ЭОМ", "Перерасход"]}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [
+                  o.name,
+                  pctCell(o.limitsSs.hasTemplate, o.limitsSs.percent, o.limitsSs.overCount),
+                  pctCell(o.limitsEom.hasTemplate, o.limitsEom.percent, o.limitsEom.overCount),
+                  o.limitsSs.overCount + o.limitsEom.overCount || "—"
+                ]
+              }))}
+            />
+          </HomeDrillByObjects>
         );
       }
-      if (drill.key === "toolsByObject" && toolsByObjectRows.length) {
+      if (drill.key === "toolsByObject") {
         return (
-          <HomeScrollChart height={toolsObjChartH} maxPreview={CHART_MODAL_H}>
-            {renderToolsByObjectChart(toolsObjChartH, 160, true)}
-          </HomeScrollChart>
+          <HomeDrillByObjects objectCount={objects.length}>
+            <ObjectDrillTable
+              columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+              }))}
+            />
+          </HomeDrillByObjects>
         );
       }
       if (drill.key === "toolsStatus") {
-        return renderToolsPie(260);
-      }
-      if (drill.key === "camp" && campChartRows.length) {
         return (
-          <HomeScrollChartX width={campChartW} height={260} maxPreviewHeight={CHART_MODAL_H}>
-            {renderCampChart(campChartW, 260)}
-          </HomeScrollChartX>
+          <HomeDrillByObjects
+            objectCount={objects.length}
+            chart={toolsPieData.length ? renderToolsPie(240) : undefined}
+            note="Круговая диаграмма — сводка по всем объектам. Таблица — разбивка по каждому объекту."
+          >
+            <ObjectDrillTable
+              columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+              }))}
+            />
+          </HomeDrillByObjects>
         );
       }
-      if (drill.key === "categories" && topToolsRows.length) {
+      if (drill.key === "camp") {
         return (
-          <HomeScrollChart height={categoriesChartH} maxPreview={CHART_MODAL_H}>
-            {renderCategoriesChart(categoriesChartH, 180, true)}
-          </HomeScrollChart>
+          <HomeDrillByObjects objectCount={objects.length}>
+            <ObjectDrillTable
+              columns={["Объект", "Городок", "Инструменты"]}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, o.campSs + o.campEom, o.tools.total]
+              }))}
+            />
+          </HomeDrillByObjects>
+        );
+      }
+      if (drill.key === "categories") {
+        return (
+          <HomeDrillByObjects
+            objectCount={objects.length}
+            note="Категории инструментов внутри каждого объекта."
+          >
+            <div className="homeDrillObjectList">
+              {objects.map((o) => (
+                <section key={o.warehouseId} className="homeDrillObjectBlock">
+                  <header className="homeDrillObjectBlockHead">
+                    <strong>{o.name}</strong>
+                    <span className="muted">{o.tools.total} инстр.</span>
+                  </header>
+                  {o.tools.categories.length ? (
+                    <ObjectDrillTable
+                      columns={["Категория", "Всего", "На складе", "Выдано", "В ремонте"]}
+                      rows={o.tools.categories.map((c) => ({
+                        key: `${o.warehouseId}-${c.key}`,
+                        cells: [
+                          c.icon ? `${c.icon} ${c.label}` : c.label,
+                          c.count,
+                          c.inStock,
+                          c.issued,
+                          c.inRepair
+                        ]
+                      }))}
+                    />
+                  ) : (
+                    <p className="muted homeChartEmpty">Инструменты не заведены.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+            {topToolsRows.length > 0 ? (
+              <>
+                <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
+                  Сводно по всем объектам
+                </h4>
+                <ObjectDrillTable
+                  columns={["Категория", "Штук"]}
+                  rows={topToolsRows.map((r) => ({
+                    key: r.fullName,
+                    cells: [r.fullName, r.count]
+                  }))}
+                />
+              </>
+            ) : null}
+          </HomeDrillByObjects>
         );
       }
     }
@@ -1055,7 +1173,7 @@ export function HomeOverview({
       {drill ? (
         <HomeDrillModal
           title={drillTitle}
-          subtitle={`${objectCount} объектов · нажмите «Подробнее» для перехода в раздел`}
+          subtitle={`${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`}
           onClose={() => setDrill(null)}
           onDetails={drillDetails()}
         >
