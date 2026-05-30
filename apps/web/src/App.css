@@ -624,6 +624,46 @@ button:hover {
   background: #fff;
 }
 
+.detailDrawerSticky {
+  position: sticky;
+  top: 80px;
+  align-self: start;
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 100px);
+  z-index: 5;
+}
+.detailDrawer.detailDrawerSticky {
+  position: sticky;
+  right: auto;
+  top: 80px;
+  width: 100%;
+  box-shadow: 0 8px 24px rgba(11, 31, 68, 0.12);
+}
+
+.toolsWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.toolsWorkspace--drawer {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+}
+.toolsWorkspaceMain {
+  min-width: 0;
+}
+@media (max-width: 960px) {
+  .toolsWorkspace--drawer {
+    grid-template-columns: 1fr;
+  }
+  .detailDrawerSticky {
+    position: relative;
+    top: auto;
+    max-width: none;
+  }
+}
+
 .detailDrawer {
   position: fixed;
   right: 18px;

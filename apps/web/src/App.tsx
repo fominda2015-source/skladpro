@@ -43,8 +43,13 @@ import {
   type HomeOverviewSummary
 } from "./widgets/home/HomeOverview";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
-import { ToolsCategoryTable } from "./widgets/tools/ToolsCategoryTable";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
+import {
+  buildToolDisplayName,
+  loadToolCreateDefaults,
+  pickDefaultCategories,
+  saveToolCreateDefaults
+} from "./widgets/tools/toolDefaults";
 import {
   ApprovalsIssueQueueTable,
   ApprovalsReceiptRequestsTable
@@ -344,6 +349,10 @@ type ToolItem = {
   warehouse?: { id: string; name: string } | null;
   responsible?: string | null;
   note?: string | null;
+  brand?: string | null;
+  toolType?: string | null;
+  categoryId?: string | null;
+  category?: { id: string; name: string; icon?: string | null } | null;
   calibrationDueAt?: string | null;
   createdAt: string;
 };
@@ -964,29 +973,14 @@ function App() {
   const [toolWarehouseId, setToolWarehouseId] = useState("");
   const [toolResponsible, setToolResponsible] = useState("");
   const [toolCategoryDraft, setToolCategoryDraft] = useState<string>("");
+  const [toolBrand, setToolBrand] = useState("");
+  const [toolToolType, setToolToolType] = useState("");
+  const [toolCategoryFilter, setToolCategoryFilter] = useState("");
   const [toolReceiptNote, setToolReceiptNote] = useState("");
   const [toolSearch, setToolSearch] = useState("");
   const [toolStatusFilter, setToolStatusFilter] = useState<"" | ToolStatus>("");
-  // Карточный режим инструментов: сначала видим карточки категорий, потом проваливаемся внутрь.
   type ToolCategoryRow = { id: string; name: string; icon?: string | null; order: number };
-  type ToolGroupCard = {
-    key: string;
-    label: string;
-    type: "CATEGORY" | "NAME";
-    categoryId: string | null;
-    icon: string | null;
-    count: number;
-    inStock: number;
-    issued: number;
-    inRepair: number;
-  };
   const [toolCategories, setToolCategories] = useState<ToolCategoryRow[]>([]);
-  const [toolGroupCards, setToolGroupCards] = useState<ToolGroupCard[]>([]);
-  const [toolGroupCardsLoading, setToolGroupCardsLoading] = useState(false);
-  const [toolDrilledCard, setToolDrilledCard] = useState<ToolGroupCard | null>(null);
-  const [toolCategoryAdminOpen, setToolCategoryAdminOpen] = useState(false);
-  const [toolCategoryDraftName, setToolCategoryDraftName] = useState("");
-  const [toolCategoryEdit, setToolCategoryEdit] = useState<Record<string, { name: string; icon: string; order: string }>>({});
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
@@ -2073,6 +2067,7 @@ function App() {
   function openToolDrawer(toolId: string) {
     setToolDetailModalId(toolId);
     setSelectedToolForEvents(toolId);
+    setActiveTab("tools");
     setDrawerMode("tool");
     void loadToolEvents(toolId);
     const t =
@@ -2090,10 +2085,6 @@ function App() {
     setActiveTab(tab);
     if (tab === "limits") void loadLimitTemplates();
     if (tab === "camp") void loadCampItems();
-    if (tab === "tools") {
-      setToolDrilledCard(null);
-      void loadToolGroupCards();
-    }
   }
 
   async function loadAuditLogs() {
@@ -3915,12 +3906,7 @@ function App() {
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
         `section=${encodeURIComponent(objectSectionFilter)}`,
         toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
-        toolDrilledCard?.type === "CATEGORY" && toolDrilledCard.categoryId
-          ? `categoryId=${encodeURIComponent(toolDrilledCard.categoryId)}`
-          : "",
-        toolDrilledCard?.type === "NAME"
-          ? `nameGroup=${encodeURIComponent(toolDrilledCard.label)}`
-          : "",
+        toolCategoryFilter ? `categoryId=${encodeURIComponent(toolCategoryFilter)}` : "",
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -3941,6 +3927,24 @@ function App() {
     }
   }
 
+  async function openToolAddModal() {
+    if (!toolCategories.length) await loadToolCategories();
+    const saved = loadToolCreateDefaults();
+    const cats = pickDefaultCategories(toolCategories);
+    const categoryId = saved.categoryId || cats[0]?.id || "";
+    setToolsMessage("");
+    setToolsTone("neutral");
+    setToolCategoryDraft(categoryId);
+    setToolBrand(saved.brand);
+    setToolToolType(saved.toolType);
+    setToolName(buildToolDisplayName(saved.brand, saved.toolType));
+    setToolSerialNumber("");
+    setToolResponsible("");
+    setToolInventoryNumber(`INV-${Date.now()}`);
+    if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) setToolWarehouseId(activeObjectId);
+    setToolManualModalOpen(true);
+  }
+
   async function loadToolCategories() {
     if (!token) return;
     try {
@@ -3952,82 +3956,6 @@ function App() {
     } catch {
       // ignore
     }
-  }
-
-  async function loadToolGroupCards() {
-    if (!token) return;
-    setToolGroupCardsLoading(true);
-    try {
-      const parts = [
-        `section=${encodeURIComponent(objectSectionFilter)}`,
-        toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : ""
-      ].filter(Boolean);
-      const query = parts.length ? `?${parts.join("&")}` : "";
-      const r = await fetchWithSession(`${API_URL}/api/tools/by-category${query}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!r.ok) return;
-      setToolGroupCards(((await r.json()) as ToolGroupCard[]) || []);
-    } catch {
-      setToolGroupCards([]);
-    } finally {
-      setToolGroupCardsLoading(false);
-    }
-  }
-
-  async function createToolCategory(name: string) {
-    if (!token) return false;
-    const value = name.trim();
-    if (!value) return false;
-    const r = await fetchWithSession(`${API_URL}/api/tools/categories`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: value })
-    });
-    if (!r.ok) {
-      const body = await r.json().catch(() => ({}));
-      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось создать категорию");
-      setToolsTone("error");
-      return false;
-    }
-    await loadToolCategories();
-    await loadToolGroupCards();
-    return true;
-  }
-
-  async function updateToolCategory(id: string, patch: { name?: string; icon?: string | null; order?: number }) {
-    if (!token) return false;
-    const r = await fetchWithSession(`${API_URL}/api/tools/categories/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(patch)
-    });
-    if (!r.ok) {
-      const body = await r.json().catch(() => ({}));
-      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось обновить категорию");
-      setToolsTone("error");
-      return false;
-    }
-    await loadToolCategories();
-    await loadToolGroupCards();
-    return true;
-  }
-
-  async function deleteToolCategory(id: string) {
-    if (!token) return false;
-    const r = await fetchWithSession(`${API_URL}/api/tools/categories/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!r.ok) {
-      const body = await r.json().catch(() => ({}));
-      setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось удалить категорию");
-      setToolsTone("error");
-      return false;
-    }
-    await loadToolCategories();
-    await loadToolGroupCards();
-    return true;
   }
 
   async function loadToolWarehouseSummary() {
@@ -4186,6 +4114,68 @@ function App() {
         setToolDetailRecord((await res.json()) as ToolItem);
       }
     }
+  }
+
+  function renderToolDetailDrawer() {
+    if (!toolDetailModalId) return null;
+    const d = toolDetailRecord?.id === toolDetailModalId ? toolDetailRecord : null;
+    const t = d || tools.find((x) => x.id === toolDetailModalId) || null;
+    return (
+      <ToolDetailDrawer
+        tool={t}
+        loading={!t}
+        events={selectedToolForEvents === toolDetailModalId ? toolEvents : []}
+        eventsLoading={selectedToolForEvents === toolDetailModalId && !toolEvents.length}
+        statusLabel={toolStatusLabel}
+        actionLabel={toolActionLabel}
+        safeName={safeName}
+        calibrationDraft={toolCalibrationDraft}
+        onCalibrationDraftChange={setToolCalibrationDraft}
+        canWrite={hasPermission("tools.write")}
+        onClose={() => {
+          setDrawerMode("");
+          setToolDetailModalId(null);
+        }}
+        onSaveCalibration={async () => {
+          if (!token || !toolDetailModalId) return;
+          const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              calibrationDueAt: toolCalibrationDraft ? `${toolCalibrationDraft}T12:00:00.000Z` : null
+            })
+          });
+          if (!res.ok) {
+            setToolsMessage("Не удалось сохранить дату поверки");
+            setToolsTone("error");
+            return;
+          }
+          setToolsMessage("Дата поверки сохранена");
+          setToolsTone("neutral");
+          await loadTools().catch(() => undefined);
+        }}
+        onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
+        onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
+        onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
+        onDispute={() => t && openToolActionDialog(t.id, "MARK_DISPUTED")}
+        onWriteOff={() => t && openToolActionDialog(t.id, "WRITE_OFF")}
+        onShowQr={async () => {
+          if (!token || !t) return;
+          const res = await fetchWithSession(`${API_URL}/api/tools/${t.id}/qr`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as { id: string; dataUrl: string; qrCode: string };
+          setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
+        }}
+        onRefreshEvents={() => t && void loadToolEvents(t.id)}
+        qrPreview={
+          toolQrPreview && toolQrPreview.toolId === t?.id ? (
+            <img src={toolQrPreview.dataUrl} alt="QR" style={{ maxWidth: 160, marginTop: 8 }} />
+          ) : null
+        }
+      />
+    );
   }
 
   async function loadDocuments() {
@@ -5058,19 +5048,18 @@ function App() {
       void loadTools();
       void loadToolWarehouseSummary();
       void loadToolCategories();
-      void loadToolGroupCards();
     }
   }, [
     token,
     activeTab,
     toolSearch,
     toolStatusFilter,
+    toolCategoryFilter,
     toolsSort,
     toolsPage,
     toolsPageSize,
     objectSectionFilter,
-    toolListWarehouseId,
-    toolDrilledCard?.key
+    toolListWarehouseId
   ]);
 
   useEffect(() => {
@@ -9723,66 +9712,7 @@ function App() {
         </aside>
       )}
 
-      {drawerMode === "tool" && toolDetailModalId && (() => {
-        const d = toolDetailRecord?.id === toolDetailModalId ? toolDetailRecord : null;
-        const t = d || tools.find((x) => x.id === toolDetailModalId) || null;
-        return (
-          <ToolDetailDrawer
-            tool={t}
-            loading={!t}
-            events={selectedToolForEvents === toolDetailModalId ? toolEvents : []}
-            eventsLoading={selectedToolForEvents === toolDetailModalId && !toolEvents.length}
-            statusLabel={toolStatusLabel}
-            actionLabel={toolActionLabel}
-            safeName={safeName}
-            calibrationDraft={toolCalibrationDraft}
-            onCalibrationDraftChange={setToolCalibrationDraft}
-            canWrite={hasPermission("tools.write")}
-            onClose={() => {
-              setDrawerMode("");
-              setToolDetailModalId(null);
-            }}
-            onSaveCalibration={async () => {
-              if (!token || !toolDetailModalId) return;
-              const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
-                method: "PATCH",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  calibrationDueAt: toolCalibrationDraft ? `${toolCalibrationDraft}T12:00:00.000Z` : null
-                })
-              });
-              if (!res.ok) {
-                setToolsMessage("Не удалось сохранить дату поверки");
-                setToolsTone("error");
-                return;
-              }
-              setToolsMessage("Дата поверки сохранена");
-              setToolsTone("neutral");
-              await loadTools().catch(() => undefined);
-            }}
-            onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
-            onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
-            onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
-            onDispute={() => t && openToolActionDialog(t.id, "MARK_DISPUTED")}
-            onWriteOff={() => t && openToolActionDialog(t.id, "WRITE_OFF")}
-            onShowQr={async () => {
-              if (!token || !t) return;
-              const res = await fetchWithSession(`${API_URL}/api/tools/${t.id}/qr`, {
-                headers: { Authorization: `Bearer ${token}` }
-              });
-              if (!res.ok) return;
-              const data = (await res.json()) as { id: string; dataUrl: string; qrCode: string };
-              setToolQrPreview({ toolId: data.id, dataUrl: data.dataUrl, qrCode: data.qrCode });
-            }}
-            onRefreshEvents={() => t && void loadToolEvents(t.id)}
-            qrPreview={
-              toolQrPreview && toolQrPreview.toolId === t?.id ? (
-                <img src={toolQrPreview.dataUrl} alt="QR" style={{ maxWidth: 160, marginTop: 8 }} />
-              ) : null
-            }
-          />
-        );
-      })()}
+      {drawerMode === "tool" && toolDetailModalId && activeTab !== "tools" && renderToolDetailDrawer()}
 
       {drawerMode === "waybill" && selectedWaybill && (
         <aside className="detailDrawer">
@@ -10178,77 +10108,41 @@ function App() {
       )}
 
       {activeTab === "tools" && (
-        <div>
+        <div
+          className={`toolsWorkspace${drawerMode === "tool" && toolDetailModalId ? " toolsWorkspace--drawer" : ""}`}
+        >
+          <div className="toolsWorkspaceMain">
           {renderTabObjectFilter()}
           <PageHero
             icon="⚒"
-            title={toolDrilledCard ? toolDrilledCard.label : "Инструменты"}
-            subtitle={
-              toolDrilledCard
-                ? `${toolDrilledCard.type === "CATEGORY" ? "Категория" : "Группа по названию"} · раздел ${objectSectionFilter}`
-                : `Категории · раздел ${objectSectionFilter}`
-            }
-            stats={
-              toolDrilledCard
-                ? [
-                    { label: "Всего", value: toolDrilledCard.count },
-                    { label: "На складе", value: toolDrilledCard.inStock, tone: "ok" },
-                    { label: "Выдано", value: toolDrilledCard.issued, tone: "warn" },
-                    { label: "В ремонте", value: toolDrilledCard.inRepair, tone: toolDrilledCard.inRepair > 0 ? "warn" : "neutral" }
-                  ]
-                : [
-                    { label: "Категорий", value: toolGroupCards.length },
-                    { label: "Инструментов", value: toolGroupCards.reduce((s, c) => s + c.count, 0) }
-                  ]
-            }
+            title="Инструменты"
+            subtitle={`Раздел ${objectSectionFilter} · ${toolsTotal} ед.`}
+            stats={[
+              { label: "Всего", value: toolsTotal },
+              {
+                label: "На складе",
+                value: toolWarehouseSummary.reduce((s, x) => s + x.inStock, 0),
+                tone: "ok"
+              },
+              {
+                label: "Выдано",
+                value: toolWarehouseSummary.reduce((s, x) => s + x.issued, 0),
+                tone: "warn"
+              }
+            ]}
             actions={
-              <>
-                {toolDrilledCard ? (
-                  <button type="button" className="ghostBtn" onClick={() => setToolDrilledCard(null)}>
-                    ← К категориям
-                  </button>
-                ) : null}
-                {hasPermission("tools.write") && (
-                  <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(true)}>
-                    Категории…
-                  </button>
-                )}
-                <PeriodExportButton
-                  section="tools"
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  title="Инструменты в Excel"
-                  warehouseId={exportWarehouseId || undefined}
-                  sectionFilter={objectSectionFilter}
-                />
-              </>
+              <PeriodExportButton
+                section="tools"
+                token={token}
+                apiUrl={API_URL}
+                fetchWithSession={fetchWithSession}
+                title="Инструменты в Excel"
+                warehouseId={exportWarehouseId || undefined}
+                sectionFilter={objectSectionFilter}
+              />
             }
           />
 
-          {!toolDrilledCard && (
-            <>
-              {toolGroupCardsLoading ? (
-                <LoadingState text="Загрузка категорий..." />
-              ) : !toolGroupCards.length ? (
-                <EmptyState
-                  title="Категорий пока нет"
-                  hint="Импортируйте или добавьте инструменты — по их названиям соберутся карточки автоматически. Можно создать свою категорию."
-                />
-              ) : (
-                <ToolsCategoryTable
-                  cards={toolGroupCards}
-                  onOpen={(card) => {
-                    setToolDrilledCard(card);
-                    setToolsPage(1);
-                  }}
-                />
-              )}
-            </>
-          )}
-
-          {toolDrilledCard && (
-          <>
           {toolWarehouseSummary.length > 1 && (
             <div className="card" style={{ marginBottom: 12, background: "rgba(148, 163, 184, 0.08)" }}>
               <h3 style={{ marginTop: 0 }}>Срез по объектам</h3>
@@ -10294,20 +10188,7 @@ function App() {
                   ↻ Обновить
                 </button>
                 {hasPermission("tools.write") && (
-                  <button
-                    type="button"
-                    className="primaryBtn"
-                    onClick={() => {
-                      setToolsMessage("");
-                      setToolsTone("neutral");
-                      setToolName("");
-                      setToolSerialNumber("");
-                      setToolResponsible("");
-                      setToolInventoryNumber(`INV-${Date.now()}`);
-                      if (activeObjectId) setToolWarehouseId(activeObjectId);
-                      setToolManualModalOpen(true);
-                    }}
-                  >
+                  <button type="button" className="primaryBtn" onClick={() => void openToolAddModal()}>
                     + Добавить
                   </button>
                 )}
@@ -10343,6 +10224,14 @@ function App() {
               </>
             }
           >
+            <select value={toolCategoryFilter} onChange={(e) => { setToolCategoryFilter(e.target.value); setToolsPage(1); }} aria-label="Категория">
+              <option value="">Все категории</option>
+              {pickDefaultCategories(toolCategories).map((c) => (
+                <option key={`tcf-${c.id}`} value={c.id}>
+                  {c.icon ? `${c.icon} ` : ""}{c.name}
+                </option>
+              ))}
+            </select>
             <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
               <option value="">Все статусы</option>
               <option value="IN_STOCK">{toolStatusLabel("IN_STOCK")}</option>
@@ -10424,8 +10313,10 @@ function App() {
               </div>
             </>
           )}
-          </>
-          )}
+
+          </div>
+
+          {drawerMode === "tool" && toolDetailModalId && renderToolDetailDrawer()}
 
           {toolManualModalOpen && hasPermission("tools.write") && (
             <div
@@ -10446,11 +10337,57 @@ function App() {
               }}
             >
               <div className="card" style={{ maxWidth: 520, width: "100%" }} onMouseDown={(e) => e.stopPropagation()}>
-                <h3 style={{ marginTop: 0 }}>Новый инструмент вручную</h3>
+                <h3 style={{ marginTop: 0 }}>Новый инструмент</h3>
                 <div className="form">
                   <label>
+                    Категория
+                    <select
+                      value={toolCategoryDraft}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setToolCategoryDraft(id);
+                        const saved = loadToolCreateDefaults();
+                        if (saved.categoryId === id) {
+                          setToolBrand(saved.brand);
+                          setToolToolType(saved.toolType);
+                          setToolName(buildToolDisplayName(saved.brand, saved.toolType));
+                        }
+                      }}
+                    >
+                      {pickDefaultCategories(toolCategories).map((c) => (
+                        <option key={`tcat-opt-${c.id}`} value={c.id}>
+                          {c.icon ? `${c.icon} ` : ""}{c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Марка
+                    <input
+                      value={toolBrand}
+                      onChange={(e) => {
+                        const brand = e.target.value;
+                        setToolBrand(brand);
+                        setToolName(buildToolDisplayName(brand, toolToolType));
+                      }}
+                      placeholder="Например, Bosch"
+                    />
+                  </label>
+                  <label>
+                    Вид инструмента
+                    <input
+                      value={toolToolType}
+                      onChange={(e) => {
+                        const toolType = e.target.value;
+                        setToolToolType(toolType);
+                        setToolName(buildToolDisplayName(toolBrand, toolType));
+                      }}
+                      placeholder="Например, перфоратор"
+                    />
+                  </label>
+                  <label>
                     Наименование
-                    <input value={toolName} onChange={(e) => setToolName(e.target.value)} placeholder="Например, перфоратор" />
+                    <input value={toolName} onChange={(e) => setToolName(e.target.value)} />
                   </label>
                   <label>
                     Инвентарный номер
@@ -10475,17 +10412,6 @@ function App() {
                     Ответственный при создании
                     <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
                   </label>
-                  <label>
-                    Категория (необязательно)
-                    <select value={toolCategoryDraft} onChange={(e) => setToolCategoryDraft(e.target.value)}>
-                      <option value="">— по умолчанию (группа по названию) —</option>
-                      {toolCategories.map((c) => (
-                        <option key={`tcat-opt-${c.id}`} value={c.id}>
-                          {c.icon ? `${c.icon} ` : ""}{c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
                 <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
                   <button type="button" className="ghostBtn" onClick={() => setToolManualModalOpen(false)}>
@@ -10493,22 +10419,35 @@ function App() {
                   </button>
                   <button
                     type="button"
-                    disabled={!toolName.trim() || !toolInventoryNumber.trim()}
+                    disabled={
+                      !toolCategoryDraft ||
+                      !toolBrand.trim() ||
+                      !toolToolType.trim() ||
+                      !toolName.trim() ||
+                      !toolInventoryNumber.trim()
+                    }
                     onClick={async () => {
-                      if (!token || !toolName.trim() || !toolInventoryNumber.trim()) return;
+                      if (!token || !toolCategoryDraft || !toolName.trim() || !toolInventoryNumber.trim()) return;
                       setToolsMessage("");
                       setToolsTone("neutral");
+                      saveToolCreateDefaults({
+                        categoryId: toolCategoryDraft,
+                        brand: toolBrand.trim(),
+                        toolType: toolToolType.trim()
+                      });
                       const res = await fetchWithSession(`${API_URL}/api/tools`, {
                         method: "POST",
                         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                         body: JSON.stringify({
                           name: toolName.trim(),
+                          brand: toolBrand.trim(),
+                          toolType: toolToolType.trim(),
                           inventoryNumber: toolInventoryNumber.trim(),
                           serialNumber: toolSerialNumber.trim() || undefined,
                           warehouseId: toolWarehouseId || undefined,
                           section: objectSectionFilter,
                           responsible: toolResponsible.trim() || undefined,
-                          categoryId: toolCategoryDraft || undefined
+                          categoryId: toolCategoryDraft
                         })
                       });
                       if (!res.ok) {
@@ -10522,10 +10461,8 @@ function App() {
                       setToolManualModalOpen(false);
                       setToolInventoryNumber(`INV-${Date.now()}`);
                       setToolSerialNumber("");
-                      setToolCategoryDraft("");
                       await loadTools();
                       await loadToolWarehouseSummary();
-                      await loadToolGroupCards();
                     }}
                   >
                     Создать
@@ -10535,10 +10472,11 @@ function App() {
             </div>
           )}
 
-          {toolCategoryAdminOpen && hasPermission("tools.write") && (
+          {toolAction && (
             <div
               role="dialog"
               aria-modal="true"
+              aria-labelledby="tool-action-title"
               style={{
                 position: "fixed",
                 inset: 0,
@@ -10546,171 +10484,71 @@ function App() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 55,
+                zIndex: 65,
                 padding: 16
               }}
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setToolCategoryAdminOpen(false);
+                if (e.target === e.currentTarget) setToolAction(null);
               }}
             >
-              <div
-                className="card"
-                style={{ maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <h3 style={{ marginTop: 0 }}>Категории инструментов</h3>
-                  <button type="button" className="ghostBtn" onClick={() => setToolCategoryAdminOpen(false)}>
+              <div className="card" style={{ maxWidth: 480, width: "100%" }} onMouseDown={(e) => e.stopPropagation()}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                  <h3 id="tool-action-title" style={{ marginTop: 0 }}>
+                    {toolAction.action === "ISSUE" ? "Кому выдать" : `Подтверждение: ${toolActionLabel(toolAction.action)}`}
+                  </h3>
+                  <button type="button" className="ghostBtn" onClick={() => setToolAction(null)}>
                     Закрыть
                   </button>
                 </div>
-                <p className="muted">
-                  По умолчанию инструменты группируются по полю «Название». Категории здесь — ручные группы поверх этого.
-                </p>
-                <div className="toolbar" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                  <input
-                    placeholder="Новая категория (например, Шуруповёрты)"
-                    value={toolCategoryDraftName}
-                    onChange={(e) => setToolCategoryDraftName(e.target.value)}
-                    style={{ minWidth: 240 }}
-                  />
+                {toolAction.action === "ISSUE" ? (
+                  <p className="muted">Укажите ФИО получателя — попадёт в журнал выдачи.</p>
+                ) : null}
+                <div className="form">
+                  <label>
+                    {toolAction.action === "ISSUE" ? "Получатель" : "Ответственное лицо"}
+                    {toolAction.action === "ISSUE" ? " (обязательно)" : ""}
+                    <input
+                      value={toolActionResponsible}
+                      onChange={(e) => setToolActionResponsible(e.target.value)}
+                      list={toolAction.action === "ISSUE" ? "tool-issue-recipients" : undefined}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void submitToolActionDialog();
+                        }
+                      }}
+                    />
+                    {toolAction.action === "ISSUE" ? (
+                      <datalist id="tool-issue-recipients">
+                        {chatUsers.map((u) => (
+                          <option key={`tool-issue-${u.id}`} value={u.fullName} />
+                        ))}
+                      </datalist>
+                    ) : null}
+                  </label>
+                  <label>
+                    Комментарий
+                    <input value={toolActionComment} onChange={(e) => setToolActionComment(e.target.value)} />
+                  </label>
+                  <label>
+                    Фотофиксация (опционально)
+                    <input type="file" accept="image/*" onChange={(e) => setToolActionPhoto(e.target.files?.[0] || null)} />
+                  </label>
+                </div>
+                <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
+                  <button type="button" className="ghostBtn" onClick={() => setToolAction(null)}>
+                    Отмена
+                  </button>
                   <button
                     type="button"
-                    disabled={!toolCategoryDraftName.trim()}
-                    onClick={async () => {
-                      const ok = await createToolCategory(toolCategoryDraftName);
-                      if (ok) setToolCategoryDraftName("");
-                    }}
+                    className="primaryBtn"
+                    disabled={toolAction.action === "ISSUE" && !toolActionResponsible.trim()}
+                    onClick={() => void submitToolActionDialog()}
                   >
-                    Добавить
+                    Подтвердить
                   </button>
                 </div>
-                <table className="desktopTable" style={{ marginTop: 12 }}>
-                  <thead>
-                    <tr>
-                      <th>Название</th>
-                      <th style={{ width: 80 }}>Икона</th>
-                      <th style={{ width: 80 }}>Порядок</th>
-                      <th style={{ width: 200 }}>Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {toolCategories.map((c) => {
-                      const draft = toolCategoryEdit[c.id] || {
-                        name: c.name,
-                        icon: c.icon || "",
-                        order: String(c.order || 0)
-                      };
-                      const dirty =
-                        draft.name !== c.name ||
-                        draft.icon !== (c.icon || "") ||
-                        Number(draft.order || 0) !== Number(c.order || 0);
-                      return (
-                        <tr key={`tcat-row-${c.id}`}>
-                          <td>
-                            <input
-                              value={draft.name}
-                              onChange={(e) =>
-                                setToolCategoryEdit((prev) => ({
-                                  ...prev,
-                                  [c.id]: { ...draft, name: e.target.value }
-                                }))
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              value={draft.icon}
-                              placeholder="🔧"
-                              onChange={(e) =>
-                                setToolCategoryEdit((prev) => ({
-                                  ...prev,
-                                  [c.id]: { ...draft, icon: e.target.value }
-                                }))
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min={0}
-                              value={draft.order}
-                              onChange={(e) =>
-                                setToolCategoryEdit((prev) => ({
-                                  ...prev,
-                                  [c.id]: { ...draft, order: e.target.value }
-                                }))
-                              }
-                            />
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              disabled={!dirty || !draft.name.trim()}
-                              onClick={async () => {
-                                const ok = await updateToolCategory(c.id, {
-                                  name: draft.name.trim(),
-                                  icon: draft.icon.trim() || null,
-                                  order: Number(draft.order || 0)
-                                });
-                                if (ok)
-                                  setToolCategoryEdit((prev) => {
-                                    const next = { ...prev };
-                                    delete next[c.id];
-                                    return next;
-                                  });
-                              }}
-                            >
-                              Сохранить
-                            </button>{" "}
-                            <button
-                              type="button"
-                              className="ghostBtn"
-                              onClick={() => {
-                                if (!window.confirm(`Удалить категорию «${c.name}»? Инструменты останутся, но потеряют привязку.`))
-                                  return;
-                                void deleteToolCategory(c.id);
-                              }}
-                            >
-                              Удалить
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {!toolCategories.length ? (
-                      <tr>
-                        <td colSpan={4} className="muted">
-                          Категорий пока нет.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {toolAction && (
-            <div className="card">
-              <h3>Подтверждение действия: {toolActionLabel(toolAction.action)}</h3>
-              <div className="form">
-                <label>
-                  Ответственное лицо {toolAction.action === "ISSUE" ? "(обязательно)" : ""}
-                  <input value={toolActionResponsible} onChange={(e) => setToolActionResponsible(e.target.value)} />
-                </label>
-                <label>
-                  Комментарий
-                  <input value={toolActionComment} onChange={(e) => setToolActionComment(e.target.value)} />
-                </label>
-                <label>
-                  Фотофиксация (опционально)
-                  <input type="file" accept="image/*" onChange={(e) => setToolActionPhoto(e.target.files?.[0] || null)} />
-                </label>
-              </div>
-              <div className="toolbar">
-                <button onClick={() => void submitToolActionDialog()}>Подтвердить</button>
-                <button onClick={() => setToolAction(null)}>Отмена</button>
               </div>
             </div>
           )}

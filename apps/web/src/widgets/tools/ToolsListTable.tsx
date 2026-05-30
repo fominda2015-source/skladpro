@@ -7,6 +7,9 @@ export type ToolListRow = {
   serialNumber?: string | null;
   qrCode: string;
   status: string;
+  brand?: string | null;
+  toolType?: string | null;
+  category?: { id: string; name: string } | null;
   calibrationDueAt?: string | null;
   warehouse?: { id: string; name: string } | null;
 };
@@ -42,7 +45,10 @@ export function ToolsListTable({
         <thead>
           <tr>
             <th style={{ width: 40 }} />
+            <th>Категория</th>
             <th>Наименование</th>
+            <th style={{ width: 100 }}>Марка</th>
+            <th style={{ width: 100 }}>Вид</th>
             <th style={{ width: 120 }}>Инв. №</th>
             <th style={{ width: 120 }}>Серийный</th>
               <th>Объект</th>
@@ -74,8 +80,13 @@ export function ToolsListTable({
                 />
               </td>
               <td>
+                <span className="muted">{t.category?.name || "—"}</span>
+              </td>
+              <td>
                 <strong>{safeName(t.name)}</strong>
               </td>
+              <td className="muted">{t.brand || "—"}</td>
+              <td className="muted">{t.toolType || "—"}</td>
               <td className="muted">{t.inventoryNumber}</td>
               <td className="muted">{t.serialNumber || "—"}</td>
               <td className="muted">{t.warehouse?.name ? safeName(t.warehouse.name) : "—"}</td>

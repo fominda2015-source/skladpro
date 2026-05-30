@@ -135,9 +135,14 @@ export function ChatPanel({
 
   useEffect(() => {
     const node = messagesRef.current;
-    if (!node || !showThread) return;
-    node.scrollTop = node.scrollHeight;
-  }, [messages, showThread, peerUserId]);
+    if (!node || !showThread || loading) return;
+    const scrollBottom = () => {
+      node.scrollTop = node.scrollHeight;
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(scrollBottom);
+    });
+  }, [messages, showThread, peerUserId, loading]);
 
   const isPeerUnread = (convId: string, last?: ChatMessage) =>
     Boolean(

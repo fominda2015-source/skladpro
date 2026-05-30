@@ -17,6 +17,27 @@ import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
+export const MANUAL_TOOL_CATEGORY = "Ручной";
+export const ELECTRIC_TOOL_CATEGORY = "Электрический";
+
+export function isManualToolCategoryName(name: string | null | undefined) {
+  return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
+}
+
+async function ensureDefaultToolCategories() {
+  const defaults = [
+    { name: MANUAL_TOOL_CATEGORY, icon: "🔧", order: 1 },
+    { name: ELECTRIC_TOOL_CATEGORY, icon: "⚡", order: 2 }
+  ];
+  for (const row of defaults) {
+    await prisma.toolCategory.upsert({
+      where: { name: row.name },
+      create: row,
+      update: { icon: row.icon, order: row.order }
+    });
+  }
+}
+
 const createToolSchema = z.object({
   name: z.string().min(1),
   inventoryNumber: z.string().min(1),
@@ -26,6 +47,8 @@ const createToolSchema = z.object({
   projectId: z.string().optional(),
   responsible: z.string().optional(),
   note: z.string().optional(),
+  brand: z.string().optional(),
+  toolType: z.string().optional(),
   categoryId: z.string().nullable().optional(),
   calibrationDueAt: z.union([z.string(), z.null()]).optional()
 });
@@ -38,6 +61,8 @@ const updateToolSchema = z.object({
   projectId: z.string().nullable().optional(),
   responsible: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
+  brand: z.string().nullable().optional(),
+  toolType: z.string().nullable().optional(),
   status: z.nativeEnum(ToolStatus).optional(),
   categoryId: z.string().nullable().optional(),
   calibrationDueAt: z.union([z.string(), z.null()]).optional()
@@ -82,6 +107,7 @@ toolsRouter.use(requirePermission("tools.read"));
 
 // --- Категории инструмента (карточный вид) ---
 toolsRouter.get("/categories", async (_req, res) => {
+  await ensureDefaultToolCategories();
   const cats = await prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] });
   return res.json(cats);
 });
@@ -289,7 +315,8 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
       where,
       include: {
         warehouse: true,
-        project: true
+        project: true,
+        category: true
       },
       orderBy:
         sort === "status"
@@ -468,10 +495,17 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
   const nextStatus = nextStatusByAction[parsed.data.action];
   const scope = await getRequestDataScope(req);
   const beforeTool = await prisma.tool.findFirst({
-    where: { AND: [toolWhereFromScope(scope), { id }] }
+    where: { AND: [toolWhereFromScope(scope), { id }] },
+    include: { category: true }
   });
   if (!beforeTool) {
     return res.status(404).json({ error: "Tool not found" });
+  }
+  if (parsed.data.action === "WRITE_OFF" && isManualToolCategoryName(beforeTool.category?.name)) {
+    return res.status(400).json({
+      error:
+        "Ручной инструмент списывается только по акту на имя ответственного. Используйте акт «Списание» в разделе «Акты»."
+    });
   }
   try {
     const updated = await prisma.$transaction(async (tx) => {
@@ -540,7 +574,7 @@ toolsRouter.get("/:id", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const tool = await prisma.tool.findFirst({
     where: { AND: [toolWhereFromScope(scope), { id }] },
-    include: { warehouse: true, project: true }
+    include: { warehouse: true, project: true, category: true }
   });
   if (!tool) {
     return res.status(404).json({ error: "Tool not found" });

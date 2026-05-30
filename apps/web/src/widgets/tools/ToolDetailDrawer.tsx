@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
+import { isManualToolCategory } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
 export type ToolDrawerRecord = {
@@ -10,6 +11,9 @@ export type ToolDrawerRecord = {
   qrCode: string;
   status: string;
   calibrationDueAt?: string | null;
+  brand?: string | null;
+  toolType?: string | null;
+  category?: { id: string; name: string } | null;
   warehouse?: { name: string } | null;
   responsible?: string | null;
 };
@@ -70,7 +74,7 @@ export function ToolDetailDrawer({
   if (!tool && !loading) return null;
 
   return (
-    <aside className="detailDrawer detailDrawerTool">
+    <aside className="detailDrawer detailDrawerTool detailDrawerSticky">
       <div className="detailDrawerHeader">
         <h3>{tool ? safeName(tool.name) : "Инструмент"}</h3>
         <button type="button" className="ghostBtn" onClick={onClose}>
@@ -87,9 +91,17 @@ export function ToolDetailDrawer({
           </p>
           <p className="muted">
             <StatusBadge tone={toolStatusTone(tool.status)}>{statusLabel(tool.status)}</StatusBadge>
+            {tool.category?.name ? ` · ${tool.category.name}` : ""}
             {tool.warehouse?.name ? ` · ${safeName(tool.warehouse.name)}` : ""}
             {tool.responsible ? ` · ${tool.responsible}` : ""}
           </p>
+          {tool.brand || tool.toolType ? (
+            <p className="muted" style={{ fontSize: 13 }}>
+              {tool.brand ? `Марка: ${tool.brand}` : ""}
+              {tool.brand && tool.toolType ? " · " : ""}
+              {tool.toolType ? `Вид: ${tool.toolType}` : ""}
+            </p>
+          ) : null}
           {canWrite ? (
             <label className="muted" style={{ display: "block", fontSize: 13, marginTop: 8 }}>
               Поверка до
@@ -125,14 +137,19 @@ export function ToolDetailDrawer({
               </button>
             ) : null}
             {canWrite ? (
-              <>
-                <button type="button" className="ghostBtn" onClick={onDispute}>
-                  Спор
-                </button>
-                <button type="button" className="ghostBtn" onClick={onWriteOff}>
-                  Списать
-                </button>
-              </>
+              <button type="button" className="ghostBtn" onClick={onDispute}>
+                Спор
+              </button>
+            ) : null}
+            {canWrite && !isManualToolCategory(tool.category?.name) ? (
+              <button type="button" className="ghostBtn" onClick={onWriteOff}>
+                Списать
+              </button>
+            ) : null}
+            {canWrite && isManualToolCategory(tool.category?.name) ? (
+              <p className="muted" style={{ fontSize: 12, margin: "8px 0 0", lineHeight: 1.45 }}>
+                Ручной инструмент списывается только по акту «Списание» на имя ответственного (раздел «Акты»).
+              </p>
             ) : null}
             <button type="button" className="ghostBtn" onClick={onShowQr}>
               QR
