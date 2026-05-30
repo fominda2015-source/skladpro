@@ -43,7 +43,6 @@ import {
   type HomeOverviewSummary
 } from "./widgets/home/HomeOverview";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
-import { LimitsRiskTable } from "./widgets/limits/LimitsRiskTable";
 import { ToolsCategoryTable } from "./widgets/tools/ToolsCategoryTable";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
@@ -792,7 +791,6 @@ function App() {
     Record<string, Pick<LimitSupplyMetricRow, "arrivedQty" | "issuedQty" | "onOrderQty" | "stockQty">>
   >({});
   const [limitEditMode, setLimitEditMode] = useState(false);
-  const [limitShowOnlyRisk, setLimitShowOnlyRisk] = useState(false);
   const [expandedLimitNodes, setExpandedLimitNodes] = useState<Record<string, boolean>>({});
   // Локальные «черновики» правки строк лимита: ключ — id узла шаблона.
   const [limitNodeDrafts, setLimitNodeDrafts] = useState<
@@ -5681,6 +5679,7 @@ function App() {
                   }
                 : undefined
             }
+            onOpenCampTab={() => setActiveTab("camp")}
             canCamp
             canLimits={canReadLimits}
             canTools={canReadTools}
@@ -8092,19 +8091,7 @@ function App() {
           )}
 
           {!limitTemplatesLoading && limitTemplates.length > 0 && (
-            <LimitsRiskTable
-              templates={limitTemplates}
-              issuedTotalsByMaterialId={issuedTotalsByMaterialId}
-              limitSupplyByMaterialId={limitSupplyByMaterialId}
-              showOnlyRisk={limitShowOnlyRisk}
-              onShowOnlyRiskChange={setLimitShowOnlyRisk}
-              onOpenMaterial={(materialId) => {
-                const warehouseId = exportWarehouseId || activeObjectId || "";
-                if (warehouseId) setMaterialEditModal({ materialId, warehouseId });
-              }}
-            />
-          )}
-
+            <>
           {limitTemplates.map((tpl) => (
             <div key={`limit-tpl-${tpl.id}`} className="card limitTemplateCard" style={{ marginTop: 12 }}>
               {(() => {
@@ -8807,6 +8794,8 @@ function App() {
                 })()}
             </div>
           ))}
+            </>
+          )}
         </div>
       )}
 

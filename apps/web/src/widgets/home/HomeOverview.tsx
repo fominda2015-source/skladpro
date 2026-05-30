@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { StatusBadge, objectRiskLabel, objectRiskStatus } from "../../shared/ui/StatusBadge";
 import {
   Bar,
@@ -14,6 +14,13 @@ import {
   YAxis
 } from "recharts";
 import { PageHero } from "../ui/PageHero";
+import { HomeDrillModal } from "./HomeDrillModal";
+import {
+  HomeScrollChart,
+  HomeScrollChartX,
+  chartColumnsWidth,
+  chartRowsHeight
+} from "./HomeScrollChart";
 
 export type HomeToolCategory = {
   key: string;
@@ -92,6 +99,7 @@ type Props = {
   onOpenWarehouseTab?: () => void;
   onOpenLimitsTab?: () => void;
   onOpenToolsTab?: () => void;
+  onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
   canCamp?: boolean;
@@ -108,6 +116,90 @@ type Props = {
   onAcceptReturn?: () => void;
 };
 
+const CHART_PREVIEW_H = 280;
+const CHART_MODAL_H = 520;
+
+type HomeStatKey =
+  | "limitsSs"
+  | "limitsEom"
+  | "stock"
+  | "tools"
+  | "toolsStock"
+  | "toolsIssued"
+  | "toolsRepair"
+  | "receipts";
+
+type HomeChartKey = "movement" | "limits" | "toolsByObject" | "toolsStatus" | "camp" | "categories";
+
+type HomeDrill =
+  | { kind: "stat"; key: HomeStatKey }
+  | { kind: "chart"; key: HomeChartKey };
+
+function ChartCardHead({
+  title,
+  hint,
+  count,
+  onExpand
+}: {
+  title: string;
+  hint: string;
+  count?: number;
+  onExpand: () => void;
+}) {
+  return (
+    <header className="homeChartHead">
+      <div>
+        <h3>{title}</h3>
+        <span className="muted">
+          {hint}
+          {count != null ? ` · ${count}` : ""}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="ghostBtn homeChartExpandBtn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onExpand();
+        }}
+      >
+        Развернуть
+      </button>
+    </header>
+  );
+}
+
+function ObjectDrillTable({
+  columns,
+  rows
+}: {
+  columns: string[];
+  rows: Array<{ key: string; cells: ReactNode[] }>;
+}) {
+  if (!rows.length) return <p className="muted homeChartEmpty">Нет данных по объектам.</p>;
+  return (
+    <div className="erpTableWrap homeDrillTable">
+      <table className="erpTable desktopTable">
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              {r.cells.map((cell, i) => (
+                <td key={i}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
 const LIMIT_SS_COLOR = "#4f46e5";
 const LIMIT_EOM_COLOR = "#0ea5e9";
@@ -142,6 +234,7 @@ export function HomeOverview({
   onOpenWarehouseTab,
   onOpenLimitsTab,
   onOpenToolsTab,
+  onOpenCampTab,
   onOpenOperations,
   onOpenOperationsTab,
   canCamp = true,
@@ -157,6 +250,10 @@ export function HomeOverview({
   onCreateRequest,
   onAcceptReturn
 }: Props) {
+  const [drill, setDrill] = useState<HomeDrill | null>(null);
+
+  const openStatDrill = (key: HomeStatKey) => setDrill({ kind: "stat", key });
+  const openChartDrill = (key: HomeChartKey) => setDrill({ kind: "chart", key });
   const totals = useMemo(() => {
     if (summary) {
       return {
@@ -227,11 +324,6 @@ export function HomeOverview({
   const limitsChartRows = useMemo(
     () =>
       objects
-        .filter(
-          (o) =>
-            (o.limitsSs.hasTemplate && o.limitsSs.plannedQty > 0) ||
-            (o.limitsEom.hasTemplate && o.limitsEom.plannedQty > 0)
-        )
         .map((o) => ({
           id: o.warehouseId,
           name: shortName(o.name, 16),
@@ -241,7 +333,7 @@ export function HomeOverview({
           ssOver: o.limitsSs.overCount,
           eomOver: o.limitsEom.overCount
         }))
-        .sort((a, b) => Math.max(b.ss ?? 0, b.eom ?? 0) - Math.max(a.ss ?? 0, a.eom ?? 0)),
+        .sort((a, b) => Math.max(b.ss ?? 0, b.eom ?? 0) - Math.max(a.ss ?? 0, a.eom ?? 0) || a.fullName.localeCompare(b.fullName, "ru")),
     [objects]
   );
 
@@ -255,8 +347,7 @@ export function HomeOverview({
           camp: o.campSs + o.campEom,
           tools: o.tools.total
         }))
-        .filter((r) => r.camp > 0 || r.tools > 0)
-        .sort((a, b) => b.camp - a.camp || b.tools - a.tools),
+        .sort((a, b) => b.camp - a.camp || b.tools - a.tools || a.fullName.localeCompare(b.fullName, "ru")),
     [objects]
   );
 
@@ -286,13 +377,29 @@ export function HomeOverview({
       : objects.flatMap((o) => o.tools.categories);
     return [...src]
       .sort((a, b) => b.count - a.count)
-      .slice(0, 6)
       .map((c) => ({
-        name: shortName(c.icon ? `${c.icon} ${c.label}` : c.label, 16),
-        fullName: c.label,
+        name: shortName(c.icon ? `${c.icon} ${c.label}` : c.label, 18),
+        fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
         count: c.count
       }));
   }, [objects, summary]);
+
+  const toolsByObjectRows = useMemo(
+    () =>
+      objects
+        .map((o) => ({
+          id: o.warehouseId,
+          name: shortName(o.name, 14),
+          fullName: o.name,
+          inStock: o.tools.inStock,
+          issued: o.tools.issued,
+          inRepair: o.tools.inRepair,
+          total: o.tools.total
+        }))
+        .filter((r) => r.total > 0)
+        .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, "ru")),
+    [objects]
+  );
 
   const attentionItems = useMemo(() => {
     const items: Array<{ id: string; label: string; value: number; tone: "bad" | "warn"; onClick?: () => void }> =
@@ -303,7 +410,7 @@ export function HomeOverview({
         label: "Перерасход лимитов",
         value: totals.overLines,
         tone: "bad",
-        onClick: canLimits ? onOpenLimitsTab : undefined
+        onClick: () => openStatDrill("limitsSs")
       });
     }
     if (totals.withoutTemplate > 0) {
@@ -320,7 +427,7 @@ export function HomeOverview({
         label: "Инструмент в ремонте",
         value: totals.toolsInRepair,
         tone: "warn",
-        onClick: canTools ? onOpenToolsTab : undefined
+        onClick: () => openStatDrill("toolsRepair")
       });
     }
     if (totals.receiptOpen > 0) {
@@ -329,7 +436,7 @@ export function HomeOverview({
         label: "Приёмки в работе",
         value: totals.receiptOpen,
         tone: "warn",
-        onClick: canOperations ? onOpenOperationsTab : undefined
+        onClick: () => openStatDrill("receipts")
       });
     }
     const calOver = summary?.toolsCalibrationOverdue ?? 0;
@@ -343,17 +450,7 @@ export function HomeOverview({
       });
     }
     return items;
-  }, [
-    totals,
-    summary,
-    canLimits,
-    canTools,
-    canOperations,
-    onOpenLimitsTab,
-    onOpenToolsTab,
-    onOpenOperationsTab,
-    onOpenVerifications
-  ]);
+  }, [totals, summary, onOpenVerifications]);
 
   const showCharts = objects.length > 0 && !loading;
 
@@ -372,6 +469,332 @@ export function HomeOverview({
   }, [objects]);
 
   const objectCount = summary?.objectCount ?? objects.length;
+
+  const limitsChartH = chartRowsHeight(limitsChartRows.length);
+  const toolsObjChartH = chartRowsHeight(toolsByObjectRows.length);
+  const categoriesChartH = chartRowsHeight(topToolsRows.length);
+  const campChartW = chartColumnsWidth(campChartRows.length);
+
+  const drillTitle = drill
+    ? drill.kind === "stat"
+      ? ({
+          limitsSs: "Лимиты СС по объектам",
+          limitsEom: "Лимиты ЭОМ по объектам",
+          stock: "Позиции на складе",
+          tools: "Инструменты по объектам",
+          toolsStock: "Инструменты на складе",
+          toolsIssued: "Выданные инструменты",
+          toolsRepair: "Инструменты в ремонте",
+          receipts: "Приёмки в работе"
+        } satisfies Record<HomeStatKey, string>)[drill.key]
+      : ({
+          movement: "Движение за 30 дней",
+          limits: "Выполнение лимитов",
+          toolsByObject: "Инструменты по объектам",
+          toolsStatus: "Статусы инструментов",
+          camp: "Городок и инструменты",
+          categories: "Категории инструментов"
+        } satisfies Record<HomeChartKey, string>)[drill.key]
+    : "";
+
+  const drillDetails = (): (() => void) | undefined => {
+    if (!drill) return undefined;
+    if (drill.kind === "stat") {
+      if (drill.key === "limitsSs" || drill.key === "limitsEom") return canLimits ? onOpenLimitsTab : undefined;
+      if (drill.key === "stock") return onOpenWarehouseTab;
+      if (drill.key === "receipts") return canOperations ? onOpenOperationsTab : undefined;
+      if (drill.key === "tools" || drill.key === "toolsStock" || drill.key === "toolsIssued" || drill.key === "toolsRepair") {
+        return canTools ? onOpenToolsTab : undefined;
+      }
+    }
+    if (drill.kind === "chart") {
+      if (drill.key === "movement") return onOpenWarehouseTab;
+      if (drill.key === "limits") return canLimits ? onOpenLimitsTab : undefined;
+      if (drill.key === "camp") return canCamp ? onOpenCampTab : undefined;
+      if (drill.key === "toolsByObject" || drill.key === "toolsStatus" || drill.key === "categories") {
+        return canTools ? onOpenToolsTab : undefined;
+      }
+    }
+    return undefined;
+  };
+
+  const renderLimitsChart = (height: number, yWidth: number, useFullNames: boolean) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart
+        data={
+          useFullNames
+            ? limitsChartRows.map((r) => ({ ...r, name: r.fullName }))
+            : limitsChartRows
+        }
+        layout="vertical"
+        margin={{ top: 4, right: 16, left: 4, bottom: 4 }}
+      >
+        <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#e8edf5" />
+        <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: "#64748b" }} unit="%" />
+        <YAxis type="category" dataKey="name" width={yWidth} tick={{ fontSize: 11, fill: "#334155" }} interval={0} />
+        <Tooltip
+          formatter={(v: unknown, name: unknown) => [`${v}%`, name === "ss" ? "СС" : "ЭОМ"]}
+          labelFormatter={(_, payload) =>
+            payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
+          }
+        />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey="ss" name="СС" fill={LIMIT_SS_COLOR} radius={[0, 4, 4, 0]} barSize={10} />
+        <Bar dataKey="eom" name="ЭОМ" fill={LIMIT_EOM_COLOR} radius={[0, 4, 4, 0]} barSize={10} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const renderToolsByObjectChart = (height: number, yWidth: number, useFullNames: boolean) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart
+        data={useFullNames ? toolsByObjectRows.map((r) => ({ ...r, name: r.fullName })) : toolsByObjectRows}
+        layout="vertical"
+        margin={{ top: 4, right: 12, left: 4, bottom: 4 }}
+      >
+        <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#e8edf5" />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
+        <YAxis type="category" dataKey="name" width={yWidth} tick={{ fontSize: 11, fill: "#334155" }} interval={0} />
+        <Tooltip
+          formatter={chartTooltipQty}
+          labelFormatter={(_, payload) =>
+            payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
+          }
+        />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey="inStock" name="На складе" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={8} />
+        <Bar dataKey="issued" name="Выдано" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={8} />
+        <Bar dataKey="inRepair" name="В ремонте" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={8} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const renderCategoriesChart = (height: number, yWidth: number, useFullNames: boolean) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart
+        data={useFullNames ? topToolsRows.map((r) => ({ ...r, name: r.fullName })) : topToolsRows}
+        layout="vertical"
+        margin={{ top: 4, right: 12, left: 4, bottom: 4 }}
+      >
+        <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#e8edf5" />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
+        <YAxis type="category" dataKey="name" width={yWidth} tick={{ fontSize: 11, fill: "#334155" }} interval={0} />
+        <Tooltip
+          formatter={chartTooltipQty}
+          labelFormatter={(_, payload) =>
+            payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
+          }
+        />
+        <Bar dataKey="count" name="Штук" fill="#6366f1" radius={[0, 6, 6, 0]} barSize={14} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const renderCampChart = (_width: number, height: number) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={campChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 6" vertical={false} stroke="#e8edf5" />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} interval={0} />
+        <YAxis width={36} tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
+        <Tooltip
+          formatter={chartTooltipQty}
+          labelFormatter={(_, payload) =>
+            payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
+          }
+        />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey="camp" name="Городок" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+        <Bar dataKey="tools" name="Инструменты" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const renderMovementChart = (height: number) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={movementChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e8edf3" />
+        <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fontSize: 11 }} />
+        <Tooltip formatter={chartTooltipQty} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey="income" name="Приход" fill="#22c55e" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="outcome" name="Расход" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const renderToolsPie = (height: number) =>
+    toolsPieData.length ? (
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart>
+          <Pie
+            data={toolsPieData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            innerRadius={52}
+            outerRadius={78}
+            paddingAngle={2}
+          >
+            {toolsPieData.map((entry, i) => (
+              <Cell key={entry.key} fill={TOOL_PIE_COLORS[i % TOOL_PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip formatter={chartTooltipQty} />
+          <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    ) : (
+      <p className="muted homeChartEmpty">Инструменты не заведены.</p>
+    );
+
+  const renderDrillBody = () => {
+    if (!drill) return null;
+    if (drill.kind === "stat") {
+      if (drill.key === "limitsSs") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Выполнение", "Перерасход"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [
+                o.name,
+                o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "—",
+                o.limitsSs.overCount > 0 ? o.limitsSs.overCount : "—"
+              ]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "limitsEom") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Выполнение", "Перерасход"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [
+                o.name,
+                o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "—",
+                o.limitsEom.overCount > 0 ? o.limitsEom.overCount : "—"
+              ]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "stock") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Позиций"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, fmtQty(o.stockLines)]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "tools") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Всего", "На складе", "Выдано", "В ремонте"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "toolsStock") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "На складе"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, o.tools.inStock]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "toolsIssued") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Выдано"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, o.tools.issued]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "toolsRepair") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "В ремонте"]}
+            rows={objects
+              .filter((o) => o.tools.inRepair > 0)
+              .map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, o.tools.inRepair]
+              }))}
+          />
+        );
+      }
+      if (drill.key === "receipts") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Приёмки"]}
+            rows={objects
+              .filter((o) => o.receiptOpen > 0)
+              .map((o) => ({
+                key: o.warehouseId,
+                cells: [o.name, o.receiptOpen]
+              }))}
+          />
+        );
+      }
+    }
+    if (drill.kind === "chart") {
+      if (drill.key === "movement") {
+        return (
+          <HomeScrollChart height={240} maxPreview={CHART_MODAL_H}>
+            {renderMovementChart(240)}
+          </HomeScrollChart>
+        );
+      }
+      if (drill.key === "limits" && limitsChartRows.length) {
+        return (
+          <HomeScrollChart height={limitsChartH} maxPreview={CHART_MODAL_H}>
+            {renderLimitsChart(limitsChartH, 160, true)}
+          </HomeScrollChart>
+        );
+      }
+      if (drill.key === "toolsByObject" && toolsByObjectRows.length) {
+        return (
+          <HomeScrollChart height={toolsObjChartH} maxPreview={CHART_MODAL_H}>
+            {renderToolsByObjectChart(toolsObjChartH, 160, true)}
+          </HomeScrollChart>
+        );
+      }
+      if (drill.key === "toolsStatus") {
+        return renderToolsPie(260);
+      }
+      if (drill.key === "camp" && campChartRows.length) {
+        return (
+          <HomeScrollChartX width={campChartW} height={260} maxPreviewHeight={CHART_MODAL_H}>
+            {renderCampChart(campChartW, 260)}
+          </HomeScrollChartX>
+        );
+      }
+      if (drill.key === "categories" && topToolsRows.length) {
+        return (
+          <HomeScrollChart height={categoriesChartH} maxPreview={CHART_MODAL_H}>
+            {renderCategoriesChart(categoriesChartH, 180, true)}
+          </HomeScrollChart>
+        );
+      }
+    }
+    return <p className="muted homeChartEmpty">Нет данных для отображения.</p>;
+  };
 
   return (
     <div className="homeOverview tabShell">
@@ -397,35 +820,49 @@ export function HomeOverview({
             label: "Лимиты СС",
             value: totals.ss.hasTemplate ? `${totals.ss.percent}%` : "—",
             tone: totals.ss.overCount > 0 ? "bad" : totals.ss.percent >= 80 ? "warn" : "ok",
-            onClick: canLimits ? onOpenLimitsTab : undefined
+            onClick: () => openStatDrill("limitsSs")
           },
           {
             label: "Лимиты ЭОМ",
             value: totals.eom.hasTemplate ? `${totals.eom.percent}%` : "—",
             tone: totals.eom.overCount > 0 ? "bad" : totals.eom.percent >= 80 ? "warn" : "ok",
-            onClick: canLimits ? onOpenLimitsTab : undefined
+            onClick: () => openStatDrill("limitsEom")
           },
-          { label: "Позиций на складе", value: fmtQty(totals.stockLines), tone: "neutral", onClick: onOpenWarehouseTab },
-          { label: "Инструменты", value: totals.tools, tone: "neutral" },
+          {
+            label: "Позиций на складе",
+            value: fmtQty(totals.stockLines),
+            tone: "neutral",
+            onClick: () => openStatDrill("stock")
+          },
+          {
+            label: "Инструменты",
+            value: totals.tools,
+            tone: "neutral",
+            onClick: () => openStatDrill("tools")
+          },
           {
             label: "На складе",
             value: summary?.toolsInStock ?? totals.toolsInStock,
-            tone: "ok"
+            tone: "ok",
+            onClick: () => openStatDrill("toolsStock")
           },
           {
             label: "Выдано",
             value: summary?.toolsIssued ?? totals.toolsIssued,
-            tone: "neutral"
+            tone: "neutral",
+            onClick: () => openStatDrill("toolsIssued")
           },
           {
             label: "В ремонте",
             value: summary?.toolsInRepair ?? totals.toolsInRepair,
-            tone: totals.toolsInRepair > 0 ? "warn" : "neutral"
+            tone: totals.toolsInRepair > 0 ? "warn" : "neutral",
+            onClick: () => openStatDrill("toolsRepair")
           },
           {
             label: "Приёмки",
             value: totals.receiptOpen,
-            tone: totals.receiptOpen > 0 ? "warn" : "neutral"
+            tone: totals.receiptOpen > 0 ? "warn" : "neutral",
+            onClick: () => openStatDrill("receipts")
           }
         ]}
       />
@@ -505,138 +942,125 @@ export function HomeOverview({
       {showCharts ? (
         <div className="homeChartsGrid">
           {movementChartRows.length > 0 ? (
-            <section className="homeChartCard homeChartCardWide">
-              <header className="homeChartHead">
-                <h3>Движение за 30 дней</h3>
-                <span className="muted">приход и расход по складам</span>
-              </header>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={movementChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e8edf3" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={chartTooltipQty} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="income" name="Приход" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="outcome" name="Расход" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <section
+              className="homeChartCard homeChartCardWide homeChartCardClickable"
+              onClick={() => openChartDrill("movement")}
+              role="presentation"
+            >
+              <ChartCardHead
+                title="Движение за 30 дней"
+                hint="приход и расход по складам"
+                count={movementChartRows.length}
+                onExpand={() => openChartDrill("movement")}
+              />
+              <HomeScrollChart height={220} maxPreview={CHART_PREVIEW_H}>
+                {renderMovementChart(220)}
+              </HomeScrollChart>
             </section>
           ) : null}
-          <section className="homeChartCard">
-            <header className="homeChartHead">
-              <h3>Выполнение лимитов</h3>
-              <span className="muted">СС и ЭОМ, % выдано / план</span>
-            </header>
+
+          <section
+            className="homeChartCard homeChartCardClickable"
+            onClick={() => limitsChartRows.length && openChartDrill("limits")}
+            role="presentation"
+          >
+            <ChartCardHead
+              title="Выполнение лимитов"
+              hint="СС и ЭОМ, % выдано / план"
+              count={limitsChartRows.length}
+              onExpand={() => openChartDrill("limits")}
+            />
             {limitsChartRows.length ? (
-              <ResponsiveContainer width="100%" height={Math.min(300, 56 + limitsChartRows.length * 36)}>
-                <BarChart data={limitsChartRows} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#e8edf5" />
-                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: "#64748b" }} unit="%" />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={88}
-                    tick={{ fontSize: 11, fill: "#334155" }}
-                    interval={0}
-                  />
-                  <Tooltip
-                    formatter={(v: unknown, name: unknown) => [`${v}%`, name === "ss" ? "СС" : "ЭОМ"]}
-                    labelFormatter={(_, payload) =>
-                      payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
-                    }
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="ss" name="СС" fill={LIMIT_SS_COLOR} radius={[0, 4, 4, 0]} barSize={10} />
-                  <Bar dataKey="eom" name="ЭОМ" fill={LIMIT_EOM_COLOR} radius={[0, 4, 4, 0]} barSize={10} />
-                </BarChart>
-              </ResponsiveContainer>
+              <HomeScrollChart height={limitsChartH} maxPreview={CHART_PREVIEW_H}>
+                {renderLimitsChart(limitsChartH, 96, false)}
+              </HomeScrollChart>
             ) : (
               <p className="muted homeChartEmpty">Нет загруженных лимитов с планом.</p>
             )}
           </section>
 
-          <section className="homeChartCard">
-            <header className="homeChartHead">
-              <h3>Инструменты</h3>
-              <span className="muted">статусы по объектам</span>
-            </header>
-            {toolsPieData.length ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={toolsPieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={78}
-                    paddingAngle={2}
-                  >
-                    {toolsPieData.map((entry, i) => (
-                      <Cell key={entry.key} fill={TOOL_PIE_COLORS[i % TOOL_PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={chartTooltipQty} />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
+          <section
+            className="homeChartCard homeChartCardClickable"
+            onClick={() => toolsByObjectRows.length && openChartDrill("toolsByObject")}
+            role="presentation"
+          >
+            <ChartCardHead
+              title="Инструменты"
+              hint="по всем объектам"
+              count={toolsByObjectRows.length}
+              onExpand={() => openChartDrill("toolsByObject")}
+            />
+            {toolsByObjectRows.length ? (
+              <HomeScrollChart height={toolsObjChartH} maxPreview={CHART_PREVIEW_H}>
+                {renderToolsByObjectChart(toolsObjChartH, 96, false)}
+              </HomeScrollChart>
             ) : (
               <p className="muted homeChartEmpty">Инструменты не заведены.</p>
             )}
           </section>
 
-          <section className="homeChartCard homeChartCardWide">
-            <header className="homeChartHead">
-              <h3>Городок и инструменты</h3>
-              <span className="muted">по объектам</span>
-            </header>
+          <section
+            className="homeChartCard homeChartCardClickable"
+            onClick={() => toolsPieData.length && openChartDrill("toolsStatus")}
+            role="presentation"
+          >
+            <ChartCardHead
+              title="Статусы инструментов"
+              hint="сводно по всем объектам"
+              onExpand={() => openChartDrill("toolsStatus")}
+            />
+            {renderToolsPie(220)}
+          </section>
+
+          <section
+            className="homeChartCard homeChartCardWide homeChartCardClickable"
+            onClick={() => campChartRows.length && openChartDrill("camp")}
+            role="presentation"
+          >
+            <ChartCardHead
+              title="Городок и инструменты"
+              hint="по объектам"
+              count={campChartRows.length}
+              onExpand={() => openChartDrill("camp")}
+            />
             {campChartRows.length ? (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={campChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 6" vertical={false} stroke="#e8edf5" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} interval={0} />
-                  <YAxis width={36} tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
-                  <Tooltip
-                    formatter={chartTooltipQty}
-                    labelFormatter={(_, payload) =>
-                      payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
-                    }
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="camp" name="Городок" fill="#4f46e5" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="tools" name="Инструменты" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <HomeScrollChartX width={campChartW} height={240} maxPreviewHeight={CHART_PREVIEW_H}>
+                {renderCampChart(campChartW, 240)}
+              </HomeScrollChartX>
             ) : (
               <p className="muted homeChartEmpty">Нет данных для сравнения.</p>
             )}
           </section>
 
-          {topToolsRows.length > 1 ? (
-            <section className="homeChartCard homeChartCardWide">
-              <header className="homeChartHead">
-                <h3>Топ категорий инструментов</h3>
-                <span className="muted">суммарно по всем объектам</span>
-              </header>
-              <ResponsiveContainer width="100%" height={Math.min(220, 40 + topToolsRows.length * 28)}>
-                <BarChart data={topToolsRows} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 6" horizontal={false} stroke="#e8edf5" />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 11, fill: "#334155" }} />
-                  <Tooltip
-                    formatter={chartTooltipQty}
-                    labelFormatter={(_, payload) =>
-                      payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
-                    }
-                  />
-                  <Bar dataKey="count" name="Штук" fill="#6366f1" radius={[0, 6, 6, 0]} barSize={14} />
-                </BarChart>
-              </ResponsiveContainer>
+          {topToolsRows.length > 0 ? (
+            <section
+              className="homeChartCard homeChartCardWide homeChartCardClickable"
+              onClick={() => openChartDrill("categories")}
+              role="presentation"
+            >
+              <ChartCardHead
+                title="Категории инструментов"
+                hint="суммарно по всем объектам"
+                count={topToolsRows.length}
+                onExpand={() => openChartDrill("categories")}
+              />
+              <HomeScrollChart height={categoriesChartH} maxPreview={CHART_PREVIEW_H}>
+                {renderCategoriesChart(categoriesChartH, 110, false)}
+              </HomeScrollChart>
             </section>
           ) : null}
         </div>
+      ) : null}
+
+      {drill ? (
+        <HomeDrillModal
+          title={drillTitle}
+          subtitle={`${objectCount} объектов · нажмите «Подробнее» для перехода в раздел`}
+          onClose={() => setDrill(null)}
+          onDetails={drillDetails()}
+        >
+          {renderDrillBody()}
+        </HomeDrillModal>
       ) : null}
 
       {error ? <p className="error">{error}</p> : null}
