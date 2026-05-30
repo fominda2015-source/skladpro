@@ -37,6 +37,49 @@ export const documentsRouter = Router();
 documentsRouter.use(requireAuth);
 documentsRouter.use(requirePermission("documents.read"));
 
+type EntityIdBatch = { entityType: string; ids: string[] };
+
+async function loadWarehouseEntityBatches(
+  warehouseId: string,
+  section?: ObjectSection
+): Promise<EntityIdBatch[]> {
+  const scoped = { warehouseId, ...(section ? { section } : {}) };
+  const campWhere = { warehouseId, ...(section ? { section } : {}) };
+  const [issues, receipts, operations, tools, campItems, writeoffs] = await Promise.all([
+    prisma.issueRequest.findMany({ where: scoped, select: { id: true } }),
+    prisma.receiptRequest.findMany({ where: scoped, select: { id: true } }),
+    prisma.operation.findMany({ where: scoped, select: { id: true } }),
+    prisma.tool.findMany({ where: scoped, select: { id: true } }),
+    prisma.campItem.findMany({ where: campWhere, select: { id: true } }),
+    prisma.materialHolderWriteoff.findMany({ where: scoped, select: { id: true } })
+  ]);
+  return [
+    { entityType: "issue", ids: issues.map((x) => x.id) },
+    { entityType: "receipt", ids: receipts.map((x) => x.id) },
+    { entityType: "operation", ids: operations.map((x) => x.id) },
+    { entityType: "tool", ids: tools.map((x) => x.id) },
+    { entityType: "camp", ids: campItems.map((x) => x.id) },
+    { entityType: "material-writeoff", ids: writeoffs.map((x) => x.id) }
+  ];
+}
+
+function buildDocumentScopeOr(batches: EntityIdBatch[]): Prisma.DocumentFileWhereInput | undefined {
+  const entityOr: Prisma.DocumentFileWhereInput[] = [];
+  const linkOr: Prisma.DocumentLinkWhereInput[] = [];
+  for (const batch of batches) {
+    if (!batch.ids.length) continue;
+    entityOr.push({ entityType: batch.entityType, entityId: { in: batch.ids } });
+    linkOr.push({ entityType: batch.entityType, entityId: { in: batch.ids } });
+  }
+  if (!entityOr.length && !linkOr.length) return undefined;
+  return {
+    OR: [
+      ...(entityOr.length ? entityOr : []),
+      ...(linkOr.length ? [{ links: { some: { OR: linkOr } } }] : [])
+    ]
+  };
+}
+
 documentsRouter.get("/", async (req: AuthedRequest, res) => {
   const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
@@ -70,45 +113,9 @@ documentsRouter.get("/", async (req: AuthedRequest, res) => {
 
   let warehouseFilter: Prisma.DocumentFileWhereInput | undefined;
   if (warehouseId) {
-    const issueWhere = { warehouseId, ...(section ? { section } : {}) };
-    const receiptWhere = { warehouseId, ...(section ? { section } : {}) };
-    const operationWhere = { warehouseId, ...(section ? { section } : {}) };
-    const [issues, receipts, operations] = await Promise.all([
-      prisma.issueRequest.findMany({ where: issueWhere, select: { id: true } }),
-      prisma.receiptRequest.findMany({ where: receiptWhere, select: { id: true } }),
-      prisma.operation.findMany({ where: operationWhere, select: { id: true } })
-    ]);
-    const issueIds = issues.map((x) => x.id);
-    const receiptIds = receipts.map((x) => x.id);
-    const operationIds = operations.map((x) => x.id);
-    const entityOr: Prisma.DocumentFileWhereInput[] = [];
-    if (issueIds.length) {
-      entityOr.push({ entityType: "issue", entityId: { in: issueIds } });
-    }
-    if (receiptIds.length) {
-      entityOr.push({ entityType: "receipt", entityId: { in: receiptIds } });
-    }
-    if (operationIds.length) {
-      entityOr.push({ entityType: "operation", entityId: { in: operationIds } });
-    }
-    const linkOr: Prisma.DocumentLinkWhereInput[] = [];
-    if (issueIds.length) {
-      linkOr.push({ entityType: "issue", entityId: { in: issueIds } });
-    }
-    if (receiptIds.length) {
-      linkOr.push({ entityType: "receipt", entityId: { in: receiptIds } });
-    }
-    if (operationIds.length) {
-      linkOr.push({ entityType: "operation", entityId: { in: operationIds } });
-    }
-    if (entityOr.length || linkOr.length) {
-      warehouseFilter = {
-        OR: [
-          ...(entityOr.length ? entityOr : []),
-          ...(linkOr.length ? [{ links: { some: { OR: linkOr } } }] : [])
-        ]
-      };
-    } else {
+    const batches = await loadWarehouseEntityBatches(warehouseId, section);
+    warehouseFilter = buildDocumentScopeOr(batches);
+    if (!warehouseFilter) {
       return res.json([]);
     }
   }

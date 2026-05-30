@@ -4222,8 +4222,7 @@ function App() {
       docEntityType && docEntityId ? `entityType=${encodeURIComponent(docEntityType)}` : "",
       docEntityType && docEntityId ? `entityId=${encodeURIComponent(docEntityId)}` : "",
       docTypeFilter ? `type=${encodeURIComponent(docTypeFilter)}` : "",
-      docWarehouseFilter ? `warehouseId=${encodeURIComponent(docWarehouseFilter)}` : "",
-      docWarehouseFilter ? `section=${encodeURIComponent(objectSectionFilter)}` : ""
+      docWarehouseFilter ? `warehouseId=${encodeURIComponent(docWarehouseFilter)}` : ""
     ].filter(Boolean);
     const query = parts.length ? `?${parts.join("&")}` : "";
     const res = await fetchWithSession(`${API_URL}/api/documents${query}`, {
@@ -4263,6 +4262,7 @@ function App() {
   function openDocumentsForEntity(entityType: "issue" | "operation" | "receipt", entityId: string) {
     setDocEntityType(entityType);
     setDocEntityId(entityId);
+    setDocWarehouseFilter("");
     setSelectedDocumentId("");
     setDocPreviewUrl("");
     setActiveTab("documents");
@@ -5058,18 +5058,7 @@ function App() {
       void loadReceiptRequests();
       void loadDocuments();
     }
-  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, docWarehouseFilter, activeObjectId, objectSectionFilter]);
-
-  useEffect(() => {
-    if (
-      activeTab === "documents" &&
-      activeObjectId &&
-      activeObjectId !== ALL_OBJECTS_ID &&
-      !docWarehouseFilter
-    ) {
-      setDocWarehouseFilter(activeObjectId);
-    }
-  }, [activeTab, activeObjectId, docWarehouseFilter]);
+  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, docWarehouseFilter]);
 
   useEffect(() => {
     if (token && activeTab === "camp") {
@@ -9261,7 +9250,7 @@ function App() {
               setDocTypeFilter("");
               setDocEntityType("");
               setDocEntityId("");
-              setDocWarehouseFilter(activeObjectId || "");
+              setDocWarehouseFilter("");
               setDocSearchQuery("");
               setSelectedDocumentId("");
               setDocPreviewUrl("");
