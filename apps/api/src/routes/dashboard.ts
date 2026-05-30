@@ -12,6 +12,7 @@ import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 import {
   getRequestDataScope,
+  getHomeOverviewDataScope,
   issueWhereFromScope,
   mergeIssueWhere,
   operationWhereFromScope,
@@ -267,7 +268,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
 });
 
 dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
+  const scope = await getHomeOverviewDataScope(req);
   const { objects, summary } = await buildHomeOverview(scope);
   return res.json({
     generatedAt: new Date().toISOString(),

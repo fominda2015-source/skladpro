@@ -26,6 +26,31 @@ export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope
   return p;
 }
 
+/** Сводка главной — всегда по всем доступным объектам, без фильтра «текущий объект» в шапке. */
+export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<DataScope> {
+  if (!req.user) {
+    throw new Error("Unauthorized");
+  }
+  const { userId, permissions } = req.user;
+  if (permissions.includes("*")) {
+    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
+  }
+  const [whRows, pjRows, sectionRows] = await Promise.all([
+    prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
+    prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
+    prisma.userWarehouseSectionScope.findMany({ where: { userId }, select: { warehouseId: true, section: true } })
+  ]);
+  return {
+    unrestricted: false,
+    warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : null,
+    projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
+    sectionScopes: sectionRows.map((s) => ({
+      warehouseId: s.warehouseId,
+      section: s.section
+    }))
+  };
+}
+
 async function loadDataScope(userId: string, permissions: string[]): Promise<DataScope> {
   const [userRow, whRows, pjRows, sectionRows] = await Promise.all([
     prisma.user.findUnique({
