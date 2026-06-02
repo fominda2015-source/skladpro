@@ -1,7 +1,12 @@
 import type { Prisma } from "@prisma/client";
 import { OperationType } from "@prisma/client";
 import { Router } from "express";
-import { assertObjectSectionInScope, getRequestDataScope, type DataScope } from "../lib/dataScope.js";
+import {
+  assertObjectSectionInScope,
+  getRequestDataScope,
+  resolveReadScope,
+  type DataScope
+} from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -31,8 +36,8 @@ function movementScopeWhere(scope: DataScope): Prisma.StockMovementWhereInput {
 }
 
 stockMovementsRouter.get("/issued-summary", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const scope = await resolveReadScope(req, { warehouseId });
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
 
@@ -75,8 +80,8 @@ stockMovementsRouter.get("/issued-summary", async (req: AuthedRequest, res) => {
 
 /** Сводка для количественной диаграммы лимита: приход по секции, расход по выдаче, остаток, «в закупке». */
 stockMovementsRouter.get("/supply-metrics", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const scope = await resolveReadScope(req, { warehouseId });
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
 

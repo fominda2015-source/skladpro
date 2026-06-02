@@ -10,6 +10,7 @@ import {
   assertProjectInScope,
   assertWarehouseInScope,
   getRequestDataScope,
+  resolveReadScope,
   toolWhereFromScope,
   warehouseWhereFromScope
 } from "../lib/dataScope.js";
@@ -169,9 +170,9 @@ toolsRouter.delete("/categories/:id", requirePermission("tools.write"), async (r
 // Группировка инструментов по категориям: если categoryId задан — берём категорию,
 // иначе группируем по полю name. Возвращаем массив «карточек».
 toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
-  const scopedToolFilter = toolWhereFromScope(scope);
   const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const scope = await resolveReadScope(req, { warehouseId: warehouseIdParam || undefined });
+  const scopedToolFilter = toolWhereFromScope(scope);
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section: "SS" | "EOM" | undefined = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   try {
@@ -243,8 +244,8 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
 });
 
 toolsRouter.get("/", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const scope = await resolveReadScope(req, { warehouseId: warehouseIdParam || undefined });
   try {
     if (warehouseIdParam) {
       assertWarehouseInScope(scope, warehouseIdParam);

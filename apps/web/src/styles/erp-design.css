@@ -170,6 +170,40 @@
 .homeAnnouncementsTop .homeAnnRegularGroup {
   display: contents;
 }
+.homeAnnBellBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.homeAnnBellBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.homeAnnModalBody .homeAnnouncements {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+.homeDrillTabEmbed {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+}
+.homeDrillTabEmbed .limitTemplateCard {
+  margin-top: 8px;
+}
+
 .homeToolbarHint {
   display: inline-flex;
   align-items: center;

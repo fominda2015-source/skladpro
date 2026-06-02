@@ -254,6 +254,20 @@ export function objectLimitTemplateWhereFromScope(scope: DataScope): Prisma.Obje
   return {};
 }
 
+/**
+ * Область для чтения по явному warehouseId в query (главная, drill по объектам).
+ * Не сужается до активного склада в шапке — иначе периодические 403 при просмотре «чужих» объектов.
+ */
+export async function resolveReadScope(
+  req: AuthedRequest,
+  opts?: { warehouseId?: string }
+): Promise<DataScope> {
+  if (opts?.warehouseId) {
+    return getHomeOverviewDataScope(req);
+  }
+  return getRequestDataScope(req);
+}
+
 export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {
   if (scope.unrestricted || !scope.warehouseIds?.length) {
     return;

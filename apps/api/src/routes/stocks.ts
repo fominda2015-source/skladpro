@@ -4,7 +4,9 @@ import { MaterialKind, StockMovementDirection } from "@prisma/client";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
+  assertWarehouseInScope,
   getRequestDataScope,
+  resolveReadScope,
   stockWhereFromScope
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
@@ -176,7 +178,6 @@ stocksRouter.get("/peer-summaries", async (req: AuthedRequest, res) => {
 });
 
 stocksRouter.get("/", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
   const materialId = typeof req.query.materialId === "string" ? req.query.materialId : undefined;
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
@@ -185,8 +186,23 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
   const onlyLow =
     typeof req.query.onlyLow === "string" ? ["1", "true", "yes"].includes(req.query.onlyLow) : false;
 
-  if (warehouseId && !scope.unrestricted && scope.warehouseIds?.length && !scope.warehouseIds.includes(warehouseId)) {
-    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+  const scope = await resolveReadScope(req, { warehouseId });
+  if (warehouseId && section) {
+    try {
+      assertObjectSectionInScope(scope, warehouseId, section);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+  } else if (warehouseId) {
+    try {
+      assertWarehouseInScope(scope, warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
   }
 
   const kindParam = typeof req.query.kind === "string" ? req.query.kind.toUpperCase() : "";

@@ -26,6 +26,8 @@ type Props = {
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  /** В модальном окне — всегда показывать блок, даже если объявлений нет */
+  embedded?: boolean;
 };
 
 type Draft = {
@@ -64,7 +66,7 @@ function needsExpand(body: string) {
   return body.trim().length > PREVIEW_LINES || body.split("\n").length > 4;
 }
 
-export function HomeAnnouncements({ token, fetchWithSession, canCreate, canEdit, canDelete }: Props) {
+export function HomeAnnouncements({ token, fetchWithSession, canCreate, canEdit, canDelete, embedded = false }: Props) {
   const [rows, setRows] = useState<AnnouncementRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -98,7 +100,7 @@ export function HomeAnnouncements({ token, fetchWithSession, canCreate, canEdit,
   const visibleRegular = showAll ? regular : regular.slice(0, COLLAPSED_VISIBLE);
   const hiddenRegularCount = Math.max(0, regular.length - COLLAPSED_VISIBLE);
 
-  const visible = rows.length > 0 || canCreate || loading;
+  const visible = embedded || rows.length > 0 || canCreate || loading;
   if (!visible) return null;
 
   function resetForm() {

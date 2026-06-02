@@ -5,8 +5,10 @@ import { z } from "zod";
 import type { LimitNodeType, Prisma } from "@prisma/client";
 import {
   assertObjectSectionInScope,
+  assertWarehouseInScope,
   getRequestDataScope,
-  objectLimitTemplateWhereFromScope
+  objectLimitTemplateWhereFromScope,
+  resolveReadScope
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -654,14 +656,16 @@ limitImportsRouter.delete(
 );
 
 limitImportsRouter.get("/", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
+  const scope = await resolveReadScope(req, { warehouseId });
   if (warehouseId) {
     try {
       if (section) {
         assertObjectSectionInScope(scope, warehouseId, section);
+      } else {
+        assertWarehouseInScope(scope, warehouseId);
       }
     } catch (e) {
       const err = e as Error & { status?: number };

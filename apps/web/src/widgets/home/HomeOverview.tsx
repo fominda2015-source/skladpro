@@ -107,7 +107,7 @@ type Props = {
   canTools?: boolean;
   canWarehouse?: boolean;
   canOperations?: boolean;
-  announcements?: ReactNode;
+  announcementsBell?: ReactNode;
   renderObjectDrillContent?: (params: {
     warehouseId: string;
     objectName: string;
@@ -286,7 +286,7 @@ export function HomeOverview({
   canTools = true,
   canWarehouse = true,
   canOperations = true,
-  announcements = null,
+  announcementsBell = null,
   renderObjectDrillContent,
   onOpenQr,
   onOpenIssues,
@@ -1049,9 +1049,12 @@ export function HomeOverview({
           </>
         }
         actions={
-          <button type="button" className="ghostBtn" onClick={onRefresh} disabled={loading}>
-            ↻ Обновить
-          </button>
+          <>
+            {announcementsBell}
+            <button type="button" className="ghostBtn" onClick={onRefresh} disabled={loading}>
+              ↻ Обновить
+            </button>
+          </>
         }
         stats={[
           {
@@ -1094,8 +1097,6 @@ export function HomeOverview({
           }
         ]}
       />
-
-      {announcements ? <div className="homeAnnouncementsTop">{announcements}</div> : null}
 
       <div className="erpQuickActions">
         {canWarehouse && onOpenWarehouseTab ? (

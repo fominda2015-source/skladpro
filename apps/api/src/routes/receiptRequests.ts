@@ -8,7 +8,7 @@ import xlsx from "xlsx";
 import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
-import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js";
+import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
   ensureMaterialInCurrentLimitTemplate,
@@ -434,8 +434,8 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
 });
 
 receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
-  const scope = await getRequestDataScope(req);
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const scope = await resolveReadScope(req, { warehouseId });
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
   if (warehouseId) {

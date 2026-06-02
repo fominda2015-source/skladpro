@@ -8,7 +8,7 @@ import { IssueRequestDomain, IssueRequestStatus, MaterialKind } from "@prisma/cl
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { config } from "../config.js";
-import { assertObjectSectionInScope, getRequestDataScope } from "../lib/dataScope.js";
+import { assertObjectSectionInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -235,7 +235,7 @@ materialReportRouter.get("/balances", requirePermission("materialReport.read"), 
     return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
   }
 
-  const scope = await getRequestDataScope(req);
+  const scope = await resolveReadScope(req, { warehouseId });
   try {
     assertObjectSectionInScope(scope, warehouseId, section);
   } catch (e) {
@@ -260,7 +260,7 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
     return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
   }
 
-  const scope = await getRequestDataScope(req);
+  const scope = await resolveReadScope(req, { warehouseId });
   try {
     assertObjectSectionInScope(scope, warehouseId, section);
   } catch (e) {
