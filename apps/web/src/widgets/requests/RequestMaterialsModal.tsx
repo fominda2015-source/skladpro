@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ReceiptInvoiceAttachBar } from "../receipts/ReceiptInvoiceAttachBar";
 import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
 
 type MaterialRow = {
@@ -68,6 +69,11 @@ type PropsBase = {
   token: string;
   fetchWithSession: FetchFn;
   onOpenDocumentsTab?: () => void;
+  /** Приход: загрузить файл счёта (привязка к заявке) */
+  onUploadInvoiceFile?: (file: File) => void;
+  /** Приход: открыть последний приложенный счёт */
+  onOpenInvoice?: () => void;
+  canWrite?: boolean;
   /** Встроенный режим — без полноэкранного backdrop (side-panel) */
   embedded?: boolean;
 };
@@ -105,11 +111,22 @@ function sortAndDedupeDocs(list: RequestDoc[]): RequestDoc[] {
 }
 
 export function RequestMaterialsModal(props: Props) {
-  const { onClose, apiUrl, token, fetchWithSession, onOpenDocumentsTab, embedded = false } = props;
+  const {
+    onClose,
+    apiUrl,
+    token,
+    fetchWithSession,
+    onOpenDocumentsTab,
+    onUploadInvoiceFile,
+    onOpenInvoice,
+    canWrite = true,
+    embedded = false
+  } = props;
   const [highlight, setHighlight] = useState("");
   const [docs, setDocs] = useState<RequestDoc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
+  const [docsRefresh, setDocsRefresh] = useState(0);
 
   const entityType = props.kind === "issue" ? "issue" : "receipt";
   const entityId = props.row.id;
@@ -143,7 +160,7 @@ export function RequestMaterialsModal(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, entityId, entityType, fetchWithSession, token]);
+  }, [apiUrl, entityId, entityType, fetchWithSession, token, docsRefresh]);
 
   const rows: MaterialRow[] = useMemo(() => {
     if (props.kind === "issue") {
@@ -183,6 +200,10 @@ export function RequestMaterialsModal(props: Props) {
   const totalPct = totalQty > 0 ? Math.round((totalAccepted / totalQty) * 1000) / 10 : 0;
 
   const docsSorted = useMemo(() => sortAndDedupeDocs(docs), [docs]);
+  const invoiceDoc = useMemo(
+    () => docsSorted.find((d) => d.type === "receipt-invoice") ?? null,
+    [docsSorted]
+  );
 
   function copyAsTsv() {
     const headerCells =
@@ -266,9 +287,25 @@ export function RequestMaterialsModal(props: Props) {
           </p>
         ) : null}
 
+        {props.kind === "receipt" && onUploadInvoiceFile ? (
+          <ReceiptInvoiceAttachBar
+            apiUrl={apiUrl}
+            receiptId={props.row.id}
+            token={token}
+            fetchWithSession={fetchWithSession}
+            canWrite={canWrite}
+            invoiceDoc={invoiceDoc}
+            onUploadFile={async (file) => {
+              await onUploadInvoiceFile(file);
+              setDocsRefresh((v) => v + 1);
+            }}
+            onOpenInvoice={onOpenInvoice}
+          />
+        ) : null}
+
         <div className="requestMaterialsModalBody">
           {rows.length ? (
-            <table className="limitMaterialsTable" style={{ width: "100%" }}>
+            <table className="erpTable desktopTable requestMaterialsTable">
               <thead>
                 <tr>
                   <th className="num" style={{ width: 32 }}>№</th>
@@ -285,7 +322,7 @@ export function RequestMaterialsModal(props: Props) {
                 {rows.map((r) => (
                   <tr key={`${props.kind}-row-${r.num}`}>
                     <td className="num">{r.num}</td>
-                    <td className="matName" title={r.name}>{r.name}</td>
+                    <td className="requestMaterialsMatCell" title={r.name}>{r.name}</td>
                     {props.kind === "issue" ? <td>{r.sku || ""}</td> : null}
                     <td className="num">{r.unit}</td>
                     <td className="num">
@@ -297,12 +334,12 @@ export function RequestMaterialsModal(props: Props) {
                       </td>
                     ) : null}
                     {props.kind === "receipt" ? (
-                      <td className="matName muted" title={r.factLabel || ""}>
+                      <td className="requestMaterialsMatCell muted" title={r.factLabel || ""}>
                         {r.factLabel || ""}
                       </td>
                     ) : null}
                     {props.kind === "issue" ? (
-                      <td className="matName muted" title={r.factLabel || ""}>
+                      <td className="requestMaterialsMatCell muted" title={r.factLabel || ""}>
                         {r.factLabel || ""}
                       </td>
                     ) : null}
@@ -339,7 +376,7 @@ export function RequestMaterialsModal(props: Props) {
           {tools.length ? (
             <>
               <h4 style={{ marginTop: 16, marginBottom: 6 }}>Инструменты в заявке</h4>
-              <table className="limitMaterialsTable" style={{ width: "100%" }}>
+              <table className="erpTable desktopTable requestMaterialsTable">
                 <thead>
                   <tr>
                     <th className="num" style={{ width: 32 }}>№</th>

@@ -109,9 +109,17 @@ type ReceiptProps = {
   rows: ApprovalReceiptRow[];
   onOpenTable: (row: ApprovalReceiptRow) => void;
   onOpenReceipt: (id: string) => void;
+  onAddInvoice?: (row: ApprovalReceiptRow) => void;
+  canWrite?: boolean;
 };
 
-export function ApprovalsReceiptRequestsTable({ rows, onOpenTable, onOpenReceipt }: ReceiptProps) {
+export function ApprovalsReceiptRequestsTable({
+  rows,
+  onOpenTable,
+  onOpenReceipt,
+  onAddInvoice,
+  canWrite = true
+}: ReceiptProps) {
   return (
     <section className="homePanel" style={{ marginTop: 12 }}>
       <div className="homePanelHead">
@@ -131,7 +139,7 @@ export function ApprovalsReceiptRequestsTable({ rows, onOpenTable, onOpenReceipt
                 <th>Файл</th>
                 <th>Статус</th>
                 <th style={{ width: 72 }}>Поз.</th>
-                <th style={{ width: 200 }}>Действия</th>
+                <th style={{ width: 320 }}>Действия</th>
               </tr>
             </thead>
             <tbody>
@@ -152,6 +160,11 @@ export function ApprovalsReceiptRequestsTable({ rows, onOpenTable, onOpenReceipt
                       <button type="button" className="ghostBtn" onClick={() => onOpenTable(row)}>
                         Таблица
                       </button>
+                      {canWrite && onAddInvoice ? (
+                        <button type="button" className="ghostBtn" onClick={() => onAddInvoice(row)} title="Открыть заявку и приложить счёт">
+                          Счёт →
+                        </button>
+                      ) : null}
                       <button type="button" className="ghostBtn" onClick={() => onOpenReceipt(row.id)}>
                         Приёмка →
                       </button>

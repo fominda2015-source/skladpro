@@ -26,6 +26,7 @@ export function docTypeLabel(type: string): string {
     invoice: "Счёт",
     "upd-scan": "Скан УПД / ТН",
     "receipt-request": "Заявка Excel",
+    "receipt-invoice": "Счёт",
     photo: "Фото",
     act: "Акт",
     "issue-act": "Акт выдачи",

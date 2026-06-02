@@ -62,8 +62,6 @@ import {
 } from "./widgets/approvals/ApprovalsQueueTables";
 import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
 import {
-  RECEIPT_ITEM_CATEGORIES,
-  receiptItemCategoryLabel,
   receiptStatusLabel,
   receiptStatusTone,
   type ReceiptItemCategory
@@ -73,6 +71,7 @@ import { StatusBadge } from "./shared/ui/StatusBadge";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
+import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
@@ -852,7 +851,6 @@ function App() {
   const [materialWriteoffFile, setMaterialWriteoffFile] = useState<File | null>(null);
   const [materialWriteoffBusy, setMaterialWriteoffBusy] = useState(false);
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
-  const [receiptInvoiceUploadId, setReceiptInvoiceUploadId] = useState<string | null>(null);
   const [limitNameAlertModal, setLimitNameAlertModal] = useState<null | { title: string; note: string }>(
     null
   );
@@ -3197,8 +3195,8 @@ function App() {
     await loadReceiptRequests();
   }
 
-  async function uploadReceiptInvoice(receiptId: string, file: File) {
-    if (!token) return;
+  async function uploadReceiptInvoice(receiptId: string, file: File): Promise<boolean> {
+    if (!token) return false;
     const form = new FormData();
     form.append("file", file);
     const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/invoice`, {
@@ -3208,10 +3206,11 @@ function App() {
     });
     if (!res.ok) {
       setOpsMessage("Не удалось приложить счёт");
-      return;
+      return false;
     }
     setOpsMessage("Счёт приложен к заявке");
-    setReceiptInvoiceUploadId(null);
+    await loadReceiptRequests();
+    return true;
   }
 
   async function openReceiptInvoice(receiptId: string) {
@@ -3716,35 +3715,6 @@ function App() {
     setOpsMessage("Заявка на приход удалена. Уведомление отправлено.");
     await loadReceiptRequests();
     return true;
-  }
-
-  async function patchReceiptItemMeta(
-    receiptId: string,
-    itemId: string,
-    body: {
-      category?: ReceiptItemCategory | null;
-      unitPrice?: number | null;
-      storagePlace?: string | null;
-    }
-  ) {
-    if (!token) return;
-    const res = await fetchWithSession(
-      `${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/items/${encodeURIComponent(itemId)}`,
-      {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      }
-    );
-    if (!res.ok) return;
-    const updated = (await res.json()) as ReceiptRequestItem;
-    setReceiptRequests((prev) =>
-      prev.map((r) =>
-        r.id !== receiptId
-          ? r
-          : { ...r, items: r.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it)) }
-      )
-    );
   }
 
   async function closeReceiptRequest(receiptId: string): Promise<boolean> {
@@ -7051,7 +7021,7 @@ function App() {
                     <th>Статус</th>
                     <th>Прогресс</th>
                     <th style={{ width: 72 }}>Поз.</th>
-                    <th style={{ width: 200 }}>Действия</th>
+                    <th style={{ width: 260 }}>Действия</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7113,18 +7083,13 @@ function App() {
                       <button
                         type="button"
                         className="ghostBtn"
-                        title="Приложить счёт поставщика"
-                        onClick={() => setReceiptInvoiceUploadId(row.id)}
+                        title="Открыть заявку и приложить счёт"
+                        onClick={() => {
+                          setRequestMaterialsModal({ kind: "receipt", row });
+                          setDrawerMode("requestMaterials");
+                        }}
                       >
-                        Счёт
-                      </button>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        title="Открыть приложенный счёт"
-                        onClick={() => void openReceiptInvoice(row.id)}
-                      >
-                        Счёт ↗
+                        Заявка
                       </button>
                       <button
                         type="button"
@@ -7162,6 +7127,16 @@ function App() {
                     <td colSpan={6}>
                       <div className="erpTableExpandInner" style={{ display: "block", width: "100%" }}>
                   <>
+                    <ReceiptInvoiceAttachBar
+                      apiUrl={API_URL}
+                      receiptId={row.id}
+                      token={token}
+                      fetchWithSession={fetchWithSession}
+                      compact
+                      canWrite={canWriteOperations}
+                      onUploadFile={(file) => uploadReceiptInvoice(row.id, file)}
+                      onOpenInvoice={() => void openReceiptInvoice(row.id)}
+                    />
                     <datalist id={datalistId}>
                       {materials.map((m) => (
                         <option key={`m-sug-${row.id}-${m.id}`} value={m.name}>
@@ -7263,13 +7238,9 @@ function App() {
                                 <tr>
                                   <th style={{ width: 36 }}>✓</th>
                                   <th>Название из заявки</th>
-                                  <th>Раздел лимита (M)</th>
                                   <th>Принято / план</th>
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
-                                  <th>Категория</th>
-                                  <th className="num">Цена</th>
-                                  <th>Место хранения</th>
                                   <th>Принять сейчас</th>
                                   {row.objectLimitTemplateId ? <th>Узел лимита</th> : null}
                                 </tr>
@@ -7343,7 +7314,7 @@ function App() {
                                           onChange={(e) => toggle(e.target.checked)}
                                         />
                                       </td>
-                                      <td style={{ maxWidth: 280 }}>
+                                      <td style={{ maxWidth: 280 }} title={it.sourceName}>
                                         {it.sourceName}
                                         {it.limitNameRenamed ? (
                                           <span className="limitDiffTag limitDiffTag--qty" title="Имя в лимите обновлено по колонке O">
@@ -7351,9 +7322,6 @@ function App() {
                                             ⚠ лимит
                                           </span>
                                         ) : null}
-                                      </td>
-                                      <td className="muted" style={{ fontSize: 12, maxWidth: 200 }}>
-                                        {it.limitSectionPath || "—"}
                                       </td>
                                       <td>
                                         {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
@@ -7404,103 +7372,6 @@ function App() {
                                               }
                                             }))
                                           }
-                                        />
-                                      </td>
-                                      <td style={{ minWidth: 130 }}>
-                                        <select
-                                          value={defaultCategory}
-                                          disabled={finished}
-                                          onChange={(e) => {
-                                            const category = (e.target.value || "") as ReceiptItemCategory | "";
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: prev[row.id]?.[it.id]?.newName || defaultName,
-                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || defaultUnit,
-                                                  qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
-                                                  category,
-                                                  unitPrice: defaultPrice,
-                                                  storagePlace: defaultStorage
-                                                }
-                                              }
-                                            }));
-                                            void patchReceiptItemMeta(row.id, it.id, {
-                                              category: category || null
-                                            });
-                                          }}
-                                        >
-                                          <option value="">—</option>
-                                          {RECEIPT_ITEM_CATEGORIES.map((c) => (
-                                            <option key={c} value={c}>
-                                              {receiptItemCategoryLabel(c)}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </td>
-                                      <td style={{ width: 100 }}>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          step={0.01}
-                                          value={defaultPrice}
-                                          placeholder="₽"
-                                          disabled={finished}
-                                          onChange={(e) =>
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: prev[row.id]?.[it.id]?.newName || "",
-                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
-                                                  category: defaultCategory,
-                                                  unitPrice: e.target.value,
-                                                  storagePlace: defaultStorage
-                                                }
-                                              }
-                                            }))
-                                          }
-                                          onBlur={(e) => {
-                                            const raw = e.currentTarget.value.trim().replace(",", ".");
-                                            const n = raw === "" ? null : Number(raw);
-                                            void patchReceiptItemMeta(row.id, it.id, {
-                                              unitPrice: n != null && Number.isFinite(n) ? n : null
-                                            });
-                                          }}
-                                        />
-                                      </td>
-                                      <td style={{ minWidth: 140 }}>
-                                        <input
-                                          value={defaultStorage}
-                                          placeholder="Ячейка, помещение…"
-                                          disabled={finished}
-                                          onChange={(e) =>
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: prev[row.id]?.[it.id]?.newName || "",
-                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
-                                                  category: defaultCategory,
-                                                  unitPrice: defaultPrice,
-                                                  storagePlace: e.target.value
-                                                }
-                                              }
-                                            }))
-                                          }
-                                          onBlur={(e) => {
-                                            void patchReceiptItemMeta(row.id, it.id, {
-                                              storagePlace: e.currentTarget.value.trim() || null
-                                            });
-                                          }}
                                         />
                                       </td>
                                       <td style={{ width: 130 }}>
@@ -9627,7 +9498,14 @@ function App() {
           />
           <ApprovalsReceiptRequestsTable
             rows={receiptRequests}
+            canWrite={canWriteOperations}
             onOpenTable={(row) => {
+              const full = receiptRequests.find((r) => r.id === row.id);
+              if (!full) return;
+              setRequestMaterialsModal({ kind: "receipt", row: full });
+              setDrawerMode("requestMaterials");
+            }}
+            onAddInvoice={(row) => {
               const full = receiptRequests.find((r) => r.id === row.id);
               if (!full) return;
               setRequestMaterialsModal({ kind: "receipt", row: full });
@@ -13015,33 +12893,6 @@ function App() {
         </div>
       )}
 
-      {receiptInvoiceUploadId ? (
-        <div
-          className="modalOverlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setReceiptInvoiceUploadId(null)}
-        >
-          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-            <h3 style={{ marginTop: 0 }}>Счёт к заявке</h3>
-            <p className="muted">PDF или изображение счёта поставщика.</p>
-            <input
-              type="file"
-              accept=".pdf,image/*,application/pdf"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void uploadReceiptInvoice(receiptInvoiceUploadId, f);
-              }}
-            />
-            <div className="toolbar" style={{ justifyContent: "flex-end", marginTop: 12 }}>
-              <button type="button" className="ghostBtn" onClick={() => setReceiptInvoiceUploadId(null)}>
-                Отмена
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {limitNameAlertModal ? (
         <div
           className="modalOverlay"
@@ -13168,6 +13019,9 @@ function App() {
               apiUrl={API_URL}
               token={token}
               fetchWithSession={fetchWithSession}
+              canWrite={canWriteOperations}
+              onUploadInvoiceFile={(file) => void uploadReceiptInvoice(requestMaterialsModal.row.id, file)}
+              onOpenInvoice={() => void openReceiptInvoice(requestMaterialsModal.row.id)}
               onOpenDocumentsTab={() => {
                 openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
                 setRequestMaterialsModal(null);
