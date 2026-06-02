@@ -130,7 +130,10 @@ async function findOrCreateMaterial(
 }
 
 const receiptRequestInclude = {
-  items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
+  items: {
+    orderBy: { createdAt: "asc" as const },
+    include: { mappedMaterial: { select: { id: true, name: true, unit: true } } }
+  },
   limitTemplate: { select: { id: true, title: true } }
 } as const;
 
@@ -143,14 +146,27 @@ function toQtyNumber(value: unknown): number | null {
 }
 
 function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
+  const items = row.items.map((it) => ({
+    ...it,
+    quantity: Number(it.quantity),
+    acceptedQty: toQtyNumber(it.acceptedQty),
+    unitPrice: toQtyNumber(it.unitPrice)
+  }));
+  const hasOpenItems = items.some((it) => {
+    const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
+    return remaining > 1e-6;
+  });
+  const anyAccepted = items.some((it) => Number(it.acceptedQty || 0) > 1e-6);
+  let status = row.status;
+  if (status !== "CANCELLED" && !hasOpenItems) {
+    status = "RECEIVED";
+  } else if (status === "NEW" && anyAccepted) {
+    status = "IN_PROGRESS";
+  }
   return {
     ...row,
-    items: row.items.map((it) => ({
-      ...it,
-      quantity: Number(it.quantity),
-      acceptedQty: toQtyNumber(it.acceptedQty),
-      unitPrice: toQtyNumber(it.unitPrice)
-    }))
+    status,
+    items
   };
 }
 

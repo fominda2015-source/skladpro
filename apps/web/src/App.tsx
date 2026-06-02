@@ -605,13 +605,35 @@ function parseReceiptQty(value: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+const RECEIPT_QTY_EPS = 1e-6;
+
+function isReceiptItemOpen(it: ReceiptRequestItem): boolean {
+  const total = parseReceiptQty(it.quantity);
+  const accepted = parseReceiptQty(it.acceptedQty);
+  return accepted + RECEIPT_QTY_EPS < total;
+}
+
 function receiptItemRemainingQty(it: ReceiptRequestItem): number {
-  return Math.max(0, parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty));
+  const remaining = parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty);
+  return remaining > RECEIPT_QTY_EPS ? remaining : 0;
+}
+
+function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
+  const hasOpenItems = row.items.some(isReceiptItemOpen);
+  const anyAccepted = row.items.some((it) => parseReceiptQty(it.acceptedQty) > RECEIPT_QTY_EPS);
+  if (row.status === "CANCELLED") return row;
+  if (!hasOpenItems) {
+    return { ...row, status: "RECEIVED" };
+  }
+  if (anyAccepted && row.status === "NEW") {
+    return { ...row, status: "IN_PROGRESS" };
+  }
+  return row;
 }
 
 function isOpenReceiptRequest(row: ReceiptRequestRow): boolean {
   if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
-  return row.items.some((it) => receiptItemRemainingQty(it) > 0);
+  return row.items.some(isReceiptItemOpen);
 }
 
 function App() {
@@ -2982,18 +3004,21 @@ function App() {
     });
     if (!res.ok) return;
     if (seq !== receiptRequestsLoadSeq.current) return;
-    setReceiptRequests((await res.json()) as ReceiptRequestRow[]);
+    const rows = (await res.json()) as ReceiptRequestRow[];
+    setReceiptRequests(rows.map(normalizeReceiptRequest));
   }
 
   function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
+    const normalized = normalizeReceiptRequest(updated);
     receiptRequestsLoadSeq.current += 1;
     setReceiptRequests((prev) => {
-      const idx = prev.findIndex((r) => r.id === updated.id);
-      if (idx === -1) return [updated, ...prev];
+      const idx = prev.findIndex((r) => r.id === normalized.id);
+      if (idx === -1) return [normalized, ...prev];
       const next = [...prev];
-      next[idx] = updated;
+      next[idx] = normalized;
       return next;
     });
+    return normalized;
   }
 
   async function loadMaterialMappings() {
@@ -3165,6 +3190,7 @@ function App() {
       storagePlace?: string | null;
     }> = [];
     for (const it of row.items) {
+      if (!isReceiptItemOpen(it)) continue;
       const draft = drafts[it.id];
       const qtyRaw = (draft?.qty ?? "").toString().replace(",", ".").trim();
       if (!qtyRaw) continue;
@@ -3268,13 +3294,13 @@ function App() {
         acceptBody = {};
       }
       if (acceptBody.receiptRequest) {
-        applyReceiptRequestUpdate(acceptBody.receiptRequest);
+        const normalized = applyReceiptRequestUpdate(acceptBody.receiptRequest);
         setLimitSuggestions((prev) => {
           const next = { ...prev };
           delete next[row.id];
           return next;
         });
-        if (!isOpenReceiptRequest(acceptBody.receiptRequest)) {
+        if (!isOpenReceiptRequest(normalized)) {
           setExpandedReceiptIds((prev) => {
             const next = { ...prev };
             delete next[row.id];
@@ -3285,7 +3311,7 @@ function App() {
         let receiptFullyAccepted = false;
         setReceiptRequests((prev) =>
           prev.map((r) => {
-            if (r.id !== row.id) return r;
+            if (r.id !== row.id) return normalizeReceiptRequest(r);
             const updatedItems = r.items.map((it) => {
               const m = mappings.find((x) => x.itemId === it.id);
               if (!m) return it;
@@ -3302,11 +3328,11 @@ function App() {
               if (acc + 1e-6 < parseReceiptQty(it.quantity)) allDone = false;
             }
             receiptFullyAccepted = allDone;
-            return {
+            return normalizeReceiptRequest({
               ...r,
               items: updatedItems,
               status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : r.status
-            };
+            });
           })
         );
         receiptRequestsLoadSeq.current += 1;
@@ -3320,7 +3346,15 @@ function App() {
       }
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
-        delete next[row.id];
+        const rowDrafts = { ...(next[row.id] || {}) };
+        for (const m of mappings) {
+          delete rowDrafts[m.itemId];
+        }
+        if (Object.keys(rowDrafts).length === 0) {
+          delete next[row.id];
+        } else {
+          next[row.id] = rowDrafts;
+        }
         return next;
       });
       setAcceptanceScans((prev) => {
@@ -3339,6 +3373,7 @@ function App() {
         return next;
       });
       await loadMaterialMappings();
+      void loadReceiptRequests();
       await loadStocks(q);
       await loadOperations();
       await loadNotifications();
@@ -6543,7 +6578,7 @@ function App() {
                       <div className="progressBar" style={{ width: `${donePct}%` }} />
                     </div>
                   </td>
-                  <td>{row.items.filter((it) => receiptItemRemainingQty(it) > 0).length}</td>
+                  <td>{row.items.filter(isReceiptItemOpen).length}</td>
                   <td>
                     <div className="erpCellActions">
                       <button type="button" className="ghostBtn" onClick={() => openDocumentsForEntity("receipt", row.id)}>
@@ -6619,7 +6654,7 @@ function App() {
                     </datalist>
 
                     {(() => {
-                      const itemsLeft = row.items.filter((it) => receiptItemRemainingQty(it) > 0);
+                      const itemsLeft = row.items.filter(isReceiptItemOpen);
                       const selectedCount = itemsLeft.filter((it) => {
                         const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
                         return Number.isFinite(q) && q > 0;
