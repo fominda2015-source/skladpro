@@ -242,7 +242,7 @@ export function MaterialReportTab({
 
   return (
     <div className={`materialReportPage chatPage ${isMobile && showThread ? "chatPage--thread" : ""}`}>
-      {objectFilter}
+      {objectFilter ? <div className="materialReportObjectFilter">{objectFilter}</div> : null}
       <PageHero
         variant="compact"
         icon="▪"
@@ -472,7 +472,10 @@ export function MaterialReportTab({
                         const key = lineKey(selectedHolder.holderKey, ln.materialId);
                         const isChecked = Boolean(checked[key]);
                         return (
-                          <div key={key} className={`materialReportBubble ${isChecked ? "selected" : ""}`}>
+                          <div
+                            key={key}
+                            className={`chatBubble theirs materialReportBubble ${isChecked ? "selected" : ""}`}
+                          >
                             {canWriteoff ? (
                               <label className="materialReportBubbleCheck">
                                 <input
@@ -485,8 +488,8 @@ export function MaterialReportTab({
                               </label>
                             ) : null}
                             <div className="materialReportBubbleBody">
-                              <strong>{safeName(ln.name)}</strong>
-                              <span className="materialReportBubbleQty">
+                              <p className="chatBubbleText">{safeName(ln.name)}</p>
+                              <span className="chatBubbleTime materialReportBubbleQty">
                                 {formatQty(Number(ln.quantity))} {ln.unit}
                               </span>
                             </div>

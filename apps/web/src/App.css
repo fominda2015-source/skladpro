@@ -6677,37 +6677,62 @@ button.whMenuItem:hover,
 .materialReportPage {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 180px);
+  gap: 8px;
+  min-height: calc(100vh - 120px);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+}
+.materialReportPage > .pageHero {
+  margin-bottom: 0;
+  padding: 8px 12px;
+  gap: 6px;
+}
+.materialReportPage > .pageHero .pageHeroSub {
+  display: none;
+}
+.materialReportObjectFilter {
+  margin: 0;
+}
+.materialReportObjectFilter .tabObjectFilter {
+  margin-bottom: 0 !important;
+  padding: 8px 12px !important;
 }
 .materialReportSubNav {
   display: flex;
-  gap: 8px;
-  margin: 0 0 12px;
+  gap: 6px;
+  margin: 0;
   flex-wrap: wrap;
 }
 .materialReportSubNav button {
   width: auto;
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-radius: 999px;
-  border: 1px solid #dbe1ec;
-  background: #fff;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
-.materialReportSubNav button.active {
+.materialReportSubNav button:hover:not(.active) {
   background: #eff6ff;
   border-color: #93c5fd;
-  color: #1d4ed8;
+  color: #1e40af;
+}
+.materialReportSubNav button.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 .materialReportLayout {
   flex: 1;
-  min-height: 480px;
+  min-height: 0;
 }
 .materialReportSidebarFilters {
-  padding: 0 14px 10px;
+  padding: 0 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   border-bottom: 1px solid #eef2f7;
 }
 .materialReportSidebarFilters input,
@@ -6715,10 +6740,16 @@ button.whMenuItem:hover,
   width: 100%;
   font-size: 13px;
 }
+.materialReportSidebarFilters .ghostBtn {
+  width: auto;
+  align-self: flex-start;
+  padding: 6px 10px;
+  font-size: 12px;
+}
 .materialReportFilterRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 .materialReportFilterRow label {
   display: flex;
@@ -6727,55 +6758,78 @@ button.whMenuItem:hover,
   font-size: 11px;
   color: #64748b;
 }
+.materialReportThread {
+  min-height: 0;
+}
+.materialReportPage .chatSidebarSearch {
+  padding: 8px 10px 6px;
+}
+.materialReportPage .chatThreadHead {
+  padding: 10px 14px;
+}
 .materialReportThreadToolbar {
   display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid #eef2f7;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  background: #fafbfc;
 }
 .materialReportThreadToolbar input {
   flex: 1;
-  min-width: 160px;
+  min-width: 0;
+  width: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+.materialReportThreadToolbar .primaryBtn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+  min-height: 36px;
 }
 .materialReportMessages {
-  padding: 12px 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .materialReportBubble {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #fff;
-  max-width: 100%;
+  max-width: min(88%, 640px);
+  align-self: flex-start;
 }
 .materialReportBubble.selected {
   border-color: #93c5fd;
   background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 }
 .materialReportBubbleCheck {
-  padding-top: 2px;
+  padding-top: 4px;
+  flex-shrink: 0;
 }
 .materialReportBubbleBody {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: baseline;
 }
 .materialReportBubbleQty {
-  margin-left: auto;
+  margin-top: 6px;
+  text-align: left;
   font-weight: 700;
-  white-space: nowrap;
+  color: #1d4ed8;
 }
 .materialReportHistoryPane {
-  padding: 12px 14px 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .materialReportHistoryGroup {
   margin-bottom: 6px;
