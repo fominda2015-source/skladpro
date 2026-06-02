@@ -6,6 +6,7 @@ import multer from "multer";
 import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
+import { CAMP_CATEGORY_DEFS } from "../lib/campCatalog.js";
 import { assertWarehouseInScope, getRequestDataScope, type DataScope } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -137,6 +138,31 @@ campItemsRouter.get("/", async (req: AuthedRequest, res) => {
     };
   });
   return res.json(result);
+});
+
+campItemsRouter.get("/summary", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const where: Prisma.CampItemWhereInput = { ...campItemWhereFromScope(scope) };
+  const { warehouseId, section } = req.query;
+  if (typeof warehouseId === "string" && warehouseId) where.warehouseId = warehouseId;
+  if (typeof section === "string" && section) {
+    const parsed = sectionEnum.safeParse(section);
+    if (parsed.success) where.section = parsed.data;
+  }
+  const groups = await prisma.campItem.groupBy({
+    by: ["category"],
+    where,
+    _count: { _all: true }
+  });
+  const countByCat = new Map(groups.map((g) => [g.category, g._count._all]));
+  const categories = CAMP_CATEGORY_DEFS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    icon: d.icon,
+    count: countByCat.get(d.key) ?? 0
+  }));
+  const total = categories.reduce((s, c) => s + c.count, 0);
+  return res.json({ total, categories });
 });
 
 campItemsRouter.post(
@@ -371,5 +397,187 @@ campItemsRouter.delete(
       data: { isDeleted: true }
     });
     return res.json({ ok: true });
+  }
+);
+
+const transferSectionSchema = z.object({
+  targetSection: sectionEnum,
+  note: z.string().optional().nullable()
+});
+
+campItemsRouter.post(
+  "/:id/transfer-section",
+  requirePermission("materials.write"),
+  upload.array("files", 5),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    let payload: unknown = req.body;
+    if (typeof req.body?.payload === "string") {
+      try {
+        payload = JSON.parse(req.body.payload);
+      } catch {
+        return res.status(400).json({ error: "payload должен быть валидным JSON" });
+      }
+    }
+    const parsed = transferSectionSchema.safeParse(payload);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!files.length) {
+      return res.status(400).json({ error: "Приложите документ передачи между подразделениями" });
+    }
+    const scope = await getRequestDataScope(req);
+    const found = await prisma.campItem.findFirst({
+      where: { id, ...campItemWhereFromScope(scope) }
+    });
+    if (!found) return res.status(404).json({ error: "Не найдено" });
+    if (found.section === parsed.data.targetSection) {
+      return res.status(400).json({ error: "Позиция уже в этом подразделении" });
+    }
+    const fromSection = found.section;
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.campItem.update({
+        where: { id },
+        data: {
+          section: parsed.data.targetSection,
+          ...(parsed.data.note?.trim()
+            ? {
+                description: [found.description, parsed.data.note.trim()].filter(Boolean).join("\n")
+              }
+            : {})
+        }
+      });
+      for (const f of files) {
+        if (!f.buffer || !f.size) continue;
+        const safe = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+        await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
+        const isPhoto = (f.mimetype || "").startsWith("image/");
+        await tx.documentFile.create({
+          data: {
+            groupId: crypto.randomUUID(),
+            version: 1,
+            entityType: "camp",
+            entityId: id,
+            type: isPhoto ? "photo" : "transfer_act",
+            fileName: f.originalname,
+            filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
+            mimeType: f.mimetype,
+            size: f.size,
+            checksumSha256: crypto.createHash("sha256").update(f.buffer).digest("hex"),
+            createdBy: req.user!.userId
+          }
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: req.user!.userId,
+          action: "CAMP_ITEM_UPDATE",
+          entityType: "CampItem",
+          entityId: id,
+          summary: `Передача ${fromSection} → ${parsed.data.targetSection}: ${next.name}`,
+          beforeData: found as unknown as Prisma.InputJsonValue,
+          afterData: next as unknown as Prisma.InputJsonValue
+        }
+      });
+      return next;
+    });
+    return res.json(updated);
+  }
+);
+
+const moveWarehouseSchema = z.object({
+  targetWarehouseId: z.string().min(1),
+  note: z.string().optional().nullable()
+});
+
+campItemsRouter.post(
+  "/:id/move-warehouse",
+  requirePermission("materials.write"),
+  upload.array("files", 5),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    let payload: unknown = req.body;
+    if (typeof req.body?.payload === "string") {
+      try {
+        payload = JSON.parse(req.body.payload);
+      } catch {
+        return res.status(400).json({ error: "payload должен быть валидным JSON" });
+      }
+    }
+    const parsed = moveWarehouseSchema.safeParse(payload);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, parsed.data.targetWarehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    const found = await prisma.campItem.findFirst({
+      where: { id, ...campItemWhereFromScope(scope) },
+      include: { warehouse: { select: { name: true } } }
+    });
+    if (!found) return res.status(404).json({ error: "Не найдено" });
+    if (found.warehouseId === parsed.data.targetWarehouseId) {
+      return res.status(400).json({ error: "Позиция уже на этом объекте" });
+    }
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    const targetWh = await prisma.warehouse.findUnique({
+      where: { id: parsed.data.targetWarehouseId },
+      select: { name: true }
+    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.campItem.update({
+        where: { id },
+        data: {
+          warehouseId: parsed.data.targetWarehouseId,
+          ...(parsed.data.note?.trim()
+            ? {
+                description: [found.description, parsed.data.note.trim()].filter(Boolean).join("\n")
+              }
+            : {})
+        }
+      });
+      for (const f of files) {
+        if (!f.buffer || !f.size) continue;
+        const safe = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+        await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
+        const isPhoto = (f.mimetype || "").startsWith("image/");
+        await tx.documentFile.create({
+          data: {
+            groupId: crypto.randomUUID(),
+            version: 1,
+            entityType: "camp",
+            entityId: id,
+            type: isPhoto ? "photo" : "document",
+            fileName: f.originalname,
+            filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
+            mimeType: f.mimetype,
+            size: f.size,
+            checksumSha256: crypto.createHash("sha256").update(f.buffer).digest("hex"),
+            createdBy: req.user!.userId
+          }
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: req.user!.userId,
+          action: "CAMP_ITEM_UPDATE",
+          entityType: "CampItem",
+          entityId: id,
+          summary: `Перемещение ${found.warehouse?.name ?? "—"} → ${targetWh?.name ?? parsed.data.targetWarehouseId}: ${next.name}`,
+          beforeData: found as unknown as Prisma.InputJsonValue,
+          afterData: next as unknown as Prisma.InputJsonValue
+        }
+      });
+      return next;
+    });
+    return res.json(updated);
   }
 );

@@ -1,4 +1,5 @@
-import { NotificationLevel, OperationType, StockCondition, StockMovementDirection } from "@prisma/client";
+import { NotificationLevel, OperationType, StockCondition, StockMovementDirection, CampItemStatus, type Prisma } from "@prisma/client";
+import { receiptCategoryToCampCategory } from "../lib/campCatalog.js";
 import { receiptCategoryToToolSection } from "../lib/toolCatalog.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -661,68 +662,114 @@ receiptRequestsRouter.post(
     const op = await prisma.$transaction(async (tx) => {
       const resolved: Array<{
         item: (typeof row.items)[number];
-        materialId: string;
+        materialId: string | null;
         acceptedQty: number;
         sourceUnit: string;
         limitNodeId: string | null;
+        campCategory: ReturnType<typeof receiptCategoryToCampCategory>;
       }> = [];
       for (const m of parsed.data.itemMappings) {
         const it = itemsById.get(m.itemId)!;
         const unitHint = m.newMaterialUnit?.trim() || it.sourceUnit || "шт";
+        const itemCategory = m.category ?? it.category ?? null;
+        const campCategory = receiptCategoryToCampCategory(itemCategory);
         let materialId: string | undefined = m.materialId;
-        if (!materialId && m.newMaterialName?.trim()) {
-          materialId = await findOrCreateMaterial(tx, m.newMaterialName.trim(), unitHint);
-        }
-        if (!materialId) {
-          throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
+        if (!campCategory) {
+          if (!materialId && m.newMaterialName?.trim()) {
+            materialId = await findOrCreateMaterial(tx, m.newMaterialName.trim(), unitHint);
+          }
+          if (!materialId) {
+            throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
+          }
         }
         resolved.push({
           item: it,
-          materialId,
+          materialId: materialId ?? null,
           acceptedQty: m.acceptedQty,
           sourceUnit: unitHint,
-          limitNodeId: m.limitNodeId ?? null
+          limitNodeId: m.limitNodeId ?? null,
+          campCategory
         });
       }
 
-      const operation = await tx.operation.create({
-        data: {
-          type: OperationType.INCOME,
-          warehouseId: row.warehouseId,
-          section: row.section,
-          documentNumber: parsed.data.documentNumber?.trim() || row.number,
-          status: "POSTED",
-          items: {
-            create: resolved.map((r) => ({ materialId: r.materialId, quantity: r.acceptedQty }))
-          }
-        },
-        include: { items: true }
-      });
+      const stockResolved = resolved.filter((r) => !r.campCategory && r.materialId);
+      const operation =
+        stockResolved.length > 0
+          ? await tx.operation.create({
+              data: {
+                type: OperationType.INCOME,
+                warehouseId: row.warehouseId,
+                section: row.section,
+                documentNumber: parsed.data.documentNumber?.trim() || row.number,
+                status: "POSTED",
+                items: {
+                  create: stockResolved.map((r) => ({
+                    materialId: r.materialId!,
+                    quantity: r.acceptedQty
+                  }))
+                }
+              },
+              include: { items: true }
+            })
+          : null;
 
       for (const r of resolved) {
         const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
+        const itemCategory = mapping?.category ?? r.item.category ?? null;
+        const campCategory = r.campCategory ?? receiptCategoryToCampCategory(itemCategory);
+
         await tx.receiptRequestItem.update({
           where: { id: r.item.id },
           data: {
-            mappedMaterialId: r.materialId,
-            // накопительно: уже принятое + только что принятое
+            mappedMaterialId: campCategory ? null : r.materialId,
             acceptedQty: { increment: r.acceptedQty },
-            // Если пользователь выбрал узел шаблона, сохраняем. Иначе оставляем как было.
             ...(r.limitNodeId ? { limitNodeId: r.limitNodeId } : {}),
             ...(mapping?.category !== undefined ? { category: mapping.category } : {}),
             ...(mapping?.unitPrice !== undefined ? { unitPrice: mapping.unitPrice } : {}),
             ...(mapping?.storagePlace !== undefined ? { storagePlace: mapping.storagePlace } : {})
           }
         });
-        const toolSection = receiptCategoryToToolSection(
-          mapping?.category ?? r.item.category ?? null
-        );
+
+        if (campCategory) {
+          const qty = Math.max(1, Math.round(r.acceptedQty));
+          for (let i = 0; i < qty; i++) {
+            const suffix = qty > 1 ? ` (${i + 1}/${qty})` : "";
+            const campRow = await tx.campItem.create({
+              data: {
+                name: `${r.item.sourceName.trim()}${suffix}`,
+                category: campCategory,
+                warehouseId: row.warehouseId,
+                section: row.section,
+                status: CampItemStatus.IN_USE,
+                acquiredAt: new Date(),
+                createdById: req.user!.userId,
+                description: `Принято по заявке ${row.number}`
+              }
+            });
+            await tx.auditLog.create({
+              data: {
+                userId: req.user!.userId,
+                action: "CAMP_ITEM_CREATE",
+                entityType: "CampItem",
+                entityId: campRow.id,
+                summary: `Принято по заявке ${row.number}: ${campRow.name}`,
+                afterData: campRow as unknown as Prisma.InputJsonValue
+              }
+            });
+          }
+          continue;
+        }
+
+        if (!r.materialId) continue;
+
+        const toolSection = receiptCategoryToToolSection(itemCategory);
         if (toolSection) {
           await tx.material.update({
             where: { id: r.materialId },
             data: { toolCatalogSection: toolSection }
           });
         }
+        if (!operation) continue;
         await tx.stock.upsert({
           where: {
             warehouseId_materialId_section_condition: {
@@ -799,21 +846,23 @@ receiptRequestsRouter.post(
             createdBy: req.user!.userId
           }
         });
-        await tx.documentFile.create({
-          data: {
-            groupId: crypto.randomUUID(),
-            version: 1,
-            entityType: "operation",
-            entityId: operation.id,
-            type: "upd-scan",
-            fileName: displayName,
-            filePath,
-            mimeType: f.mimetype,
-            size: f.size,
-            checksumSha256: checksum,
-            createdBy: req.user!.userId
-          }
-        });
+        if (operation) {
+          await tx.documentFile.create({
+            data: {
+              groupId: crypto.randomUUID(),
+              version: 1,
+              entityType: "operation",
+              entityId: operation.id,
+              type: "upd-scan",
+              fileName: displayName,
+              filePath,
+              mimeType: f.mimetype,
+              size: f.size,
+              checksumSha256: checksum,
+              createdBy: req.user!.userId
+            }
+          });
+        }
       }
 
       // Пересчёт статуса: смотрим, есть ли позиции, где осталось принять > 0.
@@ -848,6 +897,7 @@ receiptRequestsRouter.post(
       }> = [];
 
       for (const r of resolved) {
+        if (r.campCategory || !r.materialId) continue;
         const prevAccepted = Number(r.item.acceptedQty || 0);
         const newTotal = prevAccepted + r.acceptedQty;
         const ordered = Number(r.item.quantity);
@@ -926,7 +976,7 @@ receiptRequestsRouter.post(
       summary: `Приёмка по заявке ${row.number}: позиций ${op.acceptedItems.length}`,
       after: {
         requestId: row.id,
-        operationId: op.operation.id,
+        operationId: op.operation?.id ?? null,
         warehouseId: row.warehouseId,
         section: row.section,
         items: op.acceptedItems
@@ -973,7 +1023,7 @@ receiptRequestsRouter.post(
 
     return res.json({
       ok: true,
-      operationId: op.operation.id,
+      operationId: op.operation?.id ?? null,
       overageActions: op.overageActions || []
     });
   }

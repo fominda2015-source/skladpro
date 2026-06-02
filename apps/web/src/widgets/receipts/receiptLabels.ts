@@ -28,6 +28,11 @@ export type ReceiptItemCategory =
   | "PPE"
   | "TOOL_CONSUMABLE"
   | "KIP"
+  | "CAMP_CONTAINER_CABIN"
+  | "CAMP_FURNITURE"
+  | "CAMP_OFFICE_EQUIPMENT"
+  | "CAMP_APPLIANCES"
+  | "CAMP_OTHER"
   | "OTHER";
 
 export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = [
@@ -40,6 +45,11 @@ export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = [
   "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
+  "CAMP_CONTAINER_CABIN",
+  "CAMP_FURNITURE",
+  "CAMP_OFFICE_EQUIPMENT",
+  "CAMP_APPLIANCES",
+  "CAMP_OTHER",
   "OTHER"
 ];
 
@@ -55,6 +65,11 @@ export function receiptItemCategoryLabel(cat: ReceiptItemCategory | string | nul
       PPE: "СИЗ",
       TOOL_CONSUMABLE: "Расходники для инструмента",
       KIP: "КИП",
+      CAMP_CONTAINER_CABIN: "Городок · бытовки/контейнеры",
+      CAMP_FURNITURE: "Городок · мебель",
+      CAMP_OFFICE_EQUIPMENT: "Городок · оргтехника",
+      CAMP_APPLIANCES: "Городок · бытовая техника",
+      CAMP_OTHER: "Городок · прочее",
       OTHER: "Прочее"
     } as Record<string, string>
   )[String(cat || "")] ?? "—";

@@ -32,6 +32,13 @@ export type HomeToolCategory = {
   inRepair: number;
 };
 
+export type HomeCampCategory = {
+  key: string;
+  label: string;
+  icon: string | null;
+  count: number;
+};
+
 export type HomeLimitSlice = {
   hasTemplate: boolean;
   plannedQty: number;
@@ -60,6 +67,7 @@ export type HomeOverviewSummary = {
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  campByCategory: HomeCampCategory[];
   movementTrend30d?: HomeMovementTrendRow[];
 };
 
@@ -72,6 +80,10 @@ export type HomeObjectRow = {
   receiptOpen: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
+  camp: {
+    total: number;
+    categories: HomeCampCategory[];
+  };
   tools: {
     total: number;
     inStock: number;
@@ -99,7 +111,9 @@ type Props = {
   onOpenToolsTab?: () => void;
   /** Каталог и таблица инструментов в модалке — только после выбора объекта. */
   renderToolsStatDrillContent?: (warehouseId: string) => ReactNode;
+  renderCampStatDrillContent?: (warehouseId: string) => ReactNode;
   onToolsObjectDrill?: (warehouseId: string) => void;
+  onCampObjectDrill?: (warehouseId: string) => void;
   onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
@@ -129,13 +143,14 @@ type HomeStatKey =
   | "limitsSs"
   | "limitsEom"
   | "stock"
+  | "camp"
   | "tools"
   | "toolsStock"
   | "toolsIssued"
   | "toolsRepair"
   | "receipts";
 
-type HomeChartKey = "movement" | "limits" | "toolsByObject" | "toolsStatus" | "camp" | "categories";
+type HomeChartKey = "movement" | "limits" | "toolsByObject" | "toolsStatus" | "camp" | "campCategories" | "categories";
 
 type HomeDrill =
   | { kind: "stat"; key: HomeStatKey }
@@ -280,6 +295,8 @@ export function HomeOverview({
   onOpenToolsTab,
   renderToolsStatDrillContent,
   onToolsObjectDrill,
+  renderCampStatDrillContent,
+  onCampObjectDrill,
   onOpenCampTab,
   onOpenOperations,
   onOpenOperationsTab,
@@ -317,6 +334,9 @@ export function HomeOverview({
   const openObjectMini = (warehouseId: string) => {
     if (drill?.kind === "stat" && drill.key === "tools") {
       onToolsObjectDrill?.(warehouseId);
+    }
+    if (drill?.kind === "stat" && drill.key === "camp") {
+      onCampObjectDrill?.(warehouseId);
     }
     setDrillHistory((prev) => {
       const next = [...prev.slice(0, drillHistoryIndex + 1), { mode: "object", warehouseId } as DrillView];
@@ -456,6 +476,19 @@ export function HomeOverview({
       }));
   }, [objects, summary]);
 
+  const topCampRows = useMemo(() => {
+    const src = summary?.campByCategory?.length
+      ? summary.campByCategory
+      : objects.flatMap((o) => o.camp?.categories ?? []);
+    return [...src]
+      .sort((a, b) => b.count - a.count)
+      .map((c) => ({
+        name: shortName(c.icon ? `${c.icon} ${c.label}` : c.label, 18),
+        fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
+        count: c.count
+      }));
+  }, [objects, summary]);
+
   const toolsByObjectRows = useMemo(
     () =>
       objects
@@ -494,6 +527,7 @@ export function HomeOverview({
   const limitsChartH = chartRowsHeight(limitsChartRows.length);
   const toolsObjChartH = chartRowsHeight(toolsByObjectRows.length);
   const categoriesChartH = chartRowsHeight(topToolsRows.length);
+  const campCategoriesChartH = chartRowsHeight(topCampRows.length);
   const campChartW = chartColumnsWidth(campChartRows.length);
 
   const drillTitle = drill
@@ -502,6 +536,7 @@ export function HomeOverview({
           limitsSs: "Лимиты СС по объектам",
           limitsEom: "Лимиты ЭОМ по объектам",
           stock: "ТМЦ на складе",
+          camp: "Городок по объектам",
           tools: "Инструменты по объектам",
           toolsStock: "Инструменты на складе",
           toolsIssued: "Выданные инструменты",
@@ -513,7 +548,8 @@ export function HomeOverview({
           limits: "Выполнение лимитов",
           toolsByObject: "Инструменты по объектам",
           toolsStatus: "Статусы инструментов",
-          camp: "Городок и инструменты",
+          camp: "Городок по объектам",
+          campCategories: "Категории городка",
           categories: "Категории инструментов"
         } satisfies Record<HomeChartKey, string>)[drill.key]
     : "";
@@ -524,6 +560,7 @@ export function HomeOverview({
       if (drill.key === "limitsSs" || drill.key === "limitsEom") return canLimits ? onOpenLimitsTab : undefined;
       if (drill.key === "stock") return onOpenWarehouseTab;
       if (drill.key === "receipts") return canOperations ? onOpenOperationsTab : undefined;
+      if (drill.key === "camp") return canCamp ? onOpenCampTab : undefined;
       if (drill.key === "tools" || drill.key === "toolsStock" || drill.key === "toolsIssued" || drill.key === "toolsRepair") {
         return canTools ? onOpenToolsTab : undefined;
       }
@@ -532,6 +569,7 @@ export function HomeOverview({
       if (drill.key === "movement") return onOpenWarehouseTab;
       if (drill.key === "limits") return canLimits ? onOpenLimitsTab : undefined;
       if (drill.key === "camp") return canCamp ? onOpenCampTab : undefined;
+      if (drill.key === "campCategories") return canCamp ? onOpenCampTab : undefined;
       if (drill.key === "toolsByObject" || drill.key === "toolsStatus" || drill.key === "categories") {
         return canTools ? onOpenToolsTab : undefined;
       }
@@ -590,10 +628,10 @@ export function HomeOverview({
     </ResponsiveContainer>
   );
 
-  const renderCategoriesChart = (height: number, yWidth: number, useFullNames: boolean) => (
+  const renderCategoriesChart = (height: number, yWidth: number, useFullNames: boolean, rows = topToolsRows) => (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart
-        data={useFullNames ? topToolsRows.map((r) => ({ ...r, name: r.fullName })) : topToolsRows}
+        data={useFullNames ? rows.map((r) => ({ ...r, name: r.fullName })) : rows}
         layout="vertical"
         margin={{ top: 4, right: 12, left: 4, bottom: 4 }}
       >
@@ -625,7 +663,6 @@ export function HomeOverview({
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Bar dataKey="camp" name="Городок" fill="#4f46e5" radius={[6, 6, 0, 0]} />
-        <Bar dataKey="tools" name="Инструменты" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -700,6 +737,26 @@ export function HomeOverview({
           </div>
         );
       }
+      if (drill.kind === "stat" && drill.key === "camp" && renderCampStatDrillContent) {
+        return (
+          <div className="homeDrillStack">
+            <section className="homeDrillObjectBlock">
+              <header className="homeDrillObjectBlockHead">
+                <strong>{o.name}</strong>
+                <span className="muted">городок объекта</span>
+              </header>
+              {canCamp ? (
+                <div className="erpCellActions" style={{ marginBottom: 10 }}>
+                  <button type="button" className="ghostBtn" onClick={() => onOpenCamp(o.warehouseId)}>
+                    Вкладка «Городок»
+                  </button>
+                </div>
+              ) : null}
+              {renderCampStatDrillContent(o.warehouseId)}
+            </section>
+          </div>
+        );
+      }
       const miniRows = (() => {
         if (drill.kind === "stat") {
           if (drill.key === "limitsSs") {
@@ -709,6 +766,9 @@ export function HomeOverview({
             return [{ key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }];
           }
           if (drill.key === "stock") return [{ key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] }];
+          if (drill.key === "camp") {
+            return [{ key: "camp", cells: ["Городок", o.camp?.total ?? o.campSs + o.campEom] }];
+          }
           if (drill.key === "tools") return [{ key: "tools", cells: ["Инструменты", o.tools.total] }];
           if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] }];
           if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] }];
@@ -737,10 +797,16 @@ export function HomeOverview({
             ];
           }
           if (drill.key === "camp") {
-            return [
-              { key: "camp", cells: ["Городок", o.campSs + o.campEom] },
-              { key: "tools", cells: ["Инструменты", o.tools.total] }
-            ];
+            return [{ key: "camp", cells: ["Городок", o.camp?.total ?? o.campSs + o.campEom] }];
+          }
+          if (drill.key === "campCategories") {
+            const cats = o.camp?.categories ?? [];
+            return cats.length
+              ? cats.map((c) => ({
+                  key: `camp-${c.key}`,
+                  cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
+                }))
+              : [{ key: "camp-empty", cells: ["Категории", "отсутствует"] }];
           }
           if (drill.key === "categories") {
             return o.tools.categories.length
@@ -754,7 +820,9 @@ export function HomeOverview({
         return [{ key: "fallback", cells: ["Данные", "отсутствует"] }];
       })();
       const miniColumns =
-        drill.kind === "chart" && drill.key === "categories" ? ["Категория", "Количество"] : ["Показатель", "Значение"];
+        drill.kind === "chart" && (drill.key === "categories" || drill.key === "campCategories")
+          ? ["Категория", "Количество"]
+          : ["Показатель", "Значение"];
       const contextActions = (
         <div className="erpCellActions" style={{ marginBottom: 10 }}>
           {(drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")) ||
@@ -799,7 +867,8 @@ export function HomeOverview({
               </button>
             ) : null
           ) : null}
-          {drill.kind === "chart" && drill.key === "camp" ? (
+          {(drill.kind === "stat" && drill.key === "camp") ||
+          (drill.kind === "chart" && (drill.key === "camp" || drill.key === "campCategories")) ? (
             canCamp ? (
               <button type="button" className="ghostBtn" onClick={() => onOpenCamp(o.warehouseId)}>
                 Вкладка «Городок»
@@ -859,6 +928,22 @@ export function HomeOverview({
             rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines)]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "camp") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Городок", "СС", "ЭОМ"]}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [
+                objectCell(o.name, o.warehouseId, openObjectMini),
+                o.camp?.total ?? o.campSs + o.campEom,
+                o.campSs,
+                o.campEom
+              ]
             }))}
           />
         );
@@ -995,12 +1080,58 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
-              columns={["Объект", "Городок", "Инструменты"]}
+              columns={["Объект", "Городок", "СС", "ЭОМ"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.campSs + o.campEom, o.tools.total]
+                cells: [
+                  objectCell(o.name, o.warehouseId, openObjectMini),
+                  o.camp?.total ?? o.campSs + o.campEom,
+                  o.campSs,
+                  o.campEom
+                ]
               }))}
             />
+          </HomeDrillByObjects>
+        );
+      }
+      if (drill.key === "campCategories") {
+        return (
+          <HomeDrillByObjects objectCount={objects.length} note="Категории имущества городка по объектам.">
+            <div className="homeDrillObjectList">
+              {objects.map((o) => (
+                <section key={o.warehouseId} className="homeDrillObjectBlock">
+                  <header className="homeDrillObjectBlockHead">
+                    <strong>{o.name}</strong>
+                    <span className="muted">{o.camp?.total ?? o.campSs + o.campEom} поз.</span>
+                  </header>
+                  {(o.camp?.categories ?? []).length ? (
+                    <ObjectDrillTable
+                      columns={["Категория", "Штук"]}
+                      rows={(o.camp?.categories ?? []).map((c) => ({
+                        key: `${o.warehouseId}-${c.key}`,
+                        cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
+                      }))}
+                    />
+                  ) : (
+                    <p className="muted homeChartEmpty">Городок не заведён.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+            {topCampRows.length > 0 ? (
+              <>
+                <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
+                  Сводно по всем объектам
+                </h4>
+                <ObjectDrillTable
+                  columns={["Категория", "Штук"]}
+                  rows={topCampRows.map((r) => ({
+                    key: r.fullName,
+                    cells: [r.fullName, r.count]
+                  }))}
+                />
+              </>
+            ) : null}
           </HomeDrillByObjects>
         );
       }
@@ -1100,6 +1231,12 @@ export function HomeOverview({
             onClick: () => openStatDrill("stock")
           },
           {
+            label: "Городок",
+            value: totals.camp,
+            tone: "neutral",
+            onClick: () => openStatDrill("camp")
+          },
+          {
             label: "Инструменты",
             value: (
               <>
@@ -1151,6 +1288,11 @@ export function HomeOverview({
         {canTools && onOpenToolsTab ? (
           <button type="button" className="ghostBtn" onClick={onOpenToolsTab}>
             Инструменты
+          </button>
+        ) : null}
+        {canCamp && onOpenCampTab ? (
+          <button type="button" className="ghostBtn" onClick={onOpenCampTab}>
+            Городок
           </button>
         ) : null}
         {canOperations && onOpenOperationsTab ? (
@@ -1249,7 +1391,7 @@ export function HomeOverview({
             role="presentation"
           >
             <ChartCardHead
-              title="Городок и инструменты"
+              title="Городок"
               hint="по объектам"
               count={campChartRows.length}
               onExpand={() => openChartDrill("camp")}
@@ -1262,6 +1404,24 @@ export function HomeOverview({
               <p className="muted homeChartEmpty">Нет данных для сравнения.</p>
             )}
           </section>
+
+          {topCampRows.length > 0 ? (
+            <section
+              className="homeChartCard homeChartCardWide homeChartCardClickable"
+              onClick={() => openChartDrill("campCategories")}
+              role="presentation"
+            >
+              <ChartCardHead
+                title="Категории городка"
+                hint="суммарно по всем объектам"
+                count={topCampRows.length}
+                onExpand={() => openChartDrill("campCategories")}
+              />
+              <HomeScrollChart height={campCategoriesChartH} maxPreview={CHART_PREVIEW_H}>
+                {renderCategoriesChart(campCategoriesChartH, 110, false, topCampRows)}
+              </HomeScrollChart>
+            </section>
+          ) : null}
 
           {topToolsRows.length > 0 ? (
             <section
@@ -1289,7 +1449,9 @@ export function HomeOverview({
           size={
             drill.kind === "stat" && drill.key === "tools" && selectedObject
               ? "wide"
-              : drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")
+              : drill.kind === "stat" && drill.key === "camp" && selectedObject
+                ? "wide"
+                : drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")
                 ? "wide"
                 : drill.kind === "chart" && drill.key === "limits"
                   ? "wide"
@@ -1300,7 +1462,11 @@ export function HomeOverview({
               ? selectedObject
                 ? `${selectedObject.name} · разделы и таблица инструментов`
                 : `${objectCount} объектов · выберите объект для детализации`
-              : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
+              : drill.kind === "stat" && drill.key === "camp"
+                ? selectedObject
+                  ? `${selectedObject.name} · категории и карточки городка`
+                  : `${objectCount} объектов · выберите объект для детализации`
+                : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
           }
           onClose={() => setDrill(null)}
           onBack={goBack}

@@ -1,4 +1,5 @@
-import { LimitNodeType, ReceiptRequestStatus, ToolStatus, type Prisma } from "@prisma/client";
+import { LimitNodeType, ReceiptRequestStatus, ToolStatus, type CampItemCategory, type Prisma } from "@prisma/client";
+import { CAMP_CATEGORY_DEFS } from "./campCatalog.js";
 import {
   objectLimitTemplateWhereFromScope,
   stockWhereFromScope,
@@ -7,6 +8,13 @@ import {
   type DataScope
 } from "./dataScope.js";
 import { prisma } from "./prisma.js";
+
+export type HomeCampCategory = {
+  key: string;
+  label: string;
+  icon: string | null;
+  count: number;
+};
 
 export type HomeToolCategory = {
   key: string;
@@ -46,6 +54,7 @@ export type HomeOverviewSummary = {
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  campByCategory: HomeCampCategory[];
   movementTrend30d: HomeMovementTrendRow[];
 };
 
@@ -58,6 +67,10 @@ export type HomeObjectOverview = {
   receiptOpen: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
+  camp: {
+    total: number;
+    categories: HomeCampCategory[];
+  };
   tools: {
     total: number;
     inStock: number;
@@ -142,6 +155,17 @@ function buildToolCategories(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
 }
 
+function buildCampCategories(
+  counts: Partial<Record<CampItemCategory, number>>
+): HomeCampCategory[] {
+  return CAMP_CATEGORY_DEFS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    icon: d.icon,
+    count: counts[d.key] ?? 0
+  })).filter((c) => c.count > 0);
+}
+
 function computeLimitSlice(
   whId: string,
   tmpl: { nodes: Array<{ materialId: string | null; plannedQty: unknown }> } | undefined,
@@ -198,6 +222,7 @@ const emptySummary = (): HomeOverviewSummary => ({
   stockLines: 0,
   receiptOpen: 0,
   toolsByCategory: [],
+  campByCategory: [],
   movementTrend30d: []
 });
 
@@ -248,6 +273,7 @@ export async function buildHomeOverview(
     issuedSs,
     issuedEom,
     campGroups,
+    campCatGroups,
     toolRows,
     movementRows,
     categories,
@@ -286,6 +312,11 @@ export async function buildHomeOverview(
     }),
     prisma.campItem.groupBy({
       by: ["warehouseId", "section"],
+      where: campWhere,
+      _count: { _all: true }
+    }),
+    prisma.campItem.groupBy({
+      by: ["warehouseId", "section", "category"],
       where: campWhere,
       _count: { _all: true }
     }),
@@ -349,6 +380,20 @@ export async function buildHomeOverview(
     campByWhSec.set(`${g.warehouseId}:${g.section}`, g._count._all);
   }
 
+  const campCatByWh = new Map<string, Partial<Record<CampItemCategory, number>>>();
+  for (const g of campCatGroups) {
+    if (!g.warehouseId) continue;
+    const key = g.warehouseId;
+    const bucket = campCatByWh.get(key) || {};
+    bucket[g.category] = (bucket[g.category] ?? 0) + g._count._all;
+    campCatByWh.set(key, bucket);
+  }
+
+  const globalCampCounts: Partial<Record<CampItemCategory, number>> = {};
+  for (const g of campCatGroups) {
+    globalCampCounts[g.category] = (globalCampCounts[g.category] ?? 0) + g._count._all;
+  }
+
   const toolsByWh = new Map<string, typeof toolRows>();
   for (const t of toolRows) {
     if (!t.warehouseId) continue;
@@ -363,15 +408,21 @@ export async function buildHomeOverview(
   const objects: HomeObjectOverview[] = warehouses.map((wh) => {
     const whTools = toolsByWh.get(wh.id) || [];
     const cats = buildToolCategories(whTools, categories);
+    const campSs = campByWhSec.get(`${wh.id}:SS`) ?? 0;
+    const campEom = campByWhSec.get(`${wh.id}:EOM`) ?? 0;
     return {
       warehouseId: wh.id,
       name: wh.name,
-      campSs: campByWhSec.get(`${wh.id}:SS`) ?? 0,
-      campEom: campByWhSec.get(`${wh.id}:EOM`) ?? 0,
+      campSs,
+      campEom,
       stockLines: stockByWh.get(wh.id) ?? 0,
       receiptOpen: receiptByWh.get(wh.id) ?? 0,
       limitsSs: computeLimitSlice(wh.id, latestTmplSs.get(wh.id), issuedSsMap),
       limitsEom: computeLimitSlice(wh.id, latestTmplEom.get(wh.id), issuedEomMap),
+      camp: {
+        total: campSs + campEom,
+        categories: buildCampCategories(campCatByWh.get(wh.id) || {})
+      },
       tools: {
         total: whTools.length,
         inStock: whTools.filter((t) => t.status === ToolStatus.IN_STOCK).length,
@@ -436,6 +487,7 @@ export async function buildHomeOverview(
       stockLines,
       receiptOpen,
       toolsByCategory,
+      campByCategory: buildCampCategories(globalCampCounts),
       movementTrend30d
     }
   };
