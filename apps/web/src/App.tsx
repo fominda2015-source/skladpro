@@ -44,6 +44,10 @@ import {
 import { HomeAnnouncementsBell } from "./widgets/home/HomeAnnouncementsBell";
 import { HomeDrillContent } from "./widgets/home/HomeDrillContent";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
+import {
+  computeLimitImportDiffView,
+  limitTreeIndentPx
+} from "./widgets/limits/limitImportDiffUtils";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
@@ -2971,7 +2975,22 @@ function App() {
       setLimitsMessage("Не удалось загрузить лимиты из Excel");
       return;
     }
-    setLimitsMessage("Лимиты загружены из Excel");
+    const body = (await res.json()) as {
+      diff?: {
+        added: number;
+        removed: number;
+        qtyChanged: number;
+        preservedIssuedLines: number;
+      } | null;
+    };
+    if (body.diff) {
+      const d = body.diff;
+      setLimitsMessage(
+        `Лимиты загружены. Новых позиций: ${d.added}, удалено: ${d.removed}, изменено кол-во: ${d.qtyChanged}, сохранено выдач по заполнению: ${d.preservedIssuedLines}.`
+      );
+    } else {
+      setLimitsMessage("Лимиты загружены из Excel (первый импорт для раздела)");
+    }
     setLimitImportFile(null);
     setExpandedLimitNodes({});
     await loadLimitTemplates();
@@ -8312,9 +8331,12 @@ function App() {
                     const agg = isGroup ? aggByNodeId.get(node.id) || { plan: 0, arrived: 0, issued: 0 } : null;
                     const groupArrivedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.arrived / agg.plan) * 100)) : 0;
                     const groupIssuedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.issued / agg.plan) * 100)) : 0;
+                    const indentPx = limitTreeIndentPx(depth);
+                    const diffStatus = !isGroup ? importDiff?.statusByNodeId.get(node.id) : undefined;
+                    const prevPlanned = !isGroup ? importDiff?.prevPlannedByNodeId.get(node.id) : undefined;
 
                     return (
-                      <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
+                      <div key={node.id} className="limitTreeNode" style={{ marginLeft: indentPx, marginTop: depth ? 2 : 4 }}>
                         {isGroup ? (
                           <div
                             className="limitGroupRow"
@@ -8508,7 +8530,7 @@ function App() {
                           </div>
                         ) : null}
                         {isGroup && agg && agg.plan > 0 ? (
-                          <div style={{ margin: "4px 0 6px", paddingLeft: 36, maxWidth: 320 }}>
+                          <div style={{ margin: "4px 0 6px", paddingLeft: Math.min(indentPx + 40, 200), maxWidth: 320 }}>
                             <LimitStructureBars
                               plan={agg.plan}
                               issued={agg.issued}
@@ -8518,7 +8540,11 @@ function App() {
                           </div>
                         ) : null}
                         {!isGroup ? (
-                          <div className={`limitMaterialRow ${isOver ? "low" : ""}`}>
+                          <div
+                            className={`limitMaterialRow ${isOver ? "low" : ""} ${
+                              diffStatus === "new" ? "limitNodeNew" : diffStatus === "qty_changed" ? "limitNodeQtyChanged" : ""
+                            }`}
+                          >
                             {limitEditMode ? (() => {
                               const draft = limitNodeDrafts[node.id] || {};
                               const originalName = String(node.materialName || node.title || "");
@@ -8664,7 +8690,19 @@ function App() {
                               <div className="rightCardHeader" style={{ marginBottom: 8, gap: 10 }}>
                                 <div style={{ minWidth: 0 }}>
                                   <strong style={{ fontSize: 13 }}>{nodeTitle}</strong>
-                                  <div className="muted">{node.unit || "шт"}{!node.materialId ? " · не сопоставлено" : ""}</div>
+                                  <div className="muted">
+                                    {node.unit || "шт"}
+                                    {!node.materialId ? " · не сопоставлено" : ""}
+                                    {diffStatus === "new" ? (
+                                      <span className="limitDiffTag limitDiffTag--new"> новый</span>
+                                    ) : null}
+                                    {diffStatus === "qty_changed" && prevPlanned != null ? (
+                                      <span className="limitDiffTag limitDiffTag--qty">
+                                        {" "}
+                                        план {metricFmt(prevPlanned)} → {metricFmt(planned)}
+                                      </span>
+                                    ) : null}
+                                  </div>
                                 </div>
                                 <span className={`badge ${isOver ? "bad" : "ok"}`}>{qtyText}</span>
                               </div>
@@ -8678,7 +8716,13 @@ function App() {
                         ) : null}
 
                         {isGroup && isExpanded && directMaterials.length > 0 ? (
-                          <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
+                          <div
+                            style={{
+                              marginLeft: limitTreeIndentPx(depth + 1),
+                              marginBottom: 8,
+                              overflowX: "auto"
+                            }}
+                          >
                             <table className="limitMaterialsTable">
                               <thead>
                                 <tr>
@@ -8709,10 +8753,30 @@ function App() {
                                   const onOrd = sm?.onOrderQty ?? 0;
                                   const stk = sm?.stockQty ?? 0;
                                   const remain = Math.max(0, plan - arrived);
+                                  const mDiff = importDiff?.statusByNodeId.get(m.id);
+                                  const mPrevPlan = importDiff?.prevPlannedByNodeId.get(m.id);
                                   return (
-                                    <tr key={`mt-${node.id}-${m.id}`}>
+                                    <tr
+                                      key={`mt-${node.id}-${m.id}`}
+                                      className={
+                                        mDiff === "new"
+                                          ? "limitTableRowNew"
+                                          : mDiff === "qty_changed"
+                                            ? "limitTableRowQtyChanged"
+                                            : undefined
+                                      }
+                                    >
                                       <td className="matName" title={String(m.materialName || m.title || "")}>
                                         {safeName(String(m.materialName || m.title || ""))}
+                                        {mDiff === "new" ? (
+                                          <span className="limitDiffTag limitDiffTag--new"> новый</span>
+                                        ) : null}
+                                        {mDiff === "qty_changed" && mPrevPlan != null ? (
+                                          <span className="limitDiffTag limitDiffTag--qty">
+                                            {" "}
+                                            план {metricFmt(mPrevPlan)} → {metricFmt(plan)}
+                                          </span>
+                                        ) : null}
                                       </td>
                                       <td className="num">{m.unit || "шт"}</td>
                                       <td className="num">{metricFmt(plan)}</td>
@@ -8746,6 +8810,16 @@ function App() {
                       </div>
                     );
                   };
+
+                  const tplIndex = limitTemplates.findIndex((t) => t.id === tpl.id);
+                  const prevTpl =
+                    tplIndex >= 0 && tplIndex + 1 < limitTemplates.length
+                      ? limitTemplates[tplIndex + 1]
+                      : null;
+                  const importDiff =
+                    prevTpl && prevTpl.warehouseId === tpl.warehouseId && prevTpl.section === tpl.section
+                      ? computeLimitImportDiffView(prevTpl.nodes, tpl.nodes)
+                      : null;
 
                   const roots = childrenByParent.get("__root__") || [];
                   return (
@@ -8877,9 +8951,45 @@ function App() {
                           />
                         </div>
                       </div>
+                      {importDiff &&
+                      (importDiff.removed > 0 || importDiff.added > 0 || importDiff.qtyChanged > 0) ? (
+                        <div className="limitImportDiffLegend" role="status">
+                          <span className="limitDiffTag limitDiffTag--new">Новые: {importDiff.added}</span>
+                          <span className="limitDiffTag limitDiffTag--qty">
+                            Кол-во изменено: {importDiff.qtyChanged}
+                          </span>
+                          <span className="limitDiffTag limitDiffTag--removed">
+                            Удалено из файла: {importDiff.removed}
+                          </span>
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            Выдача и полосы заполнения переносятся с предыдущей версии лимита.
+                          </span>
+                        </div>
+                      ) : null}
                       <div className="plainList limitTree">
                         {roots.map((r) => renderNode(r, 0))}
                       </div>
+                      {importDiff && importDiff.removedItems.length > 0 ? (
+                        <div className="limitRemovedBlock">
+                          <h4 style={{ margin: "12px 0 8px", fontSize: 14 }}>Удалено в новом лимите</h4>
+                          <ul className="limitRemovedList">
+                            {importDiff.removedItems.map((item) => (
+                              <li key={item.pathKey} className="limitRemovedRow">
+                                <span className="limitRemovedLabel">{item.label}</span>
+                                <span className="muted">
+                                  {item.unit || "шт"}
+                                  {item.plannedQty != null
+                                    ? ` · план ${Number(item.plannedQty).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}`
+                                    : ""}
+                                  {item.issuedQty > 0
+                                    ? ` · выдано ${Number(item.issuedQty).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}`
+                                    : ""}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                     </>
                   );
                 })()}

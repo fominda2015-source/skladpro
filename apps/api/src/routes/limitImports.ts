@@ -10,6 +10,12 @@ import {
   objectLimitTemplateWhereFromScope,
   resolveReadScope
 } from "../lib/dataScope.js";
+import {
+  computeLimitImportDiff,
+  indexTemplateMaterials,
+  lookupIssuedQtyToPreserve,
+  pathKeyFromFlatImport
+} from "../lib/limitImportDiff.js";
 import { findLimitMaterialNodesInSection } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -335,6 +341,16 @@ limitImportsRouter.post(
     const nodes = parseLimitSheet(req.file.buffer);
     const title = parsed.data.title?.trim() || `Лимиты ${new Date().toLocaleDateString("ru-RU")}`;
     const created = await prisma.$transaction(async (tx) => {
+      const previousTpl = await tx.objectLimitTemplate.findFirst({
+        where: {
+          warehouseId: parsed.data.warehouseId,
+          section: parsed.data.section
+        },
+        orderBy: { createdAt: "desc" },
+        include: { nodes: true }
+      });
+      const prevIndex = previousTpl ? indexTemplateMaterials(previousTpl.nodes) : new Map();
+
       const tpl = await tx.objectLimitTemplate.create({
         data: {
           warehouseId: parsed.data.warehouseId,
@@ -345,9 +361,20 @@ limitImportsRouter.post(
         }
       });
       const parentByLevel = new Map<number, string>();
+      const groupTitlesByLevel = new Map<number, string>();
+      let preservedIssuedLines = 0;
+
       for (let i = 0; i < nodes.length; i += 1) {
         const n = nodes[i];
+        if (n.nodeType === "GROUP") {
+          groupTitlesByLevel.set(n.level, n.title);
+          for (const lvl of [...groupTitlesByLevel.keys()]) {
+            if (lvl > n.level) groupTitlesByLevel.delete(lvl);
+          }
+        }
+
         let materialId: string | undefined = undefined;
+        let issuedQty = 0;
         if (n.nodeType === "MATERIAL") {
           const name = String(n.materialName || n.title || "").trim();
           const unit = String(n.unit || "шт").trim() || "шт";
@@ -360,7 +387,11 @@ limitImportsRouter.post(
               materialId = createdMaterial.id;
             }
           }
+          const pathKey = pathKeyFromFlatImport(groupTitlesByLevel, name, n.level);
+          issuedQty = lookupIssuedQtyToPreserve(prevIndex, pathKey, materialId);
+          if (issuedQty > 0) preservedIssuedLines += 1;
         }
+
         const row = await tx.objectLimitNode.create({
           data: {
             templateId: tpl.id,
@@ -372,14 +403,33 @@ limitImportsRouter.post(
             materialName: n.materialName,
             unit: n.unit,
             plannedQty: n.plannedQty,
+            ...(n.nodeType === "MATERIAL" && issuedQty > 0 ? { issuedQty } : {}),
             ...(materialId ? { materialId } : {})
           }
         });
         parentByLevel.set(n.level, row.id);
       }
-      return tpl;
+
+      const diff =
+        previousTpl && previousTpl.nodes.length
+          ? computeLimitImportDiff(previousTpl.nodes, await tx.objectLimitNode.findMany({ where: { templateId: tpl.id } }))
+          : null;
+      if (diff) diff.preservedIssuedLines = preservedIssuedLines;
+
+      return { tpl, diff };
     });
-    return res.status(201).json({ id: created.id, nodes: nodes.length });
+    return res.status(201).json({
+      id: created.tpl.id,
+      nodes: nodes.length,
+      diff: created.diff
+        ? {
+            added: created.diff.added,
+            removed: created.diff.removed,
+            qtyChanged: created.diff.qtyChanged,
+            preservedIssuedLines: created.diff.preservedIssuedLines
+          }
+        : null
+    });
   }
 );
 
