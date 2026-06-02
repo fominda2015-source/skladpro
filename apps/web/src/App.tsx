@@ -596,6 +596,16 @@ type MaterialMappingRow = {
   targetMaterialId: string;
   targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
+
+function receiptItemRemainingQty(it: ReceiptRequestItem): number {
+  return Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
+}
+
+function isOpenReceiptRequest(row: ReceiptRequestRow): boolean {
+  if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
+  return row.items.some((it) => receiptItemRemainingQty(it) > 0);
+}
+
 function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -801,6 +811,10 @@ function App() {
     null
   );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  const openReceiptRequests = useMemo(
+    () => receiptRequests.filter(isOpenReceiptRequest),
+    [receiptRequests]
+  );
   // Модалка «Заявка из лимита?» после загрузки Excel.
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
@@ -3223,6 +3237,7 @@ function App() {
       setOpsMessage(
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
+      let receiptFullyAccepted = false;
       setReceiptRequests((prev) =>
         prev.map((r) => {
           if (r.id !== row.id) return r;
@@ -3241,6 +3256,7 @@ function App() {
             if (acc > 0) anyAccepted = true;
             if (acc + 1e-6 < Number(it.quantity)) allDone = false;
           }
+          receiptFullyAccepted = allDone;
           return {
             ...r,
             items: updatedItems,
@@ -3248,6 +3264,13 @@ function App() {
           };
         })
       );
+      if (receiptFullyAccepted) {
+        setExpandedReceiptIds((prev) => {
+          const next = { ...prev };
+          delete next[row.id];
+          return next;
+        });
+      }
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
         delete next[row.id];
@@ -3586,6 +3609,11 @@ function App() {
       return false;
     }
     setOpsMessage("Заявка закрыта вручную");
+    setExpandedReceiptIds((prev) => {
+      const next = { ...prev };
+      delete next[receiptId];
+      return next;
+    });
     await loadReceiptRequests();
     return true;
   }
@@ -3617,6 +3645,11 @@ function App() {
       return false;
     }
     setOpsMessage("Заявка на приход отменена. Уведомление отправлено.");
+    setExpandedReceiptIds((prev) => {
+      const next = { ...prev };
+      delete next[receiptId];
+      return next;
+    });
     await loadReceiptRequests();
     return true;
   }
@@ -6360,7 +6393,7 @@ function App() {
                 stats={[
                   {
                     label: "Активных заявок",
-                    value: receiptRequests.filter((r) => r.status !== "RECEIVED" && r.status !== "CANCELLED").length,
+                    value: openReceiptRequests.length,
                     tone: receiptRequests.some((r) => r.status === "IN_PROGRESS") ? "warn" : "neutral"
                   },
                   {
@@ -6389,14 +6422,18 @@ function App() {
                 />
               )}
 
-          {!receiptRequests.length && (
+          {!openReceiptRequests.length && (
             <EmptyState
-              title="Заявок ещё нет"
-              hint="Загрузи Excel-заявку во вкладке «Заявки» — позиции появятся здесь для приёма."
+              title={receiptRequests.length ? "Все заявки приняты" : "Заявок ещё нет"}
+              hint={
+                receiptRequests.length
+                  ? "Новые заявки появятся после загрузки Excel во вкладке «Заявки»."
+                  : "Загрузи Excel-заявку во вкладке «Заявки» — позиции появятся здесь для приёма."
+              }
             />
           )}
 
-          {receiptRequests.length > 0 ? (
+          {openReceiptRequests.length > 0 ? (
             <div className="erpTableWrap receiptsWorkspace" style={{ marginTop: 12 }}>
               <table className="erpTable desktopTable">
                 <thead>
@@ -6410,7 +6447,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-          {receiptRequests.map((row) => {
+          {openReceiptRequests.map((row) => {
             const isExpanded = expandedReceiptIds[row.id] === true;
             const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
             const acceptedQty = row.items.reduce((s, it) => s + Number(it.acceptedQty || 0), 0);
@@ -6459,7 +6496,7 @@ function App() {
                       <div className="progressBar" style={{ width: `${donePct}%` }} />
                     </div>
                   </td>
-                  <td>{row.items.length}</td>
+                  <td>{row.items.filter((it) => receiptItemRemainingQty(it) > 0).length}</td>
                   <td>
                     <div className="erpCellActions">
                       <button type="button" className="ghostBtn" onClick={() => openDocumentsForEntity("receipt", row.id)}>
@@ -6535,9 +6572,7 @@ function App() {
                     </datalist>
 
                     {(() => {
-                      const itemsLeft = row.items.filter(
-                        (it) => Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0)) > 0
-                      );
+                      const itemsLeft = row.items.filter((it) => receiptItemRemainingQty(it) > 0);
                       const selectedCount = itemsLeft.filter((it) => {
                         const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
                         return Number.isFinite(q) && q > 0;
