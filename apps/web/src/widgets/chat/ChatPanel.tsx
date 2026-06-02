@@ -238,10 +238,17 @@ export function ChatPanel({
                     const active = row.peer.id === peerUserId;
                     return (
                       <li key={row.conversation.id}>
-                        <button
-                          type="button"
+                        <div
                           className={`chatContact ${active ? "active" : ""} ${unread ? "unread" : ""}`}
+                          role="button"
+                          tabIndex={0}
                           onClick={() => void onSelectPeer(row.peer!.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              void onSelectPeer(row.peer!.id);
+                            }
+                          }}
                         >
                           <UserAvatar
                             fullName={row.peer.fullName}
@@ -264,7 +271,7 @@ export function ChatPanel({
                             </span>
                           </span>
                           {unread ? <span className="chatContactDot" aria-label="Непрочитано" /> : null}
-                        </button>
+                        </div>
                       </li>
                     );
                   })}
@@ -282,10 +289,17 @@ export function ChatPanel({
                   const active = u.id === peerUserId;
                   return (
                     <li key={u.id}>
-                      <button
-                        type="button"
+                      <div
                         className={`chatContact ${active ? "active" : ""} ${unread ? "unread" : ""}`}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => void onSelectPeer(u.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            void onSelectPeer(u.id);
+                          }
+                        }}
                       >
                         <UserAvatar
                           fullName={u.fullName}
@@ -307,7 +321,7 @@ export function ChatPanel({
                           </span>
                         </span>
                         {unread ? <span className="chatContactDot" aria-label="Непрочитано" /> : null}
-                      </button>
+                      </div>
                     </li>
                   );
                 })}

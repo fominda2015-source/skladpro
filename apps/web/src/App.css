@@ -1438,9 +1438,14 @@ tr.low {
   font: inherit;
   color: inherit;
   transition: background 0.12s ease, border-color 0.12s ease;
+  box-sizing: border-box;
 }
 .chatContact:hover {
   background: #f1f5f9;
+}
+.chatContact:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
 }
 .chatContact.active {
   background: #eff6ff;
@@ -1521,12 +1526,22 @@ tr.low {
 }
 .chatAvatarBtn {
   flex-shrink: 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
   border: none;
-  background: none;
+  background: transparent;
   padding: 0;
+  margin: 0;
   cursor: pointer;
   border-radius: 999px;
   line-height: 0;
+  font-weight: 700;
+  color: inherit;
+}
+.chatAvatarBtn:hover {
+  background: transparent;
 }
 .chatAvatarBtn:hover .chatAvatar,
 .chatAvatarBtn:focus-visible .chatAvatar {
