@@ -1,4 +1,6 @@
 import type { ObjectSection } from "@prisma/client";
+import { analyzeCatalogNames } from "./parseOrderSheet.js";
+import { syncReceiptItemToLimitTemplate } from "./receiptLimitSync.js";
 import { prisma } from "./prisma.js";
 
 export type LimitNodePick = {
@@ -202,6 +204,65 @@ export async function findLimitMaterialNodesInSection(
   }
 
   return picks.sort((a, b) => a.path.localeCompare(b.path, "ru"));
+}
+
+type ReceiptLimitItemRef = {
+  sourceName: string;
+  sourceUnit: string | null;
+  limitSectionPath: string | null;
+  limitCatalogNameN: string | null;
+  limitCatalogNameO: string | null;
+  limitNodeId: string | null;
+  limitNameRenamed: boolean;
+  namePartD: string | null;
+  namePartE: string | null;
+  externalComment: string | null;
+};
+
+/** Подбор узла лимита при приёмке: явный выбор → уже привязанный → путь из заявки → создать строку в шаблоне. */
+export async function resolveReceiptAcceptLimitNode(
+  tx: Tx,
+  templateId: string | null | undefined,
+  item: ReceiptLimitItemRef,
+  opts: {
+    explicitLimitNodeId?: string | null;
+    materialId: string | null;
+    materialName: string;
+    acceptedQty: number;
+  }
+): Promise<string | null> {
+  if (opts.explicitLimitNodeId) return opts.explicitLimitNodeId;
+  if (item.limitNodeId) return item.limitNodeId;
+  if (!templateId || !opts.materialId) return null;
+
+  const meta = analyzeCatalogNames(
+    item.sourceName,
+    item.namePartD || "",
+    item.namePartE || "",
+    item.limitCatalogNameN || "",
+    item.limitCatalogNameO || "",
+    item.externalComment || ""
+  );
+
+  const sync = await syncReceiptItemToLimitTemplate(tx, templateId, {
+    limitSectionPath: item.limitSectionPath,
+    namePartC: item.sourceName,
+    limitCatalogNameN: item.limitCatalogNameN,
+    limitCatalogNameO: item.limitCatalogNameO,
+    renameLimitToO: item.limitNameRenamed,
+    limitDisplayName: meta.limitDisplayName,
+    nameAlertNote: meta.nameAlertNote
+  });
+  if (sync.limitNodeId) return sync.limitNodeId;
+
+  return ensureMaterialInCurrentLimitTemplate(
+    tx,
+    templateId,
+    opts.materialId,
+    opts.materialName,
+    item.sourceUnit || "шт",
+    opts.acceptedQty
+  );
 }
 
 export async function ensureMaterialInCurrentLimitTemplate(

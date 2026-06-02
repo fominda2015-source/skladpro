@@ -14,12 +14,13 @@ import { handlePrismaError } from "../lib/errors.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
   ensureMaterialInCurrentLimitTemplate,
-  findLimitNodesAcrossWarehouse
+  findLimitNodesAcrossWarehouse,
+  resolveReceiptAcceptLimitNode
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
-import { findReceiptInvoiceDoc, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
+import { findReceiptInvoiceDoc, findMaterialNodeByLimitPath, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
@@ -526,7 +527,7 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
   // Построим путь до узла (для красивого отображения "Раздел / Подраздел / Материал").
   const allNodes = await prisma.objectLimitNode.findMany({
     where: { templateId: row.objectLimitTemplateId },
-    select: { id: true, parentId: true, title: true, indexLabel: true }
+    select: { id: true, parentId: true, title: true, indexLabel: true, nodeType: true, materialName: true }
   });
   // Явный тип, иначе TS жалуется на цикл при использовании `nodeById.get(cur)!` внутри замыкания.
   type LimitPathNode = { id: string; parentId: string | null; title: string; indexLabel: string | null };
@@ -556,9 +557,23 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
     return false;
   }
   const result = row.items.map((it) => {
-    const matched = nodes
-      .filter((n) => nodeMatchesItem(n, it.mappedMaterialId ?? null, it.sourceName))
-      .map((n) => ({
+    const searchNames = [
+      it.sourceName,
+      it.limitCatalogNameN || "",
+      it.limitCatalogNameO || ""
+    ];
+    let matched = nodes.filter((n) => nodeMatchesItem(n, it.mappedMaterialId ?? null, it.sourceName));
+    if (!matched.length && it.limitSectionPath?.trim()) {
+      const byPath = findMaterialNodeByLimitPath(allNodes, it.limitSectionPath, searchNames);
+      if (byPath) {
+        matched = nodes.filter((n) => n.id === byPath.id);
+      }
+    }
+    if (it.limitNodeId && !matched.some((n) => n.id === it.limitNodeId)) {
+      const pinned = nodes.find((n) => n.id === it.limitNodeId);
+      if (pinned) matched = [pinned, ...matched];
+    }
+    const suggestions = matched.map((n) => ({
         id: n.id,
         title: n.title,
         indexLabel: n.indexLabel,
@@ -567,7 +582,7 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
         issuedQty: n.issuedQty != null ? Number(n.issuedQty) : 0,
         unit: n.unit
       }));
-    return { itemId: it.id, currentLimitNodeId: it.limitNodeId ?? null, suggestions: matched };
+    return { itemId: it.id, currentLimitNodeId: it.limitNodeId ?? null, suggestions };
   });
   return res.json({ items: result, hasTemplate: true });
 });
@@ -759,6 +774,7 @@ receiptRequestsRouter.post(
       }
     }
 
+    try {
     const op = await prisma.$transaction(async (tx) => {
       const resolved: Array<{
         item: (typeof row.items)[number];
@@ -818,12 +834,23 @@ receiptRequestsRouter.post(
         const itemCategory = mapping?.category ?? r.item.category ?? null;
         const campCategory = r.campCategory ?? receiptCategoryToCampCategory(itemCategory);
 
+        let limitNodeId = r.limitNodeId ?? r.item.limitNodeId ?? null;
+        if (!campCategory && row.objectLimitTemplateId && r.materialId) {
+          limitNodeId = await resolveReceiptAcceptLimitNode(tx, row.objectLimitTemplateId, r.item, {
+            explicitLimitNodeId: mapping?.limitNodeId ?? null,
+            materialId: r.materialId,
+            materialName: mapping?.newMaterialName?.trim() || r.item.sourceName,
+            acceptedQty: r.acceptedQty
+          });
+          r.limitNodeId = limitNodeId;
+        }
+
         await tx.receiptRequestItem.update({
           where: { id: r.item.id },
           data: {
             mappedMaterialId: campCategory ? null : r.materialId,
             acceptedQty: { increment: r.acceptedQty },
-            ...(r.limitNodeId ? { limitNodeId: r.limitNodeId } : {}),
+            ...(limitNodeId ? { limitNodeId } : {}),
             ...(mapping?.category !== undefined ? { category: mapping.category } : {}),
             ...(mapping?.unitPrice !== undefined ? { unitPrice: mapping.unitPrice } : {}),
             ...(mapping?.storagePlace !== undefined ? { storagePlace: mapping.storagePlace } : {})
@@ -1129,6 +1156,11 @@ receiptRequestsRouter.post(
       overageActions: op.overageActions || [],
       receiptRequest
     });
+    } catch (e) {
+      console.error("receipt accept failed:", e);
+      const mapped = handlePrismaError(e);
+      return res.status(mapped.status).json(mapped.body);
+    }
   }
 );
 

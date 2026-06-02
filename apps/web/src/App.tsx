@@ -3179,7 +3179,7 @@ function App() {
         newMaterialName: finalName,
         newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
         acceptedQty: qty,
-        limitNodeId: draft?.limitNodeId || null,
+        limitNodeId: draft?.limitNodeId || it.limitNodeId || null,
         category: draft?.category || it.category || null,
         unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
         storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
@@ -3268,6 +3268,11 @@ function App() {
       }
       if (acceptBody.receiptRequest) {
         applyReceiptRequestUpdate(acceptBody.receiptRequest);
+        setLimitSuggestions((prev) => {
+          const next = { ...prev };
+          delete next[row.id];
+          return next;
+        });
         if (!isOpenReceiptRequest(acceptBody.receiptRequest)) {
           setExpandedReceiptIds((prev) => {
             const next = { ...prev };
@@ -3359,20 +3364,21 @@ function App() {
   }
 
   async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
-    const mappings = buildReceiptAcceptanceMappings(row);
+    const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
+    const mappings = buildReceiptAcceptanceMappings(freshRow);
     if (!mappings.length) {
       setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
       return false;
     }
     for (const m of mappings) {
-      const it = row.items.find((x) => x.id === m.itemId);
+      const it = freshRow.items.find((x) => x.id === m.itemId);
       if (!it) continue;
       const remaining = parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty);
       if (m.acceptedQty > remaining + 1e-6) {
         if (!token) return false;
         try {
           const r = await fetchWithSession(
-            `${API_URL}/api/receipt-requests/${encodeURIComponent(row.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
+            `${API_URL}/api/receipt-requests/${encodeURIComponent(freshRow.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
           if (r.ok) {
@@ -3381,7 +3387,7 @@ function App() {
               otherSections: Array<{ id: string; path: string }>;
             };
             setReceiptOverageModal({
-              row,
+              row: freshRow,
               itemId: it.id,
               extraFiles,
               mappings,
@@ -3397,7 +3403,7 @@ function App() {
         }
       }
     }
-    return postReceiptAcceptance(row, mappings, extraFiles);
+    return postReceiptAcceptance(freshRow, mappings, extraFiles);
   }
 
   async function loadIssues() {
@@ -5549,7 +5555,7 @@ function App() {
               className="ghostBtn"
               disabled={isSubmitting}
               onClick={async () => {
-                const targetRow = row;
+                const targetRow = receiptRequests.find((r) => r.id === row.id) ?? row;
                 const ok = await submitReceiptAcceptance(targetRow, []);
                 if (ok) {
                   setPendingAcceptanceRequestId(null);
@@ -5564,7 +5570,7 @@ function App() {
               disabled={isSubmitting || pendingAcceptanceFiles.length === 0}
               onClick={async () => {
                 const files = [...pendingAcceptanceFiles];
-                const targetRow = row;
+                const targetRow = receiptRequests.find((r) => r.id === row.id) ?? row;
                 const ok = await submitReceiptAcceptance(targetRow, files);
                 if (ok) {
                   setPendingAcceptanceRequestId(null);
@@ -6887,23 +6893,45 @@ function App() {
                                             const suggestions =
                                               limitSuggestions[row.id]?.items.find((x) => x.itemId === it.id)
                                                 ?.suggestions || [];
-                                            const value = draft.limitNodeId || "";
+                                            const pickedNodeId = draft.limitNodeId || it.limitNodeId || "";
+                                            const picked = suggestions.find((s) => s.id === pickedNodeId);
+                                            if (picked) {
+                                              return (
+                                                <span style={{ fontSize: 12 }} title={picked.path || picked.title}>
+                                                  {picked.path || picked.title}
+                                                </span>
+                                              );
+                                            }
+                                            if (it.limitSectionPath) {
+                                              return (
+                                                <div style={{ fontSize: 12 }}>
+                                                  <div className="muted" title={it.limitSectionPath}>
+                                                    {it.limitSectionPath}
+                                                  </div>
+                                                  {suggestions.length === 0 ? (
+                                                    <span className="muted" style={{ fontSize: 11 }}>
+                                                      узел не найден — при приёмке привяжем автоматически
+                                                    </span>
+                                                  ) : null}
+                                                </div>
+                                              );
+                                            }
                                             if (suggestions.length === 0) {
                                               return (
                                                 <span className="muted" style={{ fontSize: 12 }}>
-                                                  узел не найден — приём пройдёт без привязки
+                                                  узел не найден — при приёмке привяжем автоматически
                                                 </span>
                                               );
                                             }
                                             return (
                                               <select
-                                                value={value}
+                                                value={pickedNodeId}
                                                 disabled={finished}
                                                 onChange={(e) =>
                                                   saveDraft({ limitNodeId: e.target.value || undefined })
                                                 }
                                               >
-                                                <option value="">— без узла —</option>
+                                                <option value="">— выберите узел —</option>
                                                 {suggestions.map((s) => (
                                                   <option key={s.id} value={s.id}>
                                                     {s.path || s.title}
