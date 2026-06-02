@@ -122,6 +122,7 @@ type BalanceMaps = {
   holderLabels: Map<string, string>;
   materialMeta: Map<string, { name: string; unit: string }>;
   warehouseStockHolderKey: string;
+  holderIssueMeta: Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>;
 };
 
 async function buildMaterialReportBalances(
@@ -136,6 +137,15 @@ async function buildMaterialReportBalances(
   const qtyByKey = new Map<string, number>();
   const holderLabels = new Map<string, string>([[whHolderKey, whHolderName]]);
   const materialMeta = new Map<string, { name: string; unit: string }>();
+  const holderIssueMeta = new Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>();
+
+  const trackIssue = (holderKey: string, issueNumber: string, issuedAt: Date) => {
+    const prev = holderIssueMeta.get(holderKey) ?? { issueNumbers: [], lastIssueAt: null };
+    if (!prev.issueNumbers.includes(issueNumber)) prev.issueNumbers.push(issueNumber);
+    const at = issuedAt.toISOString();
+    if (!prev.lastIssueAt || at > prev.lastIssueAt) prev.lastIssueAt = at;
+    holderIssueMeta.set(holderKey, prev);
+  };
 
   const rememberMaterial = (id: string, name: string, unit: string) => {
     if (!materialMeta.has(id)) materialMeta.set(id, { name, unit });
@@ -177,6 +187,8 @@ async function buildMaterialReportBalances(
       items: { some: {} }
     },
     select: {
+      number: true,
+      updatedAt: true,
       responsibleName: true,
       actualRecipientName: true,
       approvedById: true,
@@ -226,6 +238,7 @@ async function buildMaterialReportBalances(
       rememberMaterial(it.material.id, it.material.name, it.material.unit);
       addQty(holderKey, holderName, it.materialId, qty);
     }
+    trackIssue(holderKey, iss.number, iss.updatedAt);
   }
 
   const woRows = await prisma.materialHolderWriteoff.groupBy({
@@ -242,11 +255,11 @@ async function buildMaterialReportBalances(
     qtyByKey.set(key, Math.max(0, cur - sub));
   }
 
-  return { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey: whHolderKey };
+  return { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey: whHolderKey, holderIssueMeta };
 }
 
 function balancesToPayload(maps: BalanceMaps) {
-  const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey } = maps;
+  const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey, holderIssueMeta } = maps;
   type Line = BalanceLine;
   const holders = new Map<string, Line[]>();
 
@@ -264,13 +277,18 @@ function balancesToPayload(maps: BalanceMaps) {
     holders.set(holderKey, arr);
   }
 
-  const payload = [...holders.entries()].map(([holderKey, lines]) => ({
-    holderKey,
-    holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
-    holderName: holderLabels.get(holderKey) || holderKey,
-    isWarehouseBalance: holderKey === warehouseStockHolderKey,
-    lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
-  }));
+  const payload = [...holders.entries()].map(([holderKey, lines]) => {
+    const meta = holderIssueMeta.get(holderKey);
+    return {
+      holderKey,
+      holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
+      holderName: holderLabels.get(holderKey) || holderKey,
+      isWarehouseBalance: holderKey === warehouseStockHolderKey,
+      issueNumbers: meta?.issueNumbers ?? [],
+      lastIssueAt: meta?.lastIssueAt ?? null,
+      lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
+    };
+  });
 
   payload.sort((a, b) => {
     if (a.isWarehouseBalance) return -1;
@@ -310,9 +328,13 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : "";
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "";
+  const holderKey = typeof req.query.holderKey === "string" ? req.query.holderKey.trim() : "";
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const fromRaw = typeof req.query.from === "string" ? req.query.from : "";
+  const toRaw = typeof req.query.to === "string" ? req.query.to : "";
 
   const takeRaw = Number(req.query.take);
-  const take = Number.isFinite(takeRaw) ? Math.min(200, Math.max(1, takeRaw)) : 80;
+  const take = Number.isFinite(takeRaw) ? Math.min(500, Math.max(1, takeRaw)) : 200;
 
   if (!warehouseId || !section) {
     return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
@@ -327,8 +349,36 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
     throw e;
   }
 
+  const createdAt: { gte?: Date; lte?: Date } = {};
+  if (fromRaw) {
+    const d = new Date(fromRaw);
+    if (!Number.isNaN(d.getTime())) createdAt.gte = d;
+  }
+  if (toRaw) {
+    const d = new Date(toRaw);
+    if (!Number.isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+      createdAt.lte = d;
+    }
+  }
+
   const rows = await prisma.materialHolderWriteoff.findMany({
-    where: { warehouseId, section },
+    where: {
+      warehouseId,
+      section,
+      ...(holderKey ? { holderKey } : {}),
+      ...(Object.keys(createdAt).length ? { createdAt } : {}),
+      ...(q
+        ? {
+            OR: [
+              { holderName: { contains: q, mode: "insensitive" } },
+              { comment: { contains: q, mode: "insensitive" } },
+              { material: { name: { contains: q, mode: "insensitive" } } },
+              { actorUser: { fullName: { contains: q, mode: "insensitive" } } }
+            ]
+          }
+        : {})
+    },
     orderBy: { createdAt: "desc" },
     take,
     include: {
@@ -356,6 +406,7 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
         createdAt: w.createdAt,
         quantity: Number(w.quantity),
         comment: w.comment,
+        holderKey: w.holderKey,
         holderName:
           w.holderName || w.holderUser?.fullName || w.holderUser?.email || w.holderKey,
         actorName: w.actorUser.fullName || w.actorUser.email,

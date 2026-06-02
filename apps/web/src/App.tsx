@@ -49,6 +49,7 @@ import {
   limitTreeIndentPx
 } from "./widgets/limits/limitImportDiffUtils";
 import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
+import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
@@ -206,26 +207,6 @@ type LimitSupplyMetricRow = {
   issuedQty: number;
   onOrderQty: number;
   stockQty: number;
-};
-type MaterialReportHolderRow = {
-  holderKey: string;
-  holderUserId?: string | null;
-  holderName: string;
-  isWarehouseBalance?: boolean;
-  lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
-};
-type MaterialWriteoffHistoryApiRow = {
-  id: string;
-  createdAt: string;
-  quantity: number;
-  comment?: string | null;
-  holderName: string;
-  actorName: string;
-  materialName: string;
-  materialUnit: string;
-  documentFileId?: string | null;
-  documentPath?: string | null;
-  documentFileName?: string | null;
 };
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => {
   detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
@@ -844,17 +825,6 @@ function App() {
     Record<string, { title?: string; unit?: string; plannedQty?: string }>
   >({});
   const [limitTemplateTitleDrafts, setLimitTemplateTitleDrafts] = useState<Record<string, string>>({});
-  const [materialBalances, setMaterialBalances] = useState<MaterialReportHolderRow[]>([]);
-  const [materialBalancesLoading, setMaterialBalancesLoading] = useState(false);
-  const [materialWriteoffHistory, setMaterialWriteoffHistory] = useState<MaterialWriteoffHistoryApiRow[]>([]);
-  const [materialReportMessage, setMaterialReportMessage] = useState("");
-  const [materialWriteoffModal, setMaterialWriteoffModal] = useState<
-    null | { holderKey: string; materialId: string; name: string; unit: string; maxQty: number }
-  >(null);
-  const [materialWriteoffQty, setMaterialWriteoffQty] = useState("");
-  const [materialWriteoffComment, setMaterialWriteoffComment] = useState("");
-  const [materialWriteoffFile, setMaterialWriteoffFile] = useState<File | null>(null);
-  const [materialWriteoffBusy, setMaterialWriteoffBusy] = useState(false);
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
   const [limitNameAlertModal, setLimitNameAlertModal] = useState<null | { title: string; note: string }>(
     null
@@ -2872,117 +2842,6 @@ function App() {
     }
   }
 
-  async function loadMaterialReportData() {
-    if (!token || !activeObjectId) return;
-    setMaterialBalancesLoading(true);
-    setMaterialReportMessage("");
-    const params = new URLSearchParams({
-      warehouseId: activeObjectId,
-      section: objectSectionFilter
-    });
-    try {
-      const [balRes, histRes] = await Promise.all([
-        fetchWithSession(`${API_URL}/api/material-report/balances?${params}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        fetchWithSession(`${API_URL}/api/material-report/writeoffs/history?${params}&take=100`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      ]);
-
-      let balancesPayload: MaterialReportHolderRow[] = [];
-      let historyPayload: MaterialWriteoffHistoryApiRow[] = [];
-      let errText = "";
-
-      if (!balRes.ok) {
-        const err = await balRes.json().catch(() => ({}));
-        errText =
-          typeof (err as { error?: unknown }).error === "string"
-            ? (err as { error: string }).error
-            : `Ошибка загрузки остатков (${balRes.status})`;
-      } else {
-        balancesPayload = (await balRes.json()) as MaterialReportHolderRow[];
-      }
-
-      if (!histRes.ok) {
-        const err = await histRes.json().catch(() => ({}));
-        const histMsg =
-          typeof (err as { error?: unknown }).error === "string"
-            ? (err as { error: string }).error
-            : `Ошибка загрузки истории (${histRes.status})`;
-        errText = errText ? `${errText} · ${histMsg}` : histMsg;
-      } else {
-        historyPayload = (await histRes.json()) as MaterialWriteoffHistoryApiRow[];
-      }
-
-      setMaterialBalances(balancesPayload);
-      setMaterialWriteoffHistory(historyPayload);
-      if (errText) setMaterialReportMessage(errText);
-    } catch (e) {
-      setMaterialBalances([]);
-      setMaterialWriteoffHistory([]);
-      setMaterialReportMessage(`Не удалось загрузить материальный отчёт: ${String(e)}`);
-    } finally {
-      setMaterialBalancesLoading(false);
-    }
-  }
-
-  async function submitMaterialWriteoff() {
-    if (!token || !activeObjectId || !materialWriteoffModal || !canMaterialWriteoff) return;
-    const qty = Number(String(materialWriteoffQty).trim().replace(",", "."));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setMaterialReportMessage("Укажите положительное количество списания.");
-      return;
-    }
-    if (qty > materialWriteoffModal.maxQty + 1e-6) {
-      setMaterialReportMessage(`Не больше остатка у ответственного: ${materialWriteoffModal.maxQty}`);
-      return;
-    }
-    setMaterialWriteoffBusy(true);
-    setMaterialReportMessage("");
-    const form = new FormData();
-    const payload: Record<string, unknown> = {
-      warehouseId: activeObjectId,
-      section: objectSectionFilter,
-      holderKey: materialWriteoffModal.holderKey,
-      materialId: materialWriteoffModal.materialId,
-      quantity: qty
-    };
-    const c = materialWriteoffComment.trim();
-    if (c) payload.comment = c;
-    form.append("payload", JSON.stringify(payload));
-    if (materialWriteoffFile) form.append("file", materialWriteoffFile);
-    try {
-      const res = await fetchWithSession(`${API_URL}/api/material-report/writeoffs`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: unknown; balance?: unknown };
-        const apiErr = typeof err.error === "string" ? err.error : "";
-        const balance =
-          typeof err.balance === "number" && Number.isFinite(err.balance) ? err.balance : null;
-        const msg =
-          apiErr ||
-          (res.status === 409 && balance !== null
-            ? `Недостаточно остатка (доступно ${balance})`
-            : `Списание не выполнено (${res.status})`);
-        setMaterialReportMessage(msg);
-        return;
-      }
-      setMaterialWriteoffModal(null);
-      setMaterialWriteoffQty("");
-      setMaterialWriteoffComment("");
-      setMaterialWriteoffFile(null);
-      await loadMaterialReportData();
-    } catch (e) {
-      setMaterialReportMessage(`Ошибка сети: ${String(e)}`);
-    } finally {
-      setMaterialWriteoffBusy(false);
-    }
-  }
-
   async function uploadLimitTemplate() {
     if (!token || !activeObjectId || !limitImportFile) return;
     if (!canWriteLimits) {
@@ -4918,7 +4777,6 @@ function App() {
         manualStockModalOpen ||
         issueRecipientModal ||
         pendingAcceptanceRequestId ||
-        materialWriteoffModal ||
         toolManualModalOpen ||
         toolDetailModalId ||
         requestMaterialsModal
@@ -4932,7 +4790,6 @@ function App() {
       setIssueRecipientSignedFile(null);
       setPendingAcceptanceRequestId(null);
       setPendingAcceptanceFiles([]);
-      setMaterialWriteoffModal(null);
       setToolManualModalOpen(false);
       setToolDetailModalId(null);
       setRequestMaterialsModal(null);
@@ -4944,7 +4801,6 @@ function App() {
     manualStockModalOpen,
     issueRecipientModal,
     pendingAcceptanceRequestId,
-    materialWriteoffModal,
     toolManualModalOpen,
     toolDetailModalId,
     requestMaterialsModal
@@ -5447,12 +5303,6 @@ function App() {
       setLimitTemplateTitleDrafts({});
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
-
-  useEffect(() => {
-    if (token && activeTab === "materialReport" && canMaterialReport) {
-      void loadMaterialReportData();
-    }
-  }, [token, activeTab, activeObjectId, objectSectionFilter, canMaterialReport]);
 
   useEffect(() => {
     if (!limitEditMode) {
@@ -9506,166 +9356,27 @@ function App() {
       )}
 
       {canMaterialReport && activeTab === "materialReport" && (
-        <div>
-          {renderTabObjectFilter()}
-          <PageHero
-            icon="▪"
-            title="Материальный отчёт"
-            subtitle={`Что у ответственных · раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
-            actions={
-              <>
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  disabled={!activeObjectId}
-                  onClick={() => void loadMaterialReportData()}
-                >
-                  ↻ Обновить
-                </button>
-                <PeriodExportButton
-                  section="materialReport"
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  title="Мат. отчёт в Excel"
-                  warehouseId={exportWarehouseId || undefined}
-                  sectionFilter={objectSectionFilter}
-                />
-              </>
-            }
-          />
-
-          {!activeObjectId ? (
-            <p className="muted">Выберите объект в верхней панели.</p>
-          ) : (
-            <>
-              {materialReportMessage ? (
-                <ResultBanner
-                  text={materialReportMessage}
-                  tone={
-                    /403|502|Недостаточно|[Оо]шибка|[Нн]екоррект|Invalid/i.test(materialReportMessage)
-                      ? "error"
-                      : "neutral"
-                  }
-                />
-              ) : null}
-              {materialBalancesLoading ? (
-                <LoadingState text="Загрузка материального отчёта..." />
-              ) : materialBalances.length === 0 ? (
-                <EmptyState
-                  title="Нет позиций в отчёте"
-                  hint="На складе остатки у кладовщика объекта (должность «Кладовщик» в доступах); после выдачи с указанием ответственного материал переходит к нему (СС/ЭОМ)."
-                />
-              ) : (
-                <div className="plainList" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {materialBalances.map((h) => (
-                    <div key={h.holderKey} className="card" style={{ margin: 0, padding: "12px 14px" }}>
-                      <div className="rightCardHeader" style={{ marginBottom: 8 }}>
-                        <strong>{safeName(h.holderName)}</strong>
-                        <span className="muted">
-                          {h.isWarehouseBalance ? "склад" : "ответственный"} · {h.lines.length} поз.
-                        </span>
-                      </div>
-                      <div style={{ overflowX: "auto" }}>
-                        <table className="desktopTable" style={{ fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th>Материал</th>
-                              <th>Ед.</th>
-                              <th>Остаток у ответственного</th>
-                              {canMaterialWriteoff ? <th aria-label="Действия" /> : null}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {h.lines.map((ln) => (
-                              <tr key={`${h.holderKey}-${ln.materialId}`}>
-                                <td>{safeName(ln.name)}</td>
-                                <td>{ln.unit}</td>
-                                <td>{Number(ln.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
-                                {canMaterialWriteoff ? (
-                                  <td style={{ whiteSpace: "nowrap" }}>
-                                    <button
-                                      type="button"
-                                      className="ghostBtn"
-                                      onClick={() => {
-                                        setMaterialWriteoffQty("");
-                                        setMaterialWriteoffComment("");
-                                        setMaterialWriteoffFile(null);
-                                        setMaterialReportMessage("");
-                                        setMaterialWriteoffModal({
-                                          holderKey: h.holderKey,
-                                          materialId: ln.materialId,
-                                          name: ln.name,
-                                          unit: ln.unit,
-                                          maxQty: Number(ln.quantity) || 0
-                                        });
-                                      }}
-                                    >
-                                      Списать
-                                    </button>
-                                  </td>
-                                ) : null}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="card" style={{ marginTop: 16 }}>
-                <h3 style={{ marginTop: 0 }}>История списаний</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Последние операции списания с ответственных по текущему объекту и разделу.
-                </p>
-                {!materialWriteoffHistory.length && !materialBalancesLoading ? (
-                  <p className="muted">Записей пока нет.</p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="desktopTable" style={{ fontSize: 13 }}>
-                      <thead>
-                        <tr>
-                          <th>Дата</th>
-                          <th>Ответственный</th>
-                          <th>Материал</th>
-                          <th>Кол-во</th>
-                          <th>Исполнитель</th>
-                          <th>Комментарий</th>
-                          <th>Вложение</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {materialWriteoffHistory.map((w) => (
-                          <tr key={w.id}>
-                            <td>{new Date(w.createdAt).toLocaleString("ru-RU")}</td>
-                            <td>{safeName(w.holderName)}</td>
-                            <td>
-                              {safeName(w.materialName)} ({w.materialUnit})
-                            </td>
-                            <td>{Number(w.quantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}</td>
-                            <td>{safeName(w.actorName)}</td>
-                            <td>{w.comment ? String(w.comment) : "—"}</td>
-                            <td>
-                              {w.documentPath ? (
-                                <a href={`${API_URL}/${w.documentPath}`} target="_blank" rel="noreferrer">
-                                  {safeName(w.documentFileName || "Файл")}
-                                </a>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+        <MaterialReportTab
+          token={token}
+          apiUrl={API_URL}
+          fetchWithSession={fetchWithSession}
+          warehouseId={activeObjectId}
+          section={objectSectionFilter}
+          canWriteoff={canMaterialWriteoff}
+          safeName={safeName}
+          objectFilter={renderTabObjectFilter()}
+          exportAction={
+            <PeriodExportButton
+              section="materialReport"
+              token={token}
+              apiUrl={API_URL}
+              fetchWithSession={fetchWithSession}
+              title="Мат. отчёт в Excel"
+              warehouseId={exportWarehouseId || undefined}
+              sectionFilter={objectSectionFilter}
+            />
+          }
+        />
       )}
 
       {activeTab === "approvals" && (
@@ -12607,101 +12318,6 @@ function App() {
           }}
         />
       ) : null}
-
-      {materialWriteoffModal && canMaterialWriteoff && activeObjectId && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="material-writeoff-title"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 55,
-            padding: 16
-          }}
-          onClick={() =>
-            !materialWriteoffBusy &&
-            (() => {
-              setMaterialWriteoffModal(null);
-              setMaterialWriteoffQty("");
-              setMaterialWriteoffComment("");
-              setMaterialWriteoffFile(null);
-            })()
-          }
-        >
-          <div className="card" style={{ maxWidth: 520, width: "100%" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-              <h3 id="material-writeoff-title" style={{ marginTop: 0 }}>
-                Списание с ответственного
-              </h3>
-              <button
-                type="button"
-                className="ghostBtn"
-                disabled={materialWriteoffBusy}
-                onClick={() => {
-                  setMaterialWriteoffModal(null);
-                  setMaterialWriteoffQty("");
-                  setMaterialWriteoffComment("");
-                  setMaterialWriteoffFile(null);
-                }}
-              >
-                Закрыть
-              </button>
-            </div>
-            <p className="muted" style={{ margin: "0 0 10px" }}>
-              {safeName(materialWriteoffModal.name)} · не больше{" "}
-              {materialWriteoffModal.maxQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {materialWriteoffModal.unit}
-            </p>
-            <div className="form">
-              <label>
-                Количество ({materialWriteoffModal.unit})
-                <input
-                  type="number"
-                  min={0.001}
-                  step="any"
-                  value={materialWriteoffQty}
-                  onChange={(e) => setMaterialWriteoffQty(e.target.value)}
-                  autoFocus
-                />
-              </label>
-              <label>
-                Комментарий (необязательно)
-                <input value={materialWriteoffComment} onChange={(e) => setMaterialWriteoffComment(e.target.value)} />
-              </label>
-              <label>
-                Подписанный акт или иной файл (необязательно)
-                <input
-                  type="file"
-                  onChange={(e) => setMaterialWriteoffFile(e.target.files?.[0] || null)}
-                  disabled={materialWriteoffBusy}
-                />
-              </label>
-            </div>
-            <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="ghostBtn"
-                disabled={materialWriteoffBusy}
-                onClick={() => {
-                  setMaterialWriteoffModal(null);
-                  setMaterialWriteoffQty("");
-                  setMaterialWriteoffComment("");
-                  setMaterialWriteoffFile(null);
-                }}
-              >
-                Отмена
-              </button>
-              <button type="button" className="primaryBtn" disabled={materialWriteoffBusy} onClick={() => void submitMaterialWriteoff()}>
-                {materialWriteoffBusy ? "Сохранение…" : "Списать"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {manualStockModalOpen && canWriteOperations && (
         <div

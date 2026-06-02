@@ -6673,3 +6673,169 @@ button.whMenuItem:hover,
 .adminIssueEditLines input[type="number"] {
   width: 100%;
 }
+
+.materialReportPage {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 180px);
+}
+.materialReportSubNav {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.materialReportSubNav button {
+  width: auto;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #dbe1ec;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.materialReportSubNav button.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.materialReportLayout {
+  flex: 1;
+  min-height: 480px;
+}
+.materialReportSidebarFilters {
+  padding: 0 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid #eef2f7;
+}
+.materialReportSidebarFilters input,
+.materialReportSidebarFilters select {
+  width: 100%;
+  font-size: 13px;
+}
+.materialReportFilterRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.materialReportFilterRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+}
+.materialReportThreadToolbar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eef2f7;
+  flex-wrap: wrap;
+}
+.materialReportThreadToolbar input {
+  flex: 1;
+  min-width: 160px;
+}
+.materialReportMessages {
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.materialReportBubble {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  max-width: 100%;
+}
+.materialReportBubble.selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.materialReportBubbleCheck {
+  padding-top: 2px;
+}
+.materialReportBubbleBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+}
+.materialReportBubbleQty {
+  margin-left: auto;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.materialReportHistoryPane {
+  padding: 12px 14px 16px;
+}
+.materialReportHistoryGroup {
+  margin-bottom: 6px;
+}
+.materialReportHistoryGroupHead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.materialReportHistoryGroupHead strong {
+  flex: 1;
+}
+.materialReportHistoryChevron {
+  color: #64748b;
+  width: 16px;
+}
+.materialReportHistoryChildren {
+  margin: 4px 0 8px 18px;
+  padding-left: 10px;
+  border-left: 2px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.materialReportHistoryRow {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #eef2f7;
+}
+.materialReportHistoryRowMain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+.materialReportHistoryRowMain time {
+  color: #64748b;
+  font-size: 12px;
+}
+.materialReportHistoryRowMeta {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.materialReportField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.materialReportWriteoffModal {
+  max-width: min(96vw, 640px);
+}
