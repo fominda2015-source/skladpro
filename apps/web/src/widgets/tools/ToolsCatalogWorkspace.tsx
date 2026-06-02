@@ -9,9 +9,8 @@ import {
   type ToolCatalogSummary,
   type ToolsNavId,
   isMaterialNav,
-  isToolListNav,
-  navToCategorySlug,
   navToMaterialSection,
+  showToolsInventoryList,
   toolsNavTitle
 } from "./toolCatalog";
 
@@ -164,12 +163,11 @@ export function ToolsCatalogWorkspace({
         </>
       )}
 
-      {isToolListNav(current) && navToCategorySlug(current) && (
-        <>
-          <h3 style={{ marginTop: hubCards ? 16 : 0 }}>{toolsNavTitle(navPath)}</h3>
+      {showToolsInventoryList(navPath) ? (
+        <div className="toolsCatalogListSection" style={{ marginTop: hubCards ? 16 : 0 }}>
           {toolListSlot}
-        </>
-      )}
+        </div>
+      ) : null}
     </div>
   );
 }

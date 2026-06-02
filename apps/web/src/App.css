@@ -660,16 +660,22 @@ button:hover {
   justify-content: center;
   gap: 8px;
   min-height: 132px;
+  height: auto;
+  width: auto;
   padding: 18px 14px;
   border: 1px solid #dce3ee;
   border-radius: 16px;
   background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  color: #0f172a;
   cursor: pointer;
   text-align: center;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  font-weight: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
 .toolsHubCard:hover {
   border-color: #0ea5e9;
+  background: #f0f9ff;
+  color: #0f172a;
   box-shadow: 0 8px 24px rgba(14, 165, 233, 0.12);
 }
 .toolsHubCardIcon {
@@ -679,10 +685,94 @@ button:hover {
 .toolsHubCardLabel {
   font-weight: 600;
   font-size: 0.95rem;
+  color: #0f172a;
 }
 .toolsHubCardHint {
   font-size: 0.78rem;
   line-height: 1.3;
+  color: #64748b;
+}
+.toolsHubCard .toolsHubCardHint.muted {
+  color: #64748b;
+}
+
+.toolsListToolbar {
+  margin: 10px 0 12px;
+}
+.toolsListToolbarRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.toolsListToolbarSearch {
+  flex: 1 1 180px;
+  min-width: 140px;
+  max-width: 360px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8dde7;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+  color: #1f2937;
+}
+.toolsListToolbarSearch:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+.toolsListToolbarFilterBtn {
+  height: 34px;
+  width: auto;
+  padding: 0 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.toolsListToolbarFilterBtn.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.toolsListToolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.toolsListToolbarActions .ghostBtn,
+.toolsListToolbarActions .primaryBtn {
+  height: 34px;
+  width: auto;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.toolsListToolbarFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.toolsListToolbarFilters select {
+  height: 32px;
+  width: auto;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 0 8px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid #d8dde7;
+  background: #fff;
+  color: #1f2937;
+}
+.toolsCatalogListSection .toolsListScopeNote {
+  margin: 0 0 8px;
+  font-size: 13px;
 }
 .toolsCatalogBreadcrumb {
   align-items: center;
@@ -3772,9 +3862,16 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   font-weight: 600;
   line-height: 1.35;
   color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  text-transform: none;
+  letter-spacing: normal;
   margin-top: 4px;
+}
+.homeOverview .pageHeroStatValue > span:first-child {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #0f172a;
 }
 .homeOverview .pageHeroStat.tone-warn .pageHeroStatLabel {
   color: #b45309;
@@ -3799,11 +3896,21 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   display: block;
   margin-top: 4px;
   font-size: 11px;
-  color: #94a3b8;
-  font-weight: 600;
+  color: #475569;
+  font-weight: 500;
   line-height: 1.35;
   text-transform: none;
   letter-spacing: normal;
+}
+.toolsInventoryBlock--embed {
+  margin-top: 0;
+}
+.homeDrillModal--wide .toolsInventoryBlock--embed .toolsHubGrid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+.homeDrillModal--wide .toolsInventoryBlock--embed .toolsHubCard {
+  min-height: 110px;
+  padding: 12px 10px;
 }
 .homeOverviewMeta {
   font-weight: 400;

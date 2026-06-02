@@ -99,7 +99,9 @@ type Props = {
   onOpenWarehouseTab?: () => void;
   onOpenLimitsTab?: () => void;
   onOpenToolsTab?: () => void;
-  toolsHubSlot?: ReactNode;
+  /** Полный раздел инструментов в модалке по клику на карточку «Инструменты». */
+  toolsStatDrillContent?: ReactNode;
+  onToolsStatDrill?: () => void;
   onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
@@ -279,7 +281,8 @@ export function HomeOverview({
   onOpenWarehouseTab,
   onOpenLimitsTab,
   onOpenToolsTab,
-  toolsHubSlot,
+  toolsStatDrillContent,
+  onToolsStatDrill,
   onOpenCampTab,
   onOpenOperations,
   onOpenOperationsTab,
@@ -302,6 +305,7 @@ export function HomeOverview({
   const [drillHistoryIndex, setDrillHistoryIndex] = useState(0);
 
   const openStatDrill = (key: HomeStatKey) => {
+    if (key === "tools") onToolsStatDrill?.();
     setDrill({ kind: "stat", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
@@ -841,6 +845,9 @@ export function HomeOverview({
           />
         );
       }
+      if (drill.key === "tools" && toolsStatDrillContent) {
+        return toolsStatDrillContent;
+      }
       if (drill.key === "tools") {
         return (
           <ObjectDrillTable
@@ -1100,16 +1107,6 @@ export function HomeOverview({
         ]}
       />
 
-      {toolsHubSlot ? (
-        <section className="homePanel" style={{ marginTop: 16 }}>
-          <header className="homePanelHead">
-            <h3>Инструменты</h3>
-            <span className="muted">те же разделы, что на вкладке «Инструменты»</span>
-          </header>
-          {toolsHubSlot}
-        </section>
-      ) : null}
-
       <div className="erpQuickActions">
         {canWarehouse && onOpenWarehouseTab ? (
           <button type="button" className="primaryBtn" onClick={onOpenWarehouseTab}>
@@ -1279,9 +1276,19 @@ export function HomeOverview({
       {drill ? (
         <HomeDrillModal
           title={drillTitle}
-          subtitle={`${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`}
           size={
-            drill.key === "limitsSs" || drill.key === "limitsEom" || drill.key === "limits" ? "wide" : "default"
+            drill.kind === "stat" && drill.key === "tools"
+              ? "wide"
+              : drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")
+                ? "wide"
+                : drill.kind === "chart" && drill.key === "limits"
+                  ? "wide"
+                  : "default"
+          }
+          subtitle={
+            drill.kind === "stat" && drill.key === "tools"
+              ? "Те же разделы и таблица, что на вкладке «Инструменты»"
+              : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
           }
           onClose={() => setDrill(null)}
           onBack={goBack}

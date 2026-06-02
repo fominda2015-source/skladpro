@@ -87,6 +87,25 @@ export function navToCategorySlug(nav: ToolsNavId): string | null {
   return null;
 }
 
+/** Цепочка slug: сначала выбранная подкатегория, затем более широкие списки. */
+export function navCategorySlugChain(nav: ToolsNavId): Array<string | null> {
+  const primary = navToCategorySlug(nav);
+  if (!primary) return [null];
+  if (primary === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS || primary === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED) {
+    return [primary, TOOL_CATEGORY_SLUGS.ELECTRIC, null];
+  }
+  if (primary === TOOL_CATEGORY_SLUGS.MANUAL || primary === TOOL_CATEGORY_SLUGS.ELECTRIC) {
+    return [primary, null];
+  }
+  return [primary, null];
+}
+
+export function showToolsInventoryList(navPath: ToolsNavId[]): boolean {
+  const current = navPath[navPath.length - 1] ?? "hub";
+  if (current === "hub" || isMaterialNav(current)) return false;
+  return navPath.includes("tool");
+}
+
 export function navToMaterialSection(nav: ToolsNavId): string | null {
   if (nav === "ppe") return "PPE";
   if (nav === "tool-consumable") return "TOOL_CONSUMABLE";

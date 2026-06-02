@@ -62,6 +62,8 @@ import {
 } from "./widgets/approvals/ApprovalsQueueTables";
 import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
 import {
+  RECEIPT_ITEM_CATEGORIES,
+  receiptItemCategoryLabel,
   receiptStatusLabel,
   receiptStatusTone,
   type ReceiptItemCategory
@@ -77,16 +79,18 @@ import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
 import { VerificationsTab } from "./widgets/verifications/VerificationsTab";
 import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
-import { ToolsCatalogWorkspace } from "./widgets/tools/ToolsCatalogWorkspace";
 import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueModal";
 import { ToolConsumablesReturnModal } from "./widgets/tools/ToolConsumablesReturnModal";
 import {
-  navToCategorySlug,
+  navCategorySlugChain,
+  TOOL_CATEGORY_SLUGS,
   type ToolsNavId,
   isElectricToolCategorySlug,
   receiptCategoryToToolsNav,
   toolsNavPathFromSegment
 } from "./widgets/tools/toolCatalog";
+import { ToolsListToolbar } from "./widgets/tools/ToolsListToolbar";
+import { ToolsInventoryBlock } from "./widgets/tools/ToolsInventoryBlock";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
@@ -1044,6 +1048,7 @@ function App() {
   const [toolActionComment, setToolActionComment] = useState("");
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
   const [toolsNavPath, setToolsNavPath] = useState<ToolsNavId[]>(["hub"]);
+  const [toolsListScopeNote, setToolsListScopeNote] = useState("");
   const [toolConsumablesIssueOpen, setToolConsumablesIssueOpen] = useState(false);
   const [toolConsumablesIssueContext, setToolConsumablesIssueContext] = useState<{
     toolIds: string[];
@@ -4142,36 +4147,76 @@ function App() {
   // Прямой приход/возврат через ручную форму удалены —
   // материал теперь принимается только через заявки (см. submitReceiptAcceptance).
 
+  function toolsListScopeNoteText(requestedSlug: string | null, usedSlug: string | null) {
+    if (!requestedSlug || requestedSlug === usedSlug) return "";
+    if (usedSlug === null) return "В выбранной категории ничего нет — показан общий список инструментов.";
+    if (usedSlug === TOOL_CATEGORY_SLUGS.ELECTRIC) {
+      return "В подкатегории ничего нет — показаны все электрические инструменты.";
+    }
+    return "Показан расширенный список по разделу.";
+  }
+
+  async function fetchToolsPage(categorySlug: string | null | undefined) {
+    const queryParts = [
+      toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
+      toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
+      `section=${encodeURIComponent(objectSectionFilter)}`,
+      toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
+      categorySlug
+        ? `categorySlug=${encodeURIComponent(categorySlug)}`
+        : toolCategoryFilter
+          ? `categoryId=${encodeURIComponent(toolCategoryFilter)}`
+          : "",
+      `sort=${encodeURIComponent(toolsSort)}`,
+      `page=${encodeURIComponent(String(toolsPage))}`,
+      `pageSize=${encodeURIComponent(String(toolsPageSize))}`
+    ].filter(Boolean);
+    const query = queryParts.length ? `?${queryParts.join("&")}` : "";
+    const res = await fetchWithSession(`${API_URL}/api/tools${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = (await res.json()) as PagedResponse<ToolItem> | ToolItem[];
+    const items = Array.isArray(payload) ? payload : payload.items;
+    const total = Array.isArray(payload) ? items.length : payload.total;
+    return { items, total };
+  }
+
   async function loadTools() {
     if (!token) return;
     setToolsError("");
     setToolsLoading(true);
+    setToolsListScopeNote("");
     try {
       const navLeaf = toolsNavPath[toolsNavPath.length - 1] ?? "hub";
-      const categorySlug = navToCategorySlug(navLeaf);
-      const queryParts = [
-        toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
-        toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
-        `section=${encodeURIComponent(objectSectionFilter)}`,
-        toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
-        categorySlug
-          ? `categorySlug=${encodeURIComponent(categorySlug)}`
-          : toolCategoryFilter
-            ? `categoryId=${encodeURIComponent(toolCategoryFilter)}`
-            : "",
-        `sort=${encodeURIComponent(toolsSort)}`,
-        `page=${encodeURIComponent(String(toolsPage))}`,
-        `pageSize=${encodeURIComponent(String(toolsPageSize))}`
-      ].filter(Boolean);
-      const query = queryParts.length ? `?${queryParts.join("&")}` : "";
-      const res = await fetchWithSession(`${API_URL}/api/tools${query}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = (await res.json()) as PagedResponse<ToolItem> | ToolItem[];
-      const items = Array.isArray(payload) ? payload : payload.items;
+      const slugChain = navCategorySlugChain(navLeaf);
+      const requestedSlug = slugChain[0] ?? null;
+      const hasManualFilters = Boolean(toolSearch.trim() || toolStatusFilter || toolCategoryFilter);
+
+      let items: ToolItem[] = [];
+      let total = 0;
+      let usedSlug: string | null = requestedSlug;
+
+      if (hasManualFilters || slugChain.length <= 1) {
+        const r = await fetchToolsPage(requestedSlug);
+        items = r.items;
+        total = r.total;
+      } else {
+        for (let i = 0; i < slugChain.length; i += 1) {
+          const slug = slugChain[i];
+          const r = await fetchToolsPage(slug);
+          usedSlug = slug;
+          items = r.items;
+          total = r.total;
+          if (r.total > 0 || i === slugChain.length - 1) {
+            setToolsListScopeNote(toolsListScopeNoteText(requestedSlug, usedSlug));
+            break;
+          }
+        }
+      }
+
       setTools(items);
-      setToolsTotal(Array.isArray(payload) ? items.length : payload.total);
+      setToolsTotal(total);
     } catch (e) {
       setToolsError(`Не удалось загрузить инструменты: ${String(e)}`);
     } finally {
@@ -4379,6 +4424,195 @@ function App() {
         setToolDetailRecord((await res.json()) as ToolItem);
       }
     }
+  }
+
+  function renderToolsListSlot() {
+    return (
+      <>
+        {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
+        {toolsError && <ErrorState text={toolsError} />}
+        <ToolsListToolbar
+          search={toolSearch}
+          onSearchChange={(v) => {
+            setToolSearch(v);
+            setToolsPage(1);
+          }}
+          searchPlaceholder="Поиск: название, инв. №, QR"
+          filters={
+            <>
+              <select
+                value={toolCategoryFilter}
+                onChange={(e) => {
+                  setToolCategoryFilter(e.target.value);
+                  setToolsPage(1);
+                }}
+                aria-label="Категория"
+              >
+                <option value="">Все категории</option>
+                {pickDefaultCategories(toolCategories).map((c) => (
+                  <option key={`tcf-${c.id}`} value={c.id}>
+                    {c.icon ? `${c.icon} ` : ""}
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={toolStatusFilter}
+                onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}
+                aria-label="Статус"
+              >
+                <option value="">Все статусы</option>
+                <option value="IN_STOCK">{toolStatusLabel("IN_STOCK")}</option>
+                <option value="ISSUED">{toolStatusLabel("ISSUED")}</option>
+                <option value="IN_REPAIR">{toolStatusLabel("IN_REPAIR")}</option>
+                <option value="DAMAGED">{toolStatusLabel("DAMAGED")}</option>
+                <option value="LOST">{toolStatusLabel("LOST")}</option>
+                <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
+                <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
+              </select>
+              <select
+                value={toolListWarehouseId}
+                onChange={(e) => setToolListWarehouseId(e.target.value)}
+                aria-label="Объект"
+              >
+                <option value="">Все объекты</option>
+                {warehouses.map((w) => (
+                  <option key={`twf-${w.id}`} value={w.id}>
+                    {safeName(w.name)}
+                  </option>
+                ))}
+              </select>
+              <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)} aria-label="Сортировка">
+                <option value="created_desc">Сначала новые</option>
+                <option value="inventory">По инв. номеру</option>
+                <option value="status">По статусу</option>
+              </select>
+            </>
+          }
+          actions={
+            <>
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={() => void loadTools().then(() => loadToolWarehouseSummary())}
+              >
+                ↻
+              </button>
+              {hasPermission("tools.write") && (
+                <button type="button" className="primaryBtn" onClick={() => void openToolAddModal()}>
+                  + Добавить
+                </button>
+              )}
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={async () => {
+                  if (!token || !selectedToolIds.length) {
+                    setToolsMessage("Отметьте строки для печати QR");
+                    setToolsTone("conflict");
+                    return;
+                  }
+                  const res = await fetchWithSession(
+                    `${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                  if (!res.ok) {
+                    setToolsMessage("Не удалось сформировать PDF");
+                    setToolsTone("error");
+                    return;
+                  }
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "tool-labels.pdf";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                QR
+              </button>
+            </>
+          }
+        />
+        {toolsListScopeNote ? <p className="muted toolsListScopeNote">{toolsListScopeNote}</p> : null}
+        {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
+        {!toolsLoading && !toolsError && !tools.length && (
+          <EmptyState title="Инструменты не найдены" hint="Смените фильтры или добавьте карточку вручную." />
+        )}
+        {toolQrPreview && (
+          <div className="card">
+            <h3>QR предпросмотр: {toolQrPreview.qrCode}</h3>
+            <img src={toolQrPreview.dataUrl} alt="Tool QR preview" style={{ maxWidth: 220 }} />
+          </div>
+        )}
+        {!toolsLoading && !toolsError && tools.length > 0 && (
+          <>
+            <p className="muted" style={{ margin: "8px 0" }}>
+              Отметьте строки для печати QR. Клик по строке — карточка инструмента.
+            </p>
+            <ToolsListTable
+              tools={tools}
+              selectedIds={selectedToolIds}
+              onToggleSelect={(id, checked) => {
+                if (checked) setSelectedToolIds((prev) => [...prev, id]);
+                else setSelectedToolIds((prev) => prev.filter((x) => x !== id));
+              }}
+              onOpen={(id) => openToolDrawer(id)}
+              statusLabel={toolStatusLabel}
+              statusTone={toolStatusTone}
+              safeName={safeName}
+            />
+            <div className="toolbar">
+              <span className="muted">
+                Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
+                {Math.min(toolsPage * toolsPageSize, toolsTotal)} из {toolsTotal}
+              </span>
+              <select
+                value={toolsPageSize}
+                onChange={(e) => setToolsPageSize(Number(e.target.value) as ListPageSize)}
+                aria-label="Размер страницы инструментов"
+              >
+                <option value={20}>20 на стр.</option>
+                <option value={50}>50 на стр.</option>
+                <option value={100}>100 на стр.</option>
+              </select>
+              <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
+                Назад
+              </button>
+              <span className="muted">
+                Стр. {toolsPage} / {toolsTotalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setToolsPage((p) => Math.min(toolsTotalPages, p + 1))}
+                disabled={toolsPage >= toolsTotalPages}
+              >
+                Вперед
+              </button>
+            </div>
+          </>
+        )}
+      </>
+    );
+  }
+
+  function renderToolsInventoryBlock(embed?: boolean) {
+    return (
+      <ToolsInventoryBlock
+        navPath={toolsNavPath}
+        onNavPathChange={setToolsNavPath}
+        warehouseId={
+          activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
+        }
+        sectionFilter={objectSectionFilter}
+        token={token}
+        apiUrl={API_URL}
+        fetchWithSession={fetchWithSession}
+        toolListSlot={renderToolsListSlot()}
+        embedMode={embed}
+      />
+    );
   }
 
   function renderToolDetailDrawer() {
@@ -5906,28 +6140,13 @@ function App() {
                   }
                 : undefined
             }
-            toolsHubSlot={
-              canReadTools ? (
-                <ToolsCatalogWorkspace
-                  navPath={toolsNavPath}
-                  onNavPathChange={(path) => {
-                    setToolsNavPath(path);
-                    if (path.length > 1) {
-                      setActiveTab("tools");
-                    }
-                  }}
-                  warehouseId={
-                    activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
-                  }
-                  sectionFilter={objectSectionFilter}
-                  token={token}
-                  apiUrl={API_URL}
-                  fetchWithSession={fetchWithSession}
-                  toolListSlot={null}
-                  showHubOnly
-                />
-              ) : null
-            }
+            toolsStatDrillContent={canReadTools ? renderToolsInventoryBlock(true) : undefined}
+            onToolsStatDrill={() => {
+              setToolsNavPath(["hub"]);
+              void loadTools().catch(() => undefined);
+              void loadToolWarehouseSummary().catch(() => undefined);
+              void loadToolCategories().catch(() => undefined);
+            }}
             onOpenOperationsTab={
               canReadOperations
                 ? () => {
@@ -7348,6 +7567,9 @@ function App() {
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
                                   <th>Принять сейчас</th>
+                                  <th>Категория</th>
+                                  <th>Цена, ₽</th>
+                                  <th>Место хранения</th>
                                   {row.objectLimitTemplateId ? <th>Узел лимита</th> : null}
                                 </tr>
                               </thead>
@@ -7373,6 +7595,34 @@ function App() {
                                     draft.unitPrice ??
                                     (it.unitPrice != null ? String(it.unitPrice) : "");
                                   const defaultStorage = draft.storagePlace ?? it.storagePlace ?? "";
+                                  const saveDraft = (patch: Partial<typeof draft>) =>
+                                    setAcceptanceDrafts((prev) => ({
+                                      ...prev,
+                                      [row.id]: {
+                                        ...prev[row.id],
+                                        [it.id]: {
+                                          newName: patch.newName ?? prev[row.id]?.[it.id]?.newName ?? defaultName,
+                                          newUnit: patch.newUnit ?? prev[row.id]?.[it.id]?.newUnit ?? defaultUnit,
+                                          qty: patch.qty ?? prev[row.id]?.[it.id]?.qty ?? "",
+                                          limitNodeId:
+                                            patch.limitNodeId !== undefined
+                                              ? patch.limitNodeId
+                                              : prev[row.id]?.[it.id]?.limitNodeId,
+                                          category:
+                                            patch.category !== undefined
+                                              ? patch.category
+                                              : (prev[row.id]?.[it.id]?.category ?? defaultCategory),
+                                          unitPrice:
+                                            patch.unitPrice !== undefined
+                                              ? patch.unitPrice
+                                              : (prev[row.id]?.[it.id]?.unitPrice ?? defaultPrice),
+                                          storagePlace:
+                                            patch.storagePlace !== undefined
+                                              ? patch.storagePlace
+                                              : (prev[row.id]?.[it.id]?.storagePlace ?? defaultStorage)
+                                        }
+                                      }
+                                    }));
                                   const isPicked =
                                     Number(draft.qty || 0) > 0 || (draft.qty || "").trim() !== "";
                                   const toggle = (checked: boolean) =>
@@ -7440,20 +7690,7 @@ function App() {
                                           value={defaultName}
                                           placeholder="Как в УПД…"
                                           disabled={finished}
-                                          onChange={(e) =>
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: e.target.value,
-                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
-                                                }
-                                              }
-                                            }))
-                                          }
+                                          onChange={(e) => saveDraft({ newName: e.target.value })}
                                         />
                                       </td>
                                       <td style={{ width: 90 }}>
@@ -7461,23 +7698,7 @@ function App() {
                                           value={defaultUnit}
                                           placeholder={it.sourceUnit || "шт"}
                                           disabled={finished}
-                                          onChange={(e) =>
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: prev[row.id]?.[it.id]?.newName || "",
-                                                  newUnit: e.target.value,
-                                                  qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
-                                                  category: defaultCategory,
-                                                  unitPrice: defaultPrice,
-                                                  storagePlace: defaultStorage
-                                                }
-                                              }
-                                            }))
-                                          }
+                                          onChange={(e) => saveDraft({ newUnit: e.target.value })}
                                         />
                                       </td>
                                       <td style={{ width: 130 }}>
@@ -7489,20 +7710,44 @@ function App() {
                                           value={draft.qty}
                                           disabled={finished}
                                           placeholder={remaining ? String(remaining) : ""}
+                                          onChange={(e) => saveDraft({ qty: e.target.value })}
+                                        />
+                                      </td>
+                                      <td style={{ minWidth: 160 }}>
+                                        <select
+                                          value={defaultCategory}
+                                          disabled={finished}
                                           onChange={(e) =>
-                                            setAcceptanceDrafts((prev) => ({
-                                              ...prev,
-                                              [row.id]: {
-                                                ...prev[row.id],
-                                                [it.id]: {
-                                                  newName: prev[row.id]?.[it.id]?.newName || "",
-                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                  qty: e.target.value,
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
-                                                }
-                                              }
-                                            }))
+                                            saveDraft({
+                                              category: (e.target.value || "") as ReceiptItemCategory | ""
+                                            })
                                           }
+                                        >
+                                          <option value="">—</option>
+                                          {RECEIPT_ITEM_CATEGORIES.map((c) => (
+                                            <option key={c} value={c}>
+                                              {receiptItemCategoryLabel(c)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </td>
+                                      <td style={{ width: 100 }}>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          step={0.01}
+                                          value={defaultPrice}
+                                          disabled={finished}
+                                          placeholder="0"
+                                          onChange={(e) => saveDraft({ unitPrice: e.target.value })}
+                                        />
+                                      </td>
+                                      <td style={{ minWidth: 120 }}>
+                                        <input
+                                          value={defaultStorage}
+                                          disabled={finished}
+                                          placeholder="Стеллаж, ячейка…"
+                                          onChange={(e) => saveDraft({ storagePlace: e.target.value })}
                                         />
                                       </td>
                                       {row.objectLimitTemplateId ? (
@@ -7524,18 +7769,7 @@ function App() {
                                                 value={value}
                                                 disabled={finished}
                                                 onChange={(e) =>
-                                                  setAcceptanceDrafts((prev) => ({
-                                                    ...prev,
-                                                    [row.id]: {
-                                                      ...prev[row.id],
-                                                      [it.id]: {
-                                                        newName: prev[row.id]?.[it.id]?.newName || "",
-                                                        newUnit: prev[row.id]?.[it.id]?.newUnit || "",
-                                                        qty: prev[row.id]?.[it.id]?.qty || "",
-                                                        limitNodeId: e.target.value || undefined
-                                                      }
-                                                    }
-                                                  }))
+                                                  saveDraft({ limitNodeId: e.target.value || undefined })
                                                 }
                                               >
                                                 <option value="">— без узла —</option>
@@ -10698,162 +10932,7 @@ function App() {
             </div>
           )}
 
-          <ToolsCatalogWorkspace
-            navPath={toolsNavPath}
-            onNavPathChange={setToolsNavPath}
-            warehouseId={
-              activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
-            }
-            sectionFilter={objectSectionFilter}
-            token={token}
-            apiUrl={API_URL}
-            fetchWithSession={fetchWithSession}
-            toolListSlot={
-              <>
-                {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
-                {toolsError && <ErrorState text={toolsError} />}
-                <FilterStrip
-            search={
-              <input
-                placeholder="Поиск (название, инв. номер, QR)"
-                value={toolSearch}
-                onChange={(e) => setToolSearch(e.target.value)}
-              />
-            }
-            actions={
-              <>
-                <button type="button" className="ghostBtn" onClick={() => void loadTools().then(() => loadToolWarehouseSummary())}>
-                  ↻ Обновить
-                </button>
-                {hasPermission("tools.write") && (
-                  <button type="button" className="primaryBtn" onClick={() => void openToolAddModal()}>
-                    + Добавить
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="ghostBtn"
-                  onClick={async () => {
-                    if (!token || !selectedToolIds.length) {
-                      setToolsMessage("Отметьте строки для печати QR");
-                      setToolsTone("conflict");
-                      return;
-                    }
-                    const res = await fetchWithSession(
-                      `${API_URL}/api/tools/labels/pdf?ids=${encodeURIComponent(selectedToolIds.join(","))}`,
-                      { headers: { Authorization: `Bearer ${token}` } }
-                    );
-                    if (!res.ok) {
-                      setToolsMessage("Не удалось сформировать PDF");
-                      setToolsTone("error");
-                      return;
-                    }
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "tool-labels.pdf";
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                >
-                  Печать QR
-                </button>
-              </>
-            }
-          >
-            <select value={toolCategoryFilter} onChange={(e) => { setToolCategoryFilter(e.target.value); setToolsPage(1); }} aria-label="Категория">
-              <option value="">Все категории</option>
-              {pickDefaultCategories(toolCategories).map((c) => (
-                <option key={`tcf-${c.id}`} value={c.id}>
-                  {c.icon ? `${c.icon} ` : ""}{c.name}
-                </option>
-              ))}
-            </select>
-            <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter((e.target.value || "") as "" | ToolStatus)}>
-              <option value="">Все статусы</option>
-              <option value="IN_STOCK">{toolStatusLabel("IN_STOCK")}</option>
-              <option value="ISSUED">{toolStatusLabel("ISSUED")}</option>
-              <option value="IN_REPAIR">{toolStatusLabel("IN_REPAIR")}</option>
-              <option value="DAMAGED">{toolStatusLabel("DAMAGED")}</option>
-              <option value="LOST">{toolStatusLabel("LOST")}</option>
-              <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
-              <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
-            </select>
-            <select value={toolListWarehouseId} onChange={(e) => setToolListWarehouseId(e.target.value)} aria-label="Объект">
-              <option value="">Все объекты</option>
-              {warehouses.map((w) => (
-                <option key={`twf-${w.id}`} value={w.id}>
-                  {safeName(w.name)}
-                </option>
-              ))}
-            </select>
-            <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)}>
-              <option value="created_desc">Сначала новые</option>
-              <option value="inventory">По инв. номеру</option>
-              <option value="status">По статусу</option>
-            </select>
-          </FilterStrip>
-          {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
-          {!toolsLoading && !toolsError && !tools.length && (
-            <EmptyState title="Инструменты не найдены" hint="Смените фильтры или добавьте карточку вручную." />
-          )}
-          {toolQrPreview && (
-            <div className="card">
-              <h3>QR предпросмотр: {toolQrPreview.qrCode}</h3>
-              <img src={toolQrPreview.dataUrl} alt="Tool QR preview" style={{ maxWidth: 220 }} />
-            </div>
-          )}
-          {!toolsLoading && !toolsError && tools.length > 0 && (
-            <>
-              <p className="muted" style={{ margin: "8px 0" }}>
-                Отметьте строки для печати QR. Клик по строке — карточка инструмента.
-              </p>
-              <ToolsListTable
-                tools={tools}
-                selectedIds={selectedToolIds}
-                onToggleSelect={(id, checked) => {
-                  if (checked) setSelectedToolIds((prev) => [...prev, id]);
-                  else setSelectedToolIds((prev) => prev.filter((x) => x !== id));
-                }}
-                onOpen={(id) => openToolDrawer(id)}
-                statusLabel={toolStatusLabel}
-                statusTone={toolStatusTone}
-                safeName={safeName}
-              />
-              <div className="toolbar">
-                <span className="muted">
-                  Показано {Math.min((toolsPage - 1) * toolsPageSize + 1, toolsTotal)}-
-                  {Math.min(toolsPage * toolsPageSize, toolsTotal)} из {toolsTotal}
-                </span>
-                <select
-                  value={toolsPageSize}
-                  onChange={(e) => setToolsPageSize(Number(e.target.value) as ListPageSize)}
-                  aria-label="Размер страницы инструментов"
-                >
-                  <option value={20}>20 на стр.</option>
-                  <option value={50}>50 на стр.</option>
-                  <option value={100}>100 на стр.</option>
-                </select>
-                <button type="button" onClick={() => setToolsPage((p) => Math.max(1, p - 1))} disabled={toolsPage <= 1}>
-                  Назад
-                </button>
-                <span className="muted">
-                  Стр. {toolsPage} / {toolsTotalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setToolsPage((p) => Math.min(toolsTotalPages, p + 1))}
-                  disabled={toolsPage >= toolsTotalPages}
-                >
-                  Вперед
-                </button>
-              </div>
-            </>
-          )}
-              </>
-            }
-          />
+          {renderToolsInventoryBlock()}
 
           </div>
 
