@@ -2972,7 +2972,11 @@ function App() {
   }
 
   async function uploadReceiptRequest() {
-    if (!token || !activeObjectId || !receiptRequestFile) return;
+    if (!token || !receiptRequestFile) return;
+    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
+      setOpsMessage("Выберите конкретный объект в шапке (не «Все объекты») — заявка привязана к складу.");
+      return;
+    }
     const form = new FormData();
     form.append("file", receiptRequestFile);
     form.append("warehouseId", activeObjectId);
@@ -2988,8 +2992,17 @@ function App() {
         const body = (await res.json()) as { error?: string; message?: string };
         if (body.error === "DUPLICATE_ORDER") {
           serverMsg = body.message || "Эта заявка уже загружена на этот объект.";
+        } else if (body.error === "SCHEMA_OUTDATED") {
+          serverMsg = body.message || "База данных не обновлена — обратитесь к администратору.";
+        } else if (body.error === "WAREHOUSE_NOT_FOUND") {
+          serverMsg = body.message || "Объект не найден. Выберите склад в шапке.";
+        } else if (body.error === "INVALID_EXCEL" || body.error === "EMPTY_SHEET") {
+          serverMsg = body.message || "Не удалось разобрать Excel-файл.";
         } else {
-          serverMsg = typeof body.error === "string" ? body.error : body.message || "";
+          serverMsg =
+            body.message ||
+            (typeof body.error === "string" && body.error !== "Internal server error" ? body.error : "") ||
+            "";
         }
       } catch {
         // ignore

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
 import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
+import { handlePrismaError } from "../lib/errors.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
   ensureMaterialInCurrentLimitTemplate,
@@ -139,6 +140,7 @@ receiptRequestsRouter.post(
     const parsed = uploadRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
     if (!req.file?.buffer) return res.status(400).json({ error: "file is required" });
+
     const scope = await getRequestDataScope(req);
     try {
       assertWarehouseInScope(scope, parsed.data.warehouseId);
@@ -147,21 +149,56 @@ receiptRequestsRouter.post(
       if (err.status === 403) return res.status(403).json({ error: err.message });
       throw e;
     }
-    const parsedSheet = parseOrderSheet(req.file.buffer);
+
+    const warehouse = await prisma.warehouse.findUnique({
+      where: { id: parsed.data.warehouseId },
+      select: { id: true, name: true }
+    });
+    if (!warehouse) {
+      return res.status(400).json({
+        error: "WAREHOUSE_NOT_FOUND",
+        message: "Объект не найден. Выберите конкретный склад в шапке (не «Все объекты»)."
+      });
+    }
+
+    let parsedSheet;
+    try {
+      parsedSheet = parseOrderSheet(req.file.buffer);
+    } catch (e) {
+      console.error("parseOrderSheet failed:", e);
+      return res.status(400).json({
+        error: "INVALID_EXCEL",
+        message: "Не удалось прочитать Excel. Проверьте формат файла (.xlsx)."
+      });
+    }
+
     const { items, orderNumber, projectTitle, format: sheetFormat } = parsedSheet;
     if (!items.length) {
       return res.status(400).json({
-        error: "В файле не найдена таблица позиций (Товар, Количество; для нового формата — колонки L, M, N, O)"
+        error: "EMPTY_SHEET",
+        message:
+          "В файле не найдена таблица позиций (Товар, Количество; для нового формата — колонки L, M, N, O)"
       });
     }
+
+    const receiptNumber = orderNumber
+      ? `ORD-${orderNumber}`
+      : `ORD-${String((await prisma.receiptRequest.count()) + 1).padStart(5, "0")}`;
 
     if (orderNumber) {
       const dup = await prisma.receiptRequest.findFirst({
         where: {
-          warehouseId: parsed.data.warehouseId,
-          section: parsed.data.section,
-          OR: [{ number: `ORD-${orderNumber}` }, { externalOrderNumber: orderNumber }]
-        }
+          OR: [
+            { number: receiptNumber },
+            { externalOrderNumber: orderNumber },
+            {
+              warehouseId: parsed.data.warehouseId,
+              section: parsed.data.section,
+              externalOrderNumber: orderNumber
+            }
+          ]
+        },
+        select: { id: true, number: true, warehouseId: true }
       });
       if (dup) {
         return res.status(409).json({
@@ -171,96 +208,100 @@ receiptRequestsRouter.post(
       }
     }
 
-    const number = orderNumber
-      ? `ORD-${orderNumber}`
-      : `ORD-${String((await prisma.receiptRequest.count()) + 1).padStart(5, "0")}`;
-
-    // Опциональная привязка к шаблону лимита (если уже передали при загрузке).
-    let attachedTemplateId: string | undefined;
-    if (parsed.data.objectLimitTemplateId) {
-      const tpl = await prisma.objectLimitTemplate.findUnique({
-        where: { id: parsed.data.objectLimitTemplateId }
-      });
-      if (tpl && tpl.warehouseId === parsed.data.warehouseId && tpl.section === parsed.data.section) {
-        attachedTemplateId = tpl.id;
-      }
-    }
-    const fromLimitFlag = parsed.data.fromLimit === "1" || parsed.data.fromLimit === "true" || Boolean(attachedTemplateId);
-
-    const created = await prisma.$transaction(async (tx) => {
-      const receipt = await tx.receiptRequest.create({
-        data: {
-          number,
-          externalOrderNumber: orderNumber ?? null,
-          warehouseId: parsed.data.warehouseId,
-          section: parsed.data.section,
-          sourceFileName: decodeUploadedOriginalName(req.file!.originalname),
-          createdById: req.user!.userId,
-          fromLimit: fromLimitFlag,
-          objectLimitTemplateId: attachedTemplateId ?? null,
-          items: {
-            create: items.map((i) => ({
-              sourceName: i.namePartC,
-              sourceUnit: i.unit,
-              quantity: i.quantity,
-              category: i.category,
-              limitSectionPath: i.limitSectionPath,
-              namePartD: i.namePartD || null,
-              namePartE: i.namePartE || null,
-              limitCatalogNameN: i.limitCatalogNameN,
-              limitCatalogNameO: i.limitCatalogNameO,
-              externalComment: i.externalComment,
-              limitNameRenamed: false
-            }))
-          }
-        },
-        include: { items: true, limitTemplate: { select: { id: true, title: true } } }
-      });
-
-      if (attachedTemplateId) {
-        for (let idx = 0; idx < receipt.items.length; idx += 1) {
-          const item = receipt.items[idx]!;
-          const src = items[idx];
-          if (!src) continue;
-          const sync = await syncReceiptItemToLimitTemplate(tx, attachedTemplateId, src);
-          if (sync.limitNodeId || sync.limitNameRenamed) {
-            await tx.receiptRequestItem.update({
-              where: { id: item.id },
-              data: {
-                limitNodeId: sync.limitNodeId,
-                limitNameRenamed: sync.limitNameRenamed
-              }
-            });
-          }
+    try {
+      // Опциональная привязка к шаблону лимита (если уже передали при загрузке).
+      let attachedTemplateId: string | undefined;
+      if (parsed.data.objectLimitTemplateId) {
+        const tpl = await prisma.objectLimitTemplate.findUnique({
+          where: { id: parsed.data.objectLimitTemplateId }
+        });
+        if (tpl && tpl.warehouseId === parsed.data.warehouseId && tpl.section === parsed.data.section) {
+          attachedTemplateId = tpl.id;
         }
       }
+      const fromLimitFlag = parsed.data.fromLimit === "1" || parsed.data.fromLimit === "true" || Boolean(attachedTemplateId);
 
-      await saveReceiptDocumentFile(tx, {
-        receiptId: receipt.id,
-        type: "receipt-request",
-        file: req.file!,
-        userId: req.user!.userId
+      const created = await prisma.$transaction(async (tx) => {
+        const receipt = await tx.receiptRequest.create({
+          data: {
+            number: receiptNumber,
+            externalOrderNumber: orderNumber ?? null,
+            warehouseId: parsed.data.warehouseId,
+            section: parsed.data.section,
+            sourceFileName: decodeUploadedOriginalName(req.file!.originalname),
+            createdById: req.user!.userId,
+            fromLimit: fromLimitFlag,
+            objectLimitTemplateId: attachedTemplateId ?? null,
+            items: {
+              create: items.map((i) => ({
+                sourceName: i.namePartC,
+                sourceUnit: i.unit,
+                quantity: i.quantity,
+                category: i.category,
+                limitSectionPath: i.limitSectionPath,
+                namePartD: i.namePartD || null,
+                namePartE: i.namePartE || null,
+                limitCatalogNameN: i.limitCatalogNameN,
+                limitCatalogNameO: i.limitCatalogNameO,
+                externalComment: i.externalComment,
+                limitNameRenamed: false
+              }))
+            }
+          },
+          include: { items: true, limitTemplate: { select: { id: true, title: true } } }
+        });
+
+        if (attachedTemplateId) {
+          for (let idx = 0; idx < receipt.items.length; idx += 1) {
+            const item = receipt.items[idx]!;
+            const src = items[idx];
+            if (!src) continue;
+            const sync = await syncReceiptItemToLimitTemplate(tx, attachedTemplateId, src);
+            if (sync.limitNodeId || sync.limitNameRenamed) {
+              await tx.receiptRequestItem.update({
+                where: { id: item.id },
+                data: {
+                  limitNodeId: sync.limitNodeId,
+                  limitNameRenamed: sync.limitNameRenamed
+                }
+              });
+            }
+          }
+        }
+
+        await saveReceiptDocumentFile(tx, {
+          receiptId: receipt.id,
+          type: "receipt-request",
+          file: req.file!,
+          userId: req.user!.userId
+        });
+
+        return tx.receiptRequest.findUniqueOrThrow({
+          where: { id: receipt.id },
+          include: { items: true, limitTemplate: { select: { id: true, title: true } } }
+        });
       });
 
-      return tx.receiptRequest.findUniqueOrThrow({
-        where: { id: receipt.id },
-        include: { items: true, limitTemplate: { select: { id: true, title: true } } }
+      await dispatchNotification({
+        eventCode: "RECEIPT_CREATED",
+        title: "Новая заявка на приход",
+        message: `${created.number}: ${created.items.length} позиций`,
+        entityType: "ReceiptRequest",
+        entityId: created.id,
+        excludeUserIds: [req.user!.userId]
+      }).catch(() => undefined);
+
+      return res.status(201).json({
+        ...created,
+        detectedOrderNumber: orderNumber || null,
+        detectedProjectTitle: projectTitle || null,
+        sheetFormat
       });
-    });
-    await dispatchNotification({
-      eventCode: "RECEIPT_CREATED",
-      title: "Новая заявка на приход",
-      message: `${created.number}: ${created.items.length} позиций`,
-      entityType: "ReceiptRequest",
-      entityId: created.id,
-      excludeUserIds: [req.user!.userId]
-    }).catch(() => undefined);
-    return res.status(201).json({
-      ...created,
-      detectedOrderNumber: orderNumber || null,
-      detectedProjectTitle: projectTitle || null,
-      sheetFormat
-    });
+    } catch (e) {
+      console.error("receipt upload failed:", e);
+      const mapped = handlePrismaError(e);
+      return res.status(mapped.status).json(mapped.body);
+    }
   }
 );
 
