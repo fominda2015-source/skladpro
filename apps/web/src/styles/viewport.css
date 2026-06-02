@@ -1,11 +1,9 @@
 /**
- * Мобильный слой UI — только overrides.
- * Десктопные правила остаются без media query (mobile-first для новых блоков не используем).
+ * Мобильный слой UI — только CSS @media (без зависимости от JS).
+ * JS (data-viewport) — для отладки и точечных React-веток; layout здесь.
  *
- * Стратегия:
- * 1) data-viewport на <html> — точечные правила без дублирования @media
- * 2) @media (max-width) — массовые layout-правила (как раньше в App.css)
- * 3) React: MobileOnly / DesktopOnly — когда разная разметка, не только CSS
+ * ≤900px — компакт (карточки, drawer, одна колонка)
+ * ≤720px — телефон (bottom nav, bottom-sheet, крупнее тач-зоны)
  */
 
 :root {
@@ -31,221 +29,204 @@
   }
 }
 
-/* ========== Shell / header (телефон) ========== */
-html[data-viewport="mobile"] .pageHeader .topToolbar input[placeholder*="Глобальный"] {
-  display: none;
+/* ========== Компакт ≤900 (телефон + планшет) ========== */
+@media (max-width: 900px) {
+  .homeOverview .pageHeroStats {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+
+  .homeOverview .pageHeroStat {
+    flex: 0 0 min(72vw, 280px);
+    scroll-snap-align: start;
+    min-height: 72px;
+  }
+
+  .erpQuickActions {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .erpQuickActions > button {
+    flex-shrink: 0;
+  }
+
+  .homeChartsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .homeChartsGrid > .homeChartCard,
+  .homeChartsGrid > .homeChartCardWide {
+    grid-column: span 1 !important;
+  }
+
+  .homeObjectMetrics,
+  .homeObjectMetrics4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolsHubGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .toolsHubCard {
+    min-height: 96px;
+    padding: 12px 10px;
+  }
+
+  .campCardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .campCardCover {
+    height: 120px;
+  }
+
+  .campWorkspace .form.docCenterForm {
+    grid-template-columns: 1fr;
+  }
+
+  .materialReportLayout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .materialReportSidebar {
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .tabObjectFilterBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tabObjectFilterBar select {
+    width: 100%;
+  }
+
+  .docCenterSplit {
+    grid-template-columns: 1fr;
+  }
+
+  .docCenterPreview iframe {
+    min-height: 280px;
+  }
+
+  .limitsRiskPanel .pageHeroStats {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .limitsRiskPanel .pageHeroStat {
+    flex: 0 0 min(42vw, 160px);
+  }
+
+  .transfersRequestBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .transfersRequestBar label {
+    width: 100%;
+  }
+
+  .adminWorkspace .grid2 {
+    grid-template-columns: 1fr;
+  }
+
+  .waybillsWorkspace .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .waybillsWorkspace .toolbar select,
+  .waybillsWorkspace .toolbar button {
+    width: 100%;
+  }
+
+  .receiptsWorkspace .erpTableWrap {
+    margin-left: -4px;
+    margin-right: -4px;
+  }
 }
 
-html[data-viewport="mobile"] .pageHeader .topToolbar {
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* ========== Телефон ≤720 ========== */
+@media (max-width: 720px) {
+  .pageHeader .topToolbar input[placeholder*="Глобальный"] {
+    display: none;
+  }
 
-html[data-viewport="mobile"] .pageHeader .topToolbar select {
-  flex: 1 1 100%;
-  min-width: 0;
-}
+  .pageHeader .topToolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 
-html[data-viewport="mobile"] .pageTitleBlock .muted {
-  font-size: 12px;
-  line-height: 1.35;
-}
+  .pageHeader .topToolbar select {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
 
-/* ========== Главная ========== */
-html[data-viewport="mobile"] .homeOverview .pageHeroStats {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 8px;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
-  scroll-snap-type: x proximity;
-}
+  .pageTitleBlock .muted {
+    font-size: 12px;
+    line-height: 1.35;
+  }
 
-html[data-viewport="mobile"] .homeOverview .pageHeroStat {
-  flex: 0 0 min(72vw, 280px);
-  scroll-snap-align: start;
-  min-height: 72px;
-}
+  .modalBackdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
 
-html[data-viewport="mobile"] .erpQuickActions {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 8px;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
-}
+  .modal,
+  .drawerPanel,
+  .issueDrawer,
+  .toolDetailDrawer,
+  .campDrawer {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    border-radius: 18px 18px 0 0;
+    max-height: 92vh;
+  }
 
-html[data-viewport="mobile"] .erpQuickActions > button {
-  flex-shrink: 0;
-}
+  .campDrawer {
+    animation: sheetUp 0.22s ease;
+    padding-top: 12px;
+  }
 
-html[data-viewport="mobile"] .homeChartsGrid {
-  grid-template-columns: 1fr;
-}
-
-html[data-viewport="mobile"] .homeChartsGrid > .homeChartCard,
-html[data-viewport="mobile"] .homeChartsGrid > .homeChartCardWide {
-  grid-column: span 1 !important;
-}
-
-html[data-viewport="mobile"] .homeObjectMetrics,
-html[data-viewport="mobile"] .homeObjectMetrics4 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* ========== Городок / инструменты — hub-карточки ========== */
-html[data-viewport="mobile"] .toolsHubGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-html[data-viewport="mobile"] .toolsHubCard {
-  min-height: 96px;
-  padding: 12px 10px;
-}
-
-html[data-viewport="mobile"] .campCardGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-html[data-viewport="mobile"] .campCardCover {
-  height: 120px;
-}
-
-html[data-viewport="mobile"] .campWorkspace .form.docCenterForm {
-  grid-template-columns: 1fr;
-}
-
-/* Drawer городка → bottom sheet на телефоне */
-html[data-viewport="mobile"] .modalBackdrop {
-  align-items: flex-end;
-  padding: 0;
-}
-
-html[data-viewport="mobile"] .campDrawer {
-  max-width: none;
-  width: 100%;
-  max-height: 92vh;
-  border-radius: 18px 18px 0 0;
-  animation: sheetUp 0.22s ease;
-  padding-top: 12px;
-}
-
-html[data-viewport="mobile"] .campDrawer::before {
-  content: "";
-  display: block;
-  width: 44px;
-  height: 4px;
-  border-radius: 4px;
-  background: #cbd5e1;
-  margin: 0 auto 12px;
-}
-
-/* ========== Material report / чат-подобные панели ========== */
-html[data-viewport="mobile"] .materialReportLayout {
-  grid-template-columns: 1fr !important;
-}
-
-html[data-viewport="mobile"] .materialReportSidebar {
-  max-height: 40vh;
-  border-right: none;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-/* ========== Tab filters ========== */
-html[data-viewport="mobile"] .tabObjectFilterBar {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-html[data-viewport="mobile"] .tabObjectFilterBar select {
-  width: 100%;
+  .campDrawer::before {
+    content: "";
+    display: block;
+    width: 44px;
+    height: 4px;
+    border-radius: 4px;
+    background: #cbd5e1;
+    margin: 0 auto 12px;
+  }
 }
 
 @media (max-width: 520px) {
-  html[data-viewport="mobile"] .toolsHubGrid,
-  html[data-viewport="mobile"] .campCardGrid {
+  .toolsHubGrid,
+  .campCardGrid {
     grid-template-columns: 1fr;
   }
 
-  html[data-viewport="mobile"] .homeObjectMetrics,
-  html[data-viewport="mobile"] .homeObjectMetrics4 {
+  .homeObjectMetrics,
+  .homeObjectMetrics4 {
     grid-template-columns: 1fr;
   }
-}
-
-/* ========== Модалки / drawer / split-панели ========== */
-html[data-viewport="mobile"] .modal,
-html[data-viewport="mobile"] .drawerPanel,
-html[data-viewport="mobile"] .issueDrawer,
-html[data-viewport="mobile"] .toolDetailDrawer {
-  max-width: none;
-  width: 100%;
-  margin: 0;
-  border-radius: 18px 18px 0 0;
-  max-height: 92vh;
-}
-
-html[data-viewport="mobile"] .modalBackdrop {
-  align-items: flex-end;
-  padding: 0;
-}
-
-html[data-viewport="mobile"] .docCenterSplit {
-  grid-template-columns: 1fr;
-}
-
-html[data-viewport="mobile"] .docCenterPreview iframe {
-  min-height: 280px;
-}
-
-html[data-viewport="mobile"] .limitsRiskPanel .pageHeroStats {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 8px;
-  -webkit-overflow-scrolling: touch;
-}
-
-html[data-viewport="mobile"] .limitsRiskPanel .pageHeroStat {
-  flex: 0 0 min(42vw, 160px);
-}
-
-html[data-viewport="mobile"] .transfersRequestBar {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-html[data-viewport="mobile"] .transfersRequestBar label {
-  width: 100%;
-}
-
-html[data-viewport="mobile"] .adminWorkspace .grid2 {
-  grid-template-columns: 1fr;
-}
-
-html[data-viewport="mobile"] .waybillsWorkspace .toolbar {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-html[data-viewport="mobile"] .waybillsWorkspace .toolbar select,
-html[data-viewport="mobile"] .waybillsWorkspace .toolbar button {
-  width: 100%;
-}
-
-html[data-viewport="mobile"] .receiptsWorkspace .erpTableWrap {
-  margin-left: -4px;
-  margin-right: -4px;
-}
-
-html[data-viewport="tablet"] .docCenterSplit {
-  grid-template-columns: 1fr;
-}
-
-html[data-viewport="tablet"] .homeChartsGrid {
-  grid-template-columns: 1fr;
 }

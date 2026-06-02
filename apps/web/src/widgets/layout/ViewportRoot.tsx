@@ -1,9 +1,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
-import { useViewport, type ViewportMode } from "../../shared/hooks/useViewport";
+import { useViewportState, type ViewportMode, type ViewportState } from "../../shared/hooks/useViewport";
 
-type ViewportContextValue = ReturnType<typeof useViewport>;
-
-const ViewportContext = createContext<ViewportContextValue | null>(null);
+const ViewportContext = createContext<ViewportState | null>(null);
 
 type Props = {
   children: ReactNode;
@@ -12,17 +10,19 @@ type Props = {
 };
 
 export function ViewportRoot({ children, bottomNav = false }: Props) {
-  const viewport = useViewport();
+  const viewport = useViewportState();
 
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.viewport = viewport.mode;
-    root.dataset.viewportWidth = String(viewport.width);
+    root.dataset.compact = viewport.isCompact ? "1" : "0";
+    root.dataset.mobile = viewport.isMobile ? "1" : "0";
     return () => {
       delete root.dataset.viewport;
-      delete root.dataset.viewportWidth;
+      delete root.dataset.compact;
+      delete root.dataset.mobile;
     };
-  }, [viewport.mode, viewport.width]);
+  }, [viewport.mode, viewport.isCompact, viewport.isMobile]);
 
   useEffect(() => {
     document.body.classList.toggle("hasBottomNav", bottomNav && viewport.isMobile);
@@ -34,7 +34,7 @@ export function ViewportRoot({ children, bottomNav = false }: Props) {
   return <ViewportContext.Provider value={viewport}>{children}</ViewportContext.Provider>;
 }
 
-export function useViewportContext(): ViewportContextValue {
+export function useViewportContext(): ViewportState {
   const ctx = useContext(ViewportContext);
   if (!ctx) {
     throw new Error("useViewportContext must be used within ViewportRoot");
@@ -42,10 +42,10 @@ export function useViewportContext(): ViewportContextValue {
   return ctx;
 }
 
-/** Без провайдера — только чтение (для ленивых виджетов). */
-export function useViewportOptional(): ViewportContextValue {
+/** Без провайдера — свой matchMedia (для Storybook/тестов). В приложении — из контекста. */
+export function useViewportOptional(): ViewportState {
   const ctx = useContext(ViewportContext);
-  const fallback = useViewport();
+  const fallback = useViewportState();
   return ctx ?? fallback;
 }
 

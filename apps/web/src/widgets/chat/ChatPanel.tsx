@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
-import { useViewport } from "../../shared/hooks/useViewport";
+import { useViewportContext } from "../layout/ViewportRoot";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "./UserAvatar";
 import { ChatComposer } from "./ChatComposer";
@@ -114,7 +114,7 @@ export function ChatPanel({
   onRefresh,
   onPeerProfileClick
 }: Props) {
-  const { isMobile } = useViewport();
+  const { isMobile } = useViewportContext();
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);

@@ -8,36 +8,49 @@ export const VIEWPORT_BREAKPOINTS = {
 
 export type ViewportMode = "mobile" | "tablet" | "desktop";
 
-function modeFromWidth(width: number): ViewportMode {
-  if (width <= VIEWPORT_BREAKPOINTS.mobile) return "mobile";
-  if (width <= VIEWPORT_BREAKPOINTS.tablet) return "tablet";
+export type ViewportState = {
+  mode: ViewportMode;
+  isMobile: boolean;
+  isTablet: boolean;
+  isDesktop: boolean;
+  /** Телефон + планшет — компактный UI (≤900px). */
+  isCompact: boolean;
+};
+
+function modeFromQueries(isMobile: boolean, isCompact: boolean): ViewportMode {
+  if (isMobile) return "mobile";
+  if (isCompact) return "tablet";
   return "desktop";
 }
 
-export function useViewport() {
-  const [width, setWidth] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth : 1280
+/** matchMedia — тот же расчёт ширины, что и CSS @media (без «дёрганья» от скроллбара). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
   );
-  const [mode, setMode] = useState<ViewportMode>(() => modeFromWidth(width));
 
   useEffect(() => {
-    const sync = () => {
-      const w = window.innerWidth;
-      setWidth(w);
-      setMode(modeFromWidth(w));
-    };
+    const mq = window.matchMedia(query);
+    const sync = () => setMatches(mq.matches);
     sync();
-    window.addEventListener("resize", sync, { passive: true });
-    return () => window.removeEventListener("resize", sync);
-  }, []);
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [query]);
 
-  return {
-    width,
-    mode,
-    isMobile: mode === "mobile",
-    isTablet: mode === "tablet",
-    isDesktop: mode === "desktop",
-    /** Телефон + планшет — когда нужен компактный UI вместо полного десктопа. */
-    isCompact: mode !== "desktop"
-  };
+  return matches;
+}
+
+export function useViewportState(): ViewportState {
+  const isMobile = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.mobile}px)`);
+  const isCompact = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.tablet}px)`);
+  const isTablet = isCompact && !isMobile;
+  const isDesktop = !isCompact;
+  const mode = modeFromQueries(isMobile, isCompact);
+
+  return { mode, isMobile, isTablet, isDesktop, isCompact };
+}
+
+/** @deprecated Prefer useViewportContext / useViewportOptional inside ViewportRoot. */
+export function useViewport(): ViewportState {
+  return useViewportState();
 }

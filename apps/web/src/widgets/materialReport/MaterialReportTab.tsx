@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useViewport } from "../../shared/hooks/useViewport";
+import { useViewportContext } from "../layout/ViewportRoot";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "../chat/UserAvatar";
@@ -72,7 +72,7 @@ export function MaterialReportTab({
   objectFilter,
   exportAction
 }: Props) {
-  const { isMobile } = useViewport();
+  const { isMobile } = useViewportContext();
   const [subTab, setSubTab] = useState<SubTab>("balances");
   const [holders, setHolders] = useState<MaterialReportHolder[]>([]);
   const [history, setHistory] = useState<MaterialWriteoffHistoryRow[]>([]);
