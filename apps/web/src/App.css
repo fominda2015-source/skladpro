@@ -2151,6 +2151,38 @@ tr.low {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 }
+.issuePickerHeadActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.issueCrossCorpBtn {
+  width: auto;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.issueCrossCorpBtn.active {
+  font-weight: 700;
+}
+
+.issueCrossSectionHint {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #334155;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+}
+
 .issuePicker {
   display: grid;
   gap: 10px;

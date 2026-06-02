@@ -780,6 +780,8 @@ model IssueRequest {
   actualRecipientName String?
   warehouseId   String
   section       ObjectSection   @default(SS)
+  /** Списание остатка с другого корпуса (СС/ЭОМ), если приход был там; учёт выдачи — в section */
+  stockSection  ObjectSection?
   projectId     String?
   requestedById String
   approvedById  String?

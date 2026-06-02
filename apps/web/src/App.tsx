@@ -288,6 +288,8 @@ type IssueRequest = {
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
+  /** Списание остатка с другого корпуса (СС/ЭОМ) */
+  stockSection?: "SS" | "EOM" | null;
   projectId?: string | null;
   requestedById: string;
   responsibleName?: string | null;
@@ -775,6 +777,9 @@ function App() {
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
+  /** Выдача из другого корпуса: учёт в objectSectionFilter, остаток — в противоположном СС/ЭОМ */
+  const [issueFromOtherSection, setIssueFromOtherSection] = useState(false);
+  const [issueStocksOtherSection, setIssueStocksOtherSection] = useState<StockRow[]>([]);
   const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
     try {
       const saved = localStorage.getItem("skladpro_issue_domain");
@@ -1463,10 +1468,17 @@ function App() {
     [stockWarehouseIdsInView, warehouses, stocks]
   );
 
+  const issueOtherSection = objectSectionFilter === "SS" ? "EOM" : "SS";
+  const issueSectionLabel = (sec: "SS" | "EOM") => (sec === "SS" ? "СС" : "ЭОМ");
+  const issuePickerStocks = issueFromOtherSection ? issueStocksOtherSection : stocks;
+  const issueOtherSectionHasStock = issueStocksOtherSection.some(
+    (s) => s.warehouseId === activeObjectId && Number(s.available) > 0
+  );
+
   const issueFacingRows = useMemo((): IssuePickCartLine[] => {
     const out: IssuePickCartLine[] = [];
     if (!activeObjectId) return out;
-    for (const s of stocks) {
+    for (const s of issuePickerStocks) {
       if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
       const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
       if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
@@ -1526,7 +1538,13 @@ function App() {
     return out.sort((a, b) =>
       (a.factLabel || a.canonName).localeCompare(b.factLabel || b.canonName, "ru", { sensitivity: "base" })
     );
-  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, materialMappingsByTargetId]);
+  }, [
+    issuePickerStocks,
+    activeObjectId,
+    issueIssuesDomain,
+    acceptedBySourceByTargetId,
+    materialMappingsByTargetId
+  ]);
 
   const issueFacingRowsFiltered = useMemo(() => {
     const qLower = issueMaterialSearch.trim().toLowerCase();
@@ -1854,6 +1872,30 @@ function App() {
       setStocksError(`Не удалось загрузить остатки: ${String(err)}`);
     } finally {
       setLoadingStocks(false);
+    }
+  }
+
+  async function loadIssueStocksOtherSection() {
+    if (!token || !activeObjectId) {
+      setIssueStocksOtherSection([]);
+      return;
+    }
+    const otherSection = objectSectionFilter === "SS" ? "EOM" : "SS";
+    const params = new URLSearchParams({
+      section: otherSection,
+      warehouseId: activeObjectId
+    });
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        setIssueStocksOtherSection([]);
+        return;
+      }
+      setIssueStocksOtherSection((await res.json()) as StockRow[]);
+    } catch {
+      setIssueStocksOtherSection([]);
     }
   }
 
@@ -3709,13 +3751,17 @@ function App() {
     for (const line of lines) {
       qtySumByMaterial.set(line.materialId, (qtySumByMaterial.get(line.materialId) || 0) + line.quantity);
     }
+    const stockPool = issueFromOtherSection ? issueStocksOtherSection : stocks;
     for (const [materialId, sumQty] of qtySumByMaterial) {
-      const stockRow = stocks.find((s) => s.materialId === materialId && s.warehouseId === activeObjectId);
+      const stockRow = stockPool.find((s) => s.materialId === materialId && s.warehouseId === activeObjectId);
       if (!stockRow) continue;
       if (sumQty > stockRow.available) {
         const label =
           issuePickCart.find((c) => c.materialId === materialId && c.factLabel)?.factLabel || stockRow.materialName;
-        setIssuesMessage(`Недостаточно остатка по «${label}» (итого по номенклатуре превышает доступно)`);
+        const corp = issueFromOtherSection ? ` (корпус ${issueSectionLabel(issueOtherSection)})` : "";
+        setIssuesMessage(
+          `Недостаточно остатка по «${label}»${corp} (итого по номенклатуре превышает доступно)`
+        );
         setIssuesTone("error");
         return;
       }
@@ -3729,6 +3775,7 @@ function App() {
         body: JSON.stringify({
           warehouseId: activeObjectId,
           section: objectSectionFilter,
+          ...(issueFromOtherSection ? { stockSection: issueOtherSection } : {}),
           note: issueNote.trim() || undefined,
           responsibleName,
           flowType: "DIRECT_ISSUE",
@@ -4765,11 +4812,18 @@ function App() {
   }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter, activeObjectId]);
 
   useEffect(() => {
+    setIssueFromOtherSection(false);
+    setIssuePickCart([]);
+    setIssuePickQtyByKey({});
+  }, [objectSectionFilter, activeObjectId]);
+
+  useEffect(() => {
     if (token && activeTab === "issues") {
       void loadCatalogData().catch(() => undefined);
       void loadProjects().catch(() => undefined);
       void loadIssues();
       void loadStocks(q);
+      void loadIssueStocksOtherSection();
       void loadMaterialMappings();
       void loadReceiptRequests();
     }
@@ -7584,10 +7638,42 @@ function App() {
                     они развёрнуты отдельно; остаток один на номенклатуру карточки.
                   </p>
                 </div>
-                <span className="muted">
-                  Строк:{issueFacingRowsFiltered.length}/{issueFacingRows.length}
-                </span>
+                <div className="issuePickerHeadActions">
+                  <span className="muted">
+                    Строк: {issueFacingRowsFiltered.length}/{issueFacingRows.length}
+                  </span>
+                  <button
+                    type="button"
+                    className={issueFromOtherSection ? "secondaryBtn issueCrossCorpBtn active" : "ghostBtn issueCrossCorpBtn"}
+                    disabled={!issueOtherSectionHasStock && !issueFromOtherSection}
+                    title={
+                      issueOtherSectionHasStock
+                        ? `Списать остаток с корпуса ${issueSectionLabel(issueOtherSection)}, учёт выдачи — ${issueSectionLabel(objectSectionFilter)}`
+                        : `На корпусе ${issueSectionLabel(issueOtherSection)} нет остатков`
+                    }
+                    onClick={() => {
+                      setIssueFromOtherSection((v) => {
+                        const next = !v;
+                        if (!next) {
+                          setIssuePickCart([]);
+                          setIssuePickQtyByKey({});
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    {issueFromOtherSection
+                      ? `Корпус ${issueSectionLabel(issueOtherSection)} · отмена`
+                      : `Выдать из корпуса ${issueSectionLabel(issueOtherSection)}`}
+                  </button>
+                </div>
               </div>
+              {issueFromOtherSection ? (
+                <p className="issueCrossSectionHint" role="status">
+                  Учёт выдачи и лимиты — <strong>{issueSectionLabel(objectSectionFilter)}</strong>. Остаток списывается с корпуса{" "}
+                  <strong>{issueSectionLabel(issueOtherSection)}</strong> (где был приход). Приходы в учёте не переносятся.
+                </p>
+              ) : null}
               <input
                 className="issueSearchInput"
                 placeholder="Поиск по фактическому названию, карточке, SKU, ед. изм…"
@@ -7635,7 +7721,9 @@ function App() {
                           <span className="badge ok">
                             {r.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}{" "}
                             <span className="muted" style={{ fontWeight: 400 }}>
-                              на карточку
+                              {issueFromOtherSection
+                                ? `корпус ${issueSectionLabel(issueOtherSection)}`
+                                : "на карточку"}
                             </span>
                           </span>
                           <span className="muted">{selected ? "В корзине" : "Добавить"}</span>
@@ -7653,7 +7741,7 @@ function App() {
                 <div className="issueCartList">
                   {issuePickCart.map((row) => {
                     const qty = Number(issuePickQtyByKey[row.pickKey] ?? 1);
-                    const stockRow = stocks.find(
+                    const stockRow = issuePickerStocks.find(
                       (s) => s.materialId === row.materialId && s.warehouseId === activeObjectId
                     );
                     const totalSameMaterial = issuePickCart

@@ -19,6 +19,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
 import {
+  assertObjectSectionInScope,
   assertProjectInScope,
   assertWarehouseInScope,
   getRequestDataScope,
@@ -45,6 +46,8 @@ const createIssueSchema = z
   .object({
     warehouseId: z.string().min(1),
     section: z.enum(["SS", "EOM"]).default("SS"),
+    /** Секция склада для списания; если не задана — совпадает с section */
+    stockSection: z.enum(["SS", "EOM"]).optional(),
     projectId: z.string().optional(),
     note: z.string().optional(),
     responsibleName: z.string().max(160).optional().nullable(),
@@ -67,6 +70,13 @@ const createIssueSchema = z
     toolItems: z.array(z.object({ toolId: z.string().min(1) })).optional().default([])
   })
   .superRefine((data, ctx) => {
+    if (data.stockSection && data.stockSection === data.section) {
+      ctx.addIssue({
+        code: "custom",
+        message: "stockSection должен отличаться от section (кросс-корпусная выдача).",
+        path: ["stockSection"]
+      });
+    }
     const nm = data.items.length;
     const nt = data.toolItems.length;
     if (nm > 0 && nt > 0) {
@@ -538,6 +548,10 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
     const scope = await getRequestDataScope(req);
     assertWarehouseInScope(scope, parsed.data.warehouseId);
     assertProjectInScope(scope, parsed.data.projectId);
+    assertObjectSectionInScope(scope, parsed.data.warehouseId, parsed.data.section);
+    if (parsed.data.stockSection) {
+      assertObjectSectionInScope(scope, parsed.data.warehouseId, parsed.data.stockSection);
+    }
   } catch (e) {
     const err = e as Error & { status?: number };
     if (err.status === 403) {
@@ -623,6 +637,7 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
       flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
       section: parsed.data.section,
+      stockSection: parsed.data.stockSection,
       projectId: parsed.data.projectId,
       note: parsed.data.note,
       responsibleName: parsed.data.responsibleName ?? undefined,
@@ -1154,6 +1169,8 @@ issueRequestsRouter.patch(
 
   try {
     const prevStatus = issueRow.status;
+    const deductSection = issueRow.stockSection ?? issueRow.section;
+
     const result = await prisma.$transaction(async (tx) => {
       for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
@@ -1161,7 +1178,7 @@ issueRequestsRouter.patch(
             warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: issueRow.section
+              section: deductSection
             }
           }
         });
@@ -1198,7 +1215,7 @@ issueRequestsRouter.patch(
         data: {
           type: OperationType.EXPENSE,
           warehouseId: issueRow.warehouseId,
-          section: issueRow.section,
+          section: deductSection,
           projectId: issueRow.projectId ?? undefined,
           documentNumber: issueRow.number,
           status: "POSTED",
@@ -1219,7 +1236,7 @@ issueRequestsRouter.patch(
             warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: issueRow.section
+              section: deductSection
             }
           },
           data: { quantity: { decrement: item.quantity } }
@@ -1295,7 +1312,7 @@ issueRequestsRouter.patch(
               warehouseId_materialId_section: {
                 warehouseId: issueRow.warehouseId,
                 materialId: it.materialId,
-                section: issueRow.section
+                section: deductSection
               }
             },
             include: { material: { select: { name: true, unit: true } } }
