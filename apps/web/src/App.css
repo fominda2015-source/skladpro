@@ -74,6 +74,15 @@
   color: #334155;
 }
 
+.mobileCardActions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mobileCards {
+  gap: clamp(8px, 2vw, 12px);
+}
+
 .warehouseMode .sidebar {
   background: linear-gradient(180deg, #7c2d12 0%, #9a3412 100%);
 }
@@ -187,7 +196,8 @@
 }
 
 .canvas {
-  padding: 16px 20px 24px;
+  padding: clamp(10px, 2.8vw, 16px) clamp(12px, 3vw, 20px)
+    calc(clamp(12px, 3vw, 24px) + var(--app-bottom, 0px));
   background: #f3f6fa;
 }
 
@@ -346,6 +356,7 @@ button:hover {
 
 .topToolbar {
   align-items: center;
+  flex-wrap: wrap;
   background: #fff;
   border: 1px solid #e6ebf5;
   border-radius: 14px;
@@ -2304,11 +2315,13 @@ tr.low {
     padding: 12px;
     border-radius: 12px;
   }
-  table {
-    display: block;
+  .tableScrollWrap {
     overflow-x: auto;
-    white-space: nowrap;
     -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  .tableScrollWrap table {
+    min-width: min(100%, 40rem);
   }
   th {
     position: static;
@@ -2330,21 +2343,6 @@ tr.low {
   .chatWidgetPanel {
     max-width: calc(100vw - 20px);
     width: min(100vw - 20px, 380px);
-  }
-  .erpTableWrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .responsiveTable--dual .desktopTable {
-    display: none;
-  }
-  .responsiveTable--dual .mobileCards {
-    display: grid;
-    gap: 10px;
-  }
-  .mobileCardActions {
-    flex-wrap: wrap;
-    gap: 6px;
   }
 }
 
@@ -3595,12 +3593,15 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .pageHeader .pageTitleBlock .crumbs {
   display: none;
 }
-@media (max-width: 720px) {
-  .pageHeader .pageTitleBlock h1 {
-    display: none;
-  }
-}
 
+.pageHeroTitle {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
 
 .pageHero {
   background: #fff;
@@ -3645,16 +3646,6 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 }
 .pageHeroTitleText {
   min-width: 0;
-}
-.pageHeroTitle {
-  margin: 0;
-  font-size: 20px;
-  line-height: 1.15;
-  font-weight: 700;
-  color: #0f172a;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .pageHeroSub {
   margin: 2px 0 0;
@@ -4922,12 +4913,8 @@ button.homeInsightPill:hover:not(:disabled) {
     gap: 4px;
   }
   body.hasBottomNav {
-    /* visual cue */
+    /* отступ canvas через --app-bottom в fluid-mobile.css */
   }
-  .canvas {
-    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-  }
-  /* Чат — отдельная вкладка в bottom nav, плавающая кнопка скрыта */
   .chatWidget {
     display: none !important;
   }

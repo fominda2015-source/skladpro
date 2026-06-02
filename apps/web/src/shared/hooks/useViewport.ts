@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-/** Единые брейкпоинты: совпадают с App.css (@media 720 / 900). */
+/** Брейкпоинты в rem — совпадают с CSS. */
 export const VIEWPORT_BREAKPOINTS = {
-  mobile: 720,
-  tablet: 900
+  mobile: 45, // rem → 720px при 16px root
+  tablet: 56.25 // rem → 900px
 } as const;
 
 export type ViewportMode = "mobile" | "tablet" | "desktop";
@@ -41,8 +41,8 @@ function useMediaQuery(query: string): boolean {
 }
 
 export function useViewportState(): ViewportState {
-  const isMobile = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.mobile}px)`);
-  const isCompact = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.tablet}px)`);
+  const isMobile = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.mobile}rem)`);
+  const isCompact = useMediaQuery(`(max-width: ${VIEWPORT_BREAKPOINTS.tablet}rem)`);
   const isTablet = isCompact && !isMobile;
   const isDesktop = !isCompact;
   const mode = modeFromQueries(isMobile, isCompact);

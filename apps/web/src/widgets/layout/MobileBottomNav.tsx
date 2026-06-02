@@ -20,12 +20,16 @@ export function MobileBottomNav({ items }: Props) {
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
+    let scrollRoot: Element | Window = window;
+    const canvas = document.querySelector(".canvas");
+    if (canvas) scrollRoot = canvas;
+
     let ticking = false;
     const onScroll = () => {
       if (ticking) return;
       ticking = true;
       rafRef.current = window.requestAnimationFrame(() => {
-        const y = window.scrollY;
+        const y = scrollRoot === window ? window.scrollY : (scrollRoot as Element).scrollTop;
         const delta = y - lastY.current;
         if (y < 80) {
           setHidden(false);
@@ -38,9 +42,9 @@ export function MobileBottomNav({ items }: Props) {
         ticking = false;
       });
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    scrollRoot.addEventListener("scroll", onScroll as EventListener, { passive: true });
     return () => {
-      window.removeEventListener("scroll", onScroll);
+      scrollRoot.removeEventListener("scroll", onScroll as EventListener);
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     };
   }, []);

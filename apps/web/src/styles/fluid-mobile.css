@@ -1,0 +1,435 @@
+/**
+ * Fluid mobile — адаптация по ширине контейнера, не по фиксированным px.
+ * Структурный drawer/bottom-nav остаётся в App.css (@media в rem).
+ */
+
+:root {
+  --space-page: clamp(10px, 2.8vw, 20px);
+  --space-card: clamp(10px, 2.2vw, 16px);
+  --font-body: clamp(14px, 3.6vw, 16px);
+  --font-small: clamp(12px, 3.2vw, 13px);
+  --font-hero: clamp(1.05rem, 4.2vw, 1.35rem);
+  --font-title: clamp(1.1rem, 5vw, 2.25rem);
+  --toolbar-gap: clamp(6px, 1.8vw, 10px);
+  --touch-min: 2.75rem;
+  --bottom-nav-h: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  --table-stack: 32rem;
+  --header-compact: 36rem;
+}
+
+html[data-mobile="1"] {
+  --app-bottom: var(--bottom-nav-h);
+}
+
+html[data-compact="1"] {
+  --app-header: clamp(3rem, 14vw, 4.5rem);
+}
+
+/* ========== Базовая типографика и отступы ========== */
+.pageTitleBlock h1 {
+  font-size: var(--font-title);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.pageHeroTitle {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
+  font-size: var(--font-hero);
+}
+
+.pageHeroSub,
+.mobileCard p {
+  font-size: var(--font-small);
+}
+
+.card,
+.homePanel {
+  padding: var(--space-card);
+}
+
+.mobileCard {
+  padding: var(--space-card);
+  gap: clamp(6px, 1.5vw, 10px);
+}
+
+.mobileCard h4 {
+  font-size: clamp(14px, 4vw, 16px);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.mobileCardActions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+input,
+select,
+textarea {
+  font-size: max(16px, var(--font-body));
+}
+
+html[data-compact="1"] button,
+html[data-compact="1"] .ghostBtn,
+html[data-compact="1"] .primaryBtn,
+html[data-compact="1"] .topIconBtn,
+html[data-compact="1"] .sectionToggleBtn {
+  min-height: var(--touch-min);
+}
+
+/* ========== Шапка — reflow по ширине header, не viewport px ========== */
+.pageHeader {
+  container-type: inline-size;
+  container-name: app-header;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--toolbar-gap);
+}
+
+.topToolbar {
+  flex: 1 1 14rem;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--toolbar-gap);
+  align-items: center;
+}
+
+.topToolbar input,
+.topToolbar select,
+.topToolbar .sectionToggle,
+.topToolbar > button,
+.topToolbar .topIconBtn {
+  flex: 1 1 auto;
+  min-width: min(100%, 8rem);
+  width: auto;
+}
+
+@container app-header (max-width: 36rem) {
+  .topToolbar input[placeholder*="Глобальный"] {
+    display: none;
+  }
+
+  .topToolbar select {
+    flex: 1 1 100%;
+  }
+
+  .topToolbar .userChip {
+    display: none;
+  }
+
+  .pageTitleBlock {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .pageTitleBlock .muted {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+}
+
+@container app-header (max-width: 22rem) {
+  .topToolbar .topIconBtn:not(.topIconBtnDanger) {
+    flex: 0 1 auto;
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+}
+
+/* ========== PageHero / stats — fluid grid вместо горизонтального скролла ========== */
+.pageHeroStats {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+}
+
+.pageHeroMain {
+  align-items: flex-start;
+}
+
+.homeOverview .pageHeroStats,
+.limitsRiskPanel .pageHeroStats {
+  display: grid;
+  flex-wrap: unset;
+  overflow: visible;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+}
+
+.homeOverview .pageHeroStat,
+.limitsRiskPanel .pageHeroStat {
+  flex: unset;
+  min-width: 0;
+  width: auto;
+}
+
+.erpQuickActions {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.erpQuickActions > button {
+  flex: 1 1 auto;
+  min-width: min(100%, 8rem);
+}
+
+.homeChartsGrid,
+.homeObjectMetrics,
+.homeObjectMetrics4,
+.toolsHubGrid,
+.campCardGrid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+}
+
+/* ========== Таблицы: container query вместо viewport px ========== */
+.erpTableWrap {
+  container-type: inline-size;
+  container-name: table-wrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.responsiveTable--dual {
+  container-type: inline-size;
+  container-name: table-dual;
+  max-width: 100%;
+}
+
+@container table-dual (max-width: 32rem) {
+  .responsiveTable--dual .desktopTable,
+  .responsiveTable--dual .erpTableWrap {
+    display: none !important;
+  }
+
+  .responsiveTable--dual .mobileCards {
+    display: grid;
+    gap: clamp(8px, 2vw, 12px);
+  }
+}
+
+/* Узкий контейнер — строки карточками (любая таблица в wrap) */
+@container table-wrap (max-width: 32rem) {
+  .erpTableWrap > table,
+  .erpTableWrap .erpTable {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .erpTableWrap > table > thead,
+  .erpTableWrap .erpTable > thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .erpTableWrap > table > tbody,
+  .erpTableWrap .erpTable > tbody {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(8px, 2vw, 10px);
+  }
+
+  .erpTableWrap > table > tbody > tr:not(.erpTableExpand),
+  .erpTableWrap .erpTable > tbody > tr:not(.erpTableExpand) {
+    display: grid;
+    gap: 6px;
+    padding: var(--space-card);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  }
+
+  .erpTableWrap > table > tbody > tr:not(.erpTableExpand) > td,
+  .erpTableWrap .erpTable > tbody > tr:not(.erpTableExpand) > td {
+    display: block;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    border: none;
+    padding: 2px 0;
+    text-align: left !important;
+  }
+
+  .erpTableWrap > table > tbody > tr.erpTableExpand,
+  .erpTableWrap .erpTable > tbody > tr.erpTableExpand {
+    display: block;
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  .erpTableWrap > table > tbody > tr.erpTableExpand > td,
+  .erpTableWrap .erpTable > tbody > tr.erpTableExpand > td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+
+  .erpTableWrap .erpTableExpandInner {
+    padding: var(--space-card);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  /* Вложенные таблицы в expand — тоже карточками */
+  .erpTableExpandInner > table > tbody > tr,
+  .erpTableExpandInner .erpTable > tbody > tr {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    margin-bottom: 6px;
+    border: 1px solid #eef2f7;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+
+  .erpTableExpandInner > table > thead,
+  .erpTableExpandInner .erpTable > thead {
+    display: none;
+  }
+
+  .erpTableExpandInner > table > tbody > tr > td,
+  .erpTableExpandInner .erpTable > tbody > tr > td {
+    display: block;
+    white-space: normal;
+    border: none;
+    padding: 2px 0;
+  }
+}
+
+/* Dual с карточками — не дублировать stack */
+@container table-dual (max-width: 32rem) {
+  .responsiveTable--dual .erpTableWrap .erpTable.desktopTable {
+    display: none !important;
+  }
+}
+
+/* Карточки с таблицами без erpTableWrap (отчёты) */
+.card {
+  container-type: inline-size;
+  container-name: card-panel;
+}
+
+@container card-panel (max-width: 32rem) {
+  .card > table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .card > table > thead {
+    display: none;
+  }
+
+  .card > table > tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card > table > tbody > tr {
+    display: grid;
+    gap: 6px;
+    padding: var(--space-card);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .card > table > tbody > tr > td {
+    display: block;
+    white-space: normal;
+    word-break: break-word;
+    border: none;
+    padding: 2px 0;
+  }
+}
+
+/* ========== Формы и тулбары ========== */
+.form,
+.grid2,
+.docCenterSplit,
+.docCenterForm,
+.materialReportLayout,
+.adminWorkspace .grid2,
+.transfersRequestBar {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+
+.toolbar {
+  flex-wrap: wrap;
+  gap: var(--toolbar-gap);
+}
+
+.toolbar > button,
+.toolbar > .ghostBtn,
+.erpCellActions {
+  flex-wrap: wrap;
+}
+
+.tabObjectFilterBar {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.tabObjectFilterBar select {
+  width: 100%;
+}
+
+/* ========== Модалки / drawer — bottom sheet на узком контейнере viewport ========== */
+@supports (height: 100dvh) {
+  .canvas--chat {
+    height: calc(100dvh - var(--app-header, 2.5rem) - var(--app-bottom, 0px));
+    max-height: calc(100dvh - var(--app-header, 2.5rem) - var(--app-bottom, 0px));
+  }
+
+  .materialReportPage {
+    min-height: calc(100dvh - var(--app-header, 6rem) - var(--app-bottom, 0px));
+    max-height: calc(100dvh - var(--app-header, 6rem) - var(--app-bottom, 0px));
+  }
+}
+
+@container app-header (max-width: 40rem) {
+  .modalBackdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal,
+  .drawerPanel,
+  .issueDrawer,
+  .toolDetailDrawer,
+  .campDrawer,
+  .detailDrawer:not(.detailDrawerSticky) {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    border-radius: 18px 18px 0 0;
+    max-height: min(92dvh, 100%);
+  }
+}
+
+/* ========== Склад: снять жёсткие min-width на узких экранах ========== */
+@container table-wrap (max-width: 32rem) {
+  .whColMat,
+  .whColLoc,
+  .whColNum {
+    min-width: 0 !important;
+    max-width: none !important;
+    white-space: normal !important;
+  }
+
+  .requestMaterialsTable {
+    min-width: 0 !important;
+  }
+}

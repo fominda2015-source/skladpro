@@ -5,9 +5,9 @@ type ShellProps = {
   className?: string;
 };
 
-/** Обёртка: на ≤900px скрывает таблицу и показывает .mobileCards внутри. */
+/** Обёртка: в узком контейнере — mobileCards или stack через fluid-mobile.css */
 export function ResponsiveTableShell({ children, className }: ShellProps) {
-  return <div className={`responsiveTable--dual${className ? ` ${className}` : ""}`}>{children}</div>;
+  return <div className={`responsiveTable--dual table-fluid${className ? ` ${className}` : ""}`}>{children}</div>;
 }
 
 type CardProps = {

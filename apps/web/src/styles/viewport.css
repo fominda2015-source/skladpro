@@ -1,15 +1,12 @@
 /**
- * Мобильный слой UI — только CSS @media (без зависимости от JS).
- * JS (data-viewport) — для отладки и точечных React-веток; layout здесь.
- *
- * ≤900px — компакт (карточки, drawer, одна колонка)
- * ≤720px — телефон (bottom nav, bottom-sheet, крупнее тач-зоны)
+ * Структурный compact-layout (drawer, bottom nav).
+ * Контентная адаптация — в fluid-mobile.css (container queries + clamp).
  */
 
 :root {
-  --bp-mobile: 720px;
-  --bp-tablet: 900px;
-  --mobile-nav-h: 62px;
+  --bp-mobile: 45rem;
+  --bp-compact: 56.25rem;
+  --mobile-nav-h: 3.5rem;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -20,213 +17,60 @@
   display: none !important;
 }
 
-@media (max-width: 720px) {
+/* Bottom nav — только телефон */
+@media (max-width: 45rem) {
   .u-desktop-only {
     display: none !important;
   }
   .u-mobile-only {
     display: revert !important;
   }
+
+  .bottomNav {
+    display: flex;
+    gap: 4px;
+  }
+
+  .chatWidget {
+    display: none !important;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  button,
+  .ghostBtn,
+  .primaryBtn {
+    min-height: 2.75rem;
+  }
 }
 
-/* ========== Компакт ≤900 (телефон + планшет) ========== */
-@media (max-width: 900px) {
-  .homeOverview .pageHeroStats {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x proximity;
-  }
-
-  .homeOverview .pageHeroStat {
-    flex: 0 0 min(72vw, 280px);
-    scroll-snap-align: start;
-    min-height: 72px;
-  }
-
-  .erpQuickActions {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .erpQuickActions > button {
-    flex-shrink: 0;
-  }
-
-  .homeChartsGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .homeChartsGrid > .homeChartCard,
-  .homeChartsGrid > .homeChartCardWide {
-    grid-column: span 1 !important;
-  }
-
-  .homeObjectMetrics,
-  .homeObjectMetrics4 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .toolsHubGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .toolsHubCard {
-    min-height: 96px;
-    padding: 12px 10px;
-  }
-
-  .campCardGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .campCardCover {
-    height: 120px;
-  }
-
-  .campWorkspace .form.docCenterForm {
-    grid-template-columns: 1fr;
-  }
-
-  .materialReportLayout {
-    grid-template-columns: 1fr !important;
-  }
-
-  .materialReportSidebar {
-    max-height: 40vh;
-    border-right: none;
-    border-bottom: 1px solid #e2e8f0;
-  }
-
-  .tabObjectFilterBar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .tabObjectFilterBar select {
-    width: 100%;
-  }
-
+/* Drawer sidebar — compact (телефон + планшет) */
+@media (max-width: 56.25rem) {
   .docCenterSplit {
     grid-template-columns: 1fr;
   }
 
   .docCenterPreview iframe {
-    min-height: 280px;
+    min-height: min(50dvh, 280px);
   }
 
-  .limitsRiskPanel .pageHeroStats {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .limitsRiskPanel .pageHeroStat {
-    flex: 0 0 min(42vw, 160px);
-  }
-
-  .transfersRequestBar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .transfersRequestBar label {
-    width: 100%;
-  }
-
-  .adminWorkspace .grid2 {
-    grid-template-columns: 1fr;
-  }
-
-  .waybillsWorkspace .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .waybillsWorkspace .toolbar select,
-  .waybillsWorkspace .toolbar button {
-    width: 100%;
-  }
-
-  .receiptsWorkspace .erpTableWrap {
-    margin-left: -4px;
-    margin-right: -4px;
-  }
-}
-
-/* ========== Телефон ≤720 ========== */
-@media (max-width: 720px) {
-  .pageHeader .topToolbar input[placeholder*="Глобальный"] {
-    display: none;
-  }
-
-  .pageHeader .topToolbar {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .pageHeader .topToolbar select {
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-
-  .pageTitleBlock .muted {
-    font-size: 12px;
-    line-height: 1.35;
-  }
-
-  .modalBackdrop {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  .modal,
-  .drawerPanel,
-  .issueDrawer,
-  .toolDetailDrawer,
-  .campDrawer {
-    max-width: none;
-    width: 100%;
-    margin: 0;
-    border-radius: 18px 18px 0 0;
-    max-height: 92vh;
-  }
-
-  .campDrawer {
-    animation: sheetUp 0.22s ease;
-    padding-top: 12px;
+  .materialReportSidebar {
+    max-height: min(40dvh, 20rem);
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
   }
 
   .campDrawer::before {
     content: "";
     display: block;
-    width: 44px;
+    width: 2.75rem;
     height: 4px;
     border-radius: 4px;
     background: #cbd5e1;
     margin: 0 auto 12px;
-  }
-}
-
-@media (max-width: 520px) {
-  .toolsHubGrid,
-  .campCardGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .homeObjectMetrics,
-  .homeObjectMetrics4 {
-    grid-template-columns: 1fr;
   }
 }
