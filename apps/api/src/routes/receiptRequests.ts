@@ -31,6 +31,8 @@ const uploadRequestSchema = z.object({
   objectLimitTemplateId: z.string().optional()
 });
 
+const receiptItemCategorySchema = z.enum(["EQUIPMENT", "CONSUMABLE", "CABLE"]);
+
 const acceptItemSchema = z.object({
   itemId: z.string().min(1),
   // либо ссылка на существующий материал, либо новое название (УПД)
@@ -41,8 +43,19 @@ const acceptItemSchema = z.object({
   // Опциональная привязка к конкретному узлу шаблона лимита (раздел/подраздел).
   // Если в шаблоне один и тот же материал лежит сразу в нескольких узлах,
   // мы спрашиваем пользователя «куда пихаем»; иначе пусто.
-  limitNodeId: z.string().min(1).nullable().optional()
+  limitNodeId: z.string().min(1).nullable().optional(),
+  category: receiptItemCategorySchema.nullable().optional(),
+  unitPrice: z.number().nonnegative().nullable().optional(),
+  storagePlace: z.string().max(200).nullable().optional()
 });
+
+const patchReceiptItemSchema = z.object({
+  category: receiptItemCategorySchema.nullable().optional(),
+  unitPrice: z.number().nonnegative().nullable().optional(),
+  storagePlace: z.string().max(200).nullable().optional()
+});
+
+const closeReceiptSchema = z.object({ reason: z.string().min(1).max(2000) });
 
 const acceptSchema = z.object({
   itemMappings: z.array(acceptItemSchema).min(1),
@@ -621,6 +634,7 @@ receiptRequestsRouter.post(
       });
 
       for (const r of resolved) {
+        const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
         await tx.receiptRequestItem.update({
           where: { id: r.item.id },
           data: {
@@ -628,7 +642,10 @@ receiptRequestsRouter.post(
             // накопительно: уже принятое + только что принятое
             acceptedQty: { increment: r.acceptedQty },
             // Если пользователь выбрал узел шаблона, сохраняем. Иначе оставляем как было.
-            ...(r.limitNodeId ? { limitNodeId: r.limitNodeId } : {})
+            ...(r.limitNodeId ? { limitNodeId: r.limitNodeId } : {}),
+            ...(mapping?.category !== undefined ? { category: mapping.category } : {}),
+            ...(mapping?.unitPrice !== undefined ? { unitPrice: mapping.unitPrice } : {}),
+            ...(mapping?.storagePlace !== undefined ? { storagePlace: mapping.storagePlace } : {})
           }
         });
         await tx.stock.upsert({
@@ -882,6 +899,137 @@ receiptRequestsRouter.post(
       operationId: op.operation.id,
       overageActions: op.overageActions || []
     });
+  }
+);
+
+// Ручное закрытие заявки (статус RECEIVED) — для «зависших» после приёмки; только ADMIN.
+receiptRequestsRouter.patch(
+  "/:id/close",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    if (req.user?.role !== "ADMIN") {
+      return res.status(403).json({ error: "Только администратор может закрыть заявку вручную" });
+    }
+    const id = String(req.params.id);
+    const parsed = closeReceiptSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "REASON_REQUIRED", details: parsed.error.flatten() });
+    }
+    const reason = parsed.data.reason.trim();
+    const row = await prisma.receiptRequest.findUnique({
+      where: { id },
+      include: { items: true }
+    });
+    if (!row) return res.status(404).json({ error: "Receipt request not found" });
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    if (row.status === "RECEIVED") {
+      return res.json(row);
+    }
+    if (row.status === "CANCELLED") {
+      return res.status(409).json({ error: "Заявка отменена — закрытие недоступно" });
+    }
+    const anyAccepted = row.items.some((it) => Number(it.acceptedQty || 0) > 0);
+    if (!anyAccepted && row.status === "NEW") {
+      return res.status(409).json({
+        error: "RECEIPT_NOT_ACCEPTED",
+        hint: "По заявке ещё не было приёмки — используйте отмену."
+      });
+    }
+    const updated = await prisma.receiptRequest.update({
+      where: { id },
+      data: {
+        status: "RECEIVED",
+        acceptedAt: row.acceptedAt ?? new Date()
+      },
+      include: {
+        items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
+        limitTemplate: { select: { id: true, title: true } }
+      }
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "RECEIPT_REQUEST_CLOSE",
+      entityType: "ReceiptRequest",
+      entityId: id,
+      summary: `Заявка на приход ${updated.number} закрыта вручную (ADMIN). Причина: ${reason}`,
+      before: { status: row.status },
+      after: { status: updated.status, reason }
+    });
+    if (row.createdById) {
+      await notifyUser({
+        userId: row.createdById,
+        title: "Заявка на приход закрыта",
+        message: `${updated.number}\nЗакрыто администратором. Причина: ${reason}`,
+        level: NotificationLevel.INFO,
+        entityType: "ReceiptRequest",
+        entityId: id,
+        eventCode: "RECEIPT_CLOSED"
+      }).catch(() => undefined);
+    }
+    await dispatchNotification({
+      eventCode: "RECEIPT_CLOSED",
+      title: "Заявка на приход закрыта вручную",
+      message: `${updated.number}\nПричина: ${reason}`,
+      entityType: "ReceiptRequest",
+      entityId: id,
+      excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
+    }).catch(() => undefined);
+    return res.json(updated);
+  }
+);
+
+receiptRequestsRouter.patch(
+  "/:id/items/:itemId",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    const receiptId = String(req.params.id);
+    const itemId = String(req.params.itemId);
+    const parsed = patchReceiptItemSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    if (
+      parsed.data.category === undefined &&
+      parsed.data.unitPrice === undefined &&
+      parsed.data.storagePlace === undefined
+    ) {
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+    const row = await prisma.receiptRequest.findUnique({
+      where: { id: receiptId },
+      include: { items: { where: { id: itemId } } }
+    });
+    if (!row || !row.items[0]) {
+      return res.status(404).json({ error: "Receipt item not found" });
+    }
+    if (row.status === "CANCELLED") {
+      return res.status(409).json({ error: "Заявка отменена" });
+    }
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    const updated = await prisma.receiptRequestItem.update({
+      where: { id: itemId },
+      data: {
+        ...(parsed.data.category !== undefined ? { category: parsed.data.category } : {}),
+        ...(parsed.data.unitPrice !== undefined ? { unitPrice: parsed.data.unitPrice } : {}),
+        ...(parsed.data.storagePlace !== undefined ? { storagePlace: parsed.data.storagePlace } : {})
+      },
+      include: { mappedMaterial: { select: { id: true, name: true, unit: true } } }
+    });
+    return res.json(updated);
   }
 );
 

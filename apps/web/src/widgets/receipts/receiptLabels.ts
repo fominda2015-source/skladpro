@@ -17,3 +17,17 @@ export function receiptStatusTone(status: ReceiptRequestStatus | string): "ok" |
   if (status === "IN_PROGRESS") return "warn";
   return "neutral";
 }
+
+export type ReceiptItemCategory = "EQUIPMENT" | "CONSUMABLE" | "CABLE";
+
+export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = ["EQUIPMENT", "CONSUMABLE", "CABLE"];
+
+export function receiptItemCategoryLabel(cat: ReceiptItemCategory | string | null | undefined) {
+  return (
+    {
+      EQUIPMENT: "Оборудование",
+      CONSUMABLE: "Расходники",
+      CABLE: "Кабель"
+    } as Record<string, string>
+  )[String(cat || "")] ?? "—";
+}

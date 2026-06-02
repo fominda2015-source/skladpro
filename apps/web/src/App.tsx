@@ -61,7 +61,13 @@ import {
   ApprovalsReceiptRequestsTable
 } from "./widgets/approvals/ApprovalsQueueTables";
 import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
-import { receiptStatusLabel, receiptStatusTone } from "./widgets/receipts/receiptLabels";
+import {
+  RECEIPT_ITEM_CATEGORIES,
+  receiptItemCategoryLabel,
+  receiptStatusLabel,
+  receiptStatusTone,
+  type ReceiptItemCategory
+} from "./widgets/receipts/receiptLabels";
 import { ReportsSnapshotHero } from "./widgets/reports/ReportsSnapshotHero";
 import { StatusBadge } from "./shared/ui/StatusBadge";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
@@ -572,6 +578,9 @@ type ReceiptRequestItem = {
   quantity: string | number;
   mappedMaterialId?: string | null;
   acceptedQty?: string | number | null;
+  category?: ReceiptItemCategory | null;
+  unitPrice?: string | number | null;
+  storagePlace?: string | null;
   mappedMaterial?: { id: string; name: string; unit: string } | null;
 };
 type ReceiptRequestRow = {
@@ -842,7 +851,15 @@ function App() {
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
   // Черновики приёмки: на заявку → на позицию → {newName, newUnit, qty}.
-  type AcceptanceDraftItem = { newName: string; newUnit: string; qty: string; limitNodeId?: string };
+  type AcceptanceDraftItem = {
+    newName: string;
+    newUnit: string;
+    qty: string;
+    limitNodeId?: string;
+    category?: ReceiptItemCategory | "";
+    unitPrice?: string;
+    storagePlace?: string;
+  };
   const [acceptanceDrafts, setAcceptanceDrafts] = useState<Record<string, Record<string, AcceptanceDraftItem>>>({});
   // Подсказки по узлам шаблона лимита для каждой заявки/позиции (для «куда пихаем»).
   type LimitNodeSuggestion = {
@@ -3236,6 +3253,9 @@ function App() {
       newMaterialUnit?: string;
       acceptedQty: number;
       limitNodeId?: string | null;
+      category?: ReceiptItemCategory | null;
+      unitPrice?: number | null;
+      storagePlace?: string | null;
     }> = [];
     for (const it of row.items) {
       const draft = drafts[it.id];
@@ -3246,12 +3266,17 @@ function App() {
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
       const finalName = explicitName || it.sourceName;
+      const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
+      const priceNum = priceRaw === "" ? null : Number(priceRaw);
       mappings.push({
         itemId: it.id,
         newMaterialName: finalName,
         newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
         acceptedQty: qty,
-        limitNodeId: draft?.limitNodeId || null
+        limitNodeId: draft?.limitNodeId || null,
+        category: draft?.category || it.category || null,
+        unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
+        storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
       });
     }
     return mappings;
@@ -3645,6 +3670,70 @@ function App() {
       return false;
     }
     setOpsMessage("Заявка на приход удалена. Уведомление отправлено.");
+    await loadReceiptRequests();
+    return true;
+  }
+
+  async function patchReceiptItemMeta(
+    receiptId: string,
+    itemId: string,
+    body: {
+      category?: ReceiptItemCategory | null;
+      unitPrice?: number | null;
+      storagePlace?: string | null;
+    }
+  ) {
+    if (!token) return;
+    const res = await fetchWithSession(
+      `${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/items/${encodeURIComponent(itemId)}`,
+      {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      }
+    );
+    if (!res.ok) return;
+    const updated = (await res.json()) as ReceiptRequestItem;
+    setReceiptRequests((prev) =>
+      prev.map((r) =>
+        r.id !== receiptId
+          ? r
+          : { ...r, items: r.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it)) }
+      )
+    );
+  }
+
+  async function closeReceiptRequest(receiptId: string): Promise<boolean> {
+    if (!token || me?.role !== "ADMIN") {
+      setOpsMessage("Закрыть заявку вручную может только администратор");
+      return false;
+    }
+    const reasonRaw = window.prompt(
+      "Закрыть заявку вручную (статус «принята»)?\nУкажите причину — например, приёмка прошла, но статус не обновился:"
+    );
+    if (reasonRaw === null) return false;
+    const reason = reasonRaw.trim();
+    if (!reason) {
+      setOpsMessage("Причина обязательна");
+      return false;
+    }
+    const r = await fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/close`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
+    });
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const b = await r.json();
+        detail = typeof b?.error === "string" ? b.error : typeof b?.hint === "string" ? b.hint : "";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(detail || `Не удалось закрыть заявку (HTTP ${r.status})`);
+      return false;
+    }
+    setOpsMessage("Заявка закрыта вручную");
     await loadReceiptRequests();
     return true;
   }
@@ -6923,7 +7012,7 @@ function App() {
                 </thead>
                 <tbody>
           {receiptRequests.map((row) => {
-            const isExpanded = expandedReceiptIds[row.id] !== false; // по умолчанию открыты
+            const isExpanded = expandedReceiptIds[row.id] === true;
             const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
             const acceptedQty = row.items.reduce((s, it) => s + Number(it.acceptedQty || 0), 0);
             const donePct = totalQty > 0 ? Math.min(100, Math.round((acceptedQty / totalQty) * 100)) : 0;
@@ -6987,6 +7076,16 @@ function App() {
                       >
                         Лимит
                       </button>
+                      {!finished && me?.role === "ADMIN" ? (
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          title="Принудительно перевести в «принята полностью»"
+                          onClick={() => void closeReceiptRequest(row.id)}
+                        >
+                          Закрыть
+                        </button>
+                      ) : null}
                       {!finished ? (
                         <button type="button" className="ghostBtn" onClick={() => void cancelReceiptRequest(row.id)}>
                           Отмена
@@ -7040,7 +7139,12 @@ function App() {
                                   newName: existing.newName || it.mappedMaterial?.name || it.sourceName,
                                   newUnit:
                                     existing.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
-                                  qty: existing.qty && Number(existing.qty) > 0 ? existing.qty : String(remaining)
+                                  qty: existing.qty && Number(existing.qty) > 0 ? existing.qty : String(remaining),
+                                  category: existing.category ?? it.category ?? "",
+                                  unitPrice:
+                                    existing.unitPrice ??
+                                    (it.unitPrice != null ? String(it.unitPrice) : ""),
+                                  storagePlace: existing.storagePlace ?? it.storagePlace ?? ""
                                 }
                               : { ...existing, qty: "" };
                           }
@@ -7102,6 +7206,9 @@ function App() {
                                   <th>Принято / план</th>
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
+                                  <th>Категория</th>
+                                  <th className="num">Цена</th>
+                                  <th>Место хранения</th>
                                   <th>Принять сейчас</th>
                                   {row.objectLimitTemplateId ? <th>Узел лимита</th> : null}
                                 </tr>
@@ -7111,11 +7218,23 @@ function App() {
                                   const total = Number(it.quantity);
                                   const accepted = Number(it.acceptedQty || 0);
                                   const remaining = Math.max(0, total - accepted);
-                                  const draft = drafts[it.id] || { newName: "", newUnit: "", qty: "" };
+                                  const draft = drafts[it.id] || {
+                                    newName: "",
+                                    newUnit: "",
+                                    qty: "",
+                                    category: it.category ?? "",
+                                    unitPrice: it.unitPrice != null ? String(it.unitPrice) : "",
+                                    storagePlace: it.storagePlace ?? ""
+                                  };
                                   const defaultName =
                                     draft.newName || it.mappedMaterial?.name || it.sourceName;
                                   const defaultUnit =
                                     draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  const defaultCategory = draft.category ?? it.category ?? "";
+                                  const defaultPrice =
+                                    draft.unitPrice ??
+                                    (it.unitPrice != null ? String(it.unitPrice) : "");
+                                  const defaultStorage = draft.storagePlace ?? it.storagePlace ?? "";
                                   const isPicked =
                                     Number(draft.qty || 0) > 0 || (draft.qty || "").trim() !== "";
                                   const toggle = (checked: boolean) =>
@@ -7132,13 +7251,19 @@ function App() {
                                                 Number(prev[row.id]?.[it.id]?.qty) > 0
                                                   ? prev[row.id][it.id]!.qty
                                                   : String(remaining),
-                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
+                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                              category: defaultCategory,
+                                              unitPrice: defaultPrice,
+                                              storagePlace: defaultStorage
                                             }
                                           : {
                                               newName: prev[row.id]?.[it.id]?.newName || "",
                                               newUnit: prev[row.id]?.[it.id]?.newUnit || "",
                                               qty: "",
-                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
+                                              limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                              category: defaultCategory,
+                                              unitPrice: defaultPrice,
+                                              storagePlace: defaultStorage
                                             }
                                       }
                                     }));
@@ -7199,11 +7324,111 @@ function App() {
                                                   newName: prev[row.id]?.[it.id]?.newName || "",
                                                   newUnit: e.target.value,
                                                   qty: prev[row.id]?.[it.id]?.qty || "",
-                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                                  category: defaultCategory,
+                                                  unitPrice: defaultPrice,
+                                                  storagePlace: defaultStorage
                                                 }
                                               }
                                             }))
                                           }
+                                        />
+                                      </td>
+                                      <td style={{ minWidth: 130 }}>
+                                        <select
+                                          value={defaultCategory}
+                                          disabled={finished}
+                                          onChange={(e) => {
+                                            const category = (e.target.value || "") as ReceiptItemCategory | "";
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: prev[row.id]?.[it.id]?.newName || defaultName,
+                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || defaultUnit,
+                                                  qty: prev[row.id]?.[it.id]?.qty || "",
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                                  category,
+                                                  unitPrice: defaultPrice,
+                                                  storagePlace: defaultStorage
+                                                }
+                                              }
+                                            }));
+                                            void patchReceiptItemMeta(row.id, it.id, {
+                                              category: category || null
+                                            });
+                                          }}
+                                        >
+                                          <option value="">—</option>
+                                          {RECEIPT_ITEM_CATEGORIES.map((c) => (
+                                            <option key={c} value={c}>
+                                              {receiptItemCategoryLabel(c)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </td>
+                                      <td style={{ width: 100 }}>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          step={0.01}
+                                          value={defaultPrice}
+                                          placeholder="₽"
+                                          disabled={finished}
+                                          onChange={(e) =>
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: prev[row.id]?.[it.id]?.newName || "",
+                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                                  qty: prev[row.id]?.[it.id]?.qty || "",
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                                  category: defaultCategory,
+                                                  unitPrice: e.target.value,
+                                                  storagePlace: defaultStorage
+                                                }
+                                              }
+                                            }))
+                                          }
+                                          onBlur={(e) => {
+                                            const raw = e.currentTarget.value.trim().replace(",", ".");
+                                            const n = raw === "" ? null : Number(raw);
+                                            void patchReceiptItemMeta(row.id, it.id, {
+                                              unitPrice: n != null && Number.isFinite(n) ? n : null
+                                            });
+                                          }}
+                                        />
+                                      </td>
+                                      <td style={{ minWidth: 140 }}>
+                                        <input
+                                          value={defaultStorage}
+                                          placeholder="Ячейка, помещение…"
+                                          disabled={finished}
+                                          onChange={(e) =>
+                                            setAcceptanceDrafts((prev) => ({
+                                              ...prev,
+                                              [row.id]: {
+                                                ...prev[row.id],
+                                                [it.id]: {
+                                                  newName: prev[row.id]?.[it.id]?.newName || "",
+                                                  newUnit: prev[row.id]?.[it.id]?.newUnit || "",
+                                                  qty: prev[row.id]?.[it.id]?.qty || "",
+                                                  limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
+                                                  category: defaultCategory,
+                                                  unitPrice: defaultPrice,
+                                                  storagePlace: e.target.value
+                                                }
+                                              }
+                                            }))
+                                          }
+                                          onBlur={(e) => {
+                                            void patchReceiptItemMeta(row.id, it.id, {
+                                              storagePlace: e.currentTarget.value.trim() || null
+                                            });
+                                          }}
                                         />
                                       </td>
                                       <td style={{ width: 130 }}>

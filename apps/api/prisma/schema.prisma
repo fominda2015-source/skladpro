@@ -105,6 +105,12 @@ enum ReceiptRequestStatus {
   CANCELLED
 }
 
+enum ReceiptItemCategory {
+  EQUIPMENT
+  CONSUMABLE
+  CABLE
+}
+
 enum FeedbackTicketStatus {
   OPEN
   IN_PROGRESS
@@ -891,6 +897,9 @@ model ReceiptRequestItem {
   limitNodeId      String?
   acceptedQty      Decimal?       @db.Decimal(14, 3)
   note             String?
+  category         ReceiptItemCategory?
+  unitPrice        Decimal?       @db.Decimal(14, 2)
+  storagePlace     String?
   receiptRequest   ReceiptRequest @relation(fields: [receiptRequestId], references: [id], onDelete: Cascade)
   mappedMaterial   Material?      @relation(fields: [mappedMaterialId], references: [id], onDelete: SetNull)
   limitNode        ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
