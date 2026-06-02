@@ -497,7 +497,7 @@ export function HomeOverview({
       ? ({
           limitsSs: "Лимиты СС по объектам",
           limitsEom: "Лимиты ЭОМ по объектам",
-          stock: "Позиции на складе",
+          stock: "ТМЦ на складе",
           tools: "Инструменты по объектам",
           toolsStock: "Инструменты на складе",
           toolsIssued: "Выданные инструменты",
@@ -684,7 +684,7 @@ export function HomeOverview({
           if (drill.key === "limitsEom") {
             return [{ key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }];
           }
-          if (drill.key === "stock") return [{ key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] }];
+          if (drill.key === "stock") return [{ key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] }];
           if (drill.key === "tools") return [{ key: "tools", cells: ["Инструменты", o.tools.total] }];
           if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] }];
           if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] }];
@@ -708,7 +708,7 @@ export function HomeOverview({
           }
           if (drill.key === "movement") {
             return [
-              { key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] },
+              { key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] },
               { key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }
             ];
           }
@@ -831,7 +831,7 @@ export function HomeOverview({
       if (drill.key === "stock") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Позиций"]}
+            columns={["Объект", "ТМЦ на складе"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines)]
@@ -910,7 +910,7 @@ export function HomeOverview({
             note="График — суммарное движение по всем складам за 30 дней. Ниже — показатели по каждому объекту."
           >
             <ObjectDrillTable
-              columns={["Объект", "Позиций на складе", "Приёмки"]}
+              columns={["Объект", "ТМЦ на складе", "Приёмки"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines), o.receiptOpen]
@@ -1067,7 +1067,7 @@ export function HomeOverview({
             onClick: () => openStatDrill("limitsEom")
           },
           {
-            label: "Позиций на складе",
+            label: "ТМЦ на складе",
             value: fmtQty(totals.stockLines),
             tone: "neutral",
             onClick: () => openStatDrill("stock")

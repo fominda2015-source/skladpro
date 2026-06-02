@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -5724,6 +5724,66 @@ function App() {
                 : undefined
             }
             renderObjectDrillContent={({ warehouseId, drillKind, drillKey }) => {
+              const isStock = drillKind === "stat" && drillKey === "stock";
+              if (isStock) {
+                const search = q.trim().toLowerCase();
+                const rows = stocks
+                  .filter((s) => s.warehouseId === warehouseId)
+                  .filter((s) => {
+                    if (!search) return true;
+                    return (
+                      s.materialName.toLowerCase().includes(search) ||
+                      String(s.materialSku || "").toLowerCase().includes(search)
+                    );
+                  })
+                  .sort((a, b) => b.available - a.available || a.materialName.localeCompare(b.materialName, "ru"));
+                return (
+                  <div className="homeDrillStack">
+                    <div className="toolbar" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="Поиск ТМЦ (название, SKU)…"
+                        style={{ minWidth: 260 }}
+                      />
+                      <button type="button" className="ghostBtn" onClick={() => void loadStocks(q)}>
+                        ↻ Обновить
+                      </button>
+                    </div>
+                    <div className="erpTableWrap homeDrillTable">
+                      <table className="erpTable desktopTable">
+                        <thead>
+                          <tr>
+                            <th>ТМЦ</th>
+                            <th>Ед.</th>
+                            <th>В наличии</th>
+                            <th>Резерв</th>
+                            <th>Количество</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.slice(0, 80).map((r) => (
+                            <tr key={`drill-stock-${r.id}`}>
+                              <td>{safeName(r.materialName)}</td>
+                              <td>{r.materialUnit}</td>
+                              <td>{r.available.toLocaleString("ru-RU")}</td>
+                              <td>{r.reserved.toLocaleString("ru-RU")}</td>
+                              <td>{r.quantity.toLocaleString("ru-RU")}</td>
+                            </tr>
+                          ))}
+                          {!rows.length ? (
+                            <tr>
+                              <td colSpan={5} className="muted">
+                                ТМЦ не найдено.
+                              </td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              }
               const isLimits =
                 (drillKind === "stat" && (drillKey === "limitsSs" || drillKey === "limitsEom")) ||
                 (drillKind === "chart" && drillKey === "limits");
@@ -5731,46 +5791,47 @@ function App() {
                 const section = drillKey === "limitsEom" ? "EOM" : "SS";
                 const templates = limitTemplates.filter((t) => t.warehouseId === warehouseId && t.section === section);
                 if (!templates.length) return <p className="muted">Лимиты отсутствуют.</p>;
+                const byParent = new Map<string, LimitImportNode[]>();
+                for (const n of templates.flatMap((t) => t.nodes)) {
+                  const key = n.parentId || "__root__";
+                  byParent.set(key, [...(byParent.get(key) || []), n]);
+                }
+                const renderLimitNode = (node: LimitImportNode, depth: number): ReactNode => {
+                  const children = (byParent.get(node.id) || []).sort((a, b) => a.orderNo - b.orderNo);
+                  if (node.nodeType === "GROUP") {
+                    return (
+                      <div key={`drill-group-${node.id}`} style={{ marginLeft: depth * 16, marginTop: 6 }}>
+                        <div style={{ fontWeight: 700, color: "#1f2937" }}>{safeName(node.title)}</div>
+                        {children.map((ch) => renderLimitNode(ch, depth + 1))}
+                      </div>
+                    );
+                  }
+                  const plan = Number(node.plannedQty || 0);
+                  const issued = node.materialId ? Number(limitIssuedTotals[node.materialId] || 0) : Number(node.issuedQty || 0);
+                  const arrived = node.materialId ? Number(limitSupplyByMaterialId[node.materialId]?.arrivedQty || 0) : 0;
+                  return (
+                    <div key={`drill-mat-${node.id}`} style={{ marginLeft: depth * 16, marginTop: 6 }}>
+                      <div style={{ fontSize: 13, marginBottom: 4 }}>{safeName(String(node.materialName || node.title || "Материал"))}</div>
+                      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                        план {plan.toLocaleString("ru-RU")} · выдано {issued.toLocaleString("ru-RU")} · приход{" "}
+                        {arrived.toLocaleString("ru-RU")}
+                      </div>
+                      {plan > 0 ? <LimitStructureBars plan={plan} issued={issued} arrived={arrived} compact /> : <span className="muted">отсутствует</span>}
+                    </div>
+                  );
+                };
                 return (
                   <div className="homeDrillStack">
                     {templates.map((tpl) => {
-                      const materials = tpl.nodes.filter((n) => n.nodeType === "MATERIAL");
+                      const roots = (tpl.nodes.filter((n) => !n.parentId) || []).sort((a, b) => a.orderNo - b.orderNo);
                       return (
                         <section key={`drill-tpl-${tpl.id}`} className="homeDrillObjectBlock">
                           <header className="homeDrillObjectBlockHead">
                             <strong>{tpl.title}</strong>
                             <span className="muted">{section}</span>
                           </header>
-                          <div className="erpTableWrap homeDrillTable">
-                            <table className="erpTable desktopTable">
-                              <thead>
-                                <tr>
-                                  <th>Материал</th>
-                                  <th>План</th>
-                                  <th>Выдано</th>
-                                  <th>Приход</th>
-                                  <th>Структура</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {materials.slice(0, 40).map((m) => {
-                                  const plan = Number(m.plannedQty || 0);
-                                  const issued = m.materialId ? Number(limitIssuedTotals[m.materialId] || 0) : Number(m.issuedQty || 0);
-                                  const arrived = m.materialId ? Number(limitSupplyByMaterialId[m.materialId]?.arrivedQty || 0) : 0;
-                                  return (
-                                    <tr key={`drill-mat-${m.id}`}>
-                                      <td>{safeName(String(m.materialName || m.title || "Материал"))}</td>
-                                      <td>{plan.toLocaleString("ru-RU")}</td>
-                                      <td>{issued.toLocaleString("ru-RU")}</td>
-                                      <td>{arrived.toLocaleString("ru-RU")}</td>
-                                      <td>
-                                        {plan > 0 ? <LimitStructureBars plan={plan} issued={issued} arrived={arrived} compact /> : "отсутствует"}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
+                          <div className="homeDrillStack">
+                            {roots.map((root) => renderLimitNode(root, 0))}
                           </div>
                         </section>
                       );
@@ -5785,29 +5846,20 @@ function App() {
                   .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                 if (!rows.length) return <p className="muted">Приемок по объекту нет.</p>;
                 return (
-                  <div className="erpTableWrap homeDrillTable">
-                    <table className="erpTable desktopTable">
-                      <thead>
-                        <tr>
-                          <th>Номер</th>
-                          <th>Раздел</th>
-                          <th>Статус</th>
-                          <th>Позиций</th>
-                          <th>Дата</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.slice(0, 40).map((row) => (
-                          <tr key={`drill-rcp-${row.id}`}>
-                            <td>{row.number}</td>
-                            <td>{row.section}</td>
-                            <td>{receiptStatusLabel(row.status)}</td>
-                            <td>{row.items.length}</td>
-                            <td>{new Date(row.createdAt).toLocaleDateString("ru-RU")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="homeDrillStack">
+                    {rows.slice(0, 40).map((row) => (
+                      <section key={`drill-rcp-${row.id}`} className="homeDrillObjectBlock">
+                        <header className="homeDrillObjectBlockHead">
+                          <strong>{row.number}</strong>
+                          <span className="muted">
+                            {row.section} · {receiptStatusLabel(row.status)}
+                          </span>
+                        </header>
+                        <div className="muted" style={{ fontSize: 13 }}>
+                          Позиций: {row.items.length} · {new Date(row.createdAt).toLocaleDateString("ru-RU")}
+                        </div>
+                      </section>
+                    ))}
                   </div>
                 );
               }
