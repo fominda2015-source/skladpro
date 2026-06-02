@@ -3836,16 +3836,28 @@ button.homeInsightPill:hover:not(:disabled) {
   padding: 14px 16px 10px;
   border-bottom: 1px solid #e2e8f0;
 }
+.homeDrillHeadActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.homeDrillNavBtn {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  line-height: 1;
+}
 .homeDrillHead h3 {
   margin: 0 0 4px;
   font-size: 17px;
 }
 .homeDrillClose {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
   padding: 0;
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1;
 }
 .homeDrillBody {
@@ -3858,7 +3870,7 @@ button.homeInsightPill:hover:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 10px 16px 14px;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;

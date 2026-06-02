@@ -33,18 +33,20 @@ export function HomeDrillModal({
             <h3>{title}</h3>
             {subtitle ? <p className="muted">{subtitle}</p> : null}
           </div>
-          <button type="button" className="ghostBtn homeDrillClose" onClick={onClose} aria-label="Закрыть">
-            ×
-          </button>
+          <div className="homeDrillHeadActions">
+            <button type="button" className="ghostBtn homeDrillNavBtn" onClick={onBack} disabled={!canBack}>
+              ←
+            </button>
+            <button type="button" className="ghostBtn homeDrillNavBtn" onClick={onForward} disabled={!canForward}>
+              →
+            </button>
+            <button type="button" className="ghostBtn homeDrillClose" onClick={onClose} aria-label="Закрыть">
+              ×
+            </button>
+          </div>
         </header>
         <div className="homeDrillBody">{children}</div>
         <footer className="homeDrillFoot">
-          <button type="button" className="ghostBtn" onClick={onBack} disabled={!canBack}>
-            ← Назад
-          </button>
-          <button type="button" className="ghostBtn" onClick={onForward} disabled={!canForward}>
-            Вперёд →
-          </button>
           {onDetails ? (
             <button
               type="button"

@@ -108,6 +108,12 @@ type Props = {
   canWarehouse?: boolean;
   canOperations?: boolean;
   announcements?: ReactNode;
+  renderObjectDrillContent?: (params: {
+    warehouseId: string;
+    objectName: string;
+    drillKind: "stat" | "chart";
+    drillKey: string;
+  }) => ReactNode;
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
   onOpenApprovals?: () => void;
@@ -281,6 +287,7 @@ export function HomeOverview({
   canWarehouse = true,
   canOperations = true,
   announcements = null,
+  renderObjectDrillContent,
   onOpenQr,
   onOpenIssues,
   onOpenApprovals,
@@ -663,6 +670,12 @@ export function HomeOverview({
     if (!drill) return null;
     if (selectedObject) {
       const o = selectedObject;
+      const customObjectDrill = renderObjectDrillContent?.({
+        warehouseId: o.warehouseId,
+        objectName: o.name,
+        drillKind: drill.kind,
+        drillKey: drill.key
+      });
       const miniRows = (() => {
         if (drill.kind === "stat") {
           if (drill.key === "limitsSs") {
@@ -776,10 +789,10 @@ export function HomeOverview({
           <section className="homeDrillObjectBlock">
             <header className="homeDrillObjectBlockHead">
               <strong>{o.name}</strong>
-              <span className="muted">дубль данных из соответствующей вкладки</span>
+              <span className="muted">{customObjectDrill ? "дублирование вкладки" : "дубль данных из соответствующей вкладки"}</span>
             </header>
             {contextActions}
-            <ObjectDrillTable columns={miniColumns} rows={miniRows} />
+            {customObjectDrill ? customObjectDrill : <ObjectDrillTable columns={miniColumns} rows={miniRows} />}
           </section>
         </div>
       );

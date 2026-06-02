@@ -5723,6 +5723,96 @@ function App() {
                   }
                 : undefined
             }
+            renderObjectDrillContent={({ warehouseId, drillKind, drillKey }) => {
+              const isLimits =
+                (drillKind === "stat" && (drillKey === "limitsSs" || drillKey === "limitsEom")) ||
+                (drillKind === "chart" && drillKey === "limits");
+              if (isLimits) {
+                const section = drillKey === "limitsEom" ? "EOM" : "SS";
+                const templates = limitTemplates.filter((t) => t.warehouseId === warehouseId && t.section === section);
+                if (!templates.length) return <p className="muted">Лимиты отсутствуют.</p>;
+                return (
+                  <div className="homeDrillStack">
+                    {templates.map((tpl) => {
+                      const materials = tpl.nodes.filter((n) => n.nodeType === "MATERIAL");
+                      return (
+                        <section key={`drill-tpl-${tpl.id}`} className="homeDrillObjectBlock">
+                          <header className="homeDrillObjectBlockHead">
+                            <strong>{tpl.title}</strong>
+                            <span className="muted">{section}</span>
+                          </header>
+                          <div className="erpTableWrap homeDrillTable">
+                            <table className="erpTable desktopTable">
+                              <thead>
+                                <tr>
+                                  <th>Материал</th>
+                                  <th>План</th>
+                                  <th>Выдано</th>
+                                  <th>Приход</th>
+                                  <th>Структура</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {materials.slice(0, 40).map((m) => {
+                                  const plan = Number(m.plannedQty || 0);
+                                  const issued = m.materialId ? Number(limitIssuedTotals[m.materialId] || 0) : Number(m.issuedQty || 0);
+                                  const arrived = m.materialId ? Number(limitSupplyByMaterialId[m.materialId]?.arrivedQty || 0) : 0;
+                                  return (
+                                    <tr key={`drill-mat-${m.id}`}>
+                                      <td>{safeName(String(m.materialName || m.title || "Материал"))}</td>
+                                      <td>{plan.toLocaleString("ru-RU")}</td>
+                                      <td>{issued.toLocaleString("ru-RU")}</td>
+                                      <td>{arrived.toLocaleString("ru-RU")}</td>
+                                      <td>
+                                        {plan > 0 ? <LimitStructureBars plan={plan} issued={issued} arrived={arrived} compact /> : "отсутствует"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                );
+              }
+              const isReceipts = drillKind === "stat" && drillKey === "receipts";
+              if (isReceipts) {
+                const rows = receiptRequests
+                  .filter((r) => r.warehouseId === warehouseId)
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                if (!rows.length) return <p className="muted">Приемок по объекту нет.</p>;
+                return (
+                  <div className="erpTableWrap homeDrillTable">
+                    <table className="erpTable desktopTable">
+                      <thead>
+                        <tr>
+                          <th>Номер</th>
+                          <th>Раздел</th>
+                          <th>Статус</th>
+                          <th>Позиций</th>
+                          <th>Дата</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.slice(0, 40).map((row) => (
+                          <tr key={`drill-rcp-${row.id}`}>
+                            <td>{row.number}</td>
+                            <td>{row.section}</td>
+                            <td>{receiptStatusLabel(row.status)}</td>
+                            <td>{row.items.length}</td>
+                            <td>{new Date(row.createdAt).toLocaleDateString("ru-RU")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              }
+              return null;
+            }}
           />
         )}
       {activeTab === "warehouse" && (
