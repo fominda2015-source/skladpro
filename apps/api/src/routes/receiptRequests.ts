@@ -128,6 +128,50 @@ async function findOrCreateMaterial(
   return created.id;
 }
 
+const receiptRequestInclude = {
+  items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
+  limitTemplate: { select: { id: true, title: true } }
+} as const;
+
+type ReceiptRequestWithRelations = Prisma.ReceiptRequestGetPayload<{ include: typeof receiptRequestInclude }>;
+
+function toQtyNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
+  return {
+    ...row,
+    items: row.items.map((it) => ({
+      ...it,
+      quantity: Number(it.quantity),
+      acceptedQty: toQtyNumber(it.acceptedQty),
+      unitPrice: toQtyNumber(it.unitPrice)
+    }))
+  };
+}
+
+async function loadSerializedReceiptRequest(id: string) {
+  const row = await prisma.receiptRequest.findUnique({
+    where: { id },
+    include: receiptRequestInclude
+  });
+  return row ? serializeReceiptRequest(row) : null;
+}
+
+function receiptRequestHasOpenItems(row: {
+  status: ReceiptRequestWithRelations["status"];
+  items: Array<{ quantity: number; acceptedQty: number | null }>;
+}): boolean {
+  if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
+  return row.items.some((it) => {
+    const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
+    return remaining > 1e-6;
+  });
+}
+
 export const receiptRequestsRouter = Router();
 receiptRequestsRouter.use(requireAuth);
 receiptRequestsRouter.use(requirePermission("operations.read"));
@@ -569,6 +613,7 @@ receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await resolveReadScope(req, { warehouseId });
   const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
+  const openOnly = req.query.openOnly === "1" || req.query.openOnly === "true";
   if (warehouseId) {
     try {
       assertWarehouseInScope(scope, warehouseId);
@@ -581,16 +626,20 @@ receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const rows = await prisma.receiptRequest.findMany({
     where: {
       ...(warehouseId ? { warehouseId } : {}),
-      ...(section ? { section } : {})
+      ...(section ? { section } : {}),
+      ...(openOnly
+        ? {
+            status: { notIn: ["RECEIVED", "CANCELLED"] }
+          }
+        : {})
     },
-    include: {
-      items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
-      limitTemplate: { select: { id: true, title: true } }
-    },
+    include: receiptRequestInclude,
     orderBy: { createdAt: "desc" },
     take: 100
   });
-  return res.json(rows);
+  const serialized = rows.map(serializeReceiptRequest);
+  const filtered = openOnly ? serialized.filter(receiptRequestHasOpenItems) : serialized;
+  return res.json(filtered);
 });
 
 receiptRequestsRouter.post(
@@ -1072,10 +1121,13 @@ receiptRequestsRouter.post(
       }).catch(() => undefined);
     }
 
+    const receiptRequest = await loadSerializedReceiptRequest(row.id);
+
     return res.json({
       ok: true,
       operationId: op.operation?.id ?? null,
-      overageActions: op.overageActions || []
+      overageActions: op.overageActions || [],
+      receiptRequest
     });
   }
 );

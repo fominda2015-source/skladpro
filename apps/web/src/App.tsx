@@ -597,8 +597,15 @@ type MaterialMappingRow = {
   targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
 
+function parseReceiptQty(value: string | number | null | undefined): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const n = Number(String(value).replace(",", ".").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
 function receiptItemRemainingQty(it: ReceiptRequestItem): number {
-  return Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
+  return Math.max(0, parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty));
 }
 
 function isOpenReceiptRequest(row: ReceiptRequestRow): boolean {
@@ -811,6 +818,7 @@ function App() {
     null
   );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  const receiptRequestsLoadSeq = useRef(0);
   const openReceiptRequests = useMemo(
     () => receiptRequests.filter(isOpenReceiptRequest),
     [receiptRequests]
@@ -2960,16 +2968,31 @@ function App() {
   }
 
   async function loadReceiptRequests() {
-    if (!token || !activeObjectId) return;
+    if (!token || !activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
+    const seq = ++receiptRequestsLoadSeq.current;
     const params = new URLSearchParams({
       warehouseId: activeObjectId,
-      section: objectSectionFilter
+      section: objectSectionFilter,
+      _: String(Date.now())
     });
     const res = await fetchWithSession(`${API_URL}/api/receipt-requests?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store"
     });
     if (!res.ok) return;
+    if (seq !== receiptRequestsLoadSeq.current) return;
     setReceiptRequests((await res.json()) as ReceiptRequestRow[]);
+  }
+
+  function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
+    receiptRequestsLoadSeq.current += 1;
+    setReceiptRequests((prev) => {
+      const idx = prev.findIndex((r) => r.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      const next = [...prev];
+      next[idx] = updated;
+      return next;
+    });
   }
 
   async function loadMaterialMappings() {
@@ -3237,39 +3260,57 @@ function App() {
       setOpsMessage(
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
-      let receiptFullyAccepted = false;
-      setReceiptRequests((prev) =>
-        prev.map((r) => {
-          if (r.id !== row.id) return r;
-          const updatedItems = r.items.map((it) => {
-            const m = mappings.find((x) => x.itemId === it.id);
-            if (!m) return it;
-            return {
-              ...it,
-              acceptedQty: Number(it.acceptedQty || 0) + m.acceptedQty
-            };
+      let acceptBody: { receiptRequest?: ReceiptRequestRow | null } = {};
+      try {
+        acceptBody = (await res.json()) as { receiptRequest?: ReceiptRequestRow | null };
+      } catch {
+        acceptBody = {};
+      }
+      if (acceptBody.receiptRequest) {
+        applyReceiptRequestUpdate(acceptBody.receiptRequest);
+        if (!isOpenReceiptRequest(acceptBody.receiptRequest)) {
+          setExpandedReceiptIds((prev) => {
+            const next = { ...prev };
+            delete next[row.id];
+            return next;
           });
-          let allDone = true;
-          let anyAccepted = false;
-          for (const it of updatedItems) {
-            const acc = Number(it.acceptedQty || 0);
-            if (acc > 0) anyAccepted = true;
-            if (acc + 1e-6 < Number(it.quantity)) allDone = false;
-          }
-          receiptFullyAccepted = allDone;
-          return {
-            ...r,
-            items: updatedItems,
-            status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : r.status
-          };
-        })
-      );
-      if (receiptFullyAccepted) {
-        setExpandedReceiptIds((prev) => {
-          const next = { ...prev };
-          delete next[row.id];
-          return next;
-        });
+        }
+      } else {
+        let receiptFullyAccepted = false;
+        setReceiptRequests((prev) =>
+          prev.map((r) => {
+            if (r.id !== row.id) return r;
+            const updatedItems = r.items.map((it) => {
+              const m = mappings.find((x) => x.itemId === it.id);
+              if (!m) return it;
+              return {
+                ...it,
+                acceptedQty: parseReceiptQty(it.acceptedQty) + m.acceptedQty
+              };
+            });
+            let allDone = true;
+            let anyAccepted = false;
+            for (const it of updatedItems) {
+              const acc = parseReceiptQty(it.acceptedQty);
+              if (acc > 0) anyAccepted = true;
+              if (acc + 1e-6 < parseReceiptQty(it.quantity)) allDone = false;
+            }
+            receiptFullyAccepted = allDone;
+            return {
+              ...r,
+              items: updatedItems,
+              status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : r.status
+            };
+          })
+        );
+        receiptRequestsLoadSeq.current += 1;
+        if (receiptFullyAccepted) {
+          setExpandedReceiptIds((prev) => {
+            const next = { ...prev };
+            delete next[row.id];
+            return next;
+          });
+        }
       }
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
@@ -3291,7 +3332,6 @@ function App() {
         delete next[row.id];
         return next;
       });
-      await loadReceiptRequests();
       await loadMaterialMappings();
       await loadStocks(q);
       await loadOperations();
@@ -3327,7 +3367,7 @@ function App() {
     for (const m of mappings) {
       const it = row.items.find((x) => x.id === m.itemId);
       if (!it) continue;
-      const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
+      const remaining = parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty);
       if (m.acceptedQty > remaining + 1e-6) {
         if (!token) return false;
         try {
@@ -6449,8 +6489,8 @@ function App() {
                 <tbody>
           {openReceiptRequests.map((row) => {
             const isExpanded = expandedReceiptIds[row.id] === true;
-            const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
-            const acceptedQty = row.items.reduce((s, it) => s + Number(it.acceptedQty || 0), 0);
+            const totalQty = row.items.reduce((s, it) => s + parseReceiptQty(it.quantity), 0);
+            const acceptedQty = row.items.reduce((s, it) => s + parseReceiptQty(it.acceptedQty), 0);
             const donePct = totalQty > 0 ? Math.min(100, Math.round((acceptedQty / totalQty) * 100)) : 0;
             const finished = row.status === "RECEIVED" || row.status === "CANCELLED";
             const drafts = acceptanceDrafts[row.id] || {};
@@ -6583,10 +6623,7 @@ function App() {
                         setAcceptanceDrafts((prev) => {
                           const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
                           for (const it of itemsLeft) {
-                            const remaining = Math.max(
-                              0,
-                              Number(it.quantity) - Number(it.acceptedQty || 0)
-                            );
+                            const remaining = receiptItemRemainingQty(it);
                             const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
                             next[row.id][it.id] = checked
                               ? {
@@ -6669,9 +6706,9 @@ function App() {
                               </thead>
                               <tbody>
                                 {itemsLeft.map((it) => {
-                                  const total = Number(it.quantity);
-                                  const accepted = Number(it.acceptedQty || 0);
-                                  const remaining = Math.max(0, total - accepted);
+                                  const total = parseReceiptQty(it.quantity);
+                                  const accepted = parseReceiptQty(it.acceptedQty);
+                                  const remaining = receiptItemRemainingQty(it);
                                   const draft = drafts[it.id] || {
                                     newName: "",
                                     newUnit: "",
