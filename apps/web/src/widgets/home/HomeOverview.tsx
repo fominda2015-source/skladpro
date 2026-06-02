@@ -244,7 +244,7 @@ function shortName(name: string, max = 14) {
 
 function objectCell(name: string, warehouseId: string, onOpen: (warehouseId: string) => void) {
   return (
-    <button type="button" className="homeTableLink" onClick={() => onOpen(warehouseId)}>
+    <button type="button" className="homeDrillObjectLink" onClick={() => onOpen(warehouseId)}>
       {name}
     </button>
   );
@@ -661,6 +661,61 @@ export function HomeOverview({
     if (!drill) return null;
     if (selectedObject) {
       const o = selectedObject;
+      const miniRows = (() => {
+        if (drill.kind === "stat") {
+          if (drill.key === "limitsSs") {
+            return [{ key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] }];
+          }
+          if (drill.key === "limitsEom") {
+            return [{ key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }];
+          }
+          if (drill.key === "stock") return [{ key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] }];
+          if (drill.key === "tools") return [{ key: "tools", cells: ["Инструменты", o.tools.total] }];
+          if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] }];
+          if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] }];
+          if (drill.key === "toolsRepair") return [{ key: "tools-repair", cells: ["Инструменты в ремонте", o.tools.inRepair] }];
+          if (drill.key === "receipts") return [{ key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }];
+        }
+        if (drill.kind === "chart") {
+          if (drill.key === "limits") {
+            return [
+              { key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] },
+              { key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }
+            ];
+          }
+          if (drill.key === "toolsByObject" || drill.key === "toolsStatus") {
+            return [
+              { key: "tools", cells: ["Инструменты", o.tools.total] },
+              { key: "tools-stock", cells: ["На складе", o.tools.inStock] },
+              { key: "tools-issued", cells: ["Выдано", o.tools.issued] },
+              { key: "tools-repair", cells: ["В ремонте", o.tools.inRepair] }
+            ];
+          }
+          if (drill.key === "movement") {
+            return [
+              { key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] },
+              { key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }
+            ];
+          }
+          if (drill.key === "camp") {
+            return [
+              { key: "camp", cells: ["Городок", o.campSs + o.campEom] },
+              { key: "tools", cells: ["Инструменты", o.tools.total] }
+            ];
+          }
+          if (drill.key === "categories") {
+            return o.tools.categories.length
+              ? o.tools.categories.map((c) => ({
+                  key: `cat-${c.key}`,
+                  cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
+                }))
+              : [{ key: "cat-empty", cells: ["Категории", "отсутствует"] }];
+          }
+        }
+        return [{ key: "fallback", cells: ["Данные", "отсутствует"] }];
+      })();
+      const miniColumns =
+        drill.kind === "chart" && drill.key === "categories" ? ["Категория", "Количество"] : ["Показатель", "Значение"];
       return (
         <div className="homeDrillStack">
           <section className="homeDrillObjectBlock">
@@ -668,20 +723,7 @@ export function HomeOverview({
               <strong>{o.name}</strong>
               <span className="muted">мини-обзор объекта</span>
             </header>
-            <ObjectDrillTable
-              columns={["Показатель", "Значение"]}
-              rows={[
-                { key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] },
-                { key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] },
-                { key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] },
-                { key: "tools", cells: ["Инструменты", o.tools.total] },
-                { key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] },
-                { key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] },
-                { key: "tools-repair", cells: ["Инструменты в ремонте", o.tools.inRepair] },
-                { key: "camp", cells: ["Городок", o.campSs + o.campEom] },
-                { key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }
-              ]}
-            />
+            <ObjectDrillTable columns={miniColumns} rows={miniRows} />
           </section>
         </div>
       );

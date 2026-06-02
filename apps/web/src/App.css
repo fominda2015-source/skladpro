@@ -3908,6 +3908,21 @@ button.homeInsightPill:hover:not(:disabled) {
   gap: 8px;
   margin-bottom: 8px;
 }
+.homeDrillObjectLink {
+  border: none;
+  background: none;
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.homeDrillObjectLink:hover {
+  color: #1e40af;
+}
 .homeChartHead h3 {
   margin: 0;
   font-size: 14px;
