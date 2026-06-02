@@ -4,7 +4,6 @@ import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
 import { Router } from "express";
-import xlsx from "xlsx";
 import { z } from "zod";
 import { config } from "../config.js";
 import { recordAudit } from "../lib/audit.js";
@@ -16,6 +15,8 @@ import {
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
+import { findReceiptInvoiceDoc, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
@@ -70,94 +71,33 @@ const limitLinkSchema = z.object({
   objectLimitTemplateId: z.string().nullable().optional()
 });
 
-function parseOrderSheet(file: Buffer): {
-  items: Array<{ name: string; unit: string; quantity: number }>;
-  orderNumber?: string;
-  projectTitle?: string;
-} {
-  const wb = xlsx.read(file, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  if (!ws || !ws["!ref"]) return { items: [] };
-  const range = xlsx.utils.decode_range(ws["!ref"]);
-  const norm = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
-  const getCell = (r: number, c: number) => norm(ws[xlsx.utils.encode_cell({ r, c })]?.v);
-
-  // 1. Метаданные сверху: «Номер заявки», «Проект».
-  let orderNumber: string | undefined;
-  let projectTitle: string | undefined;
-  const scanRows = Math.min(range.e.r, 60);
-  for (let r = 0; r <= scanRows; r += 1) {
-    for (let c = 0; c <= Math.min(range.e.c, 12); c += 1) {
-      const label = getCell(r, c).toLowerCase();
-      if (!orderNumber && label.includes("номер заявки")) {
-        // ищем числовое значение в той же строке или строкой ниже, правее label
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          for (let cc = c + 1; cc <= Math.min(range.e.c, c + 8); cc += 1) {
-            const v = getCell(rr, cc);
-            if (/^\d{2,}$/.test(v)) {
-              orderNumber = v;
-              break;
-            }
-          }
-          if (orderNumber) break;
-        }
-      }
-      if (!projectTitle && label === "проект") {
-        // значение обычно в строке ниже под этой колонкой
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          const v = getCell(rr, c) || getCell(rr, c + 1) || getCell(rr + 1, c) || getCell(rr + 1, c + 1);
-          if (v && v.toLowerCase() !== "проект") {
-            projectTitle = v;
-            break;
-          }
-        }
-      }
-    }
+async function saveReceiptDocumentFile(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  opts: {
+    receiptId: string;
+    type: string;
+    file: Express.Multer.File;
+    userId: string;
   }
-
-  // 2. Шапка таблицы — ищем строку с заголовками «Товар»/«Количество»/«Ед.изм.»
-  let headerRow = -1;
-  let colName = -1;
-  let colQty = -1;
-  let colUnit = -1;
-  for (let r = 0; r <= range.e.r; r += 1) {
-    let foundName = -1;
-    let foundQty = -1;
-    let foundUnit = -1;
-    for (let c = 0; c <= range.e.c; c += 1) {
-      const v = getCell(r, c).toLowerCase();
-      if (foundName < 0 && (v === "товар" || v === "наименование" || v === "номенклатура" || v.startsWith("товар") || v.startsWith("наимен") || v.startsWith("номенк"))) {
-        foundName = c;
-      }
-      if (foundQty < 0 && (v === "количество" || v === "кол-во" || v === "колво" || v.includes("количеств"))) {
-        foundQty = c;
-      }
-      if (foundUnit < 0 && (v.startsWith("ед.") || v === "ед" || v.includes("единиц") || v.includes("изм."))) {
-        foundUnit = c;
-      }
+) {
+  const safe = opts.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storedFileName = `${Date.now()}_${safe}`;
+  await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), opts.file.buffer);
+  await tx.documentFile.create({
+    data: {
+      groupId: crypto.randomUUID(),
+      version: 1,
+      entityType: "receipt",
+      entityId: opts.receiptId,
+      type: opts.type,
+      fileName: decodeUploadedOriginalName(opts.file.originalname),
+      filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
+      mimeType: opts.file.mimetype,
+      size: opts.file.size,
+      checksumSha256: crypto.createHash("sha256").update(opts.file.buffer).digest("hex"),
+      createdBy: opts.userId
     }
-    if (foundName >= 0 && foundQty >= 0) {
-      headerRow = r;
-      colName = foundName;
-      colQty = foundQty;
-      colUnit = foundUnit;
-      break;
-    }
-  }
-
-  const items: Array<{ name: string; unit: string; quantity: number }> = [];
-  if (headerRow < 0) return { items, orderNumber, projectTitle };
-
-  for (let r = headerRow + 1; r <= range.e.r; r += 1) {
-    const name = getCell(r, colName);
-    const qtyRaw = getCell(r, colQty).replace(",", ".");
-    const unit = colUnit >= 0 ? getCell(r, colUnit) : "шт";
-    if (!name) continue;
-    const quantity = Number(qtyRaw);
-    if (!Number.isFinite(quantity) || quantity <= 0) continue;
-    items.push({ name, unit: unit || "шт", quantity });
-  }
-  return { items, orderNumber, projectTitle };
+  });
 }
 
 async function findOrCreateMaterial(
@@ -194,20 +134,33 @@ receiptRequestsRouter.post(
       if (err.status === 403) return res.status(403).json({ error: err.message });
       throw e;
     }
-    const { items, orderNumber, projectTitle } = parseOrderSheet(req.file.buffer);
+    const parsedSheet = parseOrderSheet(req.file.buffer);
+    const { items, orderNumber, projectTitle, format: sheetFormat } = parsedSheet;
     if (!items.length) {
-      return res.status(400).json({ error: "В файле не найдена таблица позиций (нужны колонки: Товар, Количество, Ед. изм.)" });
+      return res.status(400).json({
+        error: "В файле не найдена таблица позиций (Товар, Количество; для нового формата — колонки L, M, N, O)"
+      });
     }
 
-    // Сформируем уникальный номер. Если в файле найден номер заявки — пытаемся использовать его.
-    let number = orderNumber ? `ORD-${orderNumber}` : "";
-    if (number) {
-      const dup = await prisma.receiptRequest.findUnique({ where: { number } });
-      if (dup) number = `${number}-${Date.now().toString().slice(-4)}`;
-    } else {
-      const count = await prisma.receiptRequest.count();
-      number = `ORD-${String(count + 1).padStart(5, "0")}`;
+    if (orderNumber) {
+      const dup = await prisma.receiptRequest.findFirst({
+        where: {
+          warehouseId: parsed.data.warehouseId,
+          section: parsed.data.section,
+          OR: [{ number: `ORD-${orderNumber}` }, { externalOrderNumber: orderNumber }]
+        }
+      });
+      if (dup) {
+        return res.status(409).json({
+          error: "DUPLICATE_ORDER",
+          message: `Заявка с номером ${orderNumber} уже загружена (${dup.number}).`
+        });
+      }
     }
+
+    const number = orderNumber
+      ? `ORD-${orderNumber}`
+      : `ORD-${String((await prisma.receiptRequest.count()) + 1).padStart(5, "0")}`;
 
     // Опциональная привязка к шаблону лимита (если уже передали при загрузке).
     let attachedTemplateId: string | undefined;
@@ -225,6 +178,7 @@ receiptRequestsRouter.post(
       const receipt = await tx.receiptRequest.create({
         data: {
           number,
+          externalOrderNumber: orderNumber ?? null,
           warehouseId: parsed.data.warehouseId,
           section: parsed.data.section,
           sourceFileName: decodeUploadedOriginalName(req.file!.originalname),
@@ -233,35 +187,52 @@ receiptRequestsRouter.post(
           objectLimitTemplateId: attachedTemplateId ?? null,
           items: {
             create: items.map((i) => ({
-              sourceName: i.name,
+              sourceName: i.namePartC,
               sourceUnit: i.unit,
-              quantity: i.quantity
+              quantity: i.quantity,
+              category: i.category,
+              limitSectionPath: i.limitSectionPath,
+              namePartD: i.namePartD || null,
+              namePartE: i.namePartE || null,
+              limitCatalogNameN: i.limitCatalogNameN,
+              limitCatalogNameO: i.limitCatalogNameO,
+              externalComment: i.externalComment,
+              limitNameRenamed: false
             }))
           }
         },
         include: { items: true, limitTemplate: { select: { id: true, title: true } } }
       });
 
-      const safe = req.file!.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storedFileName = `${Date.now()}_${safe}`;
-      await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), req.file!.buffer);
-      await tx.documentFile.create({
-        data: {
-          groupId: crypto.randomUUID(),
-          version: 1,
-          entityType: "receipt",
-          entityId: receipt.id,
-          type: "receipt-request",
-          fileName: decodeUploadedOriginalName(req.file!.originalname),
-          filePath: `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/"),
-          mimeType: req.file!.mimetype,
-          size: req.file!.size,
-          checksumSha256: crypto.createHash("sha256").update(req.file!.buffer).digest("hex"),
-          createdBy: req.user!.userId
+      if (attachedTemplateId) {
+        for (let idx = 0; idx < receipt.items.length; idx += 1) {
+          const item = receipt.items[idx]!;
+          const src = items[idx];
+          if (!src) continue;
+          const sync = await syncReceiptItemToLimitTemplate(tx, attachedTemplateId, src);
+          if (sync.limitNodeId || sync.limitNameRenamed) {
+            await tx.receiptRequestItem.update({
+              where: { id: item.id },
+              data: {
+                limitNodeId: sync.limitNodeId,
+                limitNameRenamed: sync.limitNameRenamed
+              }
+            });
+          }
         }
+      }
+
+      await saveReceiptDocumentFile(tx, {
+        receiptId: receipt.id,
+        type: "receipt-request",
+        file: req.file!,
+        userId: req.user!.userId
       });
 
-      return receipt;
+      return tx.receiptRequest.findUniqueOrThrow({
+        where: { id: receipt.id },
+        include: { items: true, limitTemplate: { select: { id: true, title: true } } }
+      });
     });
     await dispatchNotification({
       eventCode: "RECEIPT_CREATED",
@@ -274,10 +245,58 @@ receiptRequestsRouter.post(
     return res.status(201).json({
       ...created,
       detectedOrderNumber: orderNumber || null,
-      detectedProjectTitle: projectTitle || null
+      detectedProjectTitle: projectTitle || null,
+      sheetFormat
     });
   }
 );
+
+receiptRequestsRouter.post(
+  "/:id/invoice",
+  requirePermission("operations.write"),
+  upload.single("file"),
+  async (req: AuthedRequest, res) => {
+    const id = String(req.params.id);
+    if (!req.file?.buffer) return res.status(400).json({ error: "file is required" });
+    const row = await prisma.receiptRequest.findUnique({ where: { id } });
+    if (!row) return res.status(404).json({ error: "Receipt request not found" });
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    await prisma.$transaction(async (tx) => {
+      await saveReceiptDocumentFile(tx, {
+        receiptId: id,
+        type: "receipt-invoice",
+        file: req.file!,
+        userId: req.user!.userId
+      });
+    });
+    const doc = await findReceiptInvoiceDoc(id);
+    return res.status(201).json(doc);
+  }
+);
+
+receiptRequestsRouter.get("/:id/invoice", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const row = await prisma.receiptRequest.findUnique({ where: { id } });
+  if (!row) return res.status(404).json({ error: "Receipt request not found" });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, row.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const doc = await findReceiptInvoiceDoc(id);
+  if (!doc) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+  return res.json(doc);
+});
 
 // Привязать/отвязать заявку к шаблону лимита (модалка «Заявка из лимита?»).
 receiptRequestsRouter.patch(
@@ -307,16 +326,51 @@ receiptRequestsRouter.patch(
       }
       nextTemplateId = tpl.id;
     }
-    const updated = await prisma.receiptRequest.update({
-      where: { id },
-      data: {
-        fromLimit: parsed.data.fromLimit,
-        objectLimitTemplateId: parsed.data.fromLimit ? nextTemplateId : null
-      },
-      include: {
-        items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
-        limitTemplate: { select: { id: true, title: true } }
+    const updated = await prisma.$transaction(async (tx) => {
+      const rowUpd = await tx.receiptRequest.update({
+        where: { id },
+        data: {
+          fromLimit: parsed.data.fromLimit,
+          objectLimitTemplateId: parsed.data.fromLimit ? nextTemplateId : null
+        },
+        include: { items: true }
+      });
+
+      if (parsed.data.fromLimit && nextTemplateId) {
+        for (const item of rowUpd.items) {
+          const meta = analyzeCatalogNames(
+            item.sourceName,
+            item.namePartD || "",
+            item.namePartE || "",
+            item.limitCatalogNameN || "",
+            item.limitCatalogNameO || "",
+            item.externalComment || ""
+          );
+          const sync = await syncReceiptItemToLimitTemplate(tx, nextTemplateId, {
+            limitSectionPath: item.limitSectionPath,
+            namePartC: item.sourceName,
+            limitCatalogNameN: item.limitCatalogNameN,
+            limitCatalogNameO: item.limitCatalogNameO,
+            renameLimitToO: meta.renameLimitToO,
+            limitDisplayName: meta.limitDisplayName,
+            nameAlertNote: meta.nameAlertNote
+          });
+          if (sync.limitNodeId) {
+            await tx.receiptRequestItem.update({
+              where: { id: item.id },
+              data: { limitNodeId: sync.limitNodeId, limitNameRenamed: sync.limitNameRenamed }
+            });
+          }
+        }
       }
+
+      return tx.receiptRequest.findUniqueOrThrow({
+        where: { id },
+        include: {
+          items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
+          limitTemplate: { select: { id: true, title: true } }
+        }
+      });
     });
     return res.json(updated);
   }
@@ -934,13 +988,6 @@ receiptRequestsRouter.patch(
     }
     if (row.status === "CANCELLED") {
       return res.status(409).json({ error: "Заявка отменена — закрытие недоступно" });
-    }
-    const anyAccepted = row.items.some((it) => Number(it.acceptedQty || 0) > 0);
-    if (!anyAccepted && row.status === "NEW") {
-      return res.status(409).json({
-        error: "RECEIPT_NOT_ACCEPTED",
-        hint: "По заявке ещё не было приёмки — используйте отмену."
-      });
     }
     const updated = await prisma.receiptRequest.update({
       where: { id },

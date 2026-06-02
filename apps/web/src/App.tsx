@@ -560,6 +560,7 @@ type LimitImportNode = {
   unit?: string | null;
   plannedQty?: string | number | null;
   issuedQty?: string | number | null;
+  nameAlertNote?: string | null;
   orderNo: number;
 };
 type LimitImportTemplate = {
@@ -581,6 +582,11 @@ type ReceiptRequestItem = {
   category?: ReceiptItemCategory | null;
   unitPrice?: string | number | null;
   storagePlace?: string | null;
+  limitSectionPath?: string | null;
+  limitCatalogNameN?: string | null;
+  limitCatalogNameO?: string | null;
+  externalComment?: string | null;
+  limitNameRenamed?: boolean;
   mappedMaterial?: { id: string; name: string; unit: string } | null;
 };
 type ReceiptRequestRow = {
@@ -846,6 +852,10 @@ function App() {
   const [materialWriteoffFile, setMaterialWriteoffFile] = useState<File | null>(null);
   const [materialWriteoffBusy, setMaterialWriteoffBusy] = useState(false);
   const [receiptRequestFile, setReceiptRequestFile] = useState<File | null>(null);
+  const [receiptInvoiceUploadId, setReceiptInvoiceUploadId] = useState<string | null>(null);
+  const [limitNameAlertModal, setLimitNameAlertModal] = useState<null | { title: string; note: string }>(
+    null
+  );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   // Модалка «Заявка из лимита?» после загрузки Excel.
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
@@ -3166,8 +3176,12 @@ function App() {
     if (!res.ok) {
       let serverMsg = "";
       try {
-        const body = await res.json();
-        serverMsg = typeof body?.error === "string" ? body.error : "";
+        const body = (await res.json()) as { error?: string; message?: string };
+        if (body.error === "DUPLICATE_ORDER") {
+          serverMsg = body.message || "Эта заявка уже загружена на этот объект.";
+        } else {
+          serverMsg = typeof body.error === "string" ? body.error : body.message || "";
+        }
       } catch {
         // ignore
       }
@@ -3181,6 +3195,36 @@ function App() {
     setLimitPromptRequest(created);
     setExpandedReceiptIds((prev) => ({ ...prev, [created.id]: true }));
     await loadReceiptRequests();
+  }
+
+  async function uploadReceiptInvoice(receiptId: string, file: File) {
+    if (!token) return;
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/invoice`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+    if (!res.ok) {
+      setOpsMessage("Не удалось приложить счёт");
+      return;
+    }
+    setOpsMessage("Счёт приложен к заявке");
+    setReceiptInvoiceUploadId(null);
+  }
+
+  async function openReceiptInvoice(receiptId: string) {
+    if (!token) return;
+    const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${encodeURIComponent(receiptId)}/invoice`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setOpsMessage("Счёт к этой заявке ещё не приложён");
+      return;
+    }
+    const doc = (await res.json()) as { filePath?: string; fileName?: string };
+    openUploadedDocument(doc.filePath, doc.fileName);
   }
 
   async function attachReceiptRequestToLimit(requestId: string, templateId: string | null): Promise<boolean> {
@@ -7069,6 +7113,22 @@ function App() {
                       <button
                         type="button"
                         className="ghostBtn"
+                        title="Приложить счёт поставщика"
+                        onClick={() => setReceiptInvoiceUploadId(row.id)}
+                      >
+                        Счёт
+                      </button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        title="Открыть приложенный счёт"
+                        onClick={() => void openReceiptInvoice(row.id)}
+                      >
+                        Счёт ↗
+                      </button>
+                      <button
+                        type="button"
+                        className="ghostBtn"
                         onClick={() => {
                           setLimitPromptTemplateId(row.objectLimitTemplateId || "");
                           setLimitPromptRequest(row);
@@ -7203,6 +7263,7 @@ function App() {
                                 <tr>
                                   <th style={{ width: 36 }}>✓</th>
                                   <th>Название из заявки</th>
+                                  <th>Раздел лимита (M)</th>
                                   <th>Принято / план</th>
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
@@ -7282,7 +7343,18 @@ function App() {
                                           onChange={(e) => toggle(e.target.checked)}
                                         />
                                       </td>
-                                      <td style={{ maxWidth: 280 }}>{it.sourceName}</td>
+                                      <td style={{ maxWidth: 280 }}>
+                                        {it.sourceName}
+                                        {it.limitNameRenamed ? (
+                                          <span className="limitDiffTag limitDiffTag--qty" title="Имя в лимите обновлено по колонке O">
+                                            {" "}
+                                            ⚠ лимит
+                                          </span>
+                                        ) : null}
+                                      </td>
+                                      <td className="muted" style={{ fontSize: 12, maxWidth: 200 }}>
+                                        {it.limitSectionPath || "—"}
+                                      </td>
                                       <td>
                                         {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
                                         {total.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}{" "}
@@ -7509,6 +7581,13 @@ function App() {
                           </div>
 
                           <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() => void openReceiptInvoice(row.id)}
+                            >
+                              Счёт к заявке
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -8721,6 +8800,21 @@ function App() {
                             })() : (
                               <>
                                 <strong style={{ color: "#243656" }}>{node.title}</strong>
+                                {!limitEditMode && node.nameAlertNote ? (
+                                  <button
+                                    type="button"
+                                    className="limitNameAlertBtn"
+                                    title="Расхождение наименования с заявкой"
+                                    onClick={() =>
+                                      setLimitNameAlertModal({
+                                        title: String(node.materialName || node.title),
+                                        note: node.nameAlertNote || ""
+                                      })
+                                    }
+                                  >
+                                    !
+                                  </button>
+                                ) : null}
                                 {(() => {
                                   const c = countsByNodeId.get(node.id);
                                   if (!c) return null;
@@ -8915,6 +9009,21 @@ function App() {
                               <div className="rightCardHeader" style={{ marginBottom: 8, gap: 10 }}>
                                 <div style={{ minWidth: 0 }}>
                                   <strong style={{ fontSize: 13 }}>{nodeTitle}</strong>
+                                  {node.nameAlertNote ? (
+                                    <button
+                                      type="button"
+                                      className="limitNameAlertBtn"
+                                      title="Пояснение из внешнего комментария заявки"
+                                      onClick={() =>
+                                        setLimitNameAlertModal({
+                                          title: nodeTitle,
+                                          note: node.nameAlertNote || ""
+                                        })
+                                      }
+                                    >
+                                      !
+                                    </button>
+                                  ) : null}
                                   <div className="muted">
                                     {node.unit || "шт"}
                                     {!node.materialId ? " · не сопоставлено" : ""}
@@ -9434,8 +9543,8 @@ function App() {
           >
             <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
             <p className="muted">
-              Заявки на приёмку грузим сюда. После загрузки спросим, привязать ли заявку к лимиту.
-              Сами материалы потом принимаем в разделе «Приходы» — там есть чекбоксы и приложение документов.
+              Новый формат Excel: колонка M — раздел/подраздел лимита, L — комментарий, N/O — сверка
+              наименования с C/D/E. К заявке можно приложить счёт. Повторный номер заявки не загружается.
             </p>
             <div className="toolbar" style={{ flexWrap: "wrap" }}>
               <input
@@ -12905,6 +13014,57 @@ function App() {
           </div>
         </div>
       )}
+
+      {receiptInvoiceUploadId ? (
+        <div
+          className="modalOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setReceiptInvoiceUploadId(null)}
+        >
+          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h3 style={{ marginTop: 0 }}>Счёт к заявке</h3>
+            <p className="muted">PDF или изображение счёта поставщика.</p>
+            <input
+              type="file"
+              accept=".pdf,image/*,application/pdf"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadReceiptInvoice(receiptInvoiceUploadId, f);
+              }}
+            />
+            <div className="toolbar" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+              <button type="button" className="ghostBtn" onClick={() => setReceiptInvoiceUploadId(null)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {limitNameAlertModal ? (
+        <div
+          className="modalOverlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setLimitNameAlertModal(null)}
+        >
+          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h3 style={{ marginTop: 0 }}>Расхождение наименования</h3>
+            <p>
+              <strong>{limitNameAlertModal.title}</strong>
+            </p>
+            <p className="muted" style={{ whiteSpace: "pre-wrap" }}>
+              {limitNameAlertModal.note}
+            </p>
+            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="primaryBtn" onClick={() => setLimitNameAlertModal(null)}>
+                Понятно
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PendingAcceptanceModal />
       {isAuthed && me ? (

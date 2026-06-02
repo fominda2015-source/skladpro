@@ -835,6 +835,7 @@ model ObjectLimitNode {
   plannedQty   Decimal?          @db.Decimal(14, 3)
   issuedQty    Decimal           @default(0) @db.Decimal(14, 3)
   materialId   String?
+  nameAlertNote String?
   template     ObjectLimitTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   parent       ObjectLimitNode?  @relation("LimitNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
   children     ObjectLimitNode[] @relation("LimitNodeTree")
@@ -876,6 +877,7 @@ model ReceiptRequest {
   acceptedAt            DateTime?
   fromLimit             Boolean            @default(false)
   objectLimitTemplateId String?
+  externalOrderNumber   String?
   warehouse             Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   createdBy             User?              @relation("ReceiptRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
   limitTemplate         ObjectLimitTemplate? @relation(fields: [objectLimitTemplateId], references: [id], onDelete: SetNull)
@@ -885,6 +887,7 @@ model ReceiptRequest {
 
   @@index([warehouseId, section, status, createdAt])
   @@index([objectLimitTemplateId])
+  @@index([warehouseId, section, externalOrderNumber])
 }
 
 model ReceiptRequestItem {
@@ -900,6 +903,13 @@ model ReceiptRequestItem {
   category         ReceiptItemCategory?
   unitPrice        Decimal?       @db.Decimal(14, 2)
   storagePlace     String?
+  limitSectionPath String?
+  namePartD        String?
+  namePartE        String?
+  limitCatalogNameN String?
+  limitCatalogNameO String?
+  externalComment  String?
+  limitNameRenamed Boolean        @default(false)
   receiptRequest   ReceiptRequest @relation(fields: [receiptRequestId], references: [id], onDelete: Cascade)
   mappedMaterial   Material?      @relation(fields: [mappedMaterialId], references: [id], onDelete: SetNull)
   limitNode        ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)

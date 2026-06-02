@@ -1159,6 +1159,25 @@ tr.low {
   color: #7f1d1d;
 }
 
+.limitNameAlertBtn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #f59e0b;
+  background: #fffbeb;
+  color: #b45309;
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.limitNameAlertBtn:hover {
+  background: #fef3c7;
+}
+
 .limitGroupRow {
   display: flex;
   align-items: center;
