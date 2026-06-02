@@ -938,7 +938,7 @@ model MaterialMappingLibrary {
 
 model ReceiptRequest {
   id                    String             @id @default(cuid())
-  number                String             @unique
+  number                String
   warehouseId           String
   section               ObjectSection
   status                ReceiptRequestStatus @default(NEW)
@@ -955,9 +955,11 @@ model ReceiptRequest {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
+  @@unique([warehouseId, number])
   @@index([warehouseId, section, status, createdAt])
   @@index([objectLimitTemplateId])
   @@index([warehouseId, section, externalOrderNumber])
+  @@index([warehouseId, sourceFileName])
 }
 
 model ReceiptRequestItem {

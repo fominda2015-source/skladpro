@@ -2992,6 +2992,8 @@ function App() {
         const body = (await res.json()) as { error?: string; message?: string };
         if (body.error === "DUPLICATE_ORDER") {
           serverMsg = body.message || "Эта заявка уже загружена на этот объект.";
+        } else if (body.error === "DUPLICATE_FILE") {
+          serverMsg = body.message || "Файл с таким именем уже загружался на этот объект.";
         } else if (body.error === "SCHEMA_OUTDATED") {
           serverMsg = body.message || "База данных не обновлена — обратитесь к администратору.";
         } else if (body.error === "WAREHOUSE_NOT_FOUND") {
@@ -8680,7 +8682,8 @@ function App() {
             <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
             <p className="muted">
               Новый формат Excel: колонка M — раздел/подраздел лимита, L — комментарий, N/O — сверка
-              наименования с C/D/E. К заявке можно приложить счёт. Повторный номер заявки не загружается.
+              наименования с C/D/E. К заявке можно приложить счёт. Повторная загрузка того же файла или
+              номера заявки на этом объекте не допускается.
             </p>
             <div className="toolbar" style={{ flexWrap: "wrap" }}>
               <input

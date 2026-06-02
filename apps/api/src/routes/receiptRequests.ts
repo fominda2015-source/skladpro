@@ -185,25 +185,35 @@ receiptRequestsRouter.post(
       ? `ORD-${orderNumber}`
       : `ORD-${String((await prisma.receiptRequest.count()) + 1).padStart(5, "0")}`;
 
-    if (orderNumber) {
-      const dup = await prisma.receiptRequest.findFirst({
-        where: {
-          OR: [
-            { number: receiptNumber },
-            { externalOrderNumber: orderNumber },
-            {
-              warehouseId: parsed.data.warehouseId,
-              section: parsed.data.section,
-              externalOrderNumber: orderNumber
-            }
-          ]
-        },
-        select: { id: true, number: true, warehouseId: true }
+    const sourceFileName = decodeUploadedOriginalName(req.file.originalname);
+    const objectWhere = { warehouseId: parsed.data.warehouseId };
+
+    const dupByFile = await prisma.receiptRequest.findFirst({
+      where: {
+        ...objectWhere,
+        sourceFileName: { equals: sourceFileName, mode: "insensitive" }
+      },
+      select: { id: true, number: true, sourceFileName: true }
+    });
+    if (dupByFile) {
+      return res.status(409).json({
+        error: "DUPLICATE_FILE",
+        message: `Файл «${sourceFileName}» уже загружался на этом объекте (заявка ${dupByFile.number}).`
       });
-      if (dup) {
+    }
+
+    if (orderNumber) {
+      const dupByOrder = await prisma.receiptRequest.findFirst({
+        where: {
+          ...objectWhere,
+          OR: [{ externalOrderNumber: orderNumber }, { number: receiptNumber }]
+        },
+        select: { id: true, number: true }
+      });
+      if (dupByOrder) {
         return res.status(409).json({
           error: "DUPLICATE_ORDER",
-          message: `Заявка с номером ${orderNumber} уже загружена (${dup.number}).`
+          message: `Заявка с номером ${orderNumber} уже есть на этом объекте (${dupByOrder.number}).`
         });
       }
     }
@@ -228,7 +238,7 @@ receiptRequestsRouter.post(
             externalOrderNumber: orderNumber ?? null,
             warehouseId: parsed.data.warehouseId,
             section: parsed.data.section,
-            sourceFileName: decodeUploadedOriginalName(req.file!.originalname),
+            sourceFileName,
             createdById: req.user!.userId,
             fromLimit: fromLimitFlag,
             objectLimitTemplateId: attachedTemplateId ?? null,

@@ -6,12 +6,12 @@ export function handlePrismaError(error: unknown) {
     if (error.code === "P2002") {
       const target = error.meta?.target;
       const fields = Array.isArray(target) ? target : [];
-      if (fields.includes("number")) {
+      if (fields.includes("number") || fields.includes("warehouseId")) {
         return {
           status: 409,
           body: {
             error: "DUPLICATE_ORDER",
-            message: "Заявка с таким номером уже есть в системе (возможно на другом объекте)."
+            message: "Заявка с таким номером уже есть на этом объекте."
           }
         };
       }
