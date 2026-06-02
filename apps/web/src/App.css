@@ -6533,6 +6533,26 @@ button.whMenuItem:hover,
   margin: 0 0 8px;
   font-size: 13px;
 }
+.transfersFilterSummary {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.transfersFilterCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.transfersFilterCheck input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0;
+}
+.transfersPanel .toolsListToolbar {
+  margin-bottom: 4px;
+}
 .transfersMessage {
   margin: 0;
   padding: 10px 14px;

@@ -3,6 +3,7 @@ import { API_URL } from "../../app/constants";
 import { ErrorState, LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { PageHero } from "../ui/PageHero";
+import { ToolsListToolbar } from "../tools/ToolsListToolbar";
 
 type Warehouse = { id: string; name: string };
 
@@ -71,6 +72,13 @@ type Props = {
 };
 
 type SubTab = "request" | "outgoing" | "incoming" | "waybills";
+type MaterialKindFilter = "" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+
+const KIND_LABEL: Record<string, string> = {
+  MATERIAL: "Материал",
+  CONSUMABLE: "Расходник",
+  WORKWEAR: "СИЗ"
+};
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Новая",
@@ -103,6 +111,10 @@ export function TransfersTab({
   const [peerLoading, setPeerLoading] = useState(false);
   const [peerError, setPeerError] = useState("");
   const [expandedWh, setExpandedWh] = useState<string | null>(null);
+  const [requestSearch, setRequestSearch] = useState("");
+  const [filterWarehouseId, setFilterWarehouseId] = useState("");
+  const [filterKind, setFilterKind] = useState<MaterialKindFilter>("");
+  const [onlyAvailable, setOnlyAvailable] = useState(true);
   const [selected, setSelected] = useState<Record<string, { qty: number; limitNodeId: string | null }>>({});
   const [fromWarehouseId, setFromWarehouseId] = useState("");
   const [note, setNote] = useState("");
@@ -174,6 +186,43 @@ export function TransfersTab({
     () => incoming.filter((t) => t.status === "DONE" || t.status === "REJECTED" || t.status === "CANCELLED"),
     [incoming]
   );
+
+  const filteredPeerData = useMemo(() => {
+    const q = requestSearch.trim().toLowerCase();
+    const hasStockFilters = Boolean(q || filterKind || onlyAvailable);
+
+    return peerData
+      .filter((wh) => !filterWarehouseId || wh.warehouseId === filterWarehouseId)
+      .map((wh) => {
+        const stocks = wh.stocks.filter((row) => {
+          if (filterKind && row.kind !== filterKind) return false;
+          if (onlyAvailable && row.available <= 0) return false;
+          if (!q) return true;
+          return (
+            row.materialName.toLowerCase().includes(q) ||
+            wh.warehouseName.toLowerCase().includes(q) ||
+            row.unit.toLowerCase().includes(q)
+          );
+        });
+        return { ...wh, stocks };
+      })
+      .filter((wh) => {
+        if (wh.stocks.length > 0) return true;
+        if (filterWarehouseId && wh.warehouseId === filterWarehouseId) return true;
+        return !hasStockFilters;
+      });
+  }, [peerData, requestSearch, filterWarehouseId, filterKind, onlyAvailable]);
+
+  const filteredStockCount = useMemo(
+    () => filteredPeerData.reduce((n, wh) => n + wh.stocks.length, 0),
+    [filteredPeerData]
+  );
+
+  useEffect(() => {
+    if (!requestSearch.trim() && !filterWarehouseId) return;
+    const first = filteredPeerData.find((w) => w.stocks.length > 0);
+    if (first) setExpandedWh(first.warehouseId);
+  }, [requestSearch, filterWarehouseId, filterKind, onlyAvailable, filteredPeerData]);
 
   const selectedLines = useMemo(() => {
     const lines: Array<{ materialId: string; quantity: number; limitNodeId: string | null; label: string }> = [];
@@ -375,11 +424,82 @@ export function TransfersTab({
                 <strong>{safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}</strong>. Отметьте
                 позиции на других складах и укажите количество не больше доступного (остаток минус резерв).
               </p>
+
+              <ToolsListToolbar
+                search={requestSearch}
+                onSearchChange={setRequestSearch}
+                searchPlaceholder="Поиск: материал, склад, единица…"
+                filters={
+                  <>
+                    <label>
+                      Объект-отправитель
+                      <select
+                        value={filterWarehouseId}
+                        onChange={(e) => setFilterWarehouseId(e.target.value)}
+                        aria-label="Фильтр по объекту"
+                      >
+                        <option value="">Все объекты</option>
+                        {peerData.map((w) => (
+                          <option key={w.warehouseId} value={w.warehouseId}>
+                            {safeName(w.warehouseName)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Вид ТМЦ
+                      <select
+                        value={filterKind}
+                        onChange={(e) => setFilterKind((e.target.value || "") as MaterialKindFilter)}
+                        aria-label="Вид материала"
+                      >
+                        <option value="">Все виды</option>
+                        <option value="MATERIAL">{KIND_LABEL.MATERIAL}</option>
+                        <option value="CONSUMABLE">{KIND_LABEL.CONSUMABLE}</option>
+                        <option value="WORKWEAR">{KIND_LABEL.WORKWEAR}</option>
+                      </select>
+                    </label>
+                    <label className="transfersFilterCheck">
+                      <input
+                        type="checkbox"
+                        checked={onlyAvailable}
+                        onChange={(e) => setOnlyAvailable(e.target.checked)}
+                      />
+                      Только с доступным остатком
+                    </label>
+                  </>
+                }
+                actions={
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    onClick={() => {
+                      setRequestSearch("");
+                      setFilterWarehouseId("");
+                      setFilterKind("");
+                      setOnlyAvailable(true);
+                    }}
+                  >
+                    Сбросить
+                  </button>
+                }
+              />
+
+              {!peerLoading && !peerError ? (
+                <p className="muted transfersFilterSummary">
+                  Показано {filteredStockCount} позиций на {filteredPeerData.length} объектах
+                  {peerData.length !== filteredPeerData.length ? ` (всего объектов ${peerData.length})` : ""}
+                </p>
+              ) : null}
+
               {peerLoading ? <LoadingState text="Загружаем остатки…" /> : null}
               {peerError ? <ErrorState text={peerError} /> : null}
-              {!peerLoading && !peerError ? (
+              {!peerLoading && !peerError && filteredPeerData.length === 0 ? (
+                <p className="muted">По фильтрам ничего не найдено. Измените условия или сбросьте фильтры.</p>
+              ) : null}
+              {!peerLoading && !peerError && filteredPeerData.length > 0 ? (
                 <div className="transfersPeerList">
-                  {peerData.map((wh) => {
+                  {filteredPeerData.map((wh) => {
                     const open = expandedWh === wh.warehouseId;
                     return (
                       <section key={wh.warehouseId} className="transfersPeerCard card">
@@ -426,7 +546,13 @@ export function TransfersTab({
                                           </td>
                                           <td>
                                             {row.materialName}
-                                            <span className="muted"> · {row.unit}</span>
+                                            <span className="muted">
+                                              {" "}
+                                              · {row.unit}
+                                              {row.kind && row.kind !== "MATERIAL"
+                                                ? ` · ${KIND_LABEL[row.kind] ?? row.kind}`
+                                                : ""}
+                                            </span>
                                           </td>
                                           <td className="muted">
                                             {row.available.toLocaleString("ru-RU")}
