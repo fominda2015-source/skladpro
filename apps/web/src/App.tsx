@@ -75,6 +75,7 @@ import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
+import { TransfersTab } from "./widgets/transfers/TransfersTab";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ChatUserProfileModal, type ChatUserProfile } from "./widgets/chat/ChatUserProfileModal";
 import { ActsTab } from "./widgets/acts/ActsTab";
@@ -493,22 +494,6 @@ type FeedbackTicketDetailView = {
   authorName: string;
   messages: ChatMessage[];
 };
-type TransferRequestApiRow = {
-  id: string;
-  number: string;
-  fromWarehouseId: string;
-  toWarehouseId: string;
-  fromWarehouseName: string | null;
-  toWarehouseName: string | null;
-  section: string;
-  requestedById: string;
-  requesterName: string | null;
-  status: string;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lines: Array<{ materialId: string; quantity: number; materialName: string; unit: string }>;
-};
 type Conversation = {
   id: string;
   kind: "DM" | "FEEDBACK";
@@ -574,6 +559,7 @@ type LimitImportNode = {
   unit?: string | null;
   plannedQty?: string | number | null;
   issuedQty?: string | number | null;
+  transferredOutQty?: string | number | null;
   nameAlertNote?: string | null;
   orderNo: number;
 };
@@ -1089,16 +1075,6 @@ function App() {
   const [waybillMaterialId, setWaybillMaterialId] = useState("");
   const [waybillQty, setWaybillQty] = useState(1);
   const [selectedWaybillId, setSelectedWaybillId] = useState("");
-  const [peerSummaries, setPeerSummaries] = useState<
-    Array<{ warehouseId: string; warehouseName: string; stockLines: number; totalQty: number }>
-  >([]);
-  const [transferRequests, setTransferRequests] = useState<TransferRequestApiRow[]>([]);
-  const [transferReqFromWarehouseId, setTransferReqFromWarehouseId] = useState("");
-  const [transferReqToWarehouseId, setTransferReqToWarehouseId] = useState("");
-  const [transferReqMaterialId, setTransferReqMaterialId] = useState("");
-  const [transferReqQty, setTransferReqQty] = useState(1);
-  const [transferReqNote, setTransferReqNote] = useState("");
-  const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
   const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser" | "tool">("");
 
@@ -1306,14 +1282,6 @@ function App() {
       WAITING_REPLY: "Ожидает ответа",
       RESOLVED: "Решено",
       CLOSED: "Закрыто"
-    })[status] ?? status;
-  const transferRequestStatusLabel = (status: string) =>
-    ({
-      NEW: "Новая",
-      APPROVED: "Согласовано",
-      REJECTED: "Отказано",
-      DONE: "Выполнено",
-      CANCELLED: "Отменено автором"
     })[status] ?? status;
   const dmByUserId = useMemo(() => {
     const map = new Map<string, Conversation>();
@@ -2731,70 +2699,6 @@ function App() {
       return;
     }
     await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(ticketId)]);
-  }
-
-  async function loadTransferRequestsList() {
-    if (!token) return;
-    const res = await fetchWithSession(`${API_URL}/api/transfer-requests`, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) setTransferRequests((await res.json()) as TransferRequestApiRow[]);
-  }
-
-  async function loadPeerWarehouseSummaries() {
-    if (!token || !activeObjectId) {
-      setPeerSummaries([]);
-      return;
-    }
-    const sec = objectSectionFilter === "EOM" ? "EOM" : "SS";
-    const res = await fetchWithSession(
-      `${API_URL}/api/stocks/peer-summaries?excludeWarehouseId=${encodeURIComponent(activeObjectId)}&section=${sec}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (res.ok) setPeerSummaries(await res.json());
-  }
-
-  async function submitWarehouseTransferRequest() {
-    if (!token || transferReqSaving) return;
-    if (transferReqFromWarehouseId === transferReqToWarehouseId) {
-      return;
-    }
-    if (!transferReqMaterialId || transferReqQty <= 0) return;
-    setTransferReqSaving(true);
-    try {
-      const section = objectSectionFilter === "EOM" ? "EOM" : "SS";
-      const res = await fetchWithSession(`${API_URL}/api/transfer-requests`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fromWarehouseId: transferReqFromWarehouseId,
-          toWarehouseId: transferReqToWarehouseId,
-          section,
-          lines: [{ materialId: transferReqMaterialId, quantity: transferReqQty }],
-          note: transferReqNote.trim() || undefined
-        })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        setWaybillsMessage(typeof err.error === "string" ? err.error : `Ошибка создания заявки (${res.status})`);
-        setWaybillsTone("error");
-        return;
-      }
-      setWaybillsMessage("Заявка на перемещение создана");
-      setWaybillsTone("success");
-      await Promise.all([loadTransferRequestsList(), loadPeerWarehouseSummaries()]);
-    } finally {
-      setTransferReqSaving(false);
-    }
-  }
-
-  async function patchWarehouseTransferStatus(transferId: string, status: string) {
-    if (!token) return;
-    const res = await fetchWithSession(`${API_URL}/api/transfer-requests/${transferId}`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
-    });
-    if (!res.ok) return;
-    await loadTransferRequestsList();
   }
 
   async function syncObjectUsers(objectId: string, userIds: string[]) {
@@ -5629,8 +5533,6 @@ function App() {
     if (token && activeTab === "waybills") {
       void loadCatalogData();
       void loadWaybills();
-      void loadPeerWarehouseSummaries();
-      void loadTransferRequestsList();
     }
   }, [
     token,
@@ -5662,23 +5564,7 @@ function App() {
     if (materials.length > 0 && !waybillMaterialId) {
       setWaybillMaterialId(materials[0].id);
     }
-    if (materials.length > 0 && !transferReqMaterialId) {
-      setTransferReqMaterialId(materials[0].id);
-    }
-  }, [warehouses, materials, waybillFromWarehouseId, waybillMaterialId, transferReqMaterialId]);
-
-  useEffect(() => {
-    if (activeTab !== "waybills" || !warehouses.length) return;
-    const to =
-      activeObjectId &&
-      activeObjectId !== ALL_OBJECTS_ID &&
-      warehouses.some((w) => w.id === activeObjectId)
-        ? activeObjectId
-        : warehouses[0].id;
-    setTransferReqToWarehouseId(to);
-    const from = warehouses.find((w) => w.id !== to) ?? warehouses[0];
-    setTransferReqFromWarehouseId(from.id);
-  }, [activeTab, warehouses, activeObjectId]);
+  }, [warehouses, materials, waybillFromWarehouseId, waybillMaterialId]);
 
   useEffect(() => {
     if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
@@ -9345,6 +9231,9 @@ function App() {
                                   <th className="num" title="Осталось привезти = План − Приход">Привезти</th>
                                   <th className="num" title="В закупке — открытые заявки на приход">В закупке</th>
                                   <th className="num" title="Текущий остаток на складе">На складе</th>
+                                  <th className="num" title="Зарезервировано под перемещение на другой объект">
+                                    На др. объект
+                                  </th>
                                   <th
                                     className="structureCell"
                                     title="Жёлтая/зелёная — выдача, красная — перерасход, синяя — приход по заявке"
@@ -9363,6 +9252,7 @@ function App() {
                                     : 0;
                                   const onOrd = sm?.onOrderQty ?? 0;
                                   const stk = sm?.stockQty ?? 0;
+                                  const transferredOut = Number(m.transferredOutQty || 0);
                                   const remain = Math.max(0, plan - arrived);
                                   const mDiff = importDiff?.statusByNodeId.get(m.id);
                                   const mPrevPlan = importDiff?.prevPlannedByNodeId.get(m.id);
@@ -9396,6 +9286,7 @@ function App() {
                                       <td className="num">{m.materialId ? metricFmt(remain) : "—"}</td>
                                       <td className="num">{m.materialId ? metricFmt(onOrd) : "—"}</td>
                                       <td className="num">{m.materialId ? metricFmt(stk) : "—"}</td>
+                                      <td className="num">{m.materialId ? metricFmt(transferredOut) : "—"}</td>
                                       <td className="structureCell">
                                         {m.materialId && plan > 0 ? (
                                           <LimitStructureBars plan={plan} issued={iss} arrived={arrived} />
@@ -10068,196 +9959,35 @@ function App() {
       {activeTab === "waybills" && (
         <div>
           {renderTabObjectFilter()}
-          <PageHero
-            icon="↔"
-            title="Перемещения"
-            subtitle="Транспортные накладные и заявки между складами"
-            stats={[
-              { label: "ТН всего", value: waybills.length },
-              {
-                label: "В пути",
-                value: waybills.filter((x) => x.status === "SHIPPED").length,
-                tone: waybills.filter((x) => x.status === "SHIPPED").length > 0 ? "warn" : "neutral"
-              },
-              { label: "Заявок", value: transferRequests.length }
-            ]}
-            actions={
-              <button type="button" className="ghostBtn" onClick={() => void loadWaybills()}>
-                ↻ Обновить
-              </button>
+          <TransfersTab
+            token={token}
+            fetchWithSession={fetchWithSession}
+            meId={me?.id ?? ""}
+            toWarehouseId={
+              activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : warehouses[0]?.id ?? ""
             }
-          />
-          {waybillsLoading && <LoadingState text="Загрузка ТН..." />}
-          {waybillsError && <ErrorState text={waybillsError} />}
-          <FilterStrip>
-            <select value={waybillStatusFilter} onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}>
-              <option value="">Все статусы ТН</option>
-              <option value="DRAFT">{waybillStatusLabel("DRAFT")}</option>
-              <option value="FORMED">{waybillStatusLabel("FORMED")}</option>
-              <option value="SHIPPED">{waybillStatusLabel("SHIPPED")}</option>
-              <option value="RECEIVED">{waybillStatusLabel("RECEIVED")}</option>
-              <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
-            </select>
-          </FilterStrip>
-
-          <div className="grid2" style={{ marginBottom: 12 }}>
-            <div className="card">
-              <h3>Остатки на других складах</h3>
-              <p className="muted">
-                Раздел в шапке: {objectSectionFilter === "SS" ? "СС" : "ЭОМ"} · показаны склады вашего доступа, кроме текущего
-                объекта.
-              </p>
-              {!activeObjectId ? (
-                <p className="muted">Выберите объект в шапке.</p>
-              ) : peerSummaries.length === 0 ? (
-                <p className="muted">Нет сумм по другим складам (в доступе один объект или нет строк остатков).</p>
-              ) : (
-                <div className="erpTableWrap">
-                <table className="erpTable desktopTable">
-                  <thead>
-                    <tr>
-                      <th>Склад</th>
-                      <th>Позиций</th>
-                      <th>Сумма количества</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {peerSummaries.map((p) => (
-                      <tr key={p.warehouseId}>
-                        <td>{safeName(p.warehouseName)}</td>
-                        <td>{p.stockLines}</td>
-                        <td>{p.totalQty.toLocaleString("ru-RU")}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              )}
-            </div>
-            <div className="card">
-              <h3>Заявка на перемещение</h3>
-              {!canWriteWaybills ? (
-                <p className="muted">Недостаточно прав (<code>waybills.write</code>).</p>
-              ) : (
-                <div className="form">
-                  <label>
-                    Склад-отправитель
-                    <select value={transferReqFromWarehouseId} onChange={(e) => setTransferReqFromWarehouseId(e.target.value)}>
-                      {warehouses.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {safeName(w.name)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Склад-получатель
-                    <select value={transferReqToWarehouseId} onChange={(e) => setTransferReqToWarehouseId(e.target.value)}>
-                      {warehouses.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {safeName(w.name)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Материал · количество
-                    <select value={transferReqMaterialId} onChange={(e) => setTransferReqMaterialId(e.target.value)}>
-                      {materials.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={0.001}
-                      step={0.001}
-                      value={transferReqQty}
-                      onChange={(e) => setTransferReqQty(Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Комментарий
-                    <input value={transferReqNote} onChange={(e) => setTransferReqNote(e.target.value)} />
-                  </label>
-                  <button type="button" disabled={transferReqSaving || transferReqFromWarehouseId === transferReqToWarehouseId} onClick={() => void submitWarehouseTransferRequest()}>
-                    Отправить заявку
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h3>Список заявок на перемещение</h3>
-            {transferRequests.length === 0 ? (
-              <p className="muted">Заявок нет.</p>
-            ) : (
-              <div className="erpTableWrap">
-              <table className="erpTable desktopTable">
-                <thead>
-                  <tr>
-                    <th>Номер</th>
-                    <th>Статус</th>
-                    <th>Маршрут</th>
-                    <th>Состав</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transferRequests.map((tr) => (
-                    <tr key={tr.id}>
-                      <td><strong>{tr.number}</strong></td>
-                      <td><StatusBadge tone="neutral">{transferRequestStatusLabel(tr.status)}</StatusBadge></td>
-                      <td>
-                        {safeName(tr.fromWarehouseName || tr.fromWarehouseId)} → {safeName(tr.toWarehouseName || tr.toWarehouseId)} ·{" "}
-                        {tr.section}
-                      </td>
-                      <td>
-                        {(tr.lines || []).map((ln) => (
-                          <div key={`${tr.id}:${ln.materialId}`}>
-                            {ln.materialName} · {ln.quantity} {ln.unit}
-                          </div>
-                        ))}
-                      </td>
-                      <td>
-                        <div className="toolbar" style={{ flexWrap: "wrap" }}>
-                          {tr.status === "NEW" ? (
-                            <>
-                              {canWriteWaybills ? (
-                                <>
-                                  <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "APPROVED")}>
-                                    Согласовать
-                                  </button>
-                                  <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "REJECTED")}>
-                                    Отказать
-                                  </button>
-                                </>
-                              ) : null}
-                              {me?.id === tr.requestedById ? (
-                                <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "CANCELLED")}>
-                                  Отменить
-                                </button>
-                              ) : null}
-                            </>
-                          ) : null}
-                          {tr.status === "APPROVED" && canWriteWaybills ? (
-                            <button type="button" className="ghostBtn" onClick={() => void patchWarehouseTransferStatus(tr.id, "DONE")}>
-                              Завершить
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
-            )}
-          </div>
-
-          <div className="grid2">
+            section={objectSectionFilter}
+            warehouses={warehouses}
+            canWrite={canWriteWaybills}
+            safeName={safeName}
+            waybillsSlot={
+              <>
+                {waybillsLoading && <LoadingState text="Загрузка ТН..." />}
+                {waybillsError && <ErrorState text={waybillsError} />}
+                <FilterStrip>
+                  <select
+                    value={waybillStatusFilter}
+                    onChange={(e) => setWaybillStatusFilter((e.target.value || "") as "" | WaybillStatus)}
+                  >
+                    <option value="">Все статусы ТН</option>
+                    <option value="DRAFT">{waybillStatusLabel("DRAFT")}</option>
+                    <option value="FORMED">{waybillStatusLabel("FORMED")}</option>
+                    <option value="SHIPPED">{waybillStatusLabel("SHIPPED")}</option>
+                    <option value="RECEIVED">{waybillStatusLabel("RECEIVED")}</option>
+                    <option value="CLOSED">{waybillStatusLabel("CLOSED")}</option>
+                  </select>
+                </FilterStrip>
+                <div className="grid2">
             <div className="card">
               <h3>Новая ТН</h3>
               <div className="form">
@@ -10429,12 +10159,23 @@ function App() {
               )}
             </div>
           </div>
-          <div className="actionBar">
-            <button onClick={() => setWaybillStatusFilter("DRAFT")}>Черновики</button>
-            <button onClick={() => setWaybillStatusFilter("SHIPPED")}>В пути</button>
-            <button onClick={() => setWaybillStatusFilter("RECEIVED")}>Полученные</button>
-            <button onClick={() => setWaybillStatusFilter("")}>Все ТН</button>
-          </div>
+                <div className="actionBar">
+                  <button type="button" onClick={() => setWaybillStatusFilter("DRAFT")}>
+                    Черновики
+                  </button>
+                  <button type="button" onClick={() => setWaybillStatusFilter("SHIPPED")}>
+                    В пути
+                  </button>
+                  <button type="button" onClick={() => setWaybillStatusFilter("RECEIVED")}>
+                    Полученные
+                  </button>
+                  <button type="button" onClick={() => setWaybillStatusFilter("")}>
+                    Все ТН
+                  </button>
+                </div>
+              </>
+            }
+          />
         </div>
       )}
 

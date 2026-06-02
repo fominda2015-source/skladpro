@@ -6494,3 +6494,137 @@ button.whMenuItem:hover,
   border-radius: 999px;
   font-size: 13px;
 }
+
+.transfersWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.transfersSubNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+}
+.transfersSubNav button {
+  width: auto;
+  height: auto;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+  font-size: 13px;
+}
+.transfersSubNav button:hover {
+  background: #e2e8f0;
+}
+.transfersSubNav button.active {
+  background: #2563eb;
+  color: #fff;
+}
+.transfersPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.transfersHint {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.transfersMessage {
+  margin: 0;
+  padding: 10px 14px;
+  background: #f0f9ff;
+  border-radius: 10px;
+  border: 1px solid #bae6fd;
+}
+.transfersPeerList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.transfersPeerCard {
+  padding: 0;
+  overflow: hidden;
+}
+.transfersPeerCardHead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: none;
+  background: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.transfersPeerCardHead:hover {
+  background: #f1f5f9;
+}
+.transfersPeerCardHead strong {
+  flex: 1;
+  min-width: 0;
+}
+.transfersPeerChevron {
+  color: #64748b;
+  font-size: 12px;
+}
+.transfersPeerCardBody {
+  padding: 0 12px 12px;
+}
+.transfersPickTable input[type="number"] {
+  width: 100%;
+  max-width: 96px;
+  height: 32px;
+}
+.transfersRequestBar {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  position: sticky;
+  bottom: 8px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+}
+.transfersRequestBar label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.transfersRequestBar select,
+.transfersRequestBar input {
+  height: 36px;
+}
+.transfersRequestSummary ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.transfersRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.transfersRowActions .primaryBtn,
+.transfersRowActions .ghostBtn {
+  width: auto;
+  height: auto;
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.transfersReceiveDetail {
+  margin-top: 12px;
+}
+.transfersUploadLabel input[type="file"] {
+  display: none;
+}
+.transfersDocList {
+  margin: 8px 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+}

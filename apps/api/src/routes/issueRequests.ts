@@ -1238,7 +1238,8 @@ issueRequestsRouter.patch(
             }
           }
         });
-        if (!stock || Number(stock.quantity) < Number(item.quantity)) {
+        const available = stock ? Number(stock.quantity) - Number(stock.reserved) : 0;
+        if (!stock || available < Number(item.quantity) - 1e-9) {
           throw new Error(`INSUFFICIENT_STOCK:${item.materialId}`);
         }
       }

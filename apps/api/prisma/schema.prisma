@@ -779,8 +779,12 @@ model TransferRequest {
   toWarehouseId   String
   section         ObjectSection
   requestedById   String
+  approvedById    String?
+  receivedById    String?
   status          TransferRequestStatus @default(NEW)
   note            String?
+  approvedAt      DateTime?
+  receivedAt      DateTime?
   fromWarehouse   Warehouse @relation("TransferFromWh", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
   toWarehouse     Warehouse @relation("TransferToWh", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   requestedBy     User      @relation(fields: [requestedById], references: [id], onDelete: Restrict)
@@ -797,8 +801,10 @@ model TransferRequestLine {
   transferRequestId String
   materialId        String
   quantity          Decimal @db.Decimal(14, 3)
+  limitNodeId       String?
   transferRequest   TransferRequest @relation(fields: [transferRequestId], references: [id], onDelete: Cascade)
   material          Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  limitNode         ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
 
   @@index([transferRequestId])
 }
@@ -891,6 +897,7 @@ model ObjectLimitNode {
   unit         String?
   plannedQty   Decimal?          @db.Decimal(14, 3)
   issuedQty    Decimal           @default(0) @db.Decimal(14, 3)
+  transferredOutQty Decimal      @default(0) @db.Decimal(14, 3)
   materialId   String?
   nameAlertNote String?
   template     ObjectLimitTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -899,6 +906,7 @@ model ObjectLimitNode {
   material     Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
   receiptRequestItems ReceiptRequestItem[]
   issueRequestItems   IssueRequestItem[]
+  transferRequestLines TransferRequestLine[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
