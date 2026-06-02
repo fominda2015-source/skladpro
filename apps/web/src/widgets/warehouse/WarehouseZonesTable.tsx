@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
+import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 export type ZoneStockRow = {
   storageRoom?: string | null;
@@ -67,6 +68,7 @@ export function WarehouseZonesTable({ rows, maxCapacityPerCell = 100 }: Props) {
           {totals.occupied} занято · {totals.lines} позиций
         </span>
       </div>
+      <ResponsiveTableShell>
       <div className="erpTableWrap">
         <table className="erpTable desktopTable">
           <thead>
@@ -100,6 +102,20 @@ export function WarehouseZonesTable({ rows, maxCapacityPerCell = 100 }: Props) {
           </tbody>
         </table>
       </div>
+      <div className="mobileCards">
+        {zones.map((z) => (
+          <MobileCard key={`m-${z.key}`}>
+            <h4>{z.room}</h4>
+            <MobileCardField label="Ячейка">{z.cell}</MobileCardField>
+            <MobileCardField label="Позиций">{z.lines}</MobileCardField>
+            <MobileCardField label="Кол-во">{z.totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</MobileCardField>
+            <MobileCardField label="Заполненность">
+              <StatusBadge tone={z.fillPct >= 100 ? "bad" : z.fillPct >= 75 ? "warn" : "ok"}>{z.fillPct}%</StatusBadge>
+            </MobileCardField>
+          </MobileCard>
+        ))}
+      </div>
+      </ResponsiveTableShell>
     </section>
   );
 }

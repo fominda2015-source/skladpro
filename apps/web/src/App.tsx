@@ -99,6 +99,7 @@ import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
+import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
@@ -5492,6 +5493,7 @@ function App() {
   };
 
   return (
+    <ViewportRoot bottomNav={Boolean(isAuthed && me)}>
     <main className={`shell uiSupreme ${isStorekeeperMode ? "warehouseMode" : ""}`}>
       <aside className={`sidebar ${mobileNavOpen ? "mobileOpen" : ""}`}>
         <div className="brandWrap">
@@ -6380,7 +6382,7 @@ function App() {
           )}
 
           {receiptRequests.length > 0 ? (
-            <div className="erpTableWrap" style={{ marginTop: 12 }}>
+            <div className="erpTableWrap receiptsWorkspace" style={{ marginTop: 12 }}>
               <table className="erpTable desktopTable">
                 <thead>
                   <tr>
@@ -6893,7 +6895,7 @@ function App() {
             <p className="muted" style={{ margin: "0 0 8px" }}>
               Каждая приёмка по заявке создаёт операцию INCOME — история и прикреплённые сканы.
             </p>
-            <div className="erpTableWrap">
+            <div className="erpTableWrap responsiveTable--dual">
             <table className="erpTable desktopTable">
               <thead>
                 <tr><th>Документ</th><th>Дата</th><th>Файлы</th></tr>
@@ -6908,7 +6910,6 @@ function App() {
                 ))}
               </tbody>
             </table>
-            </div>
             <div className="mobileCards">
               {operations.filter((o) => o.type === "INCOME").slice(0, 20).map((o) => (
                 <article key={`m-op-${o.id}`} className="mobileCard">
@@ -6917,6 +6918,7 @@ function App() {
                   <button type="button" onClick={() => openDocumentsForEntity("operation", o.id)}>Документы</button>
                 </article>
               ))}
+            </div>
             </div>
           </div>
             </>
@@ -7529,6 +7531,7 @@ function App() {
             )}
             {!issuesLoading && !issuesError && issues.length > 0 && (
               <>
+                <div className="responsiveTable--dual">
                 <div className="erpTableWrap">
                 <table className="erpTable desktopTable issueHistoryTable">
                   <thead>
@@ -7598,6 +7601,7 @@ function App() {
                       </div>
                     </article>
                   ))}
+                </div>
                 </div>
                 <div className="toolbar">
                   <span className="muted">
@@ -9032,7 +9036,7 @@ function App() {
                 </select>
                 <button onClick={() => void loadWaybillEvents(selectedWaybillId)}>История статусов</button>
               </div>
-              <div className="erpTableWrap">
+              <div className="erpTableWrap responsiveTable--dual">
               <table className="erpTable desktopTable">
                 <thead>
                   <tr>
@@ -9062,9 +9066,23 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              <div className="mobileCards">
+                {waybills.map((w) => (
+                  <article key={`m-wb-${w.id}`} className="mobileCard">
+                    <h4>{w.number}</h4>
+                    <p><strong>Статус:</strong> <StatusBadge tone={issueStatusTone(w.status)}>{waybillStatusLabel(w.status)}</StatusBadge></p>
+                    <p><strong>Маршрут:</strong> {w.toLocation}</p>
+                    <div className="toolbar">
+                      <button type="button" onClick={() => { setSelectedWaybillId(w.id); setDrawerMode("waybill"); }}>Детали</button>
+                      <button type="button" onClick={() => void executeWaybillStatus(w.id, "FORMED", "Сформировано в интерфейсе")}>Сформировать</button>
+                      <button type="button" onClick={async () => { await openWaybillPdf(w.id, w.number); }}>PDF</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
               </div>
               <h3 style={{ marginTop: 12 }}>История статусов</h3>
-              <div className="erpTableWrap">
+              <div className="erpTableWrap responsiveTable--dual">
               <table className="erpTable desktopTable">
                 <thead>
                   <tr>
@@ -9083,6 +9101,15 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              <div className="mobileCards">
+                {waybillEvents.map((e) => (
+                  <article key={`m-wbe-${e.id}`} className="mobileCard">
+                    <h4>{waybillStatusLabel(e.status)}</h4>
+                    <p><strong>Дата:</strong> {new Date(e.createdAt).toLocaleString()}</p>
+                    <p><strong>Комментарий:</strong> {e.comment || "-"}</p>
+                  </article>
+                ))}
+              </div>
               </div>
               <div className="toolbar">
                 <span className="muted">
@@ -11955,6 +11982,7 @@ function App() {
       ) : null}
       </section>
     </main>
+    </ViewportRoot>
   );
 }
 

@@ -6,6 +6,7 @@ import {
   type LimitMaterialRiskRow,
   type LimitRiskTemplate
 } from "./limitsRiskUtils";
+import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 type Props = {
   templates: LimitRiskTemplate[];
@@ -112,6 +113,7 @@ export function LimitsRiskTable({
         </button>
       </div>
 
+      <ResponsiveTableShell>
       <div className="erpTableWrap">
         <table className="erpTable desktopTable">
           <thead>
@@ -174,6 +176,21 @@ export function LimitsRiskTable({
           </tbody>
         </table>
       </div>
+      <div className="mobileCards">
+        {rows.map((r) => (
+          <MobileCard key={`m-${r.templateId}-${r.nodeId}`}>
+            <h4>{r.name}</h4>
+            {r.path ? <p className="muted" style={{ margin: 0, fontSize: 11 }}>{r.path}</p> : null}
+            <MobileCardField label="План">{r.planned > 0 ? `${r.planned.toLocaleString("ru-RU")} ${r.unit}` : "—"}</MobileCardField>
+            <MobileCardField label="Выдано">{r.issued.toLocaleString("ru-RU")} {r.unit}</MobileCardField>
+            <MobileCardField label="%">{r.planned > 0 ? `${r.percent}%` : "—"}</MobileCardField>
+            <MobileCardField label="Статус">
+              <StatusBadge tone={riskTone(r.risk)}>{riskLabel(r.risk)}</StatusBadge>
+            </MobileCardField>
+          </MobileCard>
+        ))}
+      </div>
+      </ResponsiveTableShell>
       {showOnlyRisk && !rows.length ? (
         <p className="muted" style={{ margin: "10px 0 0" }}>
           Нет позиций с перерасходом или риском ≥90%.

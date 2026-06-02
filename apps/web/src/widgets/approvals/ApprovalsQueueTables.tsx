@@ -1,5 +1,6 @@
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { receiptStatusLabel, receiptStatusTone } from "../receipts/receiptLabels";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 export type ApprovalIssueRow = {
   id: string;
@@ -48,7 +49,8 @@ export function ApprovalsIssueQueueTable({
           {domainLabel}
         </span>
       </div>
-      <div className="erpTableWrap">
+      <ResponsiveTableShell>
+        <div className="erpTableWrap">
         <table className="erpTable desktopTable">
           <thead>
             <tr>
@@ -100,7 +102,38 @@ export function ApprovalsIssueQueueTable({
             )}
           </tbody>
         </table>
-      </div>
+        </div>
+        <div className="mobileCards">
+          {rows.length === 0 ? (
+            <p className="muted">В очереди ничего нет для этого типа.</p>
+          ) : (
+            rows.map((i) => (
+              <MobileCard key={`m-${i.id}`}>
+                <h4>{i.number}</h4>
+                <MobileCardField label="Склад">{i.warehouse?.name || i.warehouseId}</MobileCardField>
+                <MobileCardField label="Инициатор">{i.requestedBy?.fullName || i.requestedById}</MobileCardField>
+                <MobileCardField label="Статус">
+                  <StatusBadge tone={statusTone(i.status)}>{issueStatusLabel(i.status)}</StatusBadge>
+                </MobileCardField>
+                <MobileCardActions>
+                  <button type="button" className="ghostBtn" onClick={() => onOpenTable(i)}>
+                    Таблица
+                  </button>
+                  <button type="button" className="ghostBtn" onClick={() => onOpenDetails(i.id)}>
+                    Детали
+                  </button>
+                  <button type="button" className="primaryBtn" onClick={() => onApprove(i.id)}>
+                    Одобрить
+                  </button>
+                  <button type="button" className="ghostBtn" onClick={() => onReject(i.id)}>
+                    Отклонить
+                  </button>
+                </MobileCardActions>
+              </MobileCard>
+            ))
+          )}
+        </div>
+      </ResponsiveTableShell>
     </section>
   );
 }
@@ -131,7 +164,8 @@ export function ApprovalsReceiptRequestsTable({
       {rows.length === 0 ? (
         <p className="muted">Приходных заявок пока нет.</p>
       ) : (
-        <div className="erpTableWrap">
+        <ResponsiveTableShell>
+          <div className="erpTableWrap">
           <table className="erpTable desktopTable">
             <thead>
               <tr>
@@ -174,7 +208,33 @@ export function ApprovalsReceiptRequestsTable({
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+          <div className="mobileCards">
+            {rows.map((row) => (
+              <MobileCard key={`m-${row.id}`}>
+                <h4>{row.number}</h4>
+                <MobileCardField label="Файл">{row.sourceFileName || "—"}</MobileCardField>
+                <MobileCardField label="Статус">
+                  <StatusBadge tone={receiptStatusTone(row.status)}>{receiptStatusLabel(row.status)}</StatusBadge>
+                </MobileCardField>
+                <MobileCardField label="Позиций">{row.items.length}</MobileCardField>
+                <MobileCardActions>
+                  <button type="button" className="ghostBtn" onClick={() => onOpenTable(row)}>
+                    Таблица
+                  </button>
+                  {canWrite && onAddInvoice ? (
+                    <button type="button" className="ghostBtn" onClick={() => onAddInvoice(row)}>
+                      Счёт →
+                    </button>
+                  ) : null}
+                  <button type="button" className="ghostBtn" onClick={() => onOpenReceipt(row.id)}>
+                    Приёмка →
+                  </button>
+                </MobileCardActions>
+              </MobileCard>
+            ))}
+          </div>
+        </ResponsiveTableShell>
       )}
     </section>
   );

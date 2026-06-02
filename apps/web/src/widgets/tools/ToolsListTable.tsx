@@ -1,4 +1,5 @@
 import { StatusBadge } from "../../shared/ui/StatusBadge";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 export type ToolListRow = {
   id: string;
@@ -33,6 +34,7 @@ export function ToolsListTable({
   safeName
 }: Props) {
   return (
+    <ResponsiveTableShell>
     <div className="erpTableWrap">
       <table className="erpTable desktopTable">
         <thead>
@@ -93,6 +95,30 @@ export function ToolsListTable({
         </tbody>
       </table>
     </div>
+    <div className="mobileCards">
+      {tools.map((t) => (
+        <MobileCard key={`m-${t.id}`} onClick={() => onOpen(t.id)}>
+          <h4>{safeName(t.name)}</h4>
+          <MobileCardField label="Инв. №">{t.inventoryNumber}</MobileCardField>
+          <MobileCardField label="Категория">{t.category?.name || "—"}</MobileCardField>
+          <MobileCardField label="Объект">{t.warehouse?.name ? safeName(t.warehouse.name) : "—"}</MobileCardField>
+          <MobileCardField label="Статус">
+            <StatusBadge tone={statusTone(t.status)}>{statusLabel(t.status)}</StatusBadge>
+          </MobileCardField>
+          <MobileCardActions>
+            <input
+              type="checkbox"
+              aria-label={`Выбрать ${t.inventoryNumber}`}
+              checked={selectedIds.includes(t.id)}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => onToggleSelect(t.id, e.target.checked)}
+            />
+            <button type="button" onClick={() => onOpen(t.id)}>Открыть</button>
+          </MobileCardActions>
+        </MobileCard>
+      ))}
+    </div>
+    </ResponsiveTableShell>
   );
 }
 

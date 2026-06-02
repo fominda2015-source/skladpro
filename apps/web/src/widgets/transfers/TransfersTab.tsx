@@ -4,6 +4,7 @@ import { ErrorState, LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { PageHero } from "../ui/PageHero";
 import { ToolsListToolbar } from "../tools/ToolsListToolbar";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 type Warehouse = { id: string; name: string };
 
@@ -745,6 +746,7 @@ function TransferTable({
 }) {
   if (!rows.length) return <p className="muted">Заявок нет.</p>;
   return (
+    <ResponsiveTableShell>
     <div className="erpTableWrap">
       <table className="erpTable desktopTable">
         <thead>
@@ -806,5 +808,50 @@ function TransferTable({
         </tbody>
       </table>
     </div>
+    <div className="mobileCards">
+      {rows.map((tr) => (
+        <MobileCard key={`m-${tr.id}`}>
+          <h4>{tr.number}</h4>
+          <MobileCardField label="Статус">
+            <StatusBadge tone={statusTone(tr.status)}>{STATUS_LABEL[tr.status] ?? tr.status}</StatusBadge>
+          </MobileCardField>
+          <MobileCardField label="Маршрут">
+            {safeName(tr.fromWarehouseName || "")} → {safeName(tr.toWarehouseName || "")} · {tr.section}
+          </MobileCardField>
+          <MobileCardField label="Состав">
+            {tr.lines.map((ln) => (
+              <div key={`${tr.id}-${ln.materialId}`}>
+                {ln.materialName} · {ln.quantity} {ln.unit}
+              </div>
+            ))}
+          </MobileCardField>
+          {mode !== "history" ? (
+            <MobileCardActions>
+              {mode === "outgoing" && tr.status === "NEW" && canWrite ? (
+                <>
+                  <button type="button" className="primaryBtn" onClick={() => void onPatch(tr.id, "APPROVED")}>
+                    Согласовать
+                  </button>
+                  <button type="button" className="ghostBtn" onClick={() => void onPatch(tr.id, "REJECTED")}>
+                    Отказать
+                  </button>
+                </>
+              ) : null}
+              {mode === "outgoing" && tr.status === "NEW" && tr.requestedById === meId ? (
+                <button type="button" className="ghostBtn" onClick={() => void onPatch(tr.id, "CANCELLED")}>
+                  Отменить
+                </button>
+              ) : null}
+              {mode === "incoming" && tr.status === "APPROVED" && canWrite ? (
+                <button type="button" className="ghostBtn" onClick={() => onReceiveOpen?.(tr.id)}>
+                  Акт и приём
+                </button>
+              ) : null}
+            </MobileCardActions>
+          ) : null}
+        </MobileCard>
+      ))}
+    </div>
+    </ResponsiveTableShell>
   );
 }

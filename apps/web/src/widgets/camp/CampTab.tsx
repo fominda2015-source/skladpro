@@ -442,7 +442,7 @@ export function CampTab({
           </label>
         </div>
 
-        <div className="toolbar" style={{ flexWrap: "wrap" }}>
+        <div className="toolbar scrollX" style={{ flexWrap: "wrap" }}>
           {canWrite ? (
             <button
               type="button"
@@ -709,7 +709,7 @@ function CampItemDrawer({
               {sel.warehouse ? ` · ${sel.warehouse.name}` : ""}
             </p>
           </div>
-          <div className="toolbar" style={{ flexWrap: "wrap" }}>
+          <div className="toolbar scrollX" style={{ flexWrap: "wrap" }}>
             {canWrite ? (
               <select value={sel.status} onChange={(e) => onUpdate({ status: e.target.value })}>
                 {(Object.keys(statusLabel) as CampItemStatus[]).map((s) => (

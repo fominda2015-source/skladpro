@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useViewport } from "../../shared/hooks/useViewport";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "../chat/UserAvatar";
@@ -43,19 +44,6 @@ type Props = {
   exportAction?: ReactNode;
 };
 
-function useIsMobile(breakpoint = 720) {
-  const [mobile, setMobile] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(`(max-width: ${breakpoint}px)`).matches
-  );
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const onChange = () => setMobile(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [breakpoint]);
-  return mobile;
-}
-
 function lineKey(holderKey: string, materialId: string) {
   return `${holderKey}:${materialId}`;
 }
@@ -84,7 +72,7 @@ export function MaterialReportTab({
   objectFilter,
   exportAction
 }: Props) {
-  const isMobile = useIsMobile();
+  const { isMobile } = useViewport();
   const [subTab, setSubTab] = useState<SubTab>("balances");
   const [holders, setHolders] = useState<MaterialReportHolder[]>([]);
   const [history, setHistory] = useState<MaterialWriteoffHistoryRow[]>([]);

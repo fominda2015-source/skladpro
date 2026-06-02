@@ -3,6 +3,7 @@ import { actDownloadUrl } from "./actsManifest";
 import { PageHero } from "../ui/PageHero";
 import { TabShell } from "../layout/TabShell";
 import { EmptyState, ResultBanner } from "../../shared/ui/StateViews";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 type ActTemplate = {
   id: string;
@@ -111,7 +112,8 @@ export function ActsTab({ token, apiUrl, fetchWithSession, canUpload = false }: 
       {!templates.length && !loading ? (
         <EmptyState title="Шаблонов нет" hint="Положите .xlsx в public/acts или загрузите через форму выше." />
       ) : (
-        <div className="erpTableWrap">
+        <ResponsiveTableShell>
+          <div className="erpTableWrap">
           <table className="erpTable desktopTable">
             <thead>
               <tr>
@@ -144,7 +146,25 @@ export function ActsTab({ token, apiUrl, fetchWithSession, canUpload = false }: 
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+          <div className="mobileCards">
+            {templates.map((act) => {
+              const href = actDownloadUrl(act.fileName, apiUrl);
+              return (
+                <MobileCard key={`m-${act.id}`}>
+                  <h4>{act.label}</h4>
+                  {act.description ? <p className="muted">{act.description}</p> : null}
+                  <MobileCardField label="Файл">{act.fileName}</MobileCardField>
+                  <MobileCardActions>
+                    <a className="primaryBtn actsDownloadBtn" href={href} download={act.fileName}>
+                      Скачать
+                    </a>
+                  </MobileCardActions>
+                </MobileCard>
+              );
+            })}
+          </div>
+        </ResponsiveTableShell>
       )}
     </TabShell>
   );

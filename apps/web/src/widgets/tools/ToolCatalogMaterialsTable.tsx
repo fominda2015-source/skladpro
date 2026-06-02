@@ -1,4 +1,5 @@
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
+import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 type Props = {
   rows: ToolCatalogMaterialRow[];
@@ -9,6 +10,7 @@ export function ToolCatalogMaterialsTable({ rows, loading }: Props) {
   if (loading) return <p className="muted">Загрузка...</p>;
   if (!rows.length) return <p className="muted">Позиции не найдены.</p>;
   return (
+    <ResponsiveTableShell>
     <div className="erpTableWrap" style={{ marginTop: 8 }}>
       <table className="erpTable desktopTable">
         <thead>
@@ -37,5 +39,18 @@ export function ToolCatalogMaterialsTable({ rows, loading }: Props) {
         </tbody>
       </table>
     </div>
+    <div className="mobileCards">
+      {rows.map((r) => (
+        <MobileCard key={`m-${r.warehouseId}-${r.materialId}-${r.section}`}>
+          <h4>{r.name}</h4>
+          <MobileCardField label="Объект">{r.warehouseName}</MobileCardField>
+          <MobileCardField label="Раздел">{r.section}</MobileCardField>
+          <MobileCardField label="Ед.">{r.unit}</MobileCardField>
+          <MobileCardField label="Новые">{r.qtyNew}</MobileCardField>
+          <MobileCardField label="Использ.">{r.qtyUsed > 0 ? r.qtyUsed : "—"}</MobileCardField>
+        </MobileCard>
+      ))}
+    </div>
+    </ResponsiveTableShell>
   );
 }

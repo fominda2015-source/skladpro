@@ -4,6 +4,7 @@ import { LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { LimitStructureBars } from "../limits/LimitStructureBars";
 import { receiptStatusLabel, receiptStatusTone } from "../receipts/receiptLabels";
+import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 const metricFmt = (n: number) =>
   Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
@@ -410,6 +411,7 @@ function HomeDrillStockPanel({
           ↻ Обновить
         </button>
       </div>
+      <ResponsiveTableShell>
       <div className="erpTableWrap homeDrillTable">
         <table className="erpTable desktopTable">
           <thead>
@@ -443,6 +445,18 @@ function HomeDrillStockPanel({
           </tbody>
         </table>
       </div>
+      <div className="mobileCards">
+        {visible.slice(0, 200).map((r) => (
+          <MobileCard key={`m-drill-stock-${r.id}`}>
+            <h4>{safeName(r.materialName)}</h4>
+            <MobileCardField label="Раздел">{r.section}</MobileCardField>
+            <MobileCardField label="В наличии">{r.available.toLocaleString("ru-RU")}</MobileCardField>
+            <MobileCardField label="Резерв">{r.reserved.toLocaleString("ru-RU")}</MobileCardField>
+            <MobileCardField label="Количество">{r.quantity.toLocaleString("ru-RU")}</MobileCardField>
+          </MobileCard>
+        ))}
+      </div>
+      </ResponsiveTableShell>
     </div>
   );
 }

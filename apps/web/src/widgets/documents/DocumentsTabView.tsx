@@ -4,6 +4,7 @@ import { EmptyState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { FilterStrip, PageHero } from "../ui/PageHero";
 import { TabShell } from "../layout/TabShell";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 export type DocumentRow = {
   id: string;
@@ -160,6 +161,7 @@ export function DocumentsTabView({
               }
             />
           ) : (
+            <ResponsiveTableShell>
             <table className="erpTable desktopTable">
               <thead>
                 <tr>
@@ -219,6 +221,51 @@ export function DocumentsTabView({
                 })}
               </tbody>
             </table>
+            <div className="mobileCards">
+              {visibleDocs.map((d) => {
+                const shownName = displayDocumentFileName(d.fileName, {
+                  type: d.type,
+                  createdAt: d.createdAt
+                });
+                return (
+                  <MobileCard key={`m-${d.id}`} onClick={() => onSelectPreview(d)}>
+                    <h4>{shownName}</h4>
+                    <MobileCardField label="Дата">{new Date(d.createdAt).toLocaleString()}</MobileCardField>
+                    <MobileCardField label="Вид">
+                      <StatusBadge tone="doc">{docTypeLabel(d.type)}</StatusBadge>
+                    </MobileCardField>
+                    <MobileCardField label="Размер">
+                      {d.size ? `${Math.max(1, Math.ceil(d.size / 1024))} КБ` : "—"}
+                    </MobileCardField>
+                    <MobileCardActions>
+                      <a
+                        className="ghostBtn"
+                        href={`${apiUrl}/${d.filePath}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        download={shownName}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Открыть
+                      </a>
+                      {canWriteDocuments ? (
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(d.id, shownName);
+                          }}
+                        >
+                          Удалить
+                        </button>
+                      ) : null}
+                    </MobileCardActions>
+                  </MobileCard>
+                );
+              })}
+            </div>
+            </ResponsiveTableShell>
           )}
         </div>
         <aside className="homePanel docCenterPreview">

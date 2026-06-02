@@ -14,6 +14,7 @@ import {
   YAxis
 } from "recharts";
 import { PageHero } from "../ui/PageHero";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 import { HomeDrillModal } from "./HomeDrillModal";
 import {
   HomeScrollChart,
@@ -203,6 +204,7 @@ function ObjectDrillTable({
 }) {
   if (!rows.length) return <p className="muted homeChartEmpty">Нет данных по объектам.</p>;
   return (
+    <ResponsiveTableShell>
     <div className="erpTableWrap homeDrillTable">
       <table className="erpTable desktopTable">
         <thead>
@@ -223,6 +225,19 @@ function ObjectDrillTable({
         </tbody>
       </table>
     </div>
+    <div className="mobileCards">
+      {rows.map((r) => (
+        <MobileCard key={`m-${r.key}`}>
+          <h4>{r.cells[0]}</h4>
+          {r.cells.slice(1).map((cell, i) => (
+            <MobileCardField key={i} label={columns[i + 1] || ""}>
+              {cell}
+            </MobileCardField>
+          ))}
+        </MobileCard>
+      ))}
+    </div>
+    </ResponsiveTableShell>
   );
 }
 
@@ -1488,6 +1503,7 @@ export function HomeOverview({
             <h3>Объекты</h3>
             <span className="muted">проблемные выше · ▾ детали</span>
           </header>
+          <ResponsiveTableShell>
           <div className="erpTableWrap">
             <table className="erpTable desktopTable">
               <thead>
@@ -1614,6 +1630,51 @@ export function HomeOverview({
               </tbody>
             </table>
           </div>
+          <div className="mobileCards">
+            {sortedObjects.map((obj) => {
+              const camp = obj.campSs + obj.campEom;
+              const tone = objectRiskStatus(obj);
+              return (
+                <MobileCard key={`m-${obj.warehouseId}`}>
+                  <h4>{obj.name}</h4>
+                  <MobileCardField label="СС">
+                    {obj.limitsSs.hasTemplate ? `${obj.limitsSs.percent}%` : "отсутствует"}
+                  </MobileCardField>
+                  <MobileCardField label="ЭОМ">
+                    {obj.limitsEom.hasTemplate ? `${obj.limitsEom.percent}%` : "отсутствует"}
+                  </MobileCardField>
+                  <MobileCardField label="Городок">{camp || "—"}</MobileCardField>
+                  <MobileCardField label="Инструм.">{obj.tools.total}</MobileCardField>
+                  <MobileCardField label="Статус">
+                    <StatusBadge tone={tone}>{objectRiskLabel(tone)}</StatusBadge>
+                  </MobileCardField>
+                  <MobileCardActions>
+                    {canWarehouse ? (
+                      <button type="button" className="ghostBtn" onClick={() => onOpenWarehouse?.(obj.warehouseId)}>
+                        Склад
+                      </button>
+                    ) : null}
+                    {canCamp ? (
+                      <button type="button" className="ghostBtn" onClick={() => onOpenCamp(obj.warehouseId)}>
+                        Городок
+                      </button>
+                    ) : null}
+                    {canLimits && obj.limitsSs.hasTemplate ? (
+                      <button type="button" className="ghostBtn" onClick={() => onOpenLimits(obj.warehouseId, "SS")}>
+                        Лимиты СС
+                      </button>
+                    ) : null}
+                    {canTools ? (
+                      <button type="button" className="ghostBtn" onClick={() => onOpenTools(obj.warehouseId)}>
+                        Инструменты
+                      </button>
+                    ) : null}
+                  </MobileCardActions>
+                </MobileCard>
+              );
+            })}
+          </div>
+          </ResponsiveTableShell>
         </section>
       ) : !loading && !error ? (
         <p className="muted">Нет доступных объектов для отображения.</p>

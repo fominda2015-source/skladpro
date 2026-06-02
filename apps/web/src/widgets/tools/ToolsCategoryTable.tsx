@@ -1,4 +1,5 @@
 import { StatusBadge } from "../../shared/ui/StatusBadge";
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
 export type ToolGroupCardRow = {
   key: string;
@@ -19,6 +20,7 @@ type Props = {
 
 export function ToolsCategoryTable({ cards, onOpen }: Props) {
   return (
+    <ResponsiveTableShell>
     <div className="erpTableWrap" style={{ marginTop: 8 }}>
       <table className="erpTable desktopTable">
         <thead>
@@ -79,5 +81,27 @@ export function ToolsCategoryTable({ cards, onOpen }: Props) {
         </tbody>
       </table>
     </div>
+    <div className="mobileCards">
+      {cards.map((card) => (
+        <MobileCard key={`m-${card.key}`} onClick={() => onOpen(card)}>
+          <h4>
+            {card.icon ? `${card.icon} ` : ""}
+            {card.label}
+          </h4>
+          <MobileCardField label="Тип">
+            <StatusBadge tone={card.type === "CATEGORY" ? "doc" : "neutral"}>
+              {card.type === "CATEGORY" ? "Категория" : "По названию"}
+            </StatusBadge>
+          </MobileCardField>
+          <MobileCardField label="Всего">{card.count}</MobileCardField>
+          <MobileCardField label="На складе">{card.inStock}</MobileCardField>
+          <MobileCardField label="Выдано">{card.issued}</MobileCardField>
+          <MobileCardActions>
+            <button type="button" className="ghostBtn" onClick={() => onOpen(card)}>Открыть →</button>
+          </MobileCardActions>
+        </MobileCard>
+      ))}
+    </div>
+    </ResponsiveTableShell>
   );
 }

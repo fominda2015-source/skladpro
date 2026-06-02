@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
+import { useViewport } from "../../shared/hooks/useViewport";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "./UserAvatar";
 import { ChatComposer } from "./ChatComposer";
@@ -85,19 +86,6 @@ type Props = {
   onPeerProfileClick: (userId: string) => void;
 };
 
-function useIsMobileChat(breakpoint = 720) {
-  const [mobile, setMobile] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(`(max-width: ${breakpoint}px)`).matches
-  );
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const onChange = () => setMobile(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [breakpoint]);
-  return mobile;
-}
-
 export function ChatPanel({
   meId,
   users,
@@ -126,7 +114,7 @@ export function ChatPanel({
   onRefresh,
   onPeerProfileClick
 }: Props) {
-  const isMobile = useIsMobileChat();
+  const { isMobile } = useViewport();
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);

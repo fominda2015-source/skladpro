@@ -2331,12 +2331,20 @@ tr.low {
     max-width: calc(100vw - 20px);
     width: min(100vw - 20px, 380px);
   }
-  .desktopTable {
+  .erpTableWrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .responsiveTable--dual .desktopTable {
     display: none;
   }
-  .mobileCards {
+  .responsiveTable--dual .mobileCards {
     display: grid;
     gap: 10px;
+  }
+  .mobileCardActions {
+    flex-wrap: wrap;
+    gap: 6px;
   }
 }
 
