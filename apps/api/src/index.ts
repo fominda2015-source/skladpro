@@ -1,8 +1,10 @@
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
+import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "./lib/prisma.js";
 import { config } from "./config.js";
+import { ensureActsStorage } from "./lib/actsStorage.js";
 import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { auditRouter } from "./routes/audit.js";
@@ -41,7 +43,12 @@ const port = config.port;
 
 app.use(config.corsOrigins ? cors({ origin: config.corsOrigins }) : cors());
 app.use(express.json());
-app.use(`/${config.uploadsDir}`, express.static(path.resolve(process.cwd(), config.uploadsDir)));
+const uploadsDirAbs = path.resolve(process.cwd(), config.uploadsDir);
+if (!fs.existsSync(uploadsDirAbs)) {
+  fs.mkdirSync(uploadsDirAbs, { recursive: true });
+}
+app.use(`/${config.uploadsDir}`, express.static(uploadsDirAbs));
+app.use("/acts", express.static(ensureActsStorage()));
 
 app.get("/api/health", (_req, res) => {
   res.json({

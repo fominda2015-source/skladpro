@@ -83,7 +83,18 @@ function buildDocumentScopeOr(batches: EntityIdBatch[]): Prisma.DocumentFileWher
 documentsRouter.get("/", async (req: AuthedRequest, res) => {
   const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
-  const type = typeof req.query.type === "string" ? req.query.type : undefined;
+  const typeParam = typeof req.query.type === "string" ? req.query.type : undefined;
+  const actDocumentTypes = [
+    "act",
+    "issue-act",
+    "issue-act-tools",
+    "signed-act",
+    "transfer_act",
+    "issue-signed-attachment"
+  ];
+  const type =
+    typeParam === "act" ? undefined : typeParam;
+  const typeIn = typeParam === "act" ? actDocumentTypes : undefined;
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section: ObjectSection | undefined =
@@ -107,7 +118,7 @@ documentsRouter.get("/", async (req: AuthedRequest, res) => {
   }
 
   const base: Prisma.DocumentFileWhereInput = {
-    ...(type ? { type } : {}),
+    ...(typeIn ? { type: { in: typeIn } } : type ? { type } : {}),
     ...(includeDeleted ? {} : { isDeleted: false })
   };
 

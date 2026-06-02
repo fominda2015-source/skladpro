@@ -29,6 +29,8 @@ export function docTypeLabel(type: string): string {
     "receipt-invoice": "Счёт",
     photo: "Фото",
     act: "Акт",
+    transfer_act: "Акт перемещения",
+    "signed-act": "Подписанный акт",
     "issue-act": "Акт выдачи",
     "issue-act-tools": "Акт выдачи (инструмент)",
     "issue-signed-attachment": "Подписанный документ",

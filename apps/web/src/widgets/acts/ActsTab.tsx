@@ -4,8 +4,6 @@ import { PageHero } from "../ui/PageHero";
 import { TabShell } from "../layout/TabShell";
 import { EmptyState, ResultBanner } from "../../shared/ui/StateViews";
 
-const publicBase = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
-
 type ActTemplate = {
   id: string;
   fileName: string;
@@ -124,7 +122,7 @@ export function ActsTab({ token, apiUrl, fetchWithSession, canUpload = false }: 
             </thead>
             <tbody>
               {templates.map((act) => {
-                const href = actDownloadUrl(act.fileName, publicBase);
+                const href = actDownloadUrl(act.fileName, apiUrl);
                 return (
                   <tr key={act.id}>
                     <td>

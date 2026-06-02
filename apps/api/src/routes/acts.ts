@@ -2,20 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
+import { ensureActsStorage } from "../lib/actsStorage.js";
 import { requireAuth, requirePermission } from "../middleware/auth.js";
-
-const actsDir = path.resolve(process.cwd(), "../web/public/acts");
-
-function ensureActsDir() {
-  if (!fs.existsSync(actsDir)) {
-    fs.mkdirSync(actsDir, { recursive: true });
-  }
-}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    ensureActsDir();
-    cb(null, actsDir);
+    cb(null, ensureActsStorage());
   },
   filename: (_req, file, cb) => {
     const safe = path.basename(file.originalname).replace(/[^\w.\-()а-яА-ЯёЁ\s]/gi, "_");
@@ -36,7 +28,7 @@ export const actsRouter = Router();
 actsRouter.use(requireAuth);
 
 actsRouter.get("/templates", async (_req, res) => {
-  ensureActsDir();
+  const actsDir = ensureActsStorage();
   const files = fs
     .readdirSync(actsDir)
     .filter((f) => /\.(xlsx|xls)$/i.test(f))

@@ -24,7 +24,8 @@ export const ACT_TEMPLATES: ActTemplate[] = [
   { id: "theft", label: "Хищение", fileName: "Хищение.xlsx" }
 ];
 
-export function actDownloadUrl(fileName: string, baseUrl = ""): string {
-  const base = baseUrl.replace(/\/$/, "");
+/** Скачивание через API (тот же origin, что и uploads). */
+export function actDownloadUrl(fileName: string, apiUrl = ""): string {
+  const base = apiUrl.replace(/\/$/, "");
   return `${base}/acts/${encodeURIComponent(fileName)}`;
 }
