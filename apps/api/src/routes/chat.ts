@@ -1,7 +1,9 @@
 import { ConversationKind } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
+import { getEffectivePermissions } from "../lib/access.js";
 import { prisma } from "../lib/prisma.js";
+import { getAllowedWarehouses } from "../lib/userWarehouses.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 
 const dmSchema = z.object({
@@ -31,6 +33,8 @@ chatRouter.use(requireAuth);
 function serializeChatUser(u: {
   id: string;
   fullName: string;
+  email: string;
+  phone: string | null;
   avatarUrl: string | null;
   role: { name: string };
   position: { name: string } | null;
@@ -38,6 +42,8 @@ function serializeChatUser(u: {
   return {
     id: u.id,
     fullName: u.fullName,
+    email: u.email,
+    phone: u.phone,
     avatarUrl: u.avatarUrl,
     role: u.role.name,
     position: u.position?.name || null
@@ -62,6 +68,21 @@ chatRouter.get("/users", async (req: AuthedRequest, res) => {
   return res.json(rows.map((u) => serializeChatUser(u)));
 });
 
+chatRouter.get("/users/:userId", async (req: AuthedRequest, res) => {
+  const targetId = String(req.params.userId);
+  const target = await prisma.user.findFirst({
+    where: { id: targetId, status: "ACTIVE" },
+    include: { role: true, position: true }
+  });
+  if (!target) return res.status(404).json({ error: "User not found" });
+  const permissions = getEffectivePermissions(target.role.permissions, target.customPermissions);
+  const warehouses = await getAllowedWarehouses(target.id, permissions);
+  return res.json({
+    ...serializeChatUser(target),
+    warehouses: warehouses.map((w) => ({ id: w.id, name: w.name }))
+  });
+});
+
 chatRouter.get("/conversations", async (req: AuthedRequest, res) => {
   const me = req.user!.userId;
   const rows = await prisma.conversation.findMany({
@@ -78,16 +99,20 @@ chatRouter.get("/conversations", async (req: AuthedRequest, res) => {
     take: 200
   });
   return res.json(
-    rows.map((conv) => ({
-      id: conv.id,
-      kind: conv.kind,
-      createdAt: conv.createdAt,
-      updatedAt: conv.updatedAt,
-      participants: conv.participants.map((p) => ({
-        user: serializeChatUser(p.user)
-      })),
-      messages: conv.messages
-    }))
+    rows.map((conv) => {
+      const myParticipant = conv.participants.find((p) => p.userId === me);
+      return {
+        id: conv.id,
+        kind: conv.kind,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        myLastReadAt: myParticipant?.lastReadAt ?? null,
+        participants: conv.participants.map((p) => ({
+          user: serializeChatUser(p.user)
+        })),
+        messages: conv.messages
+      };
+    })
   );
 });
 
@@ -141,6 +166,19 @@ chatRouter.get("/conversations/:id/messages", async (req: AuthedRequest, res) =>
   return res.json(rows);
 });
 
+chatRouter.post("/conversations/:id/read", async (req: AuthedRequest, res) => {
+  const conversationId = String(req.params.id);
+  const me = req.user!.userId;
+  const allowed = await ensureParticipant(conversationId, me);
+  if (!allowed) return res.status(403).json({ error: "Forbidden" });
+  const now = new Date();
+  await prisma.conversationParticipant.update({
+    where: { conversationId_userId: { conversationId, userId: me } },
+    data: { lastReadAt: now }
+  });
+  return res.json({ ok: true, lastReadAt: now.toISOString() });
+});
+
 chatRouter.post("/conversations/:id/messages", async (req: AuthedRequest, res) => {
   const parsed = messageSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -167,9 +205,16 @@ chatRouter.post("/conversations/:id/messages", async (req: AuthedRequest, res) =
     },
     include: { sender: true, attachments: true }
   });
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: { updatedAt: new Date() }
-  });
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: now }
+    }),
+    prisma.conversationParticipant.update({
+      where: { conversationId_userId: { conversationId, userId: senderId } },
+      data: { lastReadAt: now }
+    })
+  ]);
   return res.status(201).json(created);
 });

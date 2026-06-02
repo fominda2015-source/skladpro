@@ -76,6 +76,7 @@ import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
+import { ChatUserProfileModal, type ChatUserProfile } from "./widgets/chat/ChatUserProfileModal";
 import { ActsTab } from "./widgets/acts/ActsTab";
 import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
 import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueModal";
@@ -232,6 +233,7 @@ type WindowWithBarcodeDetector = Window & {
 type MeResponse = {
   id: string;
   email: string;
+  phone?: string | null;
   fullName: string;
   avatarUrl?: string | null;
   position?: string | null;
@@ -510,6 +512,7 @@ type TransferRequestApiRow = {
 type Conversation = {
   id: string;
   kind: "DM" | "FEEDBACK";
+  myLastReadAt?: string | null;
   participants: Array<{ user: ChatUser }>;
   messages: ChatMessage[];
 };
@@ -766,6 +769,8 @@ function App() {
   const [passNext, setPassNext] = useState("");
   const [passMessage, setPassMessage] = useState("");
   const [profileFullName, setProfileFullName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -1138,7 +1143,9 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatPeerUserId, setChatPeerUserId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
-  const [chatViewedAt, setChatViewedAt] = useState<Record<string, string>>({});
+  const [chatProfileOpen, setChatProfileOpen] = useState(false);
+  const [chatProfileLoading, setChatProfileLoading] = useState(false);
+  const [chatProfileData, setChatProfileData] = useState<ChatUserProfile | null>(null);
   const [feedbackTickets, setFeedbackTickets] = useState<FeedbackTicketListItem[]>([]);
   const [feedbackSelectedId, setFeedbackSelectedId] = useState<string>("");
   const [feedbackTicketDetail, setFeedbackTicketDetail] = useState<FeedbackTicketDetailView | null>(null);
@@ -1348,10 +1355,10 @@ function App() {
         if (!row.last || !row.conversation.id) return acc;
         const isUnread =
           row.last.senderId !== me?.id &&
-          new Date(row.last.createdAt) > new Date(chatViewedAt[row.conversation.id] || 0);
+          new Date(row.last.createdAt) > new Date(row.conversation.myLastReadAt || 0);
         return acc + (isUnread ? 1 : 0);
       }, 0),
-    [chatRecent, me?.id, chatViewedAt]
+    [chatRecent, me?.id]
   );
   const chatQuickReplies = useMemo(
     () => ["Принято", "Проверю и отпишусь", "Готово", "Нужны уточнения", "Сделаю сегодня"],
@@ -2008,6 +2015,8 @@ function App() {
       const data = (await res.json()) as MeResponse;
       setMe(data);
       setProfileFullName(data.fullName);
+      setProfileEmail(data.email);
+      setProfilePhone(data.phone || "");
       if (Array.isArray(data.availableObjects)) {
         setAvailableObjects(data.availableObjects);
       }
@@ -2105,9 +2114,16 @@ function App() {
     const data = (await res.json()) as MeResponse;
     setMe(data);
     setProfileFullName(data.fullName);
+    setProfileEmail(data.email);
+    setProfilePhone(data.phone || "");
   }
 
-  async function updateProfile(next: { fullName?: string; avatarUrl?: string | null }) {
+  async function updateProfile(next: {
+    fullName?: string;
+    email?: string;
+    phone?: string | null;
+    avatarUrl?: string | null;
+  }) {
     if (!token) return;
     const res = await fetchWithSession(`${API_URL}/api/auth/me/profile`, {
       method: "PATCH",
@@ -2118,11 +2134,53 @@ function App() {
       body: JSON.stringify(next)
     });
     if (!res.ok) {
-      throw new Error("Не удалось обновить профиль");
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(typeof body.error === "string" ? body.error : "Не удалось обновить профиль");
     }
     const data = (await res.json()) as MeResponse;
     setMe(data);
     setProfileFullName(data.fullName);
+    setProfileEmail(data.email);
+    setProfilePhone(data.phone || "");
+  }
+
+  function patchConversationRead(conversationId: string, lastReadAt: string) {
+    setChatConversations((prev) =>
+      prev.map((c) => (c.id === conversationId ? { ...c, myLastReadAt: lastReadAt } : c))
+    );
+  }
+
+  async function markConversationRead(conversationId: string) {
+    if (!token || !conversationId) return;
+    const res = await fetchWithSession(`${API_URL}/api/chat/conversations/${conversationId}/read`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { lastReadAt: string };
+    patchConversationRead(conversationId, body.lastReadAt);
+  }
+
+  async function openChatUserProfile(userId: string) {
+    if (!token) return;
+    setChatProfileOpen(true);
+    setChatProfileLoading(true);
+    setChatProfileData(null);
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/chat/users/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setChatProfileData((await res.json()) as ChatUserProfile);
+      }
+    } finally {
+      setChatProfileLoading(false);
+    }
+  }
+
+  function closeChatUserProfile() {
+    setChatProfileOpen(false);
+    setChatProfileData(null);
   }
 
   async function loadHomeOverview() {
@@ -2523,7 +2581,7 @@ function App() {
         : next
     );
     if (touchViewedAt) {
-      setChatViewedAt((prev) => ({ ...prev, [conversationId]: new Date().toISOString() }));
+      await markConversationRead(conversationId);
     }
     if (!silent) {
       setChatLoading(false);
@@ -2549,6 +2607,9 @@ function App() {
       setChatAttachments([]);
       await loadConversationMessages(selectedConversationId, { silent: true, touchViewedAt: true });
       await loadConversations();
+      if (selectedConversationId) {
+        patchConversationRead(selectedConversationId, new Date().toISOString());
+      }
     } catch (e) {
       const msg = String(e);
       setChatError(
@@ -4422,7 +4483,8 @@ function App() {
     }
   }
 
-  function renderToolsListSlot() {
+  function renderToolsListSlot(opts?: { embedWarehouseId?: string }) {
+    const embedWarehouseId = opts?.embedWarehouseId;
     return (
       <>
         {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
@@ -4466,18 +4528,20 @@ function App() {
                 <option value="WRITTEN_OFF">{toolStatusLabel("WRITTEN_OFF")}</option>
                 <option value="DISPUTED">{toolStatusLabel("DISPUTED")}</option>
               </select>
-              <select
-                value={toolListWarehouseId}
-                onChange={(e) => setToolListWarehouseId(e.target.value)}
-                aria-label="Объект"
-              >
-                <option value="">Все объекты</option>
-                {warehouses.map((w) => (
-                  <option key={`twf-${w.id}`} value={w.id}>
-                    {safeName(w.name)}
-                  </option>
-                ))}
-              </select>
+              {!embedWarehouseId ? (
+                <select
+                  value={toolListWarehouseId}
+                  onChange={(e) => setToolListWarehouseId(e.target.value)}
+                  aria-label="Объект"
+                >
+                  <option value="">Все объекты</option>
+                  {warehouses.map((w) => (
+                    <option key={`twf-${w.id}`} value={w.id}>
+                      {safeName(w.name)}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <select value={toolsSort} onChange={(e) => setToolsSort(e.target.value as typeof toolsSort)} aria-label="Сортировка">
                 <option value="created_desc">Сначала новые</option>
                 <option value="inventory">По инв. номеру</option>
@@ -4593,19 +4657,24 @@ function App() {
     );
   }
 
-  function renderToolsInventoryBlock(embed?: boolean) {
+  function renderToolsInventoryBlock(embed?: boolean, drillWarehouseId?: string) {
+    const warehouseId =
+      drillWarehouseId ||
+      (activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId);
     return (
       <ToolsInventoryBlock
         navPath={toolsNavPath}
         onNavPathChange={setToolsNavPath}
-        warehouseId={
-          activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
-        }
+        warehouseId={warehouseId}
         sectionFilter={objectSectionFilter}
         token={token}
         apiUrl={API_URL}
         fetchWithSession={fetchWithSession}
-        toolListSlot={renderToolsListSlot()}
+        toolListSlot={
+          drillWarehouseId
+            ? renderToolsListSlot({ embedWarehouseId: drillWarehouseId })
+            : renderToolsListSlot()
+        }
         embedMode={embed}
       />
     );
@@ -6134,12 +6203,16 @@ function App() {
                   }
                 : undefined
             }
-            toolsStatDrillContent={canReadTools ? renderToolsInventoryBlock(true) : undefined}
-            onToolsStatDrill={() => {
+            renderToolsStatDrillContent={
+              canReadTools ? (warehouseId) => renderToolsInventoryBlock(true, warehouseId) : undefined
+            }
+            onToolsObjectDrill={(warehouseId) => {
+              setToolListWarehouseId(warehouseId);
               setToolsNavPath(["hub"]);
-              void loadTools().catch(() => undefined);
-              void loadToolWarehouseSummary().catch(() => undefined);
+              setToolsPage(1);
               void loadToolCategories().catch(() => undefined);
+              void loadToolWarehouseSummary().catch(() => undefined);
+              void loadTools().catch(() => undefined);
             }}
             onOpenOperationsTab={
               canReadOperations
@@ -11219,7 +11292,6 @@ function App() {
           error={chatError}
           loading={chatLoading}
           unreadTotal={chatUnreadTotal}
-          viewedAt={chatViewedAt}
           quickReplies={chatQuickReplies}
           roleLabel={roleLabel}
           timeLabel={chatTimeLabel}
@@ -11234,6 +11306,18 @@ function App() {
           }}
           onSend={() => void sendConversationMessage()}
           onRefresh={refreshChatData}
+          onPeerProfileClick={(userId) => void openChatUserProfile(userId)}
+        />
+      ) : null}
+
+      {chatProfileOpen ? (
+        <ChatUserProfileModal
+          open={chatProfileOpen}
+          loading={chatProfileLoading}
+          profile={chatProfileData}
+          roleLabel={roleLabel}
+          safeName={safeName}
+          onClose={closeChatUserProfile}
         />
       ) : null}
 
@@ -12443,8 +12527,22 @@ function App() {
               </div>
             </label>
             <label>
-              Email
-              <input value={me.email} disabled />
+              Почта
+              <input
+                type="email"
+                value={profileEmail}
+                onChange={(e) => setProfileEmail(e.target.value)}
+                placeholder="name@company.ru"
+              />
+            </label>
+            <label>
+              Телефон
+              <input
+                type="tel"
+                value={profilePhone}
+                onChange={(e) => setProfilePhone(e.target.value)}
+                placeholder="+7 …"
+              />
             </label>
             <label>
               ФИО
@@ -12476,7 +12574,11 @@ function App() {
             <button
               onClick={async () => {
                 try {
-                  await updateProfile({ fullName: profileFullName });
+                  await updateProfile({
+                    fullName: profileFullName,
+                    email: profileEmail.trim(),
+                    phone: profilePhone.trim() || null
+                  });
                   setProfileMessage("Профиль обновлен");
                 } catch {
                   setProfileMessage("Не удалось обновить профиль");

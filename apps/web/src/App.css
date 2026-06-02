@@ -1519,6 +1519,91 @@ tr.low {
   height: 48px;
   font-size: 18px;
 }
+.chatAvatarBtn {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  line-height: 0;
+}
+.chatAvatarBtn:hover .chatAvatar,
+.chatAvatarBtn:focus-visible .chatAvatar {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+.chatUserProfileBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.chatUserProfileCard {
+  position: relative;
+  width: min(360px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px 20px 20px;
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+  text-align: center;
+}
+.chatUserProfileClose {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.chatUserProfileAvatarWrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.chatUserProfileAvatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 700;
+}
+.chatUserProfileAvatar--fallback {
+  font-size: 36px;
+}
+.chatUserProfileName {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+.chatUserProfileMeta {
+  margin: 0;
+  text-align: left;
+  display: grid;
+  gap: 10px;
+}
+.chatUserProfileMeta > div {
+  display: grid;
+  gap: 2px;
+}
+.chatUserProfileMeta dt {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+.chatUserProfileMeta dd {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+}
 .chatThread {
   display: flex;
   flex-direction: column;

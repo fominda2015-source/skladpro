@@ -97,9 +97,9 @@ type Props = {
   onOpenWarehouseTab?: () => void;
   onOpenLimitsTab?: () => void;
   onOpenToolsTab?: () => void;
-  /** Полный раздел инструментов в модалке по клику на карточку «Инструменты». */
-  toolsStatDrillContent?: ReactNode;
-  onToolsStatDrill?: () => void;
+  /** Каталог и таблица инструментов в модалке — только после выбора объекта. */
+  renderToolsStatDrillContent?: (warehouseId: string) => ReactNode;
+  onToolsObjectDrill?: (warehouseId: string) => void;
   onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
@@ -278,8 +278,8 @@ export function HomeOverview({
   onOpenWarehouseTab,
   onOpenLimitsTab,
   onOpenToolsTab,
-  toolsStatDrillContent,
-  onToolsStatDrill,
+  renderToolsStatDrillContent,
+  onToolsObjectDrill,
   onOpenCampTab,
   onOpenOperations,
   onOpenOperationsTab,
@@ -301,7 +301,6 @@ export function HomeOverview({
   const [drillHistoryIndex, setDrillHistoryIndex] = useState(0);
 
   const openStatDrill = (key: HomeStatKey) => {
-    if (key === "tools") onToolsStatDrill?.();
     setDrill({ kind: "stat", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
@@ -316,6 +315,9 @@ export function HomeOverview({
     drillView.mode === "object" ? objects.find((o) => o.warehouseId === drillView.warehouseId) || null : null;
 
   const openObjectMini = (warehouseId: string) => {
+    if (drill?.kind === "stat" && drill.key === "tools") {
+      onToolsObjectDrill?.(warehouseId);
+    }
     setDrillHistory((prev) => {
       const next = [...prev.slice(0, drillHistoryIndex + 1), { mode: "object", warehouseId } as DrillView];
       return next;
@@ -678,6 +680,26 @@ export function HomeOverview({
         drillKind: drill.kind,
         drillKey: drill.key
       });
+      if (drill.kind === "stat" && drill.key === "tools" && renderToolsStatDrillContent) {
+        return (
+          <div className="homeDrillStack">
+            <section className="homeDrillObjectBlock">
+              <header className="homeDrillObjectBlockHead">
+                <strong>{o.name}</strong>
+                <span className="muted">инструменты объекта</span>
+              </header>
+              {canTools ? (
+                <div className="erpCellActions" style={{ marginBottom: 10 }}>
+                  <button type="button" className="ghostBtn" onClick={() => onOpenTools(o.warehouseId)}>
+                    Вкладка «Инструменты»
+                  </button>
+                </div>
+              ) : null}
+              {renderToolsStatDrillContent(o.warehouseId)}
+            </section>
+          </div>
+        );
+      }
       const miniRows = (() => {
         if (drill.kind === "stat") {
           if (drill.key === "limitsSs") {
@@ -840,9 +862,6 @@ export function HomeOverview({
             }))}
           />
         );
-      }
-      if (drill.key === "tools" && toolsStatDrillContent) {
-        return toolsStatDrillContent;
       }
       if (drill.key === "tools") {
         return (
@@ -1268,7 +1287,7 @@ export function HomeOverview({
         <HomeDrillModal
           title={drillTitle}
           size={
-            drill.kind === "stat" && drill.key === "tools"
+            drill.kind === "stat" && drill.key === "tools" && selectedObject
               ? "wide"
               : drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")
                 ? "wide"
@@ -1278,7 +1297,9 @@ export function HomeOverview({
           }
           subtitle={
             drill.kind === "stat" && drill.key === "tools"
-              ? "Те же разделы и таблица, что на вкладке «Инструменты»"
+              ? selectedObject
+                ? `${selectedObject.name} · разделы и таблица инструментов`
+                : `${objectCount} объектов · выберите объект для детализации`
               : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
           }
           onClose={() => setDrill(null)}

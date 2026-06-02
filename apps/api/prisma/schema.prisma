@@ -157,6 +157,7 @@ enum LimitNodeType {
 model User {
   id               String               @id @default(cuid())
   email            String               @unique
+  phone            String?
   passwordHash     String
   fullName         String
   avatarUrl        String?
@@ -673,6 +674,7 @@ model ConversationParticipant {
   id             String       @id @default(cuid())
   conversationId String
   userId         String
+  lastReadAt     DateTime?
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())

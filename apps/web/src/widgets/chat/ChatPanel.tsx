@@ -32,6 +32,7 @@ export type ChatMessage = {
 export type Conversation = {
   id: string;
   kind: "DM" | "FEEDBACK";
+  myLastReadAt?: string | null;
   participants: Array<{ user: ChatUser }>;
   messages: ChatMessage[];
 };
@@ -70,7 +71,6 @@ type Props = {
   error: string;
   loading: boolean;
   unreadTotal: number;
-  viewedAt: Record<string, string>;
   quickReplies: string[];
   roleLabel: (role: string) => string;
   timeLabel: (iso?: string) => string;
@@ -82,6 +82,7 @@ type Props = {
   onBackToList: () => void;
   onSend: () => void | Promise<void>;
   onRefresh: () => void;
+  onPeerProfileClick: (userId: string) => void;
 };
 
 function useIsMobileChat(breakpoint = 720) {
@@ -112,7 +113,6 @@ export function ChatPanel({
   error,
   loading,
   unreadTotal,
-  viewedAt,
   quickReplies,
   roleLabel,
   timeLabel,
@@ -123,7 +123,8 @@ export function ChatPanel({
   onSelectPeer,
   onBackToList,
   onSend,
-  onRefresh
+  onRefresh,
+  onPeerProfileClick
 }: Props) {
   const isMobile = useIsMobileChat();
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -187,11 +188,11 @@ export function ChatPanel({
     return () => observer.disconnect();
   }, [showThread, scrollToBottom, updateScrollDownVisibility]);
 
-  const isPeerUnread = (convId: string, last?: ChatMessage) =>
+  const isPeerUnread = (last?: ChatMessage, lastReadAt?: string | null) =>
     Boolean(
       last &&
         last.senderId !== meId &&
-        new Date(last.createdAt) > new Date(viewedAt[convId] || 0)
+        new Date(last.createdAt) > new Date(lastReadAt || 0)
     );
 
   return (
@@ -233,7 +234,7 @@ export function ChatPanel({
                 <ul className="chatContactList">
                   {recent.slice(0, 6).map((row) => {
                     if (!row.peer) return null;
-                    const unread = isPeerUnread(row.conversation.id, row.last);
+                    const unread = isPeerUnread(row.last, row.conversation.myLastReadAt);
                     const active = row.peer.id === peerUserId;
                     return (
                       <li key={row.conversation.id}>
@@ -242,7 +243,14 @@ export function ChatPanel({
                           className={`chatContact ${active ? "active" : ""} ${unread ? "unread" : ""}`}
                           onClick={() => void onSelectPeer(row.peer!.id)}
                         >
-                          <UserAvatar fullName={row.peer.fullName} avatarUrl={row.peer.avatarUrl} />
+                          <UserAvatar
+                            fullName={row.peer.fullName}
+                            avatarUrl={row.peer.avatarUrl}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onPeerProfileClick(row.peer!.id);
+                            }}
+                          />
                           <span className="chatContactBody">
                             <span className="chatContactTop">
                               <strong>{row.peer.fullName}</strong>
@@ -270,7 +278,7 @@ export function ChatPanel({
                 {filteredUsers.map((u) => {
                   const conv = dmByUserId.get(u.id);
                   const last = conv?.messages?.[0];
-                  const unread = conv && last ? isPeerUnread(conv.id, last) : false;
+                  const unread = conv && last ? isPeerUnread(last, conv.myLastReadAt) : false;
                   const active = u.id === peerUserId;
                   return (
                     <li key={u.id}>
@@ -279,7 +287,14 @@ export function ChatPanel({
                         className={`chatContact ${active ? "active" : ""} ${unread ? "unread" : ""}`}
                         onClick={() => void onSelectPeer(u.id)}
                       >
-                        <UserAvatar fullName={u.fullName} avatarUrl={u.avatarUrl} />
+                        <UserAvatar
+                          fullName={u.fullName}
+                          avatarUrl={u.avatarUrl}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPeerProfileClick(u.id);
+                          }}
+                        />
                         <span className="chatContactBody">
                           <span className="chatContactTop">
                             <strong>{u.fullName}</strong>
@@ -310,7 +325,12 @@ export function ChatPanel({
                   ← Назад
                 </button>
               ) : null}
-              <UserAvatar fullName={peer!.fullName} avatarUrl={peer!.avatarUrl} size="lg" />
+              <UserAvatar
+                fullName={peer!.fullName}
+                avatarUrl={peer!.avatarUrl}
+                size="lg"
+                onClick={() => onPeerProfileClick(peer!.id)}
+              />
               <div className="chatThreadHeadText">
                 <strong>{peer!.fullName}</strong>
                 <span className="muted">

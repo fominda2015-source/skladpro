@@ -30,6 +30,8 @@ const changePasswordSchema = z.object({
 
 const updateProfileSchema = z.object({
   fullName: z.string().min(2).max(120).optional(),
+  email: z.string().email().max(200).optional(),
+  phone: z.string().max(32).nullable().optional(),
   /** Поддержка небольших data URL вручную; для обычных фото см. POST /auth/me/avatar */
   avatarUrl: z.string().max(900_000).nullable().optional()
 });
@@ -208,6 +210,7 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   return res.json({
     id: me.id,
     email: me.email,
+    phone: me.phone,
     fullName: me.fullName,
     avatarUrl: me.avatarUrl,
     position: me.position?.name || null,
@@ -288,25 +291,38 @@ authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => 
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
   }
-  const updated = await prisma.user.update({
-    where: { id: req.user!.userId },
-    data: {
-      ...(typeof parsed.data.fullName === "string" ? { fullName: parsed.data.fullName.trim() } : {}),
-      ...(Object.prototype.hasOwnProperty.call(parsed.data, "avatarUrl")
-        ? { avatarUrl: parsed.data.avatarUrl ?? null }
-        : {})
-    },
-    include: { role: true, position: true }
-  });
-  return res.json({
-    id: updated.id,
-    email: updated.email,
-    fullName: updated.fullName,
-    avatarUrl: updated.avatarUrl,
-    position: updated.position?.name || null,
-    role: updated.role.name,
-    permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
-  });
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: {
+        ...(typeof parsed.data.fullName === "string" ? { fullName: parsed.data.fullName.trim() } : {}),
+        ...(typeof parsed.data.email === "string" ? { email: parsed.data.email.trim().toLowerCase() } : {}),
+        ...(Object.prototype.hasOwnProperty.call(parsed.data, "phone")
+          ? { phone: parsed.data.phone?.trim() || null }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(parsed.data, "avatarUrl")
+          ? { avatarUrl: parsed.data.avatarUrl ?? null }
+          : {})
+      },
+      include: { role: true, position: true }
+    });
+    return res.json({
+      id: updated.id,
+      email: updated.email,
+      phone: updated.phone,
+      fullName: updated.fullName,
+      avatarUrl: updated.avatarUrl,
+      position: updated.position?.name || null,
+      role: updated.role.name,
+      permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
+    });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "P2002") {
+      return res.status(409).json({ error: "Этот email уже занят" });
+    }
+    throw error;
+  }
 });
 
 authRouter.post("/me/avatar", requireAuth, async (req: AuthedRequest, res) => {
@@ -332,6 +348,7 @@ authRouter.post("/me/avatar", requireAuth, async (req: AuthedRequest, res) => {
       return res.json({
         id: updated.id,
         email: updated.email,
+        phone: updated.phone,
         fullName: updated.fullName,
         avatarUrl: updated.avatarUrl,
         position: updated.position?.name || null,
