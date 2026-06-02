@@ -1071,7 +1071,18 @@ function App() {
   const [transferReqNote, setTransferReqNote] = useState("");
   const [transferReqSaving, setTransferReqSaving] = useState(false);
   const [waybillEvents, setWaybillEvents] = useState<WaybillEvent[]>([]);
-  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser" | "tool" | "requestMaterials">("");
+  const [drawerMode, setDrawerMode] = useState<"" | "issue" | "waybill" | "adminUser" | "tool">("");
+
+  function openRequestMaterialsTable(
+    modal: NonNullable<typeof requestMaterialsModal>
+  ) {
+    setDrawerMode("");
+    setRequestMaterialsModal(modal);
+  }
+
+  function closeRequestMaterialsTable() {
+    setRequestMaterialsModal(null);
+  }
   const [homeOverview, setHomeOverview] = useState<HomeOverviewResponse | null>(null);
   const [homeOverviewLoading, setHomeOverviewLoading] = useState(false);
   const [homeOverviewError, setHomeOverviewError] = useState("");
@@ -4634,7 +4645,8 @@ function App() {
         pendingAcceptanceRequestId ||
         materialWriteoffModal ||
         toolManualModalOpen ||
-        toolDetailModalId
+        toolDetailModalId ||
+        requestMaterialsModal
     );
     if (!openOverlay) return;
     const onKey = (e: KeyboardEvent) => {
@@ -4648,6 +4660,7 @@ function App() {
       setMaterialWriteoffModal(null);
       setToolManualModalOpen(false);
       setToolDetailModalId(null);
+      setRequestMaterialsModal(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -4658,7 +4671,8 @@ function App() {
     pendingAcceptanceRequestId,
     materialWriteoffModal,
     toolManualModalOpen,
-    toolDetailModalId
+    toolDetailModalId,
+    requestMaterialsModal
   ]);
 
   useEffect(() => {
@@ -7085,8 +7099,7 @@ function App() {
                         className="ghostBtn"
                         title="Открыть заявку и приложить счёт"
                         onClick={() => {
-                          setRequestMaterialsModal({ kind: "receipt", row });
-                          setDrawerMode("requestMaterials");
+                          openRequestMaterialsTable({ kind: "receipt", row });
                         }}
                       >
                         Заявка
@@ -9486,8 +9499,7 @@ function App() {
             onOpenTable={(i) => {
               const row = approvalQueue.find((x) => x.id === i.id) ?? issues.find((x) => x.id === i.id);
               if (!row) return;
-              setRequestMaterialsModal({ kind: "issue", row });
-              setDrawerMode("requestMaterials");
+              openRequestMaterialsTable({ kind: "issue", row });
             }}
             onOpenDetails={(id) => {
               setSelectedIssueId(id);
@@ -9502,14 +9514,12 @@ function App() {
             onOpenTable={(row) => {
               const full = receiptRequests.find((r) => r.id === row.id);
               if (!full) return;
-              setRequestMaterialsModal({ kind: "receipt", row: full });
-              setDrawerMode("requestMaterials");
+              openRequestMaterialsTable({ kind: "receipt", row: full });
             }}
             onAddInvoice={(row) => {
               const full = receiptRequests.find((r) => r.id === row.id);
               if (!full) return;
-              setRequestMaterialsModal({ kind: "receipt", row: full });
-              setDrawerMode("requestMaterials");
+              openRequestMaterialsTable({ kind: "receipt", row: full });
             }}
             onOpenReceipt={(id) => {
               setActiveTab("operations");
@@ -12984,56 +12994,44 @@ function App() {
             document.body
           )
         : null}
-      {drawerMode === "requestMaterials" && requestMaterialsModal && token ? (
-        <aside className="detailDrawer detailDrawerRequestMaterials">
-          {requestMaterialsModal.kind === "issue" ? (
-            <RequestMaterialsModal
-              embedded
-              kind="issue"
-              row={
-                issues.find((x) => x.id === requestMaterialsModal.row.id) ||
-                approvalQueue.find((x) => x.id === requestMaterialsModal.row.id) ||
-                requestMaterialsModal.row
-              }
-              apiUrl={API_URL}
-              token={token}
-              fetchWithSession={fetchWithSession}
-              onOpenDocumentsTab={() => {
-                openDocumentsForEntity("issue", requestMaterialsModal.row.id);
-                setRequestMaterialsModal(null);
-                setDrawerMode("");
-              }}
-              onClose={() => {
-                setRequestMaterialsModal(null);
-                setDrawerMode("");
-              }}
-            />
-          ) : (
-            <RequestMaterialsModal
-              embedded
-              kind="receipt"
-              row={
-                receiptRequests.find((x) => x.id === requestMaterialsModal.row.id) ||
-                requestMaterialsModal.row
-              }
-              apiUrl={API_URL}
-              token={token}
-              fetchWithSession={fetchWithSession}
-              canWrite={canWriteOperations}
-              onUploadInvoiceFile={(file) => void uploadReceiptInvoice(requestMaterialsModal.row.id, file)}
-              onOpenInvoice={() => void openReceiptInvoice(requestMaterialsModal.row.id)}
-              onOpenDocumentsTab={() => {
-                openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
-                setRequestMaterialsModal(null);
-                setDrawerMode("");
-              }}
-              onClose={() => {
-                setRequestMaterialsModal(null);
-                setDrawerMode("");
-              }}
-            />
-          )}
-        </aside>
+      {requestMaterialsModal && token ? (
+        requestMaterialsModal.kind === "issue" ? (
+          <RequestMaterialsModal
+            kind="issue"
+            row={
+              issues.find((x) => x.id === requestMaterialsModal.row.id) ||
+              approvalQueue.find((x) => x.id === requestMaterialsModal.row.id) ||
+              requestMaterialsModal.row
+            }
+            apiUrl={API_URL}
+            token={token}
+            fetchWithSession={fetchWithSession}
+            onOpenDocumentsTab={() => {
+              openDocumentsForEntity("issue", requestMaterialsModal.row.id);
+              closeRequestMaterialsTable();
+            }}
+            onClose={closeRequestMaterialsTable}
+          />
+        ) : (
+          <RequestMaterialsModal
+            kind="receipt"
+            row={
+              receiptRequests.find((x) => x.id === requestMaterialsModal.row.id) ||
+              requestMaterialsModal.row
+            }
+            apiUrl={API_URL}
+            token={token}
+            fetchWithSession={fetchWithSession}
+            canWrite={canWriteOperations}
+            onUploadInvoiceFile={(file) => void uploadReceiptInvoice(requestMaterialsModal.row.id, file)}
+            onOpenInvoice={() => void openReceiptInvoice(requestMaterialsModal.row.id)}
+            onOpenDocumentsTab={() => {
+              openDocumentsForEntity("receipt", requestMaterialsModal.row.id);
+              closeRequestMaterialsTable();
+            }}
+            onClose={closeRequestMaterialsTable}
+          />
+        )
       ) : null}
       </section>
     </main>
