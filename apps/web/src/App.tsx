@@ -44,6 +44,7 @@ import {
 import { HomeAnnouncementsBell } from "./widgets/home/HomeAnnouncementsBell";
 import { HomeDrillContent } from "./widgets/home/HomeDrillContent";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
+import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
   buildToolDisplayName,
@@ -288,7 +289,7 @@ type IssueRequest = {
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
-  /** Списание остатка с другого корпуса (СС/ЭОМ) */
+  /** @deprecated кросс-корпусная выдача; не используется в UI */
   stockSection?: "SS" | "EOM" | null;
   projectId?: string | null;
   requestedById: string;
@@ -324,6 +325,9 @@ type IssuePickCartLine = {
   sku: string | null;
   available: number;
   acceptedQty?: number;
+  /** Подраздел лимита для учёта выдачи */
+  limitNodeId?: string | null;
+  limitPath?: string | null;
 };
 type OperationRow = {
   id: string;
@@ -777,9 +781,7 @@ function App() {
   const [issueLines, setIssueLines] = useState<IssueLine[]>([]);
   const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
-  /** Выдача из другого корпуса: учёт в objectSectionFilter, остаток — в противоположном СС/ЭОМ */
-  const [issueFromOtherSection, setIssueFromOtherSection] = useState(false);
-  const [issueStocksOtherSection, setIssueStocksOtherSection] = useState<StockRow[]>([]);
+  const [issueLimitPickRow, setIssueLimitPickRow] = useState<IssuePickCartLine | null>(null);
   const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
     try {
       const saved = localStorage.getItem("skladpro_issue_domain");
@@ -1468,17 +1470,10 @@ function App() {
     [stockWarehouseIdsInView, warehouses, stocks]
   );
 
-  const issueOtherSection = objectSectionFilter === "SS" ? "EOM" : "SS";
-  const issueSectionLabel = (sec: "SS" | "EOM") => (sec === "SS" ? "СС" : "ЭОМ");
-  const issuePickerStocks = issueFromOtherSection ? issueStocksOtherSection : stocks;
-  const issueOtherSectionHasStock = issueStocksOtherSection.some(
-    (s) => s.warehouseId === activeObjectId && Number(s.available) > 0
-  );
-
   const issueFacingRows = useMemo((): IssuePickCartLine[] => {
     const out: IssuePickCartLine[] = [];
     if (!activeObjectId) return out;
-    for (const s of issuePickerStocks) {
+    for (const s of stocks) {
       if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
       const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
       if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
@@ -1538,13 +1533,7 @@ function App() {
     return out.sort((a, b) =>
       (a.factLabel || a.canonName).localeCompare(b.factLabel || b.canonName, "ru", { sensitivity: "base" })
     );
-  }, [
-    issuePickerStocks,
-    activeObjectId,
-    issueIssuesDomain,
-    acceptedBySourceByTargetId,
-    materialMappingsByTargetId
-  ]);
+  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, materialMappingsByTargetId]);
 
   const issueFacingRowsFiltered = useMemo(() => {
     const qLower = issueMaterialSearch.trim().toLowerCase();
@@ -1872,30 +1861,6 @@ function App() {
       setStocksError(`Не удалось загрузить остатки: ${String(err)}`);
     } finally {
       setLoadingStocks(false);
-    }
-  }
-
-  async function loadIssueStocksOtherSection() {
-    if (!token || !activeObjectId) {
-      setIssueStocksOtherSection([]);
-      return;
-    }
-    const otherSection = objectSectionFilter === "SS" ? "EOM" : "SS";
-    const params = new URLSearchParams({
-      section: otherSection,
-      warehouseId: activeObjectId
-    });
-    try {
-      const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) {
-        setIssueStocksOtherSection([]);
-        return;
-      }
-      setIssueStocksOtherSection((await res.json()) as StockRow[]);
-    } catch {
-      setIssueStocksOtherSection([]);
     }
   }
 
@@ -3739,7 +3704,8 @@ function App() {
       .map((row) => ({
         materialId: row.materialId,
         quantity: Number(issuePickQtyByKey[row.pickKey] ?? 1),
-        factLabel: row.factLabel?.trim() ? row.factLabel.trim() : undefined
+        factLabel: row.factLabel?.trim() ? row.factLabel.trim() : undefined,
+        limitNodeId: row.limitNodeId || undefined
       }))
       .filter((line) => line.materialId && line.quantity > 0);
     if (!lines.length) {
@@ -3751,17 +3717,13 @@ function App() {
     for (const line of lines) {
       qtySumByMaterial.set(line.materialId, (qtySumByMaterial.get(line.materialId) || 0) + line.quantity);
     }
-    const stockPool = issueFromOtherSection ? issueStocksOtherSection : stocks;
     for (const [materialId, sumQty] of qtySumByMaterial) {
-      const stockRow = stockPool.find((s) => s.materialId === materialId && s.warehouseId === activeObjectId);
+      const stockRow = stocks.find((s) => s.materialId === materialId && s.warehouseId === activeObjectId);
       if (!stockRow) continue;
       if (sumQty > stockRow.available) {
         const label =
           issuePickCart.find((c) => c.materialId === materialId && c.factLabel)?.factLabel || stockRow.materialName;
-        const corp = issueFromOtherSection ? ` (корпус ${issueSectionLabel(issueOtherSection)})` : "";
-        setIssuesMessage(
-          `Недостаточно остатка по «${label}»${corp} (итого по номенклатуре превышает доступно)`
-        );
+        setIssuesMessage(`Недостаточно остатка по «${label}» (итого по номенклатуре превышает доступно)`);
         setIssuesTone("error");
         return;
       }
@@ -3775,7 +3737,6 @@ function App() {
         body: JSON.stringify({
           warehouseId: activeObjectId,
           section: objectSectionFilter,
-          ...(issueFromOtherSection ? { stockSection: issueOtherSection } : {}),
           note: issueNote.trim() || undefined,
           responsibleName,
           flowType: "DIRECT_ISSUE",
@@ -4812,18 +4773,12 @@ function App() {
   }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter, activeObjectId]);
 
   useEffect(() => {
-    setIssueFromOtherSection(false);
-    setIssuePickCart([]);
-    setIssuePickQtyByKey({});
-  }, [objectSectionFilter, activeObjectId]);
-
-  useEffect(() => {
     if (token && activeTab === "issues") {
       void loadCatalogData().catch(() => undefined);
       void loadProjects().catch(() => undefined);
       void loadIssues();
       void loadStocks(q);
-      void loadIssueStocksOtherSection();
+      void loadLimitTemplates().catch(() => undefined);
       void loadMaterialMappings();
       void loadReceiptRequests();
     }
@@ -7638,42 +7593,10 @@ function App() {
                     они развёрнуты отдельно; остаток один на номенклатуру карточки.
                   </p>
                 </div>
-                <div className="issuePickerHeadActions">
-                  <span className="muted">
-                    Строк: {issueFacingRowsFiltered.length}/{issueFacingRows.length}
-                  </span>
-                  <button
-                    type="button"
-                    className={issueFromOtherSection ? "secondaryBtn issueCrossCorpBtn active" : "ghostBtn issueCrossCorpBtn"}
-                    disabled={!issueOtherSectionHasStock && !issueFromOtherSection}
-                    title={
-                      issueOtherSectionHasStock
-                        ? `Списать остаток с корпуса ${issueSectionLabel(issueOtherSection)}, учёт выдачи — ${issueSectionLabel(objectSectionFilter)}`
-                        : `На корпусе ${issueSectionLabel(issueOtherSection)} нет остатков`
-                    }
-                    onClick={() => {
-                      setIssueFromOtherSection((v) => {
-                        const next = !v;
-                        if (!next) {
-                          setIssuePickCart([]);
-                          setIssuePickQtyByKey({});
-                        }
-                        return next;
-                      });
-                    }}
-                  >
-                    {issueFromOtherSection
-                      ? `Корпус ${issueSectionLabel(issueOtherSection)} · отмена`
-                      : `Выдать из корпуса ${issueSectionLabel(issueOtherSection)}`}
-                  </button>
-                </div>
+                <span className="muted">
+                  Строк: {issueFacingRowsFiltered.length}/{issueFacingRows.length}
+                </span>
               </div>
-              {issueFromOtherSection ? (
-                <p className="issueCrossSectionHint" role="status">
-                  Учёт выдачи и лимиты — <strong>{issueSectionLabel(objectSectionFilter)}</strong>. Остаток списывается с корпуса{" "}
-                  <strong>{issueSectionLabel(issueOtherSection)}</strong> (где был приход). Приходы в учёте не переносятся.
-                </p>
-              ) : null}
               <input
                 className="issueSearchInput"
                 placeholder="Поиск по фактическому названию, карточке, SKU, ед. изм…"
@@ -7721,9 +7644,7 @@ function App() {
                           <span className="badge ok">
                             {r.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}{" "}
                             <span className="muted" style={{ fontWeight: 400 }}>
-                              {issueFromOtherSection
-                                ? `корпус ${issueSectionLabel(issueOtherSection)}`
-                                : "на карточку"}
+                              на карточку
                             </span>
                           </span>
                           <span className="muted">{selected ? "В корзине" : "Добавить"}</span>
@@ -7741,7 +7662,7 @@ function App() {
                 <div className="issueCartList">
                   {issuePickCart.map((row) => {
                     const qty = Number(issuePickQtyByKey[row.pickKey] ?? 1);
-                    const stockRow = issuePickerStocks.find(
+                    const stockRow = stocks.find(
                       (s) => s.materialId === row.materialId && s.warehouseId === activeObjectId
                     );
                     const totalSameMaterial = issuePickCart
@@ -7758,8 +7679,21 @@ function App() {
                             {stockRow?.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) ?? "—"}
                             {row.factLabel ? ` · номенклатура: ${safeName(row.canonName)}` : ""}
                           </span>
+                          {row.limitPath ? (
+                            <span className="issueLimitPathBadge" title="Подраздел лимита для выдачи">
+                              Выдача: {row.limitPath}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="issueCartControls">
+                          <button
+                            type="button"
+                            className="ghostBtn issueSubsectionBtn"
+                            title="Указать другой подраздел лимита (приход может быть в другом)"
+                            onClick={() => setIssueLimitPickRow(row)}
+                          >
+                            {row.limitNodeId ? "Сменить подраздел" : "Выдать из другого подраздела"}
+                          </button>
                           <button
                             type="button"
                             className="ghostBtn iconBtn"
@@ -7859,6 +7793,32 @@ function App() {
                       : "Выдать материал"}
               </button>
             </div>
+
+            {issueLimitPickRow && activeObjectId ? (
+              <IssueLimitSubsectionModal
+                token={token}
+                fetchWithSession={fetchWithSession}
+                warehouseId={activeObjectId}
+                section={objectSectionFilter}
+                materialId={issueLimitPickRow.materialId}
+                sourceName={issueLimitPickRow.factLabel || issueLimitPickRow.canonName}
+                materialLabel={
+                  issueLimitPickRow.factLabel
+                    ? safeName(issueLimitPickRow.factLabel)
+                    : safeName(issueLimitPickRow.canonName)
+                }
+                initialLimitNodeId={issueLimitPickRow.limitNodeId}
+                onCancel={() => setIssueLimitPickRow(null)}
+                onConfirm={(limitNodeId, path) => {
+                  setIssuePickCart((prev) =>
+                    prev.map((r) =>
+                      r.pickKey === issueLimitPickRow.pickKey ? { ...r, limitNodeId, limitPath: path } : r
+                    )
+                  );
+                  setIssueLimitPickRow(null);
+                }}
+              />
+            ) : null}
               </>
             )}
             {issueIssuesDomain === "TOOLS" && (
@@ -8243,8 +8203,10 @@ function App() {
                       const plan = Number(node.plannedQty || 0);
                       const sm = node.materialId ? limitSupplyByMaterialId[node.materialId] : undefined;
                       const arrived = sm?.arrivedQty ?? 0;
-                      const issued = node.materialId
-                        ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0)
+                      const matNode = tpl.nodes.find((x) => x.id === nodeId);
+                      const issued = matNode?.materialId
+                        ? Number(matNode.issuedQty || 0) ||
+                          Number(issuedTotalsByMaterialId.get(matNode.materialId) || 0)
                         : 0;
                       const a: NodeAgg = { plan, arrived, issued };
                       aggByNodeId.set(nodeId, a);
@@ -8294,10 +8256,12 @@ function App() {
                   for (const n of tpl.nodes) if (n.nodeType === "GROUP") computeCounts(n.id);
 
                   const totalPlanned = materialNodes.reduce((sum, n) => sum + Number(n.plannedQty || 0), 0);
-                  const totalIssued = materialNodes.reduce(
-                    (sum, n) => sum + (n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0),
-                    0
-                  );
+                  const totalIssued = materialNodes.reduce((sum, n) => {
+                    const iss = n.materialId
+                      ? Number(n.issuedQty || 0) || Number(issuedTotalsByMaterialId.get(n.materialId) || 0)
+                      : 0;
+                    return sum + iss;
+                  }, 0);
                   const totalArrived = materialNodes.reduce(
                     (sum, n) =>
                       sum + (n.materialId ? Number(limitSupplyByMaterialId[n.materialId]?.arrivedQty || 0) : 0),
@@ -8309,7 +8273,9 @@ function App() {
                     totalPlanned > 0 ? Math.min(100, Math.round((totalArrived / totalPlanned) * 100)) : 0;
                   const overCount = materialNodes.filter((n) => {
                     const planned = Number(n.plannedQty || 0);
-                    const issued = n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0;
+                    const issued = n.materialId
+                      ? Number(n.issuedQty || 0) || Number(issuedTotalsByMaterialId.get(n.materialId) || 0)
+                      : 0;
                     return planned > 0 && issued > planned;
                   }).length;
 
@@ -8330,7 +8296,10 @@ function App() {
                     const isGroup = node.nodeType === "GROUP";
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
                     const planned = Number(node.plannedQty || 0);
-                    const issued = node.materialId ? Number(issuedTotalsByMaterialId.get(node.materialId) || 0) : 0;
+                      const issued = node.materialId
+                        ? Number(node.issuedQty || 0) ||
+                          Number(issuedTotalsByMaterialId.get(node.materialId) || 0)
+                        : 0;
                     const arrived = node.materialId
                       ? Number(limitSupplyByMaterialId[node.materialId]?.arrivedQty || 0)
                       : 0;
@@ -8734,7 +8703,9 @@ function App() {
                                   const plan = Number(m.plannedQty || 0);
                                   const sm = m.materialId ? limitSupplyByMaterialId[m.materialId] : undefined;
                                   const arrived = sm?.arrivedQty ?? 0;
-                                  const iss = m.materialId ? Number(issuedTotalsByMaterialId.get(m.materialId) || 0) : 0;
+                                  const iss = m.materialId
+                                    ? Number(m.issuedQty || 0) || Number(issuedTotalsByMaterialId.get(m.materialId) || 0)
+                                    : 0;
                                   const onOrd = sm?.onOrderQty ?? 0;
                                   const stk = sm?.stockQty ?? 0;
                                   const remain = Math.max(0, plan - arrived);

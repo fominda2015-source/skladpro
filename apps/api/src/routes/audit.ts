@@ -560,7 +560,24 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
         ? items
         : op.items.map((i) => ({ materialId: i.materialId, quantity: Number(i.quantity) }));
 
+      const issueWithItems = await prisma.issueRequest.findUnique({
+        where: { id: issueId },
+        select: {
+          items: { select: { materialId: true, quantity: true, limitNodeId: true } }
+        }
+      });
+
       await prisma.$transaction(async (tx) => {
+        if (issueWithItems?.items.length) {
+          for (const line of issueWithItems.items) {
+            if (line.limitNodeId) {
+              await tx.objectLimitNode.update({
+                where: { id: line.limitNodeId },
+                data: { issuedQty: { decrement: line.quantity } }
+              });
+            }
+          }
+        }
         for (const it of finalItems) {
           const stock = await tx.stock.findUnique({
             where: {

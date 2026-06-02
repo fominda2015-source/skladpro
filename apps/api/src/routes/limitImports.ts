@@ -10,6 +10,7 @@ import {
   objectLimitTemplateWhereFromScope,
   resolveReadScope
 } from "../lib/dataScope.js";
+import { findLimitMaterialNodesInSection } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -654,6 +655,38 @@ limitImportsRouter.delete(
     return res.status(204).end();
   }
 );
+
+limitImportsRouter.get("/material-nodes", async (req: AuthedRequest, res) => {
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : null;
+  const materialId = typeof req.query.materialId === "string" ? req.query.materialId.trim() : "";
+  const sourceName = typeof req.query.sourceName === "string" ? req.query.sourceName : undefined;
+
+  if (!warehouseId || !section) {
+    return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
+  }
+  if (!materialId && !sourceName?.trim()) {
+    return res.status(400).json({ error: "Укажите materialId или sourceName" });
+  }
+
+  const scope = await resolveReadScope(req, { warehouseId });
+  try {
+    assertObjectSectionInScope(scope, warehouseId, section);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+
+  const picks = await findLimitMaterialNodesInSection(
+    warehouseId,
+    section,
+    materialId,
+    sourceName
+  );
+  return res.json(picks);
+});
 
 limitImportsRouter.get("/", async (req: AuthedRequest, res) => {
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;

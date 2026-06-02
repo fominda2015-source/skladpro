@@ -834,6 +834,7 @@ model ObjectLimitNode {
   children     ObjectLimitNode[] @relation("LimitNodeTree")
   material     Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
   receiptRequestItems ReceiptRequestItem[]
+  issueRequestItems   IssueRequestItem[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -917,9 +918,14 @@ model IssueRequestItem {
   materialId     String
   /** Подпись в акте/печати: как в УПД/фактическая номенклатура; если null — номенклатура карточки материала */
   factLabel      String?
+  /** Подраздел лимита, в который относится выдача (приход может быть в другом узле) */
+  limitNodeId    String?
   quantity       Decimal      @db.Decimal(14, 3)
   issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
   material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  limitNode      ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
+
+  @@index([limitNodeId])
 }
 
 model TransportWaybill {

@@ -62,7 +62,9 @@ const createIssueSchema = z
         z.object({
           materialId: z.string().min(1),
           quantity: z.number().positive(),
-          factLabel: z.string().max(500).optional().nullable()
+          factLabel: z.string().max(500).optional().nullable(),
+          /** Подраздел лимита для учёта выдачи */
+          limitNodeId: z.string().min(1).optional().nullable()
         })
       )
       .optional()
@@ -629,11 +631,64 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
     parsed.data.basisType ??
     (parsed.data.projectId ? IssueBasisType.PROJECT_WORK : IssueBasisType.OTHER);
 
+  let limitReleasePath = parsed.data.limitReleasePath?.trim() || "";
+  if (!limitReleasePath && parsed.data.items.length) {
+    const nodeIds = [
+      ...new Set(
+        parsed.data.items.map((i) => i.limitNodeId).filter((id): id is string => Boolean(id))
+      )
+    ];
+    if (nodeIds.length) {
+      const nodes = await prisma.objectLimitNode.findMany({
+        where: { id: { in: nodeIds } },
+        select: { id: true, templateId: true, title: true, indexLabel: true, parentId: true }
+      });
+      const templateIds = [...new Set(nodes.map((n) => n.templateId))];
+      const tplRows = await prisma.objectLimitTemplate.findMany({
+        where: { id: { in: templateIds } },
+        select: { id: true, section: true, title: true }
+      });
+      const tplMeta = new Map(tplRows.map((t) => [t.id, t]));
+      const tree = await prisma.objectLimitNode.findMany({
+        where: { templateId: { in: templateIds } },
+        select: { id: true, templateId: true, parentId: true, title: true, indexLabel: true }
+      });
+      const treeByTpl = new Map<string, Map<string, { parentId: string | null; title: string; indexLabel: string | null }>>();
+      for (const n of tree) {
+        let m = treeByTpl.get(n.templateId);
+        if (!m) {
+          m = new Map();
+          treeByTpl.set(n.templateId, m);
+        }
+        m.set(n.id, { parentId: n.parentId, title: n.title, indexLabel: n.indexLabel });
+      }
+      const paths: string[] = [];
+      for (const nid of nodeIds) {
+        const node = nodes.find((n) => n.id === nid);
+        if (!node) continue;
+        const m = treeByTpl.get(node.templateId);
+        const parts: string[] = [];
+        let cur: string | null = nid;
+        for (let g = 0; g < 64 && cur && m; g++) {
+          const x = m.get(cur);
+          if (!x) break;
+          const label = [x.indexLabel, x.title].filter(Boolean).join(" ").trim();
+          if (label) parts.unshift(label);
+          cur = x.parentId;
+        }
+        const tpl = tplMeta.get(node.templateId);
+        if (tpl?.title) parts.unshift(`${tpl.section === "SS" ? "СС" : "ЭОМ"} · ${tpl.title}`);
+        if (parts.length) paths.push(parts.join(" / "));
+      }
+      limitReleasePath = [...new Set(paths)].join("; ");
+    }
+  }
+
   const created = await prisma.issueRequest.create({
     data: {
       number,
       domain,
-      limitReleasePath: parsed.data.limitReleasePath?.trim() ? parsed.data.limitReleasePath.trim() : undefined,
+      limitReleasePath: limitReleasePath || undefined,
       flowType: parsed.data.flowType ?? "REQUEST",
       warehouseId: parsed.data.warehouseId,
       section: parsed.data.section,
@@ -651,7 +706,8 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
               create: parsed.data.items.map((item) => ({
                 materialId: item.materialId,
                 quantity: item.quantity,
-                factLabel: item.factLabel?.trim() || null
+                factLabel: item.factLabel?.trim() || null,
+                limitNodeId: item.limitNodeId || null
               }))
             }
           }
@@ -1169,8 +1225,6 @@ issueRequestsRouter.patch(
 
   try {
     const prevStatus = issueRow.status;
-    const deductSection = issueRow.stockSection ?? issueRow.section;
-
     const result = await prisma.$transaction(async (tx) => {
       for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
@@ -1178,7 +1232,7 @@ issueRequestsRouter.patch(
             warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: deductSection
+              section: issueRow.section
             }
           }
         });
@@ -1215,7 +1269,7 @@ issueRequestsRouter.patch(
         data: {
           type: OperationType.EXPENSE,
           warehouseId: issueRow.warehouseId,
-          section: deductSection,
+          section: issueRow.section,
           projectId: issueRow.projectId ?? undefined,
           documentNumber: issueRow.number,
           status: "POSTED",
@@ -1236,11 +1290,18 @@ issueRequestsRouter.patch(
             warehouseId_materialId_section: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: deductSection
+              section: issueRow.section
             }
           },
           data: { quantity: { decrement: item.quantity } }
         });
+
+        if (item.limitNodeId) {
+          await tx.objectLimitNode.update({
+            where: { id: item.limitNodeId },
+            data: { issuedQty: { increment: item.quantity } }
+          });
+        }
 
         await tx.stockMovement.create({
           data: {
@@ -1312,7 +1373,7 @@ issueRequestsRouter.patch(
               warehouseId_materialId_section: {
                 warehouseId: issueRow.warehouseId,
                 materialId: it.materialId,
-                section: deductSection
+                section: issueRow.section
               }
             },
             include: { material: { select: { name: true, unit: true } } }

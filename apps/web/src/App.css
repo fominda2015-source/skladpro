@@ -2172,6 +2172,36 @@ tr.low {
   font-weight: 700;
 }
 
+.issueSubsectionBtn {
+  width: auto;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.issueLimitPathBadge {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #1d4ed8;
+  line-height: 1.35;
+}
+
+.issueLimitSubModal {
+  max-width: 560px;
+}
+
+.issueLimitSubHint {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+
 .issueCrossSectionHint {
   margin: 0 0 8px;
   padding: 8px 10px;
