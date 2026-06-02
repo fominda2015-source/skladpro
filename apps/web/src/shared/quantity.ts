@@ -3,7 +3,7 @@ export const MATERIAL_QTY_STEP = 1;
 export const MATERIAL_QTY_MIN = 1;
 
 /** Парсит количество и округляет до целого (0 для пустого/невалидного). */
-export function parseMaterialQty(value: string | number | null | undefined): number {
+export function parseMaterialQty(value: unknown): number {
   if (value == null || value === "") return 0;
   if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
   const n = Number(String(value).replace(",", ".").trim());
@@ -11,7 +11,7 @@ export function parseMaterialQty(value: string | number | null | undefined): num
 }
 
 /** Форматирование количества без дробной части. */
-export function formatMaterialQty(value: string | number | null | undefined): string {
+export function formatMaterialQty(value: unknown): string {
   return parseMaterialQty(value).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
 }
 

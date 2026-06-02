@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
+import { MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 
 export type WriteoffLine = {
   holderKey: string;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
+import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
 
 type PickLine = { materialId: string; name: string; unit: string; maxQty: number; qty: string };
