@@ -16,10 +16,11 @@ import {
   reserveTransferLines
 } from "../lib/transferStock.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { materialQtyCoerceSchema } from "../lib/quantity.js";
 
 const lineSchema = z.object({
   materialId: z.string().min(1),
-  quantity: z.coerce.number().positive().max(1_000_000_000),
+  quantity: materialQtyCoerceSchema,
   limitNodeId: z.string().optional()
 });
 

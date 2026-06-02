@@ -13,6 +13,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import { formatMaterialQty } from "../../shared/quantity";
 import { PageHero } from "../ui/PageHero";
 import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 import { HomeDrillModal } from "./HomeDrillModal";
@@ -288,8 +289,7 @@ function objectCell(name: string, warehouseId: string, onOpen: (warehouseId: str
 }
 
 function chartTooltipQty(value: unknown): [string, string] {
-  const n = typeof value === "number" ? value : Number(value);
-  return [Number.isFinite(n) ? n.toLocaleString("ru-RU") : "—", ""];
+  return [formatMaterialQty(value), ""];
 }
 
 export function HomeOverview({

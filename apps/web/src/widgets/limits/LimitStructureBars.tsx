@@ -1,3 +1,5 @@
+import { formatMaterialQty } from "../../shared/quantity";
+
 type Props = {
   plan: number;
   issued: number;
@@ -7,7 +9,7 @@ type Props = {
 };
 
 function fmtQty(n: number): string {
-  return Number.isFinite(n) ? n.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
+  return formatMaterialQty(n);
 }
 
 function fmtPct(n: number): string {

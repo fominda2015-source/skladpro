@@ -16,7 +16,8 @@ type TransferCtx = {
 };
 
 function qtyOf(v: unknown) {
-  return Number(v);
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
 async function stockRow(

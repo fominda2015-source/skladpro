@@ -98,6 +98,7 @@ import { ToolsInventoryBlock } from "./widgets/tools/ToolsInventoryBlock";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
+import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "./shared/quantity";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
@@ -106,8 +107,7 @@ import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/R
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
 function warehouseReportTooltipQty(value: unknown): [string, string] {
-  const n = typeof value === "number" ? value : Number(value);
-  return [Number.isFinite(n) ? n.toFixed(3) : "—", "Кол-во"];
+  return [formatMaterialQty(typeof value === "number" ? value : Number(value)), "Кол-во"];
 }
 
 function warehouseReportTooltipCount(value: unknown): [number, string] {
@@ -598,29 +598,22 @@ type MaterialMappingRow = {
   targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
 
-function parseReceiptQty(value: string | number | null | undefined): number {
-  if (value == null || value === "") return 0;
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  const n = Number(String(value).replace(",", ".").trim());
-  return Number.isFinite(n) ? n : 0;
-}
-
-const RECEIPT_QTY_EPS = 1e-6;
+const RECEIPT_QTY_EPS = 0.5;
 
 function isReceiptItemOpen(it: ReceiptRequestItem): boolean {
-  const total = parseReceiptQty(it.quantity);
-  const accepted = parseReceiptQty(it.acceptedQty);
+  const total = parseMaterialQty(it.quantity);
+  const accepted = parseMaterialQty(it.acceptedQty);
   return accepted + RECEIPT_QTY_EPS < total;
 }
 
 function receiptItemRemainingQty(it: ReceiptRequestItem): number {
-  const remaining = parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty);
+  const remaining = parseMaterialQty(it.quantity) - parseMaterialQty(it.acceptedQty);
   return remaining > RECEIPT_QTY_EPS ? remaining : 0;
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
   const hasOpenItems = row.items.some(isReceiptItemOpen);
-  const anyAccepted = row.items.some((it) => parseReceiptQty(it.acceptedQty) > RECEIPT_QTY_EPS);
+  const anyAccepted = row.items.some((it) => parseMaterialQty(it.acceptedQty) > RECEIPT_QTY_EPS);
   if (row.status === "CANCELLED") return row;
   if (!hasOpenItems) {
     return { ...row, status: "RECEIVED" };
@@ -1411,7 +1404,7 @@ function App() {
     for (const r of receiptRequests) {
       for (const it of r.items) {
         if (!it.mappedMaterialId) continue;
-        const accepted = Number(it.acceptedQty || 0);
+        const accepted = parseMaterialQty(it.acceptedQty);
         if (!Number.isFinite(accepted) || accepted <= 0) continue;
         const key = `${it.sourceName}|${it.sourceUnit || ""}`;
         const bucket = map.get(it.mappedMaterialId) || new Map();
@@ -1610,7 +1603,7 @@ function App() {
     if (!warehouseSnapshot) return [];
     return warehouseSnapshot.stocksBySection.map((r) => ({
       name: r.section === "SS" ? "СС" : r.section === "EOM" ? "ЭОМ" : r.section,
-      quantity: Number(r.quantity) || 0,
+      quantity: parseMaterialQty(r.quantity),
       lines: r.lines
     }));
   }, [warehouseSnapshot]);
@@ -1618,7 +1611,7 @@ function App() {
     if (!warehouseSnapshot) return [];
     return warehouseSnapshot.topMaterials.slice(0, 14).map((m) => ({
       name: m.name.length > 36 ? `${m.name.slice(0, 34)}…` : m.name,
-      quantity: Number(m.quantity) || 0
+      quantity: parseMaterialQty(m.quantity)
     }));
   }, [warehouseSnapshot]);
   const reportsLimitUsageRows = useMemo(() => {
@@ -3194,8 +3187,8 @@ function App() {
       const draft = drafts[it.id];
       const qtyRaw = (draft?.qty ?? "").toString().replace(",", ".").trim();
       if (!qtyRaw) continue;
-      const qty = Number(qtyRaw);
-      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const qty = parseMaterialQty(qtyRaw);
+      if (qty <= 0) continue;
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
       const finalName = explicitName || it.sourceName;
@@ -3317,15 +3310,15 @@ function App() {
               if (!m) return it;
               return {
                 ...it,
-                acceptedQty: parseReceiptQty(it.acceptedQty) + m.acceptedQty
+                acceptedQty: parseMaterialQty(it.acceptedQty) + m.acceptedQty
               };
             });
             let allDone = true;
             let anyAccepted = false;
             for (const it of updatedItems) {
-              const acc = parseReceiptQty(it.acceptedQty);
+              const acc = parseMaterialQty(it.acceptedQty);
               if (acc > 0) anyAccepted = true;
-              if (acc + 1e-6 < parseReceiptQty(it.quantity)) allDone = false;
+              if (acc + 1e-6 < parseMaterialQty(it.quantity)) allDone = false;
             }
             receiptFullyAccepted = allDone;
             return normalizeReceiptRequest({
@@ -3409,7 +3402,7 @@ function App() {
     for (const m of mappings) {
       const it = freshRow.items.find((x) => x.id === m.itemId);
       if (!it) continue;
-      const remaining = parseReceiptQty(it.quantity) - parseReceiptQty(it.acceptedQty);
+      const remaining = parseMaterialQty(it.quantity) - parseMaterialQty(it.acceptedQty);
       if (m.acceptedQty > remaining + 1e-6) {
         if (!token) return false;
         try {
@@ -3778,7 +3771,7 @@ function App() {
     const lines = issuePickCart
       .map((row) => ({
         materialId: row.materialId,
-        quantity: Number(issuePickQtyByKey[row.pickKey] ?? 1),
+        quantity: parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1) || MATERIAL_QTY_MIN,
         factLabel: row.factLabel?.trim() ? row.factLabel.trim() : undefined,
         limitNodeId: row.limitNodeId || undefined
       }))
@@ -5511,7 +5504,7 @@ function App() {
     if (!row) return null;
     const drafts = acceptanceDrafts[row.id] || {};
     const pickedItems = row.items.filter((it) => {
-      const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
+      const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
       return Number.isFinite(q) && q > 0;
     });
     const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
@@ -6531,8 +6524,8 @@ function App() {
                 <tbody>
           {openReceiptRequests.map((row) => {
             const isExpanded = expandedReceiptIds[row.id] === true;
-            const totalQty = row.items.reduce((s, it) => s + parseReceiptQty(it.quantity), 0);
-            const acceptedQty = row.items.reduce((s, it) => s + parseReceiptQty(it.acceptedQty), 0);
+            const totalQty = row.items.reduce((s, it) => s + parseMaterialQty(it.quantity), 0);
+            const acceptedQty = row.items.reduce((s, it) => s + parseMaterialQty(it.acceptedQty), 0);
             const donePct = totalQty > 0 ? Math.min(100, Math.round((acceptedQty / totalQty) * 100)) : 0;
             const finished = row.status === "RECEIVED" || row.status === "CANCELLED";
             const drafts = acceptanceDrafts[row.id] || {};
@@ -6571,8 +6564,7 @@ function App() {
                   </td>
                   <td>
                     <div className="muted" style={{ fontSize: 12 }}>
-                      {acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
-                      {totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} ({donePct}%)
+                      {formatMaterialQty(acceptedQty)} / {formatMaterialQty(totalQty)} ({donePct}%)
                     </div>
                     <div className="progressWrap" style={{ width: "100%", marginTop: 4, maxWidth: 160 }}>
                       <div className="progressBar" style={{ width: `${donePct}%` }} />
@@ -6656,7 +6648,7 @@ function App() {
                     {(() => {
                       const itemsLeft = row.items.filter(isReceiptItemOpen);
                       const selectedCount = itemsLeft.filter((it) => {
-                        const q = Number((drafts[it.id]?.qty ?? "").toString().replace(",", "."));
+                        const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
                         return Number.isFinite(q) && q > 0;
                       }).length;
                       const allSelected = itemsLeft.length > 0 && selectedCount === itemsLeft.length;
@@ -6672,7 +6664,7 @@ function App() {
                                   newName: existing.newName || it.mappedMaterial?.name || it.sourceName,
                                   newUnit:
                                     existing.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
-                                  qty: existing.qty && Number(existing.qty) > 0 ? existing.qty : String(remaining),
+                                  qty: existing.qty && parseMaterialQty(existing.qty) > 0 ? existing.qty : String(remaining),
                                   category: existing.category ?? it.category ?? "",
                                   unitPrice:
                                     existing.unitPrice ??
@@ -6748,8 +6740,8 @@ function App() {
                               </thead>
                               <tbody>
                                 {itemsLeft.map((it) => {
-                                  const total = parseReceiptQty(it.quantity);
-                                  const accepted = parseReceiptQty(it.acceptedQty);
+                                  const total = parseMaterialQty(it.quantity);
+                                  const accepted = parseMaterialQty(it.acceptedQty);
                                   const remaining = receiptItemRemainingQty(it);
                                   const draft = drafts[it.id] || {
                                     newName: "",
@@ -6797,7 +6789,7 @@ function App() {
                                       }
                                     }));
                                   const isPicked =
-                                    Number(draft.qty || 0) > 0 || (draft.qty || "").trim() !== "";
+                                    parseMaterialQty(draft.qty) > 0 || (draft.qty || "").trim() !== "";
                                   const toggle = (checked: boolean) =>
                                     setAcceptanceDrafts((prev) => ({
                                       ...prev,
@@ -6809,7 +6801,7 @@ function App() {
                                               newUnit: prev[row.id]?.[it.id]?.newUnit || defaultUnit,
                                               qty:
                                                 prev[row.id]?.[it.id]?.qty &&
-                                                Number(prev[row.id]?.[it.id]?.qty) > 0
+                                                parseMaterialQty(prev[row.id]?.[it.id]?.qty) > 0
                                                   ? prev[row.id][it.id]!.qty
                                                   : String(remaining),
                                               limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
@@ -6853,8 +6845,7 @@ function App() {
                                         ) : null}
                                       </td>
                                       <td>
-                                        {accepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} /{" "}
-                                        {total.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}{" "}
+                                        {formatMaterialQty(accepted)} / {formatMaterialQty(total)}{" "}
                                         <span className="muted">{it.sourceUnit || "шт"}</span>
                                       </td>
                                       <td>
@@ -6878,12 +6869,12 @@ function App() {
                                         <input
                                           type="number"
                                           min={0}
-                                          step={0.001}
+                                          step={MATERIAL_QTY_STEP}
                                           max={remaining || undefined}
                                           value={draft.qty}
                                           disabled={finished}
                                           placeholder={remaining ? String(remaining) : ""}
-                                          onChange={(e) => saveDraft({ qty: e.target.value })}
+                                          onChange={(e) => saveDraft({ qty: e.target.value.replace(/[^\d]/g, "") })}
                                         />
                                       </td>
                                       <td style={{ minWidth: 160 }}>
@@ -7365,13 +7356,13 @@ function App() {
                           {typeof r.acceptedQty === "number" && r.acceptedQty > 0 ? (
                             <span className="muted" style={{ fontSize: 12 }}>
                               принято под этим названием:{" "}
-                              {r.acceptedQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}
+                              {formatMaterialQty(r.acceptedQty)} {r.unit}
                             </span>
                           ) : null}
                         </div>
                         <div className="issueMaterialMeta">
                           <span className="badge ok">
-                            {r.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} {r.unit}{" "}
+                            {formatMaterialQty(r.available)} {r.unit}{" "}
                             <span className="muted" style={{ fontWeight: 400 }}>
                               на карточку
                             </span>
@@ -7390,13 +7381,13 @@ function App() {
                 <h3>Подобрано к выдаче</h3>
                 <div className="issueCartList">
                   {issuePickCart.map((row) => {
-                    const qty = Number(issuePickQtyByKey[row.pickKey] ?? 1);
+                    const qty = parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1);
                     const stockRow = stocks.find(
                       (s) => s.materialId === row.materialId && s.warehouseId === activeObjectId
                     );
                     const totalSameMaterial = issuePickCart
                       .filter((c) => c.materialId === row.materialId)
-                      .reduce((acc, c) => acc + Number(issuePickQtyByKey[c.pickKey] ?? 1), 0);
+                      .reduce((acc, c) => acc + parseMaterialQty(issuePickQtyByKey[c.pickKey] ?? 1), 0);
                     const exceeds = stockRow ? totalSameMaterial > stockRow.available : false;
                     const lineTitle = row.factLabel ? safeName(row.factLabel) : safeName(row.canonName);
                     return (
@@ -7405,7 +7396,7 @@ function App() {
                           <strong>{lineTitle}</strong>
                           <span className="muted">
                             {row.unit} · доступно по карточке{" "}
-                            {stockRow?.available.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) ?? "—"}
+                            {stockRow ? formatMaterialQty(stockRow.available) : "—"}
                             {row.factLabel ? ` · номенклатура: ${safeName(row.canonName)}` : ""}
                           </span>
                           {row.limitPath ? (
@@ -7429,7 +7420,7 @@ function App() {
                             onClick={() =>
                               setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [row.pickKey]: Math.max(0.001, Number((qty - 1).toFixed(3)))
+                                [row.pickKey]: Math.max(MATERIAL_QTY_MIN, Math.round(qty) - 1)
                               }))
                             }
                             aria-label="Уменьшить"
@@ -7438,13 +7429,13 @@ function App() {
                           </button>
                           <input
                             type="number"
-                            min={0.001}
-                            step={0.001}
+                            min={MATERIAL_QTY_MIN}
+                            step={MATERIAL_QTY_STEP}
                             value={qty}
                             onChange={(e) =>
                               setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [row.pickKey]: Number(e.target.value)
+                                [row.pickKey]: parseMaterialQty(e.target.value) || MATERIAL_QTY_MIN
                               }))
                             }
                           />
@@ -7454,7 +7445,7 @@ function App() {
                             onClick={() =>
                               setIssuePickQtyByKey((prev) => ({
                                 ...prev,
-                                [row.pickKey]: Number((qty + 1).toFixed(3))
+                                [row.pickKey]: Math.round(qty) + 1
                               }))
                             }
                             aria-label="Увеличить"
@@ -8038,8 +8029,7 @@ function App() {
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
                     const directMaterials = children.filter((c) => c.nodeType === "MATERIAL");
-                    const metricFmt = (n: number) =>
-                      Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
+                    const metricFmt = (n: number) => formatMaterialQty(n);
                     const agg = isGroup ? aggByNodeId.get(node.id) || { plan: 0, arrived: 0, issued: 0 } : null;
                     const groupArrivedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.arrived / agg.plan) * 100)) : 0;
                     const groupIssuedPct = agg && agg.plan > 0 ? Math.min(100, Math.round((agg.issued / agg.plan) * 100)) : 0;
@@ -8299,8 +8289,8 @@ function App() {
                                 }
                                 const unit = (unitValue || "шт").trim() || "шт";
                                 const planRaw = (planValue ?? "").toString().trim().replace(",", ".");
-                                const planNum = planRaw === "" ? null : Number(planRaw);
-                                if (planNum !== null && !Number.isFinite(planNum)) {
+                                const planNum = planRaw === "" ? null : Math.round(Number(planRaw));
+                                if (planNum !== null && (!Number.isFinite(planNum) || planNum < 0)) {
                                   setLimitsMessage("Некорректное плановое количество");
                                   return;
                                 }
@@ -8367,7 +8357,7 @@ function App() {
                                         План
                                         <input
                                           type="number"
-                                          step={0.001}
+                                          step={MATERIAL_QTY_STEP}
                                           value={planValue}
                                           disabled={!canWriteLimits}
                                           style={{ borderColor: draft.plannedQty !== undefined && draft.plannedQty !== originalPlan ? "#ff9f1c" : undefined }}
@@ -8726,10 +8716,10 @@ function App() {
                                 <span className="muted">
                                   {item.unit || "шт"}
                                   {item.plannedQty != null
-                                    ? ` · план ${Number(item.plannedQty).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}`
+                                    ? ` · план ${formatMaterialQty(item.plannedQty)}`
                                     : ""}
                                   {item.issuedQty > 0
-                                    ? ` · выдано ${Number(item.issuedQty).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}`
+                                    ? ` · выдано ${formatMaterialQty(item.issuedQty)}`
                                     : ""}
                                 </span>
                               </li>
@@ -9130,7 +9120,7 @@ function App() {
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                   </select>
-                  <input type="number" min={0.001} step={0.001} value={waybillQty} onChange={(e) => setWaybillQty(Number(e.target.value))} />
+                  <input type="number" min={MATERIAL_QTY_MIN} step={MATERIAL_QTY_STEP} value={waybillQty} onChange={(e) => setWaybillQty(parseMaterialQty(e.target.value) || MATERIAL_QTY_MIN)} />
                 </label>
                 <button
                   onClick={async () => {
@@ -10523,7 +10513,7 @@ function App() {
                 </div>
                 <div className="kpi">
                   <span>Суммарно по количеству</span>
-                  <strong>{warehouseSnapshot.counts.totalStockQty.toFixed(2)}</strong>
+                  <strong>{formatMaterialQty(warehouseSnapshot.counts.totalStockQty)}</strong>
                 </div>
                 <div className="kpi">
                   <span>Заявки на выдачу</span>
@@ -10691,7 +10681,7 @@ function App() {
                               <td>{it.planned}</td>
                               <td>{it.issued}</td>
                               <td>{it.reserved}</td>
-                              <td>{Number(it.onStock).toFixed(3)}</td>
+                              <td>{formatMaterialQty(it.onStock)}</td>
                               <td>{it.remainingPlan}</td>
                               <td>
                                 <span className={it.usagePercent > 90 ? "bad" : it.usagePercent > 70 ? "warnText" : "ok"}>
@@ -11800,10 +11790,10 @@ function App() {
                 Количество
                 <input
                   type="number"
-                  min={0.001}
-                  step="any"
+                  min={MATERIAL_QTY_MIN}
+                  step={MATERIAL_QTY_STEP}
                   value={manualStockQty}
-                  onChange={(e) => setManualStockQty(e.target.value)}
+                  onChange={(e) => setManualStockQty(e.target.value.replace(/[^\d]/g, ""))}
                 />
               </label>
               <label style={{ gridColumn: "1 / -1" }}>
@@ -11846,7 +11836,7 @@ function App() {
                   if (!token) return;
                   const wid = manualStockWarehouseOverride || activeObjectId || warehouses[0]?.id;
                   if (!wid) return;
-                  const qty = Number(String(manualStockQty).trim().replace(",", "."));
+                  const qty = parseMaterialQty(manualStockQty);
                   if (!Number.isFinite(qty) || qty <= 0) {
                     setManualStockMessage("Укажи положительное количество.");
                     return;

@@ -22,7 +22,7 @@ reportsRouter.use(requirePermission("dashboard.read"));
 
 function num(x: unknown): number {
   const v = Number(x);
-  return Number.isFinite(v) ? v : 0;
+  return Number.isFinite(v) ? Math.round(v) : 0;
 }
 
 function stockWhereForWarehouse(scope: DataScope, warehouseId: string): Prisma.StockWhereInput {
@@ -390,7 +390,7 @@ reportsRouter.get("/warehouse/:warehouseId/summary.pdf", async (req: AuthedReque
   doc.moveDown(0.8);
   doc.fontSize(12).text("Ключевые показатели");
   doc.fontSize(10);
-  doc.text(`Строк остатков: ${snap.counts.stockLines} · суммарно по количеству: ${snap.counts.totalStockQty.toFixed(2)}`);
+  doc.text(`Строк остатков: ${snap.counts.stockLines} · суммарно по количеству: ${Math.round(snap.counts.totalStockQty)}`);
   doc.text(`Заявки на выдачу: ${snap.counts.issuesTotal}`);
   doc.text(`Операции за 30 дней: приход ${snap.counts.operationsLast30d.income}, расход ${snap.counts.operationsLast30d.expense}`);
   doc.text(`Открытые ТН: ${snap.counts.waybillsOpen} · инструментов: ${snap.counts.tools} · городок: ${snap.counts.campItems}`);
@@ -401,13 +401,13 @@ reportsRouter.get("/warehouse/:warehouseId/summary.pdf", async (req: AuthedReque
   doc.fontSize(12).text("Остатки по разделам");
   doc.fontSize(10);
   for (const s of snap.stocksBySection) {
-    doc.text(`- ${s.section}: строк ${s.lines}, количество ${s.quantity.toFixed(2)}`);
+    doc.text(`- ${s.section}: строк ${s.lines}, количество ${Math.round(s.quantity)}`);
   }
   doc.moveDown(0.6);
   doc.fontSize(12).text("ТОП позиций на складе");
   doc.fontSize(9);
   snap.topMaterials.slice(0, 25).forEach((r, idx) => {
-    doc.text(`${idx + 1}. ${r.name} (${r.unit}) — ${r.quantity.toFixed(2)}`);
+    doc.text(`${idx + 1}. ${r.name} (${r.unit}) — ${Math.round(r.quantity)}`);
   });
   doc.moveDown(0.6);
   doc.fontSize(12).text("Лимиты проектов (фрагмент)");

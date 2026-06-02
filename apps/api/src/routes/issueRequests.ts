@@ -42,6 +42,7 @@ const deleteIssueSchema = z.object({
 import { sha256File } from "../lib/fileHash.js";
 import { adminEditIssueRequest, adminEditIssueSchema } from "../lib/issueAdminEdit.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createIssueSchema = z
@@ -63,7 +64,7 @@ const createIssueSchema = z
       .array(
         z.object({
           materialId: z.string().min(1),
-          quantity: z.number().positive(),
+          quantity: materialQtySchema,
           factLabel: z.string().max(500).optional().nullable(),
           /** Подраздел лимита для учёта выдачи */
           limitNodeId: z.string().min(1).optional().nullable()

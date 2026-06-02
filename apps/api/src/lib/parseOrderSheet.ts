@@ -163,7 +163,7 @@ function parseOrderV2(ws: xlsx.WorkSheet): ParsedOrderSheet | null {
     const partC = getCell(r, 2);
     const qtyRaw = getCell(r, 5).replace(",", ".");
     if (!partC) continue;
-    const quantity = Number(qtyRaw);
+    const quantity = Math.round(Number(qtyRaw));
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
 
     const partD = getCell(r, 3);
@@ -271,7 +271,7 @@ function parseLegacy(ws: xlsx.WorkSheet): ParsedOrderSheet {
       const qtyRaw = getCell(r, colQty).replace(",", ".");
       const unit = colUnit >= 0 ? getCell(r, colUnit) : "шт";
       if (!name) continue;
-      const quantity = Number(qtyRaw);
+      const quantity = Math.round(Number(qtyRaw));
       if (!Number.isFinite(quantity) || quantity <= 0) continue;
       items.push({
         name,

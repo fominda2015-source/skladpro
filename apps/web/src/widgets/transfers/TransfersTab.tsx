@@ -5,6 +5,7 @@ import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { PageHero } from "../ui/PageHero";
 import { ToolsListToolbar } from "../tools/ToolsListToolbar";
 import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
+import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 
 type Warehouse = { id: string; name: string };
 
@@ -262,7 +263,7 @@ export function TransfersTab({
 
   const setRowQty = (whId: string, materialId: string, qty: number, limitNodeId: string | null, max: number) => {
     const key = `${whId}:${materialId}`;
-    const safe = Math.max(0, Math.min(max, qty));
+    const safe = Math.max(0, Math.min(max, Math.round(qty)));
     setSelected((prev) => {
       if (safe <= 0) {
         const next = { ...prev };
@@ -564,14 +565,14 @@ export function TransfersTab({
                                               type="number"
                                               min={0}
                                               max={row.available}
-                                              step={0.001}
+                                              step={MATERIAL_QTY_STEP}
                                               disabled={!sel || !canWrite}
                                               value={sel?.qty ?? ""}
                                               onChange={(e) =>
                                                 setRowQty(
                                                   wh.warehouseId,
                                                   row.materialId,
-                                                  Number(e.target.value),
+                                                  parseMaterialQty(e.target.value),
                                                   row.limitNodeId,
                                                   row.available
                                                 )

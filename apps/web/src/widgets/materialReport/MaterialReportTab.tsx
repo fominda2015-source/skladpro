@@ -4,6 +4,7 @@ import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateVie
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "../chat/UserAvatar";
 import { MaterialReportWriteoffModal, type WriteoffLine } from "./MaterialReportWriteoffModal";
+import { formatMaterialQty } from "../../shared/quantity";
 
 export type MaterialReportHolder = {
   holderKey: string;
@@ -49,7 +50,7 @@ function lineKey(holderKey: string, materialId: string) {
 }
 
 function formatQty(n: number) {
-  return n.toLocaleString("ru-RU", { maximumFractionDigits: 3 });
+  return formatMaterialQty(n);
 }
 
 function formatDate(iso?: string | null) {

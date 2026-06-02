@@ -82,7 +82,7 @@ export type WarehouseStockViewProps = {
   movementsError?: string;
 };
 
-function fmtQty(n: number, maxFrac = 3): string {
+function fmtQty(n: number, maxFrac = 0): string {
   return n.toLocaleString("ru-RU", { maximumFractionDigits: maxFrac });
 }
 

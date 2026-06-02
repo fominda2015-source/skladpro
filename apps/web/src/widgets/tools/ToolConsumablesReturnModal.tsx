@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { parseMaterialQty } from "../../shared/quantity";
 
 type OpenLine = {
   id: string;
@@ -90,9 +91,9 @@ export function ToolConsumablesReturnModal({
     const lines = drafts
       .map((d) => ({
         issueId: d.issueId,
-        qtyNew: Number(d.qtyNew) || 0,
-        qtyUsed: Number(d.qtyUsed) || 0,
-        writeoffQty: Number(d.writeoffQty) || 0,
+        qtyNew: parseMaterialQty(d.qtyNew),
+        qtyUsed: parseMaterialQty(d.qtyUsed),
+        writeoffQty: parseMaterialQty(d.writeoffQty),
         writeoffReason: d.writeoffReason.trim() || undefined
       }))
       .filter((l) => l.qtyNew + l.qtyUsed + (l.writeoffQty ?? 0) > 0);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 
 export type WriteoffLine = {
   holderKey: string;
@@ -60,7 +61,7 @@ export function MaterialReportWriteoffModal({
       return;
     }
     for (const row of picked) {
-      const qty = Number(String(row.qty).trim().replace(",", "."));
+      const qty = parseMaterialQty(row.qty);
       if (!Number.isFinite(qty) || qty <= 0) {
         onError(`Укажите количество для «${safeName(row.name)}».`);
         return;
@@ -74,7 +75,7 @@ export function MaterialReportWriteoffModal({
     setBusy(true);
     try {
       for (const row of picked) {
-        const qty = Number(String(row.qty).trim().replace(",", "."));
+        const qty = parseMaterialQty(row.qty);
         const form = new FormData();
         const payload: Record<string, unknown> = {
           warehouseId,
@@ -161,8 +162,8 @@ export function MaterialReportWriteoffModal({
                   <td>
                     <input
                       type="number"
-                      min={0.001}
-                      step="any"
+                      min={MATERIAL_QTY_MIN}
+                      step={MATERIAL_QTY_STEP}
                       max={row.maxQty}
                       value={row.qty}
                       disabled={!row.selected}
@@ -170,7 +171,7 @@ export function MaterialReportWriteoffModal({
                         setRows((prev) =>
                           prev.map((x) =>
                             x.materialId === row.materialId && x.holderKey === row.holderKey
-                              ? { ...x, qty: e.target.value }
+                              ? { ...x, qty: e.target.value.replace(/[^\d]/g, "") }
                               : x
                           )
                         )

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { formatMaterialQty } from "../../shared/quantity";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
@@ -88,7 +89,7 @@ export function WarehouseZonesTable({ rows, maxCapacityPerCell = 100 }: Props) {
                 </td>
                 <td>{z.cell}</td>
                 <td>{z.lines}</td>
-                <td>{z.totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</td>
+                <td>{formatMaterialQty(z.totalQty)}</td>
                 <td>
                   <StatusBadge tone={z.fillPct >= 100 ? "bad" : z.fillPct >= 75 ? "warn" : "ok"}>
                     {z.fillPct}%
@@ -108,7 +109,7 @@ export function WarehouseZonesTable({ rows, maxCapacityPerCell = 100 }: Props) {
             <h4>{z.room}</h4>
             <MobileCardField label="Ячейка">{z.cell}</MobileCardField>
             <MobileCardField label="Позиций">{z.lines}</MobileCardField>
-            <MobileCardField label="Кол-во">{z.totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</MobileCardField>
+            <MobileCardField label="Кол-во">{formatMaterialQty(z.totalQty)}</MobileCardField>
             <MobileCardField label="Заполненность">
               <StatusBadge tone={z.fillPct >= 100 ? "bad" : z.fillPct >= 75 ? "warn" : "ok"}>{z.fillPct}%</StatusBadge>
             </MobileCardField>

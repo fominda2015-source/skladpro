@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatMaterialQty } from "../../shared/quantity";
 import { PageHero } from "../ui/PageHero";
 
 type SnapshotCounts = {
@@ -43,7 +44,7 @@ export function ReportsSnapshotHero({ warehouseName, generatedAt, counts, childr
       {counts ? (
         <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
           Сформировано: {new Date(generatedAt).toLocaleString()} · количество на складе:{" "}
-          {counts.totalStockQty.toFixed(2)} · городок: {counts.campItems} · проектов: {counts.linkedProjects}
+          {formatMaterialQty(counts.totalStockQty)} · городок: {counts.campItems} · проектов: {counts.linkedProjects}
         </p>
       ) : null}
       {children ? <div className="erpQuickActions">{children}</div> : null}

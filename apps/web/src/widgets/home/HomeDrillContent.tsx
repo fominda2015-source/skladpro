@@ -4,10 +4,10 @@ import { LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { LimitStructureBars } from "../limits/LimitStructureBars";
 import { receiptStatusLabel, receiptStatusTone } from "../receipts/receiptLabels";
+import { formatMaterialQty } from "../../shared/quantity";
 import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 
-const metricFmt = (n: number) =>
-  Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
+const metricFmt = (n: number) => formatMaterialQty(n);
 
 type Section = "SS" | "EOM";
 
@@ -585,7 +585,7 @@ function HomeDrillReceiptsPanel({
                                 <tr key={it.id}>
                                   <td>{safeName(it.sourceName || "—")}</td>
                                   <td>{Number(it.quantity).toLocaleString("ru-RU")}</td>
-                                  <td>{Number(it.acceptedQty || 0).toLocaleString("ru-RU")}</td>
+                                  <td>{formatMaterialQty(it.acceptedQty)}</td>
                                 </tr>
                               ))}
                             </tbody>

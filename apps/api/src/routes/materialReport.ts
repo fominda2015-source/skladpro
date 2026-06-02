@@ -11,6 +11,7 @@ import { config } from "../config.js";
 import { assertObjectSectionInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
@@ -426,7 +427,7 @@ const writeOffSchema = z.object({
   holderKey: z.string().min(1).optional(),
   holderUserId: z.string().min(1).optional(),
   materialId: z.string().min(1),
-  quantity: z.number().positive(),
+  quantity: materialQtySchema,
   comment: z.string().max(2000).optional()
 });
 

@@ -160,7 +160,7 @@ function parseYellowLimitSheet(ws: xlsx.WorkSheet): FlatNode[] | null {
       nodeType: "MATERIAL",
       materialName: name,
       unit: unit || undefined,
-      plannedQty: Number.isFinite(qty) ? qty : undefined
+      plannedQty: Number.isFinite(qty) ? Math.round(qty) : undefined
     });
   }
 
@@ -236,7 +236,7 @@ function parseLegacyLimitSheet(ws: xlsx.WorkSheet): FlatNode[] {
           nodeType: "MATERIAL",
           materialName: name,
           unit: unit || undefined,
-          plannedQty: Number.isFinite(qty) ? qty : undefined
+          plannedQty: Number.isFinite(qty) ? Math.round(qty) : undefined
         });
         continue;
       }
@@ -258,7 +258,7 @@ function parseLegacyLimitSheet(ws: xlsx.WorkSheet): FlatNode[] {
       nodeType: "MATERIAL",
       materialName: name,
       unit: unit || undefined,
-      plannedQty: Number.isFinite(qty) ? qty : undefined
+      plannedQty: Number.isFinite(qty) ? Math.round(qty) : undefined
     });
   }
   return out;

@@ -9,6 +9,7 @@ import {
 import { z } from "zod";
 import { recordAudit } from "./audit.js";
 import { prisma } from "./prisma.js";
+import { materialQtySchema } from "./quantity.js";
 
 export const adminEditIssueSchema = z.object({
   reason: z.string().min(3).max(2000),
@@ -19,7 +20,7 @@ export const adminEditIssueSchema = z.object({
       z.object({
         id: z.string().min(1).optional(),
         materialId: z.string().min(1),
-        quantity: z.number().positive(),
+        quantity: materialQtySchema,
         factLabel: z.string().max(500).optional().nullable(),
         limitNodeId: z.string().min(1).optional().nullable()
       })

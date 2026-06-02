@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
 
 type PickLine = { materialId: string; name: string; unit: string; maxQty: number; qty: string };
@@ -79,7 +80,7 @@ export function ToolConsumablesIssueModal({
   async function submit() {
     if (!token || !toolIds.length) return;
     const items = lines
-      .map((l) => ({ materialId: l.materialId, quantity: Number(l.qty) }))
+      .map((l) => ({ materialId: l.materialId, quantity: parseMaterialQty(l.qty) }))
       .filter((x) => x.quantity > 0);
     if (!items.length) {
       onClose();
@@ -152,10 +153,10 @@ export function ToolConsumablesIssueModal({
                         type="number"
                         min={0}
                         max={l.maxQty}
-                        step="any"
+                        step={MATERIAL_QTY_STEP}
                         value={l.qty}
                         onChange={(e) => {
-                          const qty = e.target.value;
+                          const qty = e.target.value.replace(/[^\d]/g, "");
                           setLines((prev) => prev.map((row, j) => (j === i ? { ...row, qty } : row)));
                         }}
                         style={{ width: "100%" }}

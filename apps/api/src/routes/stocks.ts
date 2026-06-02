@@ -10,6 +10,7 @@ import {
   stockWhereFromScope
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtyCoerceSchema, qtyFromDb } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 export const stocksRouter = Router();
@@ -20,7 +21,7 @@ const manualStockLineSchema = z.object({
   warehouseId: z.string().min(1),
   section: z.enum(["SS", "EOM"]),
   materialName: z.string().trim().min(1).max(800),
-  quantity: z.coerce.number().positive().max(1_000_000_000),
+  quantity: materialQtyCoerceSchema,
   unit: z.string().trim().min(1).max(64).optional().default("шт"),
   kind: z.nativeEnum(MaterialKind).optional().default(MaterialKind.MATERIAL),
   unitPrice: z.coerce.number().nonnegative().optional().nullable()
@@ -240,8 +241,8 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
   });
 
   const mapped = rows.map((row) => {
-    const qty = Number(row.quantity);
-    const reserved = Number(row.reserved);
+    const qty = qtyFromDb(row.quantity);
+    const reserved = qtyFromDb(row.reserved);
     const available = qty - reserved;
     return {
       id: row.id,

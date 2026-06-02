@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ReceiptInvoiceAttachBar } from "../receipts/ReceiptInvoiceAttachBar";
 import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
+import { formatMaterialQty } from "../../shared/quantity";
 
 type MaterialRow = {
   num: number;
@@ -326,11 +327,11 @@ export function RequestMaterialsModal(props: Props) {
                     {props.kind === "issue" ? <td>{r.sku || ""}</td> : null}
                     <td className="num">{r.unit}</td>
                     <td className="num">
-                      {r.quantity.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                      {formatMaterialQty(r.quantity)}
                     </td>
                     {props.kind === "receipt" ? (
                       <td className="num">
-                        {(r.acceptedQty || 0).toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                        {formatMaterialQty(r.acceptedQty || 0)}
                       </td>
                     ) : null}
                     {props.kind === "receipt" ? (
@@ -352,12 +353,12 @@ export function RequestMaterialsModal(props: Props) {
                     Итого
                   </td>
                   <td className="num" style={{ fontWeight: 700 }}>
-                    {totalQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                    {formatMaterialQty(totalQty)}
                   </td>
                   {props.kind === "receipt" ? (
                     <>
                       <td className="num" style={{ fontWeight: 700 }}>
-                        {totalAccepted.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                        {formatMaterialQty(totalAccepted)}
                       </td>
                       <td className="muted" style={{ fontSize: 11 }}>
                         принято {totalPct}%

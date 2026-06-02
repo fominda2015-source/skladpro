@@ -15,6 +15,7 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema } from "../lib/quantity.js";
 import {
   ensureDefaultToolCategories,
   isElectricToolCategorySlug,
@@ -728,7 +729,7 @@ const consumableIssueSchema = z.object({
     .array(
       z.object({
         materialId: z.string().min(1),
-        quantity: z.number().positive()
+        quantity: materialQtySchema
       })
     )
     .min(1)

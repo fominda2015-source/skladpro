@@ -10,6 +10,7 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createWaybillSchema = z.object({
@@ -22,7 +23,7 @@ const createWaybillSchema = z.object({
   route: z.string().optional(),
   operationId: z.string().optional(),
   issueRequestId: z.string().optional(),
-  items: z.array(z.object({ materialId: z.string().min(1), quantity: z.number().positive() })).min(1)
+  items: z.array(z.object({ materialId: z.string().min(1), quantity: materialQtySchema })).min(1)
 });
 
 const setStatusSchema = z.object({

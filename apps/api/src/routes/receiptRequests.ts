@@ -18,6 +18,7 @@ import {
   resolveReceiptAcceptLimitNode
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema, toQtyNumber } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, findMaterialNodeByLimitPath, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
@@ -55,7 +56,7 @@ const acceptItemSchema = z.object({
   materialId: z.string().optional(),
   newMaterialName: z.string().max(500).optional(),
   newMaterialUnit: z.string().max(50).optional(),
-  acceptedQty: z.number().positive(),
+  acceptedQty: materialQtySchema,
   // Опциональная привязка к конкретному узлу шаблона лимита (раздел/подраздел).
   // Если в шаблоне один и тот же материал лежит сразу в нескольких узлах,
   // мы спрашиваем пользователя «куда пихаем»; иначе пусто.
@@ -139,16 +140,10 @@ const receiptRequestInclude = {
 
 type ReceiptRequestWithRelations = Prisma.ReceiptRequestGetPayload<{ include: typeof receiptRequestInclude }>;
 
-function toQtyNumber(value: unknown): number | null {
-  if (value == null) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
   const items = row.items.map((it) => ({
     ...it,
-    quantity: Number(it.quantity),
+    quantity: Math.round(Number(it.quantity)),
     acceptedQty: toQtyNumber(it.acceptedQty),
     unitPrice: toQtyNumber(it.unitPrice)
   }));

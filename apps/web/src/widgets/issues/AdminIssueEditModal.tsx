@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 
 type IssueItem = {
   id: string;
@@ -102,7 +103,7 @@ export function AdminIssueEditModal({
     if (!isTools) {
       const parsedLines = lines
         .map((ln) => {
-          const qty = Number(String(ln.quantity).trim().replace(",", "."));
+          const qty = parseMaterialQty(ln.quantity);
           if (!ln.materialId || !Number.isFinite(qty) || qty <= 0) return null;
           return {
             id: ln.id,
@@ -236,12 +237,12 @@ export function AdminIssueEditModal({
                       <td>
                         <input
                           type="number"
-                          min={0.001}
-                          step="any"
+                          min={MATERIAL_QTY_MIN}
+                          step={MATERIAL_QTY_STEP}
                           value={ln.quantity}
                           onChange={(e) =>
                             setLines((prev) =>
-                              prev.map((x) => (x.key === ln.key ? { ...x, quantity: e.target.value } : x))
+                              prev.map((x) => (x.key === ln.key ? { ...x, quantity: e.target.value.replace(/[^\d]/g, "") } : x))
                             )
                           }
                         />
@@ -286,8 +287,8 @@ export function AdminIssueEditModal({
                 onClick={() => {
                   const mat = materialById.get(newMaterialId);
                   if (!mat) return;
-                  const qty = Number(String(newQty).trim().replace(",", "."));
-                  if (!Number.isFinite(qty) || qty <= 0) return;
+                  const qty = parseMaterialQty(newQty);
+                  if (qty <= 0) return;
                   setLines((prev) => [
                     ...prev,
                     {

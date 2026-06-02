@@ -9,6 +9,7 @@ import {
   operationWhereFromScope
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
+import { materialQtySchema } from "../lib/quantity.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const createOperationSchema = z.object({
@@ -24,7 +25,7 @@ const createOperationSchema = z.object({
     .array(
       z.object({
         materialId: z.string().min(1),
-        quantity: z.number().positive(),
+        quantity: materialQtySchema,
         price: z.number().positive().optional()
       })
     )
