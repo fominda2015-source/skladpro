@@ -568,6 +568,7 @@ type ReceiptRequestItem = {
   unitPrice?: string | number | null;
   storagePlace?: string | null;
   limitSectionPath?: string | null;
+  limitNodeId?: string | null;
   limitCatalogNameN?: string | null;
   limitCatalogNameO?: string | null;
   externalComment?: string | null;
