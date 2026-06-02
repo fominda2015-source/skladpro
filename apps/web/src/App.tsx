@@ -41,6 +41,7 @@ import {
   type HomeObjectRow,
   type HomeOverviewSummary
 } from "./widgets/home/HomeOverview";
+import { HomeAnnouncements } from "./widgets/home/HomeAnnouncements";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
@@ -5644,6 +5645,15 @@ function App() {
             generatedAt={homeOverview?.generatedAt}
             expandedId={homeExpandedId}
             onExpand={setHomeExpandedId}
+            announcements={
+              <HomeAnnouncements
+                token={token}
+                fetchWithSession={fetchWithSession}
+                canCreate={hasPermission("announcements.write")}
+                canEdit={hasPermission("announcements.edit")}
+                canDelete={hasPermission("announcements.delete")}
+              />
+            }
             onRefresh={() => void loadHomeOverview()}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {

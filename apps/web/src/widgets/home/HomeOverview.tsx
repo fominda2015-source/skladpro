@@ -107,6 +107,7 @@ type Props = {
   canTools?: boolean;
   canWarehouse?: boolean;
   canOperations?: boolean;
+  announcements?: ReactNode;
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
   onOpenApprovals?: () => void;
@@ -279,6 +280,7 @@ export function HomeOverview({
   canTools = true,
   canWarehouse = true,
   canOperations = true,
+  announcements = null,
   onOpenQr,
   onOpenIssues,
   onOpenApprovals,
@@ -716,13 +718,67 @@ export function HomeOverview({
       })();
       const miniColumns =
         drill.kind === "chart" && drill.key === "categories" ? ["Категория", "Количество"] : ["Показатель", "Значение"];
+      const contextActions = (
+        <div className="erpCellActions" style={{ marginBottom: 10 }}>
+          {(drill.kind === "stat" && (drill.key === "limitsSs" || drill.key === "limitsEom")) ||
+          (drill.kind === "chart" && drill.key === "limits") ? (
+            <>
+              {canLimits ? (
+                <button type="button" className="ghostBtn" onClick={() => onOpenLimits(o.warehouseId, "SS")}>
+                  Лимиты СС
+                </button>
+              ) : null}
+              {canLimits ? (
+                <button type="button" className="ghostBtn" onClick={() => onOpenLimits(o.warehouseId, "EOM")}>
+                  Лимиты ЭОМ
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {(drill.kind === "stat" &&
+            (drill.key === "tools" ||
+              drill.key === "toolsStock" ||
+              drill.key === "toolsIssued" ||
+              drill.key === "toolsRepair")) ||
+          (drill.kind === "chart" &&
+            (drill.key === "toolsByObject" || drill.key === "toolsStatus" || drill.key === "categories")) ? (
+            canTools ? (
+              <button type="button" className="ghostBtn" onClick={() => onOpenTools(o.warehouseId)}>
+                Вкладка «Инструменты»
+              </button>
+            ) : null
+          ) : null}
+          {(drill.kind === "stat" && drill.key === "stock") || (drill.kind === "chart" && drill.key === "movement") ? (
+            canWarehouse ? (
+              <button type="button" className="ghostBtn" onClick={() => onOpenWarehouse?.(o.warehouseId)}>
+                Вкладка «Склад»
+              </button>
+            ) : null
+          ) : null}
+          {(drill.kind === "stat" && drill.key === "receipts") ? (
+            canOperations ? (
+              <button type="button" className="ghostBtn" onClick={() => onOpenOperations?.(o.warehouseId)}>
+                Вкладка «Приходы»
+              </button>
+            ) : null
+          ) : null}
+          {drill.kind === "chart" && drill.key === "camp" ? (
+            canCamp ? (
+              <button type="button" className="ghostBtn" onClick={() => onOpenCamp(o.warehouseId)}>
+                Вкладка «Городок»
+              </button>
+            ) : null
+          ) : null}
+        </div>
+      );
       return (
         <div className="homeDrillStack">
           <section className="homeDrillObjectBlock">
             <header className="homeDrillObjectBlockHead">
               <strong>{o.name}</strong>
-              <span className="muted">мини-обзор объекта</span>
+              <span className="muted">дубль данных из соответствующей вкладки</span>
             </header>
+            {contextActions}
             <ObjectDrillTable columns={miniColumns} rows={miniRows} />
           </section>
         </div>
@@ -1025,6 +1081,8 @@ export function HomeOverview({
           }
         ]}
       />
+
+      {announcements ? <div className="homeAnnouncementsTop">{announcements}</div> : null}
 
       <div className="erpQuickActions">
         {canWarehouse && onOpenWarehouseTab ? (
