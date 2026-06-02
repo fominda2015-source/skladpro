@@ -6,6 +6,10 @@ type Props = {
   onClose: () => void;
   onDetails?: () => void;
   detailsLabel?: string;
+  onBack?: () => void;
+  onForward?: () => void;
+  canBack?: boolean;
+  canForward?: boolean;
   children: ReactNode;
 };
 
@@ -15,6 +19,10 @@ export function HomeDrillModal({
   onClose,
   onDetails,
   detailsLabel = "Подробнее",
+  onBack,
+  onForward,
+  canBack = false,
+  canForward = false,
   children
 }: Props) {
   return (
@@ -31,6 +39,12 @@ export function HomeDrillModal({
         </header>
         <div className="homeDrillBody">{children}</div>
         <footer className="homeDrillFoot">
+          <button type="button" className="ghostBtn" onClick={onBack} disabled={!canBack}>
+            ← Назад
+          </button>
+          <button type="button" className="ghostBtn" onClick={onForward} disabled={!canForward}>
+            Вперёд →
+          </button>
           {onDetails ? (
             <button
               type="button"

@@ -3537,6 +3537,34 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   flex-direction: column;
   gap: 12px;
 }
+.homeOverview .pageHeroStats {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.homeOverview .pageHeroStat {
+  min-height: 88px;
+  padding: 12px 14px;
+}
+.homeOverview .pageHeroStatLabel {
+  font-size: 13px;
+}
+.homeOverview .pageHeroStatValue {
+  font-size: 28px;
+  line-height: 1.05;
+}
+.homeOverview .pageHeroStat.tone-warn,
+.homeOverview .pageHeroStat.tone-bad {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.homeStatSubline {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  line-height: 1.35;
+}
 .homeOverviewMeta {
   font-weight: 400;
 }
@@ -3726,6 +3754,7 @@ button.homeInsightPill:hover:not(:disabled) {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
+  margin-top: 44px;
 }
 .homeChartsGrid > .homeChartCard {
   grid-column: span 6;
@@ -3829,7 +3858,7 @@ button.homeInsightPill:hover:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 10px 16px 14px;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;

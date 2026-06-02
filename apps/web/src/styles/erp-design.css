@@ -37,9 +37,10 @@
 .erpQuickActions .primaryBtn,
 .erpQuickActions .ghostBtn {
   width: auto;
-  height: 34px;
-  font-size: 13px;
-  padding: 0 14px;
+  height: 46px;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 0 20px;
 }
 
 .erpStatus {

@@ -107,7 +107,6 @@ type Props = {
   canTools?: boolean;
   canWarehouse?: boolean;
   canOperations?: boolean;
-  announcements?: ReactNode;
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
   onOpenApprovals?: () => void;
@@ -134,6 +133,10 @@ type HomeChartKey = "movement" | "limits" | "toolsByObject" | "toolsStatus" | "c
 type HomeDrill =
   | { kind: "stat"; key: HomeStatKey }
   | { kind: "chart"; key: HomeChartKey };
+
+type DrillView =
+  | { mode: "list" }
+  | { mode: "object"; warehouseId: string };
 
 function ChartCardHead({
   title,
@@ -223,7 +226,7 @@ function HomeDrillByObjects({
 }
 
 function pctCell(has: boolean, percent: number, over: number) {
-  if (!has) return "—";
+  if (!has) return "отсутствует";
   return over > 0 ? `${percent}% ⚠` : `${percent}%`;
 }
 const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
@@ -237,6 +240,14 @@ function fmtQty(n: number) {
 function shortName(name: string, max = 14) {
   const t = name.trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function objectCell(name: string, warehouseId: string, onOpen: (warehouseId: string) => void) {
+  return (
+    <button type="button" className="homeTableLink" onClick={() => onOpen(warehouseId)}>
+      {name}
+    </button>
+  );
 }
 
 function chartTooltipQty(value: unknown): [string, string] {
@@ -268,7 +279,6 @@ export function HomeOverview({
   canTools = true,
   canWarehouse = true,
   canOperations = true,
-  announcements = null,
   onOpenQr,
   onOpenIssues,
   onOpenApprovals,
@@ -277,9 +287,32 @@ export function HomeOverview({
   onAcceptReturn
 }: Props) {
   const [drill, setDrill] = useState<HomeDrill | null>(null);
+  const [drillHistory, setDrillHistory] = useState<DrillView[]>([{ mode: "list" }]);
+  const [drillHistoryIndex, setDrillHistoryIndex] = useState(0);
 
-  const openStatDrill = (key: HomeStatKey) => setDrill({ kind: "stat", key });
-  const openChartDrill = (key: HomeChartKey) => setDrill({ kind: "chart", key });
+  const openStatDrill = (key: HomeStatKey) => {
+    setDrill({ kind: "stat", key });
+    setDrillHistory([{ mode: "list" }]);
+    setDrillHistoryIndex(0);
+  };
+  const openChartDrill = (key: HomeChartKey) => {
+    setDrill({ kind: "chart", key });
+    setDrillHistory([{ mode: "list" }]);
+    setDrillHistoryIndex(0);
+  };
+  const drillView = drillHistory[drillHistoryIndex] || { mode: "list" as const };
+  const selectedObject =
+    drillView.mode === "object" ? objects.find((o) => o.warehouseId === drillView.warehouseId) || null : null;
+
+  const openObjectMini = (warehouseId: string) => {
+    setDrillHistory((prev) => {
+      const next = [...prev.slice(0, drillHistoryIndex + 1), { mode: "object", warehouseId } as DrillView];
+      return next;
+    });
+    setDrillHistoryIndex((i) => i + 1);
+  };
+  const goBack = () => setDrillHistoryIndex((i) => Math.max(0, i - 1));
+  const goForward = () => setDrillHistoryIndex((i) => Math.min(drillHistory.length - 1, i + 1));
   const totals = useMemo(() => {
     if (summary) {
       return {
@@ -426,57 +459,6 @@ export function HomeOverview({
         .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, "ru")),
     [objects]
   );
-
-  const attentionItems = useMemo(() => {
-    const items: Array<{ id: string; label: string; value: number; tone: "bad" | "warn"; onClick?: () => void }> =
-      [];
-    if (totals.overLines > 0) {
-      items.push({
-        id: "over",
-        label: "Перерасход лимитов",
-        value: totals.overLines,
-        tone: "bad",
-        onClick: () => openStatDrill("limitsSs")
-      });
-    }
-    if (totals.withoutTemplate > 0) {
-      items.push({
-        id: "noTpl",
-        label: "Без шаблона лимитов",
-        value: totals.withoutTemplate,
-        tone: "warn"
-      });
-    }
-    if (totals.toolsInRepair > 0) {
-      items.push({
-        id: "repair",
-        label: "Инструмент в ремонте",
-        value: totals.toolsInRepair,
-        tone: "warn",
-        onClick: () => openStatDrill("toolsRepair")
-      });
-    }
-    if (totals.receiptOpen > 0) {
-      items.push({
-        id: "rcp",
-        label: "Приёмки в работе",
-        value: totals.receiptOpen,
-        tone: "warn",
-        onClick: () => openStatDrill("receipts")
-      });
-    }
-    const calOver = summary?.toolsCalibrationOverdue ?? 0;
-    if (calOver > 0) {
-      items.push({
-        id: "cal",
-        label: "Просрочены поверки",
-        value: calOver,
-        tone: "bad",
-        onClick: onOpenVerifications
-      });
-    }
-    return items;
-  }, [totals, summary, onOpenVerifications]);
 
   const showCharts = objects.length > 0 && !loading;
 
@@ -677,6 +659,33 @@ export function HomeOverview({
 
   const renderDrillBody = () => {
     if (!drill) return null;
+    if (selectedObject) {
+      const o = selectedObject;
+      return (
+        <div className="homeDrillStack">
+          <section className="homeDrillObjectBlock">
+            <header className="homeDrillObjectBlockHead">
+              <strong>{o.name}</strong>
+              <span className="muted">мини-обзор объекта</span>
+            </header>
+            <ObjectDrillTable
+              columns={["Показатель", "Значение"]}
+              rows={[
+                { key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] },
+                { key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] },
+                { key: "stock", cells: ["Позиции склада", fmtQty(o.stockLines)] },
+                { key: "tools", cells: ["Инструменты", o.tools.total] },
+                { key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] },
+                { key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] },
+                { key: "tools-repair", cells: ["Инструменты в ремонте", o.tools.inRepair] },
+                { key: "camp", cells: ["Городок", o.campSs + o.campEom] },
+                { key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }
+              ]}
+            />
+          </section>
+        </div>
+      );
+    }
     if (drill.kind === "stat") {
       if (drill.key === "limitsSs") {
         return (
@@ -685,9 +694,9 @@ export function HomeOverview({
             rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [
-                o.name,
-                o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "—",
-                o.limitsSs.overCount > 0 ? o.limitsSs.overCount : "—"
+                objectCell(o.name, o.warehouseId, openObjectMini),
+                o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует",
+                o.limitsSs.overCount > 0 ? o.limitsSs.overCount : "отсутствует"
               ]
             }))}
           />
@@ -700,9 +709,9 @@ export function HomeOverview({
             rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [
-                o.name,
-                o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "—",
-                o.limitsEom.overCount > 0 ? o.limitsEom.overCount : "—"
+                objectCell(o.name, o.warehouseId, openObjectMini),
+                o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует",
+                o.limitsEom.overCount > 0 ? o.limitsEom.overCount : "отсутствует"
               ]
             }))}
           />
@@ -714,7 +723,7 @@ export function HomeOverview({
             columns={["Объект", "Позиций"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, fmtQty(o.stockLines)]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines)]
             }))}
           />
         );
@@ -725,7 +734,7 @@ export function HomeOverview({
             columns={["Объект", "Всего", "На складе", "Выдано", "В ремонте"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
             }))}
           />
         );
@@ -736,7 +745,7 @@ export function HomeOverview({
             columns={["Объект", "На складе"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.inStock]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock]
             }))}
           />
         );
@@ -747,7 +756,7 @@ export function HomeOverview({
             columns={["Объект", "Выдано"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.issued]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.issued]
             }))}
           />
         );
@@ -758,7 +767,7 @@ export function HomeOverview({
             columns={["Объект", "В ремонте"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.inRepair]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inRepair]
             }))}
           />
         );
@@ -769,7 +778,7 @@ export function HomeOverview({
             columns={["Объект", "Приёмки в работе"]}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.receiptOpen]
+              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.receiptOpen]
             }))}
           />
         );
@@ -793,7 +802,7 @@ export function HomeOverview({
               columns={["Объект", "Позиций на складе", "Приёмки"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
+                cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines), o.receiptOpen]
               }))}
             />
           </HomeDrillByObjects>
@@ -807,10 +816,10 @@ export function HomeOverview({
               rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [
-                  o.name,
+                  objectCell(o.name, o.warehouseId, openObjectMini),
                   pctCell(o.limitsSs.hasTemplate, o.limitsSs.percent, o.limitsSs.overCount),
                   pctCell(o.limitsEom.hasTemplate, o.limitsEom.percent, o.limitsEom.overCount),
-                  o.limitsSs.overCount + o.limitsEom.overCount || "—"
+                  o.limitsSs.overCount + o.limitsEom.overCount || "отсутствует"
                 ]
               }))}
             />
@@ -824,7 +833,7 @@ export function HomeOverview({
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
             />
           </HomeDrillByObjects>
@@ -841,7 +850,7 @@ export function HomeOverview({
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
             />
           </HomeDrillByObjects>
@@ -854,7 +863,7 @@ export function HomeOverview({
               columns={["Объект", "Городок", "Инструменты"]}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, o.campSs + o.campEom, o.tools.total]
+                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.campSs + o.campEom, o.tools.total]
               }))}
             />
           </HomeDrillByObjects>
@@ -936,13 +945,13 @@ export function HomeOverview({
         stats={[
           {
             label: "Лимиты СС",
-            value: totals.ss.hasTemplate ? `${totals.ss.percent}%` : "—",
+            value: totals.ss.hasTemplate ? `${totals.ss.percent}%` : "отсутствует",
             tone: totals.ss.overCount > 0 ? "bad" : totals.ss.percent >= 80 ? "warn" : "ok",
             onClick: () => openStatDrill("limitsSs")
           },
           {
             label: "Лимиты ЭОМ",
-            value: totals.eom.hasTemplate ? `${totals.eom.percent}%` : "—",
+            value: totals.eom.hasTemplate ? `${totals.eom.percent}%` : "отсутствует",
             tone: totals.eom.overCount > 0 ? "bad" : totals.eom.percent >= 80 ? "warn" : "ok",
             onClick: () => openStatDrill("limitsEom")
           },
@@ -954,27 +963,17 @@ export function HomeOverview({
           },
           {
             label: "Инструменты",
-            value: totals.tools,
+            value: (
+              <>
+                <span>{totals.tools}</span>
+                <small className="homeStatSubline">
+                  склад {summary?.toolsInStock ?? totals.toolsInStock} · выдано {summary?.toolsIssued ?? totals.toolsIssued} ·
+                  ремонт {summary?.toolsInRepair ?? totals.toolsInRepair}
+                </small>
+              </>
+            ),
             tone: "neutral",
             onClick: () => openStatDrill("tools")
-          },
-          {
-            label: "На складе",
-            value: summary?.toolsInStock ?? totals.toolsInStock,
-            tone: "ok",
-            onClick: () => openStatDrill("toolsStock")
-          },
-          {
-            label: "Выдано",
-            value: summary?.toolsIssued ?? totals.toolsIssued,
-            tone: "neutral",
-            onClick: () => openStatDrill("toolsIssued")
-          },
-          {
-            label: "В ремонте",
-            value: summary?.toolsInRepair ?? totals.toolsInRepair,
-            tone: totals.toolsInRepair > 0 ? "warn" : "neutral",
-            onClick: () => openStatDrill("toolsRepair")
           },
           {
             label: "Приёмки",
@@ -984,8 +983,6 @@ export function HomeOverview({
           }
         ]}
       />
-
-      {announcements ? <div className="homeAnnouncementsTop">{announcements}</div> : null}
 
       <div className="erpQuickActions">
         {canWarehouse && onOpenWarehouseTab ? (
@@ -1039,23 +1036,6 @@ export function HomeOverview({
           </button>
         ) : null}
       </div>
-
-      {attentionItems.length > 0 ? (
-        <section className="homeAttentionStrip">
-          {attentionItems.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              className={`homeAttentionChip ${it.tone}`}
-              disabled={!it.onClick}
-              onClick={it.onClick}
-            >
-              <span>{it.label}</span>
-              <strong>{it.value}</strong>
-            </button>
-          ))}
-        </section>
-      ) : null}
 
       {showCharts ? (
         <div className="homeChartsGrid">
@@ -1175,6 +1155,10 @@ export function HomeOverview({
           title={drillTitle}
           subtitle={`${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`}
           onClose={() => setDrill(null)}
+          onBack={goBack}
+          onForward={goForward}
+          canBack={drillHistoryIndex > 0}
+          canForward={drillHistoryIndex < drillHistory.length - 1}
           onDetails={drillDetails()}
         >
           {renderDrillBody()}
@@ -1242,7 +1226,7 @@ export function HomeOverview({
                               {obj.limitsSs.percent}%
                             </button>
                           ) : (
-                            "—"
+                            "отсутствует"
                           )}
                         </td>
                         <td>
@@ -1256,7 +1240,7 @@ export function HomeOverview({
                               {obj.limitsEom.percent}%
                             </button>
                           ) : (
-                            "—"
+                            "отсутствует"
                           )}
                         </td>
                         <td>{camp || "—"}</td>
