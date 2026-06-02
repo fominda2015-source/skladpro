@@ -45,6 +45,16 @@ function mapProductCategory(raw: string): ReceiptItemCategory | null {
   const s = normNameKey(raw);
   if (!s) return null;
   if (s.includes("кабел")) return "CABLE";
+  if (s.includes("сиз") || (s.includes("средств") && s.includes("защит"))) return "PPE";
+  if (s.includes("кип") || s.includes("контрольно") || s.includes("измерит")) return "KIP";
+  if (s.includes("расход") && (s.includes("инструмент") || s.includes("инстр"))) return "TOOL_CONSUMABLE";
+  if (s.includes("аккумулятор") || s.includes("аккум") || (s.includes("беспровод") && s.includes("инструмент")))
+    return "TOOL_ELECTRIC_CORDLESS";
+  if ((s.includes("сетев") || s.includes("сетевой")) && s.includes("инструмент")) return "TOOL_ELECTRIC_CORDED";
+  if (s.includes("электр") && s.includes("инструмент")) return "TOOL_ELECTRIC_CORDLESS";
+  if (s.includes("ручн") && s.includes("инструмент")) return "TOOL_MANUAL";
+  if (s.includes("инструмент") && !s.includes("расход")) return "TOOL_MANUAL";
+  if (s.includes("прочее") || s.includes("проч")) return "OTHER";
   if (s.includes("расход")) return "CONSUMABLE";
   if (s.includes("оборуд")) return "EQUIPMENT";
   return null;

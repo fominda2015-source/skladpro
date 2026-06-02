@@ -646,6 +646,47 @@ button:hover {
 .toolsWorkspaceMain {
   min-width: 0;
 }
+
+.toolsHubGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+  margin: 12px 0 20px;
+}
+.toolsHubCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 132px;
+  padding: 18px 14px;
+  border: 1px solid #dce3ee;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.toolsHubCard:hover {
+  border-color: #0ea5e9;
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.12);
+}
+.toolsHubCardIcon {
+  font-size: 2.4rem;
+  line-height: 1;
+}
+.toolsHubCardLabel {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.toolsHubCardHint {
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+.toolsCatalogBreadcrumb {
+  align-items: center;
+}
 @media (max-width: 960px) {
   .toolsWorkspace--drawer {
     grid-template-columns: 1fr;

@@ -1,5 +1,4 @@
-import type { Prisma } from "@prisma/client";
-import { ToolStatus } from "@prisma/client";
+import { StockCondition, StockMovementDirection, ToolStatus, type Prisma, type ToolCatalogSection } from "@prisma/client";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
@@ -16,28 +15,17 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import {
+  ensureDefaultToolCategories,
+  isElectricToolCategorySlug,
+  isManualToolCategoryName,
+  MANUAL_TOOL_CATEGORY,
+  ELECTRIC_TOOL_CATEGORY,
+  TOOL_CATEGORY_SLUGS
+} from "../lib/toolCatalog.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
-export const MANUAL_TOOL_CATEGORY = "Ручной";
-export const ELECTRIC_TOOL_CATEGORY = "Электрический";
-
-export function isManualToolCategoryName(name: string | null | undefined) {
-  return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
-}
-
-async function ensureDefaultToolCategories() {
-  const defaults = [
-    { name: MANUAL_TOOL_CATEGORY, icon: "🔧", order: 1 },
-    { name: ELECTRIC_TOOL_CATEGORY, icon: "⚡", order: 2 }
-  ];
-  for (const row of defaults) {
-    await prisma.toolCategory.upsert({
-      where: { name: row.name },
-      create: row,
-      update: { icon: row.icon, order: row.order }
-    });
-  }
-}
+export { MANUAL_TOOL_CATEGORY, ELECTRIC_TOOL_CATEGORY, isManualToolCategoryName };
 
 const createToolSchema = z.object({
   name: z.string().min(1),
@@ -271,7 +259,18 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
       ? (req.query.status as ToolStatus)
       : undefined;
   const categoryIdParam = typeof req.query.categoryId === "string" ? req.query.categoryId.trim() : "";
+  const categorySlugParam = typeof req.query.categorySlug === "string" ? req.query.categorySlug.trim() : "";
   const nameGroupParam = typeof req.query.nameGroup === "string" ? req.query.nameGroup.trim() : "";
+  let categorySlugIds: string[] | undefined;
+  if (categorySlugParam) {
+    await ensureDefaultToolCategories();
+    const slugs =
+      categorySlugParam === TOOL_CATEGORY_SLUGS.ELECTRIC
+        ? [TOOL_CATEGORY_SLUGS.ELECTRIC, TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS, TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]
+        : [categorySlugParam];
+    const cats = await prisma.toolCategory.findMany({ where: { slug: { in: slugs } }, select: { id: true } });
+    categorySlugIds = cats.map((c) => c.id);
+  }
   const calibrationParam =
     typeof req.query.calibration === "string" ? req.query.calibration.toLowerCase() : "";
   const now = new Date();
@@ -293,6 +292,11 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
         ...(status ? { status } : {}),
         ...(section ? { section } : {}),
         ...(categoryIdParam ? { categoryId: categoryIdParam } : {}),
+        ...(categorySlugIds !== undefined
+          ? categorySlugIds.length > 0
+            ? { categoryId: { in: categorySlugIds } }
+            : { categoryId: { in: [] } }
+          : {}),
         ...(nameGroupParam
           ? { categoryId: null, name: { equals: nameGroupParam, mode: "insensitive" as const } }
           : {}),
@@ -581,6 +585,403 @@ toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: Au
     const mapped = handlePrismaError(error);
     return res.status(mapped.status).json(mapped.body);
   }
+});
+
+const catalogSectionSchema = z.enum([
+  "TOOL_MANUAL",
+  "TOOL_ELECTRIC_CORDLESS",
+  "TOOL_ELECTRIC_CORDED",
+  "PPE",
+  "TOOL_CONSUMABLE",
+  "KIP",
+  "OTHER"
+]);
+
+toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
+  await ensureDefaultToolCategories();
+  const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const scope = await resolveReadScope(req, { warehouseId: warehouseIdParam || undefined });
+  try {
+    if (warehouseIdParam) assertWarehouseInScope(scope, warehouseIdParam);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section: "SS" | "EOM" | undefined = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
+  const baseToolWhere: Prisma.ToolWhereInput = {
+    AND: [
+      toolWhereFromScope(scope),
+      ...(warehouseIdParam ? [{ warehouseId: warehouseIdParam }] : []),
+      ...(section ? [{ section }] : [])
+    ]
+  };
+  const categories = await prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] });
+  const tools = await prisma.tool.findMany({
+    where: baseToolWhere,
+    select: { categoryId: true, status: true, category: { select: { slug: true } } }
+  });
+  const countBySlug = (slugs: string[]) => {
+    const ids = new Set(categories.filter((c) => c.slug && slugs.includes(c.slug)).map((c) => c.id));
+    const subset = tools.filter((t) => t.categoryId && ids.has(t.categoryId));
+    return {
+      count: subset.length,
+      inStock: subset.filter((t) => t.status === ToolStatus.IN_STOCK).length,
+      issued: subset.filter((t) => t.status === ToolStatus.ISSUED).length,
+      inRepair: subset.filter((t) => t.status === ToolStatus.IN_REPAIR).length
+    };
+  };
+  const materialSections: ToolCatalogSection[] = ["PPE", "TOOL_CONSUMABLE", "KIP", "OTHER"];
+  const stocks = await prisma.stock.findMany({
+    where: {
+      ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+      ...(section ? { section } : {}),
+      condition: StockCondition.NEW,
+      material: { toolCatalogSection: { in: materialSections } }
+    },
+    include: { material: { select: { toolCatalogSection: true } } }
+  });
+  const matCounts = Object.fromEntries(
+    materialSections.map((s) => [s, { count: 0, qty: 0 }])
+  ) as Record<string, { count: number; qty: number }>;
+  for (const st of stocks) {
+    const sec = st.material.toolCatalogSection;
+    if (!sec) continue;
+    matCounts[sec].count += 1;
+    matCounts[sec].qty += Number(st.quantity);
+  }
+  return res.json({
+    toolManual: countBySlug([TOOL_CATEGORY_SLUGS.MANUAL]),
+    toolElectric: countBySlug([
+      TOOL_CATEGORY_SLUGS.ELECTRIC,
+      TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS,
+      TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED
+    ]),
+    toolElectricCordless: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS]),
+    toolElectricCorded: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]),
+    ppe: matCounts.PPE,
+    toolConsumable: matCounts.TOOL_CONSUMABLE,
+    kip: matCounts.KIP,
+    other: matCounts.OTHER
+  });
+});
+
+toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
+  const parsed = catalogSectionSchema.safeParse(req.query.section);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid section" });
+  const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const scope = await resolveReadScope(req, { warehouseId: warehouseIdParam || undefined });
+  try {
+    if (warehouseIdParam) assertWarehouseInScope(scope, warehouseIdParam);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const sectionParam = typeof req.query.sectionFilter === "string" ? req.query.sectionFilter.toUpperCase() : "";
+  const objectSection: "SS" | "EOM" | undefined =
+    sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const rows = await prisma.stock.findMany({
+    where: {
+      material: { toolCatalogSection: parsed.data },
+      ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+      ...(objectSection ? { section: objectSection } : {}),
+      ...(q ? { material: { name: { contains: q, mode: "insensitive" } } } : {})
+    },
+    include: {
+      material: { select: { id: true, name: true, unit: true, kind: true, toolCatalogSection: true } },
+      warehouse: { select: { id: true, name: true } }
+    },
+    orderBy: [{ material: { name: "asc" } }]
+  });
+  const usedRows = await prisma.stock.findMany({
+    where: {
+      material: { toolCatalogSection: parsed.data },
+      condition: StockCondition.USED,
+      ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+      ...(objectSection ? { section: objectSection } : {})
+    },
+    include: {
+      material: { select: { id: true, name: true, unit: true } },
+      warehouse: { select: { id: true, name: true } }
+    }
+  });
+  const byKey = new Map<
+    string,
+    {
+      materialId: string;
+      name: string;
+      unit: string;
+      warehouseId: string;
+      warehouseName: string;
+      section: string;
+      qtyNew: number;
+      qtyUsed: number;
+    }
+  >();
+  for (const st of rows) {
+    const key = `${st.warehouseId}:${st.materialId}:${st.section}`;
+    const row = byKey.get(key) ?? {
+      materialId: st.material.id,
+      name: st.material.name,
+      unit: st.material.unit,
+      warehouseId: st.warehouseId,
+      warehouseName: st.warehouse?.name ?? "—",
+      section: st.section,
+      qtyNew: 0,
+      qtyUsed: 0
+    };
+    row.qtyNew += Number(st.quantity);
+    byKey.set(key, row);
+  }
+  for (const st of usedRows) {
+    const key = `${st.warehouseId}:${st.materialId}:${st.section}`;
+    const row = byKey.get(key);
+    if (row) row.qtyUsed += Number(st.quantity);
+    else {
+      byKey.set(key, {
+        materialId: st.material.id,
+        name: st.material.name,
+        unit: st.material.unit,
+        warehouseId: st.warehouseId,
+        warehouseName: st.warehouse?.name ?? "—",
+        section: st.section,
+        qtyNew: 0,
+        qtyUsed: Number(st.quantity)
+      });
+    }
+  }
+  return res.json(Array.from(byKey.values()));
+});
+
+const consumableIssueSchema = z.object({
+  toolId: z.string().min(1),
+  warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS"),
+  holderName: z.string().min(1),
+  issueRequestId: z.string().optional(),
+  items: z
+    .array(
+      z.object({
+        materialId: z.string().min(1),
+        quantity: z.number().positive()
+      })
+    )
+    .min(1)
+});
+
+toolsRouter.post("/consumables/issue", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = consumableIssueSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, parsed.data.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const tool = await prisma.tool.findFirst({
+    where: { AND: [toolWhereFromScope(scope), { id: parsed.data.toolId }] },
+    include: { category: true }
+  });
+  if (!tool) return res.status(404).json({ error: "Tool not found" });
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const lines = [];
+      for (const it of parsed.data.items) {
+        const stock = await tx.stock.findUnique({
+          where: {
+            warehouseId_materialId_section_condition: {
+              warehouseId: parsed.data.warehouseId,
+              materialId: it.materialId,
+              section: parsed.data.section,
+              condition: StockCondition.NEW
+            }
+          }
+        });
+        if (!stock || Number(stock.quantity) < it.quantity) {
+          throw Object.assign(new Error("Недостаточно расходника на складе"), { status: 409 });
+        }
+        await tx.stock.update({
+          where: { id: stock.id },
+          data: { quantity: { decrement: it.quantity } }
+        });
+        const line = await tx.toolConsumableIssue.create({
+          data: {
+            toolId: parsed.data.toolId,
+            materialId: it.materialId,
+            warehouseId: parsed.data.warehouseId,
+            section: parsed.data.section,
+            issueRequestId: parsed.data.issueRequestId,
+            qtyIssued: it.quantity,
+            holderName: parsed.data.holderName,
+            status: "OPEN"
+          }
+        });
+        lines.push(line);
+      }
+      return lines;
+    });
+    return res.status(201).json(created);
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+const consumableReturnSchema = z.object({
+  toolId: z.string().min(1),
+  warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS"),
+  lines: z
+    .array(
+      z.object({
+        issueId: z.string().min(1),
+        qtyNew: z.number().nonnegative(),
+        qtyUsed: z.number().nonnegative(),
+        writeoffQty: z.number().nonnegative().optional(),
+        writeoffReason: z.string().max(500).optional()
+      })
+    )
+    .min(1)
+});
+
+toolsRouter.post("/consumables/return", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = consumableReturnSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, parsed.data.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const line of parsed.data.lines) {
+        const issue = await tx.toolConsumableIssue.findFirst({
+          where: { id: line.issueId, toolId: parsed.data.toolId, status: "OPEN" }
+        });
+        if (!issue) throw Object.assign(new Error("Строка расходника не найдена"), { status: 404 });
+        const pending =
+          Number(issue.qtyIssued) -
+          Number(issue.qtyReturnedNew) -
+          Number(issue.qtyReturnedUsed) -
+          Number(issue.qtyWrittenOff);
+        const totalReturn = line.qtyNew + line.qtyUsed + (line.writeoffQty ?? 0);
+        if (totalReturn > pending + 0.0001) {
+          throw Object.assign(new Error("Возвращаемое количество больше выданного"), { status: 409 });
+        }
+        if (line.qtyNew > 0) {
+          await tx.stock.upsert({
+            where: {
+              warehouseId_materialId_section_condition: {
+                warehouseId: parsed.data.warehouseId,
+                materialId: issue.materialId,
+                section: parsed.data.section,
+                condition: StockCondition.NEW
+              }
+            },
+            create: {
+              warehouseId: parsed.data.warehouseId,
+              materialId: issue.materialId,
+              section: parsed.data.section,
+              condition: StockCondition.NEW,
+              quantity: line.qtyNew
+            },
+            update: { quantity: { increment: line.qtyNew } }
+          });
+        }
+        if (line.qtyUsed > 0) {
+          await tx.stock.upsert({
+            where: {
+              warehouseId_materialId_section_condition: {
+                warehouseId: parsed.data.warehouseId,
+                materialId: issue.materialId,
+                section: parsed.data.section,
+                condition: StockCondition.USED
+              }
+            },
+            create: {
+              warehouseId: parsed.data.warehouseId,
+              materialId: issue.materialId,
+              section: parsed.data.section,
+              condition: StockCondition.USED,
+              quantity: line.qtyUsed
+            },
+            update: { quantity: { increment: line.qtyUsed } }
+          });
+        }
+        const writeoffQty = line.writeoffQty ?? 0;
+        await tx.toolConsumableIssue.update({
+          where: { id: issue.id },
+          data: {
+            qtyReturnedNew: { increment: line.qtyNew },
+            qtyReturnedUsed: { increment: line.qtyUsed },
+            qtyWrittenOff: { increment: writeoffQty },
+            ...(writeoffQty > 0 && line.writeoffReason ? { writeoffReason: line.writeoffReason } : {}),
+            status:
+              Number(issue.qtyReturnedNew) +
+                line.qtyNew +
+                Number(issue.qtyReturnedUsed) +
+                line.qtyUsed +
+                Number(issue.qtyWrittenOff) +
+                writeoffQty >=
+              Number(issue.qtyIssued)
+                ? "CLOSED"
+                : "OPEN"
+          }
+        });
+      }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+toolsRouter.get("/:id/open-consumables", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const scope = await resolveReadScope(req);
+  const tool = await prisma.tool.findFirst({
+    where: { AND: [toolWhereFromScope(scope), { id }] },
+    include: { category: true }
+  });
+  if (!tool) return res.status(404).json({ error: "Tool not found" });
+  const lines = await prisma.toolConsumableIssue.findMany({
+    where: { toolId: id, status: "OPEN" },
+    include: { material: { select: { id: true, name: true, unit: true } } },
+    orderBy: { createdAt: "asc" }
+  });
+  const mapped = lines.map((l) => ({
+    id: l.id,
+    materialId: l.materialId,
+    name: l.material.name,
+    unit: l.material.unit,
+    qtyIssued: Number(l.qtyIssued),
+    qtyReturnedNew: Number(l.qtyReturnedNew),
+    qtyReturnedUsed: Number(l.qtyReturnedUsed),
+    qtyWrittenOff: Number(l.qtyWrittenOff),
+    pending:
+      Number(l.qtyIssued) -
+      Number(l.qtyReturnedNew) -
+      Number(l.qtyReturnedUsed) -
+      Number(l.qtyWrittenOff)
+  }));
+  return res.json({
+    hasOpen: mapped.some((m) => m.pending > 0),
+    lines: mapped,
+    isElectric: isElectricToolCategorySlug(tool.category?.slug ?? null)
+  });
 });
 
 toolsRouter.get("/:id", async (req: AuthedRequest, res) => {

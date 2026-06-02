@@ -109,6 +109,28 @@ enum ReceiptItemCategory {
   EQUIPMENT
   CONSUMABLE
   CABLE
+  TOOL_MANUAL
+  TOOL_ELECTRIC_CORDLESS
+  TOOL_ELECTRIC_CORDED
+  PPE
+  TOOL_CONSUMABLE
+  KIP
+  OTHER
+}
+
+enum ToolCatalogSection {
+  TOOL_MANUAL
+  TOOL_ELECTRIC_CORDLESS
+  TOOL_ELECTRIC_CORDED
+  PPE
+  TOOL_CONSUMABLE
+  KIP
+  OTHER
+}
+
+enum StockCondition {
+  NEW
+  USED
 }
 
 enum FeedbackTicketStatus {
@@ -249,6 +271,7 @@ model Warehouse {
   transferRequestsFrom TransferRequest[] @relation("TransferFromWh")
   transferRequestsTo   TransferRequest[] @relation("TransferToWh")
   materialHolderWriteoffs MaterialHolderWriteoff[]
+  toolConsumableIssues ToolConsumableIssue[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -261,6 +284,7 @@ model Material {
   kind            MaterialKind        @default(MATERIAL)
   unitPrice       Decimal?            @db.Decimal(14, 2)
   category        String?
+  toolCatalogSection ToolCatalogSection?
   mergedIntoId    String?
   synonyms        MaterialSynonym[]
   stocks          Stock[]
@@ -276,6 +300,7 @@ model Material {
   mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom      Material[]           @relation("MaterialMergedInto")
   materialHolderWriteoffs MaterialHolderWriteoff[]
+  toolConsumableIssues ToolConsumableIssue[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 }
@@ -319,6 +344,7 @@ model Stock {
   warehouseId   String
   materialId    String
   section       ObjectSection @default(SS)
+  condition     StockCondition @default(NEW)
   quantity      Decimal    @db.Decimal(14, 3)
   reserved      Decimal    @default(0) @db.Decimal(14, 3)
   storageRoom   String?
@@ -327,7 +353,7 @@ model Stock {
   material      Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
   updatedAt     DateTime   @updatedAt
 
-  @@unique([warehouseId, materialId, section])
+  @@unique([warehouseId, materialId, section, condition])
 }
 
 model Project {
@@ -576,6 +602,7 @@ model Tool {
   category        ToolCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   events          ToolEvent[]
   issueLines      IssueRequestToolItem[]
+  consumableIssues ToolConsumableIssue[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -587,11 +614,41 @@ model Tool {
 model ToolCategory {
   id        String   @id @default(cuid())
   name      String   @unique
+  slug      String?  @unique
   icon      String?
   order     Int      @default(0)
+  parentId  String?
+  parent    ToolCategory?  @relation("ToolCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  ToolCategory[] @relation("ToolCategoryTree")
   tools     Tool[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+}
+
+model ToolConsumableIssue {
+  id               String        @id @default(cuid())
+  toolId           String
+  materialId       String
+  warehouseId      String
+  section          ObjectSection @default(SS)
+  issueRequestId   String?
+  qtyIssued        Decimal       @db.Decimal(14, 3)
+  qtyReturnedNew   Decimal       @default(0) @db.Decimal(14, 3)
+  qtyReturnedUsed  Decimal       @default(0) @db.Decimal(14, 3)
+  qtyWrittenOff    Decimal       @default(0) @db.Decimal(14, 3)
+  holderName       String?
+  status           String        @default("OPEN")
+  writeoffReason   String?
+  tool             Tool          @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  material         Material      @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  warehouse        Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([toolId, status])
+  @@index([warehouseId, section])
 }
 
 model ToolEvent {

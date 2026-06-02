@@ -1,4 +1,5 @@
-import { NotificationLevel, OperationType, StockMovementDirection } from "@prisma/client";
+import { NotificationLevel, OperationType, StockCondition, StockMovementDirection } from "@prisma/client";
+import { receiptCategoryToToolSection } from "../lib/toolCatalog.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,7 +33,18 @@ const uploadRequestSchema = z.object({
   objectLimitTemplateId: z.string().optional()
 });
 
-const receiptItemCategorySchema = z.enum(["EQUIPMENT", "CONSUMABLE", "CABLE"]);
+const receiptItemCategorySchema = z.enum([
+  "EQUIPMENT",
+  "CONSUMABLE",
+  "CABLE",
+  "TOOL_MANUAL",
+  "TOOL_ELECTRIC_CORDLESS",
+  "TOOL_ELECTRIC_CORDED",
+  "PPE",
+  "TOOL_CONSUMABLE",
+  "KIP",
+  "OTHER"
+]);
 
 const acceptItemSchema = z.object({
   itemId: z.string().min(1),
@@ -702,18 +714,29 @@ receiptRequestsRouter.post(
             ...(mapping?.storagePlace !== undefined ? { storagePlace: mapping.storagePlace } : {})
           }
         });
+        const toolSection = receiptCategoryToToolSection(
+          mapping?.category ?? r.item.category ?? null
+        );
+        if (toolSection) {
+          await tx.material.update({
+            where: { id: r.materialId },
+            data: { toolCatalogSection: toolSection }
+          });
+        }
         await tx.stock.upsert({
           where: {
-            warehouseId_materialId_section: {
+            warehouseId_materialId_section_condition: {
               warehouseId: row.warehouseId,
               materialId: r.materialId,
-              section: row.section
+              section: row.section,
+              condition: StockCondition.NEW
             }
           },
           create: {
             warehouseId: row.warehouseId,
             section: row.section,
             materialId: r.materialId,
+            condition: StockCondition.NEW,
             quantity: r.acceptedQty,
             reserved: 0
           },

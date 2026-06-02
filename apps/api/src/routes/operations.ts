@@ -1,4 +1,4 @@
-import { OperationType, StockMovementDirection } from "@prisma/client";
+import { OperationType, StockCondition, StockMovementDirection } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
@@ -102,26 +102,20 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
       });
 
       for (const item of data.items) {
-        const existing = await tx.stock.findUnique({
-          where: {
-            warehouseId_materialId_section: {
-              warehouseId: data.warehouseId,
-              materialId: item.materialId,
-              section: data.section
-            }
+        const stockKey = {
+          warehouseId_materialId_section_condition: {
+            warehouseId: data.warehouseId,
+            materialId: item.materialId,
+            section: data.section,
+            condition: StockCondition.NEW
           }
-        });
+        };
+        const existing = await tx.stock.findUnique({ where: stockKey });
 
         if (data.type === "INCOME") {
           if (existing) {
             await tx.stock.update({
-              where: {
-                warehouseId_materialId_section: {
-                  warehouseId: data.warehouseId,
-                  materialId: item.materialId,
-                  section: data.section
-                }
-              },
+              where: stockKey,
               data: {
                 quantity: { increment: item.quantity },
                 ...(data.storageRoom !== undefined ? { storageRoom: data.storageRoom || null } : {}),
@@ -134,6 +128,7 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
                 warehouseId: data.warehouseId,
                 materialId: item.materialId,
                 section: data.section,
+                condition: StockCondition.NEW,
                 quantity: item.quantity,
                 reserved: 0,
                 storageRoom: data.storageRoom || null,
@@ -148,13 +143,7 @@ operationsRouter.post("/", requirePermission("operations.write"), async (req: Au
             throw new Error(`INSUFFICIENT_STOCK:${item.materialId}`);
           }
           await tx.stock.update({
-            where: {
-              warehouseId_materialId_section: {
-                warehouseId: data.warehouseId,
-                materialId: item.materialId,
-                section: data.section
-              }
-            },
+            where: stockKey,
             data: { quantity: { decrement: item.quantity } }
           });
         }

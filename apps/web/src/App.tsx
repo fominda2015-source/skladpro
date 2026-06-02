@@ -77,6 +77,16 @@ import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
 import { VerificationsTab } from "./widgets/verifications/VerificationsTab";
 import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
+import { ToolsCatalogWorkspace } from "./widgets/tools/ToolsCatalogWorkspace";
+import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueModal";
+import { ToolConsumablesReturnModal } from "./widgets/tools/ToolConsumablesReturnModal";
+import {
+  navToCategorySlug,
+  type ToolsNavId,
+  isElectricToolCategorySlug,
+  receiptCategoryToToolsNav,
+  toolsNavPathFromSegment
+} from "./widgets/tools/toolCatalog";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
@@ -368,7 +378,7 @@ type ToolItem = {
   brand?: string | null;
   toolType?: string | null;
   categoryId?: string | null;
-  category?: { id: string; name: string; icon?: string | null } | null;
+  category?: { id: string; name: string; icon?: string | null; slug?: string | null } | null;
   calibrationDueAt?: string | null;
   createdAt: string;
 };
@@ -1033,6 +1043,18 @@ function App() {
   const [toolActionResponsible, setToolActionResponsible] = useState("");
   const [toolActionComment, setToolActionComment] = useState("");
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
+  const [toolsNavPath, setToolsNavPath] = useState<ToolsNavId[]>(["hub"]);
+  const [toolConsumablesIssueOpen, setToolConsumablesIssueOpen] = useState(false);
+  const [toolConsumablesIssueContext, setToolConsumablesIssueContext] = useState<{
+    toolIds: string[];
+    label: string;
+    holderName: string;
+    issueRequestId?: string;
+  } | null>(null);
+  const [toolConsumablesReturn, setToolConsumablesReturn] = useState<{
+    toolId: string;
+    name: string;
+  } | null>(null);
   const [toolSaving, setToolSaving] = useState(false);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
@@ -3458,6 +3480,18 @@ function App() {
       await loadStocks(q);
       await loadOperations();
       await loadNotifications();
+      if (canReadTools) {
+        for (const m of mappings) {
+          const nav = receiptCategoryToToolsNav(m.category ?? null);
+          if (nav) {
+            setObjectSectionFilter(row.section);
+            setActiveObjectId(row.warehouseId);
+            setToolsNavPath(toolsNavPathFromSegment(nav));
+            setActiveTab("tools");
+            break;
+          }
+        }
+      }
       return true;
     } finally {
       setAcceptanceSubmitting((prev) => {
@@ -4026,12 +4060,28 @@ function App() {
       }
       setIssuesMessage(`Инструмент по заявке ${created.number} выдан. Акт сформирован автоматически.`);
       setIssuesTone("success");
+      const issuedToolIds = [...issueToolPickIds];
       setIssueToolPickIds([]);
       setIssueToolSearch("");
       setIssueNote("");
       setDirectIssueSignedFile(null);
       await loadIssues();
       void loadTools().catch(() => undefined);
+      const issuedElectric = tools.filter(
+        (t) =>
+          issuedToolIds.includes(t.id) &&
+          (isElectricToolCategorySlug(t.category?.slug ?? null) ||
+            /электр|аккумулятор|сетев/i.test(t.category?.name ?? ""))
+      );
+      if (issuedElectric.length && activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
+        setToolConsumablesIssueContext({
+          toolIds: issuedElectric.map((t) => t.id),
+          label: issuedElectric.map((t) => safeName(t.name)).join(", "),
+          holderName: actualRecipientName,
+          issueRequestId: created.id
+        });
+        setToolConsumablesIssueOpen(true);
+      }
     } catch (e) {
       setIssuesMessage(`Ошибка выдачи инструмента: ${String(e)}`);
       setIssuesTone("error");
@@ -4097,12 +4147,18 @@ function App() {
     setToolsError("");
     setToolsLoading(true);
     try {
+      const navLeaf = toolsNavPath[toolsNavPath.length - 1] ?? "hub";
+      const categorySlug = navToCategorySlug(navLeaf);
       const queryParts = [
         toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
         toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
         `section=${encodeURIComponent(objectSectionFilter)}`,
         toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
-        toolCategoryFilter ? `categoryId=${encodeURIComponent(toolCategoryFilter)}` : "",
+        categorySlug
+          ? `categorySlug=${encodeURIComponent(categorySlug)}`
+          : toolCategoryFilter
+            ? `categoryId=${encodeURIComponent(toolCategoryFilter)}`
+            : "",
         `sort=${encodeURIComponent(toolsSort)}`,
         `page=${encodeURIComponent(String(toolsPage))}`,
         `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -4301,7 +4357,20 @@ function App() {
       photo: toolActionPhoto
     });
     if (!ok) return;
+    const wasReturn = toolAction.action === "RETURN";
     setToolAction(null);
+    if (wasReturn && activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
+      const openRes = await fetchWithSession(`${API_URL}/api/tools/${tid}/open-consumables`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (openRes.ok) {
+        const payload = (await openRes.json()) as { hasOpen: boolean; lines: { pending: number }[] };
+        if (payload.hasOpen) {
+          const t = tools.find((x) => x.id === tid) || toolDetailRecord;
+          setToolConsumablesReturn({ toolId: tid, name: safeName(t?.name ?? "инструмент") });
+        }
+      }
+    }
     if (toolDetailModalId === tid) {
       const res = await fetchWithSession(`${API_URL}/api/tools/${tid}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -5235,7 +5304,8 @@ function App() {
     toolsPage,
     toolsPageSize,
     objectSectionFilter,
-    toolListWarehouseId
+    toolListWarehouseId,
+    toolsNavPath
   ]);
 
   useEffect(() => {
@@ -5831,9 +5901,32 @@ function App() {
               canReadTools
                 ? () => {
                     if (canViewAllObjects) setActiveObjectId(ALL_OBJECTS_ID);
+                    setToolsNavPath(["hub"]);
                     setActiveTab("tools");
                   }
                 : undefined
+            }
+            toolsHubSlot={
+              canReadTools ? (
+                <ToolsCatalogWorkspace
+                  navPath={toolsNavPath}
+                  onNavPathChange={(path) => {
+                    setToolsNavPath(path);
+                    if (path.length > 1) {
+                      setActiveTab("tools");
+                    }
+                  }}
+                  warehouseId={
+                    activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
+                  }
+                  sectionFilter={objectSectionFilter}
+                  token={token}
+                  apiUrl={API_URL}
+                  fetchWithSession={fetchWithSession}
+                  toolListSlot={null}
+                  showHubOnly
+                />
+              ) : null
             }
             onOpenOperationsTab={
               canReadOperations
@@ -10605,10 +10698,21 @@ function App() {
             </div>
           )}
 
-          {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
-          {toolsError && <ErrorState text={toolsError} />}
-
-          <FilterStrip
+          <ToolsCatalogWorkspace
+            navPath={toolsNavPath}
+            onNavPathChange={setToolsNavPath}
+            warehouseId={
+              activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId
+            }
+            sectionFilter={objectSectionFilter}
+            token={token}
+            apiUrl={API_URL}
+            fetchWithSession={fetchWithSession}
+            toolListSlot={
+              <>
+                {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
+                {toolsError && <ErrorState text={toolsError} />}
+                <FilterStrip
             search={
               <input
                 placeholder="Поиск (название, инв. номер, QR)"
@@ -10747,8 +10851,46 @@ function App() {
               </div>
             </>
           )}
+              </>
+            }
+          />
 
           </div>
+
+          {toolConsumablesIssueOpen && toolConsumablesIssueContext && activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? (
+            <ToolConsumablesIssueModal
+              open={toolConsumablesIssueOpen}
+              toolIds={toolConsumablesIssueContext.toolIds}
+              toolLabel={toolConsumablesIssueContext.label}
+              warehouseId={activeObjectId}
+              section={objectSectionFilter}
+              holderName={toolConsumablesIssueContext.holderName}
+              issueRequestId={toolConsumablesIssueContext.issueRequestId}
+              token={token}
+              apiUrl={API_URL}
+              fetchWithSession={fetchWithSession}
+              onClose={() => {
+                setToolConsumablesIssueOpen(false);
+                setToolConsumablesIssueContext(null);
+              }}
+              onDone={() => void loadTools().catch(() => undefined)}
+            />
+          ) : null}
+
+          {toolConsumablesReturn && activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? (
+            <ToolConsumablesReturnModal
+              open={Boolean(toolConsumablesReturn)}
+              toolId={toolConsumablesReturn.toolId}
+              toolName={toolConsumablesReturn.name}
+              warehouseId={activeObjectId}
+              section={objectSectionFilter}
+              token={token}
+              apiUrl={API_URL}
+              fetchWithSession={fetchWithSession}
+              onClose={() => setToolConsumablesReturn(null)}
+              onDone={() => void loadTools().catch(() => undefined)}
+            />
+          ) : null}
 
           {drawerMode === "tool" && toolDetailModalId && renderToolDetailDrawer()}
 

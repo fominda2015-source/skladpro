@@ -5,6 +5,7 @@ import {
   MaterialKind,
   NotificationLevel,
   OperationType,
+  StockCondition,
   StockMovementDirection,
   ToolStatus
 } from "@prisma/client";
@@ -1229,10 +1230,11 @@ issueRequestsRouter.patch(
       for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
           where: {
-            warehouseId_materialId_section: {
+            warehouseId_materialId_section_condition: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: issueRow.section
+              section: issueRow.section,
+              condition: StockCondition.NEW
             }
           }
         });
@@ -1287,10 +1289,11 @@ issueRequestsRouter.patch(
       for (const item of issueRow.items) {
         await tx.stock.update({
           where: {
-            warehouseId_materialId_section: {
+            warehouseId_materialId_section_condition: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: issueRow.section
+              section: issueRow.section,
+              condition: StockCondition.NEW
             }
           },
           data: { quantity: { decrement: item.quantity } }
@@ -1370,10 +1373,11 @@ issueRequestsRouter.patch(
         for (const it of issueRow.items) {
           const s = await prisma.stock.findUnique({
             where: {
-              warehouseId_materialId_section: {
+              warehouseId_materialId_section_condition: {
                 warehouseId: issueRow.warehouseId,
                 materialId: it.materialId,
-                section: issueRow.section
+                section: issueRow.section,
+                condition: StockCondition.NEW
               }
             },
             include: { material: { select: { name: true, unit: true } } }

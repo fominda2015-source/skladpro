@@ -18,16 +18,44 @@ export function receiptStatusTone(status: ReceiptRequestStatus | string): "ok" |
   return "neutral";
 }
 
-export type ReceiptItemCategory = "EQUIPMENT" | "CONSUMABLE" | "CABLE";
+export type ReceiptItemCategory =
+  | "EQUIPMENT"
+  | "CONSUMABLE"
+  | "CABLE"
+  | "TOOL_MANUAL"
+  | "TOOL_ELECTRIC_CORDLESS"
+  | "TOOL_ELECTRIC_CORDED"
+  | "PPE"
+  | "TOOL_CONSUMABLE"
+  | "KIP"
+  | "OTHER";
 
-export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = ["EQUIPMENT", "CONSUMABLE", "CABLE"];
+export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = [
+  "EQUIPMENT",
+  "CONSUMABLE",
+  "CABLE",
+  "TOOL_MANUAL",
+  "TOOL_ELECTRIC_CORDLESS",
+  "TOOL_ELECTRIC_CORDED",
+  "PPE",
+  "TOOL_CONSUMABLE",
+  "KIP",
+  "OTHER"
+];
 
 export function receiptItemCategoryLabel(cat: ReceiptItemCategory | string | null | undefined) {
   return (
     {
       EQUIPMENT: "Оборудование",
       CONSUMABLE: "Расходники",
-      CABLE: "Кабель"
+      CABLE: "Кабель",
+      TOOL_MANUAL: "Инструмент · ручной",
+      TOOL_ELECTRIC_CORDLESS: "Инструмент · электрический · аккумуляторный",
+      TOOL_ELECTRIC_CORDED: "Инструмент · электрический · сетевой",
+      PPE: "СИЗ",
+      TOOL_CONSUMABLE: "Расходники для инструмента",
+      KIP: "КИП",
+      OTHER: "Прочее"
     } as Record<string, string>
   )[String(cat || "")] ?? "—";
 }

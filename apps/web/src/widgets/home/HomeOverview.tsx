@@ -99,6 +99,7 @@ type Props = {
   onOpenWarehouseTab?: () => void;
   onOpenLimitsTab?: () => void;
   onOpenToolsTab?: () => void;
+  toolsHubSlot?: ReactNode;
   onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
@@ -278,6 +279,7 @@ export function HomeOverview({
   onOpenWarehouseTab,
   onOpenLimitsTab,
   onOpenToolsTab,
+  toolsHubSlot,
   onOpenCampTab,
   onOpenOperations,
   onOpenOperationsTab,
@@ -1097,6 +1099,16 @@ export function HomeOverview({
           }
         ]}
       />
+
+      {toolsHubSlot ? (
+        <section className="homePanel" style={{ marginTop: 16 }}>
+          <header className="homePanelHead">
+            <h3>Инструменты</h3>
+            <span className="muted">те же разделы, что на вкладке «Инструменты»</span>
+          </header>
+          {toolsHubSlot}
+        </section>
+      ) : null}
 
       <div className="erpQuickActions">
         {canWarehouse && onOpenWarehouseTab ? (

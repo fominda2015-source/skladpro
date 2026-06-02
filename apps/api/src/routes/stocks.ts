@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { MaterialKind, StockMovementDirection } from "@prisma/client";
+import { MaterialKind, StockCondition, StockMovementDirection } from "@prisma/client";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
@@ -50,25 +50,19 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
         select: { id: true }
       });
 
-      const existing = await tx.stock.findUnique({
-        where: {
-          warehouseId_materialId_section: {
-            warehouseId: parsed.data.warehouseId,
-            materialId: material.id,
-            section: parsed.data.section
-          }
+      const stockKey = {
+        warehouseId_materialId_section_condition: {
+          warehouseId: parsed.data.warehouseId,
+          materialId: material.id,
+          section: parsed.data.section,
+          condition: StockCondition.NEW
         }
-      });
+      };
+      const existing = await tx.stock.findUnique({ where: stockKey });
 
       if (existing) {
         await tx.stock.update({
-          where: {
-            warehouseId_materialId_section: {
-              warehouseId: parsed.data.warehouseId,
-              materialId: material.id,
-              section: parsed.data.section
-            }
-          },
+          where: stockKey,
           data: { quantity: { increment: qty } }
         });
       } else {
@@ -77,6 +71,7 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
             warehouseId: parsed.data.warehouseId,
             materialId: material.id,
             section: parsed.data.section,
+            condition: StockCondition.NEW,
             quantity: qty,
             reserved: 0
           }

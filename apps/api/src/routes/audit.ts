@@ -4,6 +4,7 @@ import {
   CampItemStatus,
   IssueRequestStatus,
   ObjectSection,
+  StockCondition,
   StockMovementDirection,
   ToolStatus
 } from "@prisma/client";
@@ -272,10 +273,11 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
           for (const it of items) {
             const stock = await tx.stock.findUnique({
               where: {
-                warehouseId_materialId_section: {
+                warehouseId_materialId_section_condition: {
                   warehouseId,
                   materialId: it.materialId,
-                  section
+                  section,
+                  condition: StockCondition.NEW
                 }
               }
             });
@@ -287,7 +289,12 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
               }
               await tx.stock.update({
                 where: {
-                  warehouseId_materialId_section: { warehouseId, materialId: it.materialId, section }
+                  warehouseId_materialId_section_condition: {
+                    warehouseId,
+                    materialId: it.materialId,
+                    section,
+                    condition: StockCondition.NEW
+                  }
                 },
                 data: { quantity: { decrement: it.quantity } }
               });
@@ -295,7 +302,12 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
               if (stock) {
                 await tx.stock.update({
                   where: {
-                    warehouseId_materialId_section: { warehouseId, materialId: it.materialId, section }
+                    warehouseId_materialId_section_condition: {
+                    warehouseId,
+                    materialId: it.materialId,
+                    section,
+                    condition: StockCondition.NEW
+                  }
                   },
                   data: { quantity: { increment: it.quantity } }
                 });
@@ -305,6 +317,7 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
                     warehouseId,
                     materialId: it.materialId,
                     section,
+                    condition: StockCondition.NEW,
                     quantity: it.quantity,
                     reserved: 0
                   }
@@ -581,20 +594,22 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
         for (const it of finalItems) {
           const stock = await tx.stock.findUnique({
             where: {
-              warehouseId_materialId_section: {
+              warehouseId_materialId_section_condition: {
                 warehouseId,
                 materialId: it.materialId,
-                section
+                section,
+                condition: StockCondition.NEW
               }
             }
           });
           if (stock) {
             await tx.stock.update({
               where: {
-                warehouseId_materialId_section: {
+                warehouseId_materialId_section_condition: {
                   warehouseId,
                   materialId: it.materialId,
-                  section
+                  section,
+                  condition: StockCondition.NEW
                 }
               },
               data: { quantity: { increment: it.quantity } }
@@ -675,10 +690,11 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
           for (const it of after.items!) {
             const stock = await tx.stock.findUnique({
               where: {
-                warehouseId_materialId_section: {
+                warehouseId_materialId_section_condition: {
                   warehouseId,
                   materialId: it.materialId,
-                  section
+                  section,
+                  condition: StockCondition.NEW
                 }
               }
             });
@@ -687,10 +703,11 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
             }
             await tx.stock.update({
               where: {
-                warehouseId_materialId_section: {
+                warehouseId_materialId_section_condition: {
                   warehouseId,
                   materialId: it.materialId,
-                  section
+                  section,
+                  condition: StockCondition.NEW
                 }
               },
               data: { quantity: { decrement: it.quantity } }
