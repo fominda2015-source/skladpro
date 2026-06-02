@@ -41,7 +41,57 @@ const REPORT_MATERIAL_KINDS: MaterialKind[] = [
 ];
 
 export const STOREKEEPER_HOLDER_KEY = "__storekeeper__";
-export const STOREKEEPER_HOLDER_NAME = "Кладовщик";
+export const STOREKEEPER_HOLDER_NAME = "Кладовщик (не назначен на объекте)";
+
+const STOREKEEPER_POSITION_NAMES = ["Кладовщик"];
+
+async function resolveWarehouseStorekeeper(
+  warehouseId: string,
+  section: "SS" | "EOM"
+): Promise<{ userId: string; fullName: string } | null> {
+  const users = await prisma.user.findMany({
+    where: {
+      status: "ACTIVE",
+      position: { name: { in: STOREKEEPER_POSITION_NAMES } },
+      OR: [
+        { warehouseScopes: { some: { warehouseId } } },
+        { warehouseSectionScopes: { some: { warehouseId } } }
+      ]
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      warehouseSectionScopes: { where: { warehouseId }, select: { section: true } }
+    },
+    orderBy: { fullName: "asc" }
+  });
+
+  if (!users.length) return null;
+
+  const sectionMatched = users.filter((u) =>
+    u.warehouseSectionScopes.some((s) => s.section === section)
+  );
+  const pick = (sectionMatched.length ? sectionMatched : users)[0]!;
+  return {
+    userId: pick.id,
+    fullName: (pick.fullName || pick.email || pick.id).trim()
+  };
+}
+
+function warehouseStockHolderKey(storekeeper: { userId: string } | null): string {
+  return storekeeper ? `user:${storekeeper.userId}` : STOREKEEPER_HOLDER_KEY;
+}
+
+function normalizeLegacyHolderKey(
+  holderKey: string,
+  warehouseStockKey: string
+): string {
+  if (holderKey === STOREKEEPER_HOLDER_KEY && warehouseStockKey !== STOREKEEPER_HOLDER_KEY) {
+    return warehouseStockKey;
+  }
+  return holderKey;
+}
 
 function composeKey(holderKey: string, materialId: string) {
   return `${holderKey}:${materialId}`;
@@ -71,14 +121,20 @@ type BalanceMaps = {
   qtyByKey: Map<string, number>;
   holderLabels: Map<string, string>;
   materialMeta: Map<string, { name: string; unit: string }>;
+  warehouseStockHolderKey: string;
 };
 
 async function buildMaterialReportBalances(
   warehouseId: string,
   section: string
 ): Promise<BalanceMaps> {
+  const sectionEnum = section as "SS" | "EOM";
+  const storekeeper = await resolveWarehouseStorekeeper(warehouseId, sectionEnum);
+  const whHolderKey = warehouseStockHolderKey(storekeeper);
+  const whHolderName = storekeeper?.fullName ?? STOREKEEPER_HOLDER_NAME;
+
   const qtyByKey = new Map<string, number>();
-  const holderLabels = new Map<string, string>([[STOREKEEPER_HOLDER_KEY, STOREKEEPER_HOLDER_NAME]]);
+  const holderLabels = new Map<string, string>([[whHolderKey, whHolderName]]);
   const materialMeta = new Map<string, { name: string; unit: string }>();
 
   const rememberMaterial = (id: string, name: string, unit: string) => {
@@ -109,7 +165,7 @@ async function buildMaterialReportBalances(
     const qty = Number(row.quantity) || 0;
     if (qty < 1e-9) continue;
     rememberMaterial(row.material.id, row.material.name, row.material.unit);
-    addQty(STOREKEEPER_HOLDER_KEY, STOREKEEPER_HOLDER_NAME, row.materialId, qty);
+    addQty(whHolderKey, whHolderName, row.materialId, qty);
   }
 
   const issues = await prisma.issueRequest.findMany({
@@ -179,17 +235,18 @@ async function buildMaterialReportBalances(
   });
 
   for (const w of woRows) {
-    const key = composeKey(w.holderKey, w.materialId);
+    const holderKey = normalizeLegacyHolderKey(w.holderKey, whHolderKey);
+    const key = composeKey(holderKey, w.materialId);
     const cur = qtyByKey.get(key) || 0;
     const sub = Number(w._sum.quantity || 0) || 0;
     qtyByKey.set(key, Math.max(0, cur - sub));
   }
 
-  return { qtyByKey, holderLabels, materialMeta };
+  return { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey: whHolderKey };
 }
 
 function balancesToPayload(maps: BalanceMaps) {
-  const { qtyByKey, holderLabels, materialMeta } = maps;
+  const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey } = maps;
   type Line = BalanceLine;
   const holders = new Map<string, Line[]>();
 
@@ -211,12 +268,13 @@ function balancesToPayload(maps: BalanceMaps) {
     holderKey,
     holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
     holderName: holderLabels.get(holderKey) || holderKey,
+    isWarehouseBalance: holderKey === warehouseStockHolderKey,
     lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
   }));
 
   payload.sort((a, b) => {
-    if (a.holderKey === STOREKEEPER_HOLDER_KEY) return -1;
-    if (b.holderKey === STOREKEEPER_HOLDER_KEY) return 1;
+    if (a.isWarehouseBalance) return -1;
+    if (b.isWarehouseBalance) return 1;
     return String(a.holderName).localeCompare(String(b.holderName), "ru");
   });
 
@@ -345,17 +403,19 @@ materialReportRouter.post(
       throw e;
     }
 
-    const holderKey =
+    const { warehouseId, section, materialId, quantity, comment } = parsed.data;
+
+    const maps = await buildMaterialReportBalances(warehouseId, section);
+    let holderKey =
       parsed.data.holderKey?.trim() ||
       (parsed.data.holderUserId ? `user:${parsed.data.holderUserId}` : "");
+    holderKey = normalizeLegacyHolderKey(holderKey, maps.warehouseStockHolderKey);
     if (!holderKey) {
       return res.status(400).json({ error: "holderKey обязателен" });
     }
 
-    const { warehouseId, section, materialId, quantity, comment } = parsed.data;
     const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
 
-    const maps = await buildMaterialReportBalances(warehouseId, section);
     const holderName = maps.holderLabels.get(holderKey) || holderKey;
     const balance = maps.qtyByKey.get(composeKey(holderKey, materialId)) || 0;
 

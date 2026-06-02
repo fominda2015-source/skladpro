@@ -210,6 +210,7 @@ type MaterialReportHolderRow = {
   holderKey: string;
   holderUserId?: string | null;
   holderName: string;
+  isWarehouseBalance?: boolean;
   lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
 };
 type MaterialWriteoffHistoryApiRow = {
@@ -9551,7 +9552,7 @@ function App() {
               ) : materialBalances.length === 0 ? (
                 <EmptyState
                   title="Нет позиций в отчёте"
-                  hint="На складе остатки у кладовщика; после выдачи с указанием ответственного материал переходит к нему (СС/ЭОМ)."
+                  hint="На складе остатки у кладовщика объекта (должность «Кладовщик» в доступах); после выдачи с указанием ответственного материал переходит к нему (СС/ЭОМ)."
                 />
               ) : (
                 <div className="plainList" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -9560,7 +9561,7 @@ function App() {
                       <div className="rightCardHeader" style={{ marginBottom: 8 }}>
                         <strong>{safeName(h.holderName)}</strong>
                         <span className="muted">
-                          {h.holderKey === "__storekeeper__" ? "склад" : "ответственный"} · {h.lines.length} поз.
+                          {h.isWarehouseBalance ? "склад" : "ответственный"} · {h.lines.length} поз.
                         </span>
                       </div>
                       <div style={{ overflowX: "auto" }}>
