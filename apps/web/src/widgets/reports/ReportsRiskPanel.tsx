@@ -1,10 +1,8 @@
 type Props = {
   limitsOver: number;
-  calibrationOverdue: number;
   receiptOpen: number;
   waybillsOpen: number;
   onOpenLimits?: () => void;
-  onOpenVerifications?: () => void;
   onOpenReceipts?: () => void;
   onOpenWaybills?: () => void;
   onOpenDocuments?: () => void;
@@ -12,11 +10,9 @@ type Props = {
 
 export function ReportsRiskPanel({
   limitsOver,
-  calibrationOverdue,
   receiptOpen,
   waybillsOpen,
   onOpenLimits,
-  onOpenVerifications,
   onOpenReceipts,
   onOpenWaybills,
   onOpenDocuments
@@ -28,13 +24,6 @@ export function ReportsRiskPanel({
       value: limitsOver,
       tone: limitsOver > 0 ? ("bad" as const) : ("ok" as const),
       onClick: onOpenLimits
-    },
-    {
-      id: "cal",
-      label: "Просроченные поверки",
-      value: calibrationOverdue,
-      tone: calibrationOverdue > 0 ? ("bad" as const) : ("ok" as const),
-      onClick: onOpenVerifications
     },
     {
       id: "rcp",

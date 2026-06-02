@@ -77,7 +77,6 @@ import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttach
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ActsTab } from "./widgets/acts/ActsTab";
-import { VerificationsTab } from "./widgets/verifications/VerificationsTab";
 import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
 import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueModal";
 import { ToolConsumablesReturnModal } from "./widgets/tools/ToolConsumablesReturnModal";
@@ -383,7 +382,6 @@ type ToolItem = {
   toolType?: string | null;
   categoryId?: string | null;
   category?: { id: string; name: string; icon?: string | null; slug?: string | null } | null;
-  calibrationDueAt?: string | null;
   createdAt: string;
 };
 type ToolWarehouseSummaryRow = {
@@ -724,7 +722,6 @@ function App() {
     | "materialReport"
     | "reports"
     | "acts"
-    | "verifications"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -2172,8 +2169,7 @@ function App() {
           warehouseId: patch.warehouseId || null,
           section: patch.section,
           responsible: patch.responsible.trim() || null,
-          note: patch.note.trim() || null,
-          calibrationDueAt: patch.calibrationDueAt ? `${patch.calibrationDueAt}T12:00:00.000Z` : null
+          note: patch.note.trim() || null
         })
       });
       if (!res.ok) {
@@ -5152,7 +5148,6 @@ function App() {
     if (canReadTools) {
       visibleTabs.add("tools");
       visibleTabs.add("qr");
-      visibleTabs.add("verifications");
     }
     if (canReadLimits) visibleTabs.add("limits");
     if (canMaterialReport) visibleTabs.add("materialReport");
@@ -5928,7 +5923,6 @@ function App() {
           {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↙</span>Приходы</button>}
           {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
           {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
-          {canReadTools && <button className={`navBtn ${activeTab === "verifications" ? "active" : ""}`} onClick={() => setActiveTab("verifications")}><span className="navIcon">◷</span>Поверки</button>}
           {canReadNotifications && (
             <button
               className={`navBtn ${activeTab === "notifications" ? "active" : ""}`}
@@ -6165,7 +6159,6 @@ function App() {
             onOpenQr={canReadTools ? () => setActiveTab("qr") : undefined}
             onOpenIssues={canReadIssues ? () => setActiveTab("issues") : undefined}
             onOpenApprovals={canReadIssues ? () => setActiveTab("approvals") : undefined}
-            onOpenVerifications={canReadTools ? () => setActiveTab("verifications") : undefined}
             onCreateRequest={
               canReadIssues
                 ? () => {
@@ -11253,24 +11246,6 @@ function App() {
         />
       )}
 
-      {activeTab === "verifications" && canReadTools && (
-        <>
-          {renderTabObjectFilter()}
-          <VerificationsTab
-            token={token}
-            apiUrl={API_URL}
-            section={objectSectionFilter}
-            warehouseId={effectiveWarehouseId || ""}
-            warehouses={warehouses}
-            fetchWithSession={fetchWithSession}
-            onOpenTool={openToolDrawer}
-            statusLabel={toolStatusLabel}
-            statusTone={toolStatusTone}
-            safeName={safeName}
-          />
-        </>
-      )}
-
       {activeTab === "feedback" && (
         <div>
           <PageHero
@@ -11532,14 +11507,12 @@ function App() {
 
           <ReportsRiskPanel
             limitsOver={homeOverview?.summary?.limitsOverLines ?? 0}
-            calibrationOverdue={homeOverview?.summary?.toolsCalibrationOverdue ?? 0}
             receiptOpen={warehouseSnapshot?.counts?.receiptRequests?.total ?? homeOverview?.summary?.receiptOpen ?? 0}
             waybillsOpen={warehouseSnapshot?.counts?.waybillsOpen ?? 0}
             onOpenLimits={() => {
               if (effectiveWarehouseId) setActiveObjectId(effectiveWarehouseId);
               setActiveTab("limits");
             }}
-            onOpenVerifications={() => setActiveTab("verifications")}
             onOpenReceipts={() => {
               setActiveTab("operations");
               setOperationsSubTab("materialReceipts");

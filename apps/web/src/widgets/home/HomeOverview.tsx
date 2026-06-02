@@ -57,8 +57,6 @@ export type HomeOverviewSummary = {
   toolsInStock: number;
   toolsIssued: number;
   toolsInRepair: number;
-  toolsCalibrationOverdue?: number;
-  toolsCalibrationDueSoon?: number;
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
@@ -120,7 +118,6 @@ type Props = {
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
   onOpenApprovals?: () => void;
-  onOpenVerifications?: () => void;
   onCreateRequest?: () => void;
   onAcceptReturn?: () => void;
 };
@@ -296,7 +293,6 @@ export function HomeOverview({
   onOpenQr,
   onOpenIssues,
   onOpenApprovals,
-  onOpenVerifications,
   onCreateRequest,
   onAcceptReturn
 }: Props) {
@@ -1146,11 +1142,6 @@ export function HomeOverview({
         {onOpenQr ? (
           <button type="button" className="ghostBtn" onClick={onOpenQr}>
             QR-сканер
-          </button>
-        ) : null}
-        {onOpenVerifications ? (
-          <button type="button" className="ghostBtn" onClick={onOpenVerifications}>
-            Поверки
           </button>
         ) : null}
         {onAcceptReturn ? (

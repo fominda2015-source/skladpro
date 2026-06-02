@@ -593,7 +593,6 @@ model Tool {
   projectId       String?
   responsible     String?
   note            String?
-  calibrationDueAt DateTime?
   brand           String?
   toolType        String?
   categoryId      String?
@@ -608,7 +607,6 @@ model Tool {
 
   @@index([categoryId])
   @@index([name])
-  @@index([calibrationDueAt])
 }
 
 model ToolCategory {

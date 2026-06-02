@@ -10,15 +10,8 @@ export type ToolListRow = {
   brand?: string | null;
   toolType?: string | null;
   category?: { id: string; name: string } | null;
-  calibrationDueAt?: string | null;
   warehouse?: { id: string; name: string } | null;
 };
-
-function formatCalibration(due?: string | null) {
-  if (!due) return "—";
-  const d = new Date(due);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("ru-RU");
-}
 
 type Props = {
   tools: ToolListRow[];
@@ -51,10 +44,9 @@ export function ToolsListTable({
             <th style={{ width: 100 }}>Вид</th>
             <th style={{ width: 120 }}>Инв. №</th>
             <th style={{ width: 120 }}>Серийный</th>
-              <th>Объект</th>
-              <th style={{ width: 100 }}>Поверка</th>
-              <th style={{ width: 110 }}>Статус</th>
-              <th style={{ width: 88 }}>QR</th>
+            <th>Объект</th>
+            <th style={{ width: 110 }}>Статус</th>
+            <th style={{ width: 88 }}>QR</th>
           </tr>
         </thead>
         <tbody>
@@ -90,9 +82,6 @@ export function ToolsListTable({
               <td className="muted">{t.inventoryNumber}</td>
               <td className="muted">{t.serialNumber || "—"}</td>
               <td className="muted">{t.warehouse?.name ? safeName(t.warehouse.name) : "—"}</td>
-              <td className="muted" style={{ fontSize: 12 }}>
-                {formatCalibration(t.calibrationDueAt)}
-              </td>
               <td>
                 <StatusBadge tone={statusTone(t.status)}>{statusLabel(t.status)}</StatusBadge>
               </td>

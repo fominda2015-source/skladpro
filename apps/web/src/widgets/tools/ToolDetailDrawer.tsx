@@ -11,7 +11,6 @@ export type ToolDrawerRecord = {
   qrCode: string;
   status: string;
   section?: "SS" | "EOM";
-  calibrationDueAt?: string | null;
   brand?: string | null;
   toolType?: string | null;
   categoryId?: string | null;
@@ -35,7 +34,6 @@ export type ToolEditPatch = {
   section: "SS" | "EOM";
   responsible: string;
   note: string;
-  calibrationDueAt: string | null;
 };
 
 export type ToolEventRow = {
@@ -70,12 +68,6 @@ type Props = {
   qrPreview?: ReactNode;
 };
 
-function calibrationInputValue(iso?: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-}
-
 function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
   return {
     name: tool.name || "",
@@ -86,8 +78,7 @@ function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
     warehouseId: tool.warehouseId || "",
     section: tool.section === "EOM" ? "EOM" : "SS",
     responsible: tool.responsible || "",
-    note: tool.note || "",
-    calibrationDueAt: calibrationInputValue(tool.calibrationDueAt)
+    note: tool.note || ""
   };
 }
 
@@ -254,16 +245,6 @@ export function ToolDetailDrawer({
                 onChange={(e) => setDraft((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
               />
             </label>
-            <label>
-              Поверка до
-              <input
-                type="date"
-                value={draft.calibrationDueAt || ""}
-                onChange={(e) =>
-                  setDraft((prev) => (prev ? { ...prev, calibrationDueAt: e.target.value || null } : prev))
-                }
-              />
-            </label>
           </div>
           <div className="erpCellActions" style={{ marginTop: 10 }}>
             <button
@@ -315,11 +296,6 @@ export function ToolDetailDrawer({
           {tool.note ? (
             <p className="muted" style={{ fontSize: 13 }}>
               Примечание: {tool.note}
-            </p>
-          ) : null}
-          {tool.calibrationDueAt ? (
-            <p className="muted" style={{ fontSize: 13 }}>
-              Поверка до: {new Date(tool.calibrationDueAt).toLocaleDateString("ru-RU")}
             </p>
           ) : null}
           <div className="erpCellActions" style={{ marginTop: 10 }}>

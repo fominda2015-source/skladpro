@@ -43,8 +43,6 @@ export type HomeOverviewSummary = {
   toolsInStock: number;
   toolsIssued: number;
   toolsInRepair: number;
-  toolsCalibrationOverdue: number;
-  toolsCalibrationDueSoon: number;
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
@@ -197,8 +195,6 @@ const emptySummary = (): HomeOverviewSummary => ({
   toolsInStock: 0,
   toolsIssued: 0,
   toolsInRepair: 0,
-  toolsCalibrationOverdue: 0,
-  toolsCalibrationDueSoon: 0,
   stockLines: 0,
   receiptOpen: 0,
   toolsByCategory: [],
@@ -300,8 +296,7 @@ export async function buildHomeOverview(
         name: true,
         categoryId: true,
         status: true,
-        section: true,
-        calibrationDueAt: true
+        section: true
       }
     }),
     prisma.stockMovement.findMany({
@@ -392,17 +387,6 @@ export async function buildHomeOverview(
   const toolsInStock = toolRows.filter((t) => t.status === ToolStatus.IN_STOCK).length;
   const toolsIssued = toolRows.filter((t) => t.status === ToolStatus.ISSUED).length;
   const toolsInRepair = toolRows.filter((t) => t.status === ToolStatus.IN_REPAIR).length;
-  const now = new Date();
-  const soonLimit = new Date(now);
-  soonLimit.setDate(soonLimit.getDate() + 30);
-  let toolsCalibrationOverdue = 0;
-  let toolsCalibrationDueSoon = 0;
-  for (const t of toolRows) {
-    if (!t.calibrationDueAt) continue;
-    const due = new Date(t.calibrationDueAt);
-    if (due < now) toolsCalibrationOverdue += 1;
-    else if (due <= soonLimit) toolsCalibrationDueSoon += 1;
-  }
 
   const trendMap = new Map<string, { income: number; outcome: number }>();
   for (let i = 29; i >= 0; i--) {
@@ -449,8 +433,6 @@ export async function buildHomeOverview(
       toolsInStock,
       toolsIssued,
       toolsInRepair,
-      toolsCalibrationOverdue,
-      toolsCalibrationDueSoon,
       stockLines,
       receiptOpen,
       toolsByCategory,

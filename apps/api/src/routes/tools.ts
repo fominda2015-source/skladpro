@@ -38,8 +38,7 @@ const createToolSchema = z.object({
   note: z.string().optional(),
   brand: z.string().optional(),
   toolType: z.string().optional(),
-  categoryId: z.string().nullable().optional(),
-  calibrationDueAt: z.union([z.string(), z.null()]).optional()
+  categoryId: z.string().nullable().optional()
 });
 
 const updateToolSchema = z.object({
@@ -53,17 +52,8 @@ const updateToolSchema = z.object({
   brand: z.string().nullable().optional(),
   toolType: z.string().nullable().optional(),
   status: z.nativeEnum(ToolStatus).optional(),
-  categoryId: z.string().nullable().optional(),
-  calibrationDueAt: z.union([z.string(), z.null()]).optional()
+  categoryId: z.string().nullable().optional()
 });
-
-function parseCalibrationDueAt(value: unknown): Date | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || value === "") return null;
-  const d = new Date(String(value));
-  if (Number.isNaN(d.getTime())) return undefined;
-  return d;
-}
 
 const toolCategorySchema = z.object({
   name: z.string().min(1).max(120),
@@ -271,19 +261,6 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     const cats = await prisma.toolCategory.findMany({ where: { slug: { in: slugs } }, select: { id: true } });
     categorySlugIds = cats.map((c) => c.id);
   }
-  const calibrationParam =
-    typeof req.query.calibration === "string" ? req.query.calibration.toLowerCase() : "";
-  const now = new Date();
-  const in30 = new Date(now);
-  in30.setDate(in30.getDate() + 30);
-  const calibrationWhere: Prisma.ToolWhereInput | null =
-    calibrationParam === "overdue"
-      ? { calibrationDueAt: { lt: now } }
-      : calibrationParam === "soon"
-        ? { calibrationDueAt: { gte: now, lte: in30 } }
-        : calibrationParam === "unset"
-          ? { calibrationDueAt: null }
-          : null;
   const where = {
     AND: [
       toolWhereFromScope(scope),
@@ -309,8 +286,7 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
                 { qrCode: { contains: q, mode: "insensitive" as const } }
               ]
             }
-          : {}),
-        ...(calibrationWhere ? calibrationWhere : {})
+          : {})
       }
     ]
   };
@@ -407,15 +383,9 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedReques
     }
     assertProjectInScope(scope, parsed.data.projectId);
     const qrCode = buildQrCode(parsed.data.inventoryNumber);
-    const calibrationDueAt = parseCalibrationDueAt(parsed.data.calibrationDueAt);
-    if (parsed.data.calibrationDueAt !== undefined && calibrationDueAt === undefined) {
-      return res.status(400).json({ error: "Invalid calibrationDueAt" });
-    }
-    const { calibrationDueAt: _c, ...rest } = parsed.data;
     const created = await prisma.tool.create({
       data: {
-        ...rest,
-        ...(calibrationDueAt !== undefined ? { calibrationDueAt } : {}),
+        ...parsed.data,
         qrCode
       },
       include: { events: true }
@@ -465,17 +435,9 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
     if (!existing) {
       return res.status(404).json({ error: "Tool not found" });
     }
-    const calibrationDueAt = parseCalibrationDueAt(parsed.data.calibrationDueAt);
-    if (parsed.data.calibrationDueAt !== undefined && calibrationDueAt === undefined) {
-      return res.status(400).json({ error: "Invalid calibrationDueAt" });
-    }
-    const { calibrationDueAt: _c, ...rest } = parsed.data;
     const updated = await prisma.tool.update({
       where: { id: String(req.params.id) },
-      data: {
-        ...rest,
-        ...(calibrationDueAt !== undefined ? { calibrationDueAt } : {})
-      },
+      data: parsed.data,
       include: { warehouse: true, project: true, category: true }
     });
     await recordAudit({
