@@ -181,7 +181,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
         </div>
         <div className="whHeaderActions">
           {canWriteOperations ? (
-            <button type="button" className="primaryBtn whBtnPrimary" onClick={onAddMaterial}>
+            <button type="button" className="primaryBtn whBtnPrimary whBtnAdd" onClick={onAddMaterial}>
               + Добавить
             </button>
           ) : null}
@@ -223,57 +223,58 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
         </p>
       ) : null}
 
-      <div className="whSearchRow">
-        <input
-          className="whSearchInput"
-          placeholder="Поиск: название, SKU, синоним…"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSearchSubmit();
-          }}
-        />
-        <button type="button" className="secondaryBtn" onClick={onSearchSubmit}>
-          Найти
-        </button>
-      </div>
-
-      <div className="whToolbar">
-        <div className="whChips" role="tablist" aria-label="Вид номенклатуры">
-          {(
-            [
-              ["ALL", "Все"],
-              ["MATERIAL", "Материалы"],
-              ["CONSUMABLE", "Расходники"],
-              ["WORKWEAR", "Спецодежда"]
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={kindTab === k}
-              className={`chip ${kindTab === k ? "active" : ""}`}
-              onClick={() => onKindTabChange(k)}
-            >
-              {label}
-            </button>
-          ))}
+      <div className="whControlBar">
+        <div className="whSearchRow">
+          <input
+            className="whSearchInput"
+            placeholder="Поиск: название, SKU, синоним…"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSearchSubmit();
+            }}
+          />
+          <button type="button" className="ghostBtn whBtnFind" onClick={onSearchSubmit}>
+            Найти
+          </button>
         </div>
-        <button
-          type="button"
-          className={`ghostBtn whFilterToggle ${filtersOpen ? "active" : ""}`}
-          onClick={() => setFiltersOpen((v) => !v)}
-        >
-          Фильтры{activeFilters > 0 ? ` (${activeFilters})` : ""}
-        </button>
-        <button
-          type="button"
-          className={limitMaterialsOnly ? "secondaryBtn" : "ghostBtn"}
-          onClick={onLimitMaterialsOnlyToggle}
-        >
-          {limitMaterialsOnly ? "Только лимит" : "Все позиции"}
-        </button>
+        <div className="whToolbar">
+          <div className="whChips" role="tablist" aria-label="Вид номенклатуры">
+            {(
+              [
+                ["ALL", "Все"],
+                ["MATERIAL", "Материалы"],
+                ["CONSUMABLE", "Расходники"],
+                ["WORKWEAR", "Спецодежда"]
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={kindTab === k}
+                className={`chip ${kindTab === k ? "active" : ""}`}
+                onClick={() => onKindTabChange(k)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={`ghostBtn whFilterToggle ${filtersOpen ? "active" : ""}`}
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            Фильтры{activeFilters > 0 ? ` (${activeFilters})` : ""}
+          </button>
+          <button
+            type="button"
+            className={`chip whLimitChip ${limitMaterialsOnly ? "active" : ""}`}
+            onClick={onLimitMaterialsOnlyToggle}
+          >
+            {limitMaterialsOnly ? "Только лимит" : "Все позиции"}
+          </button>
+        </div>
       </div>
 
       {filtersOpen ? (

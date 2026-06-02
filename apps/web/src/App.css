@@ -4874,7 +4874,47 @@ button.homeInsightPill:hover:not(:disabled) {
 .warehouseStockView {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+}
+
+/* Сброс глобальных button { width:100%; height:40px } внутри склада */
+.warehouseStockView button {
+  width: auto;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.warehouseStockView .whBtnPrimary,
+.warehouseStockView .whBtnAdd {
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.warehouseStockView .whBtnIcon {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 16px;
+}
+
+.warehouseStockView .chip {
+  padding: 4px 10px;
+  min-height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.warehouseStockView .ghostBtn {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .whHeader {
@@ -4882,12 +4922,12 @@ button.homeInsightPill:hover:not(:disabled) {
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .whTitle {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.15rem;
   font-weight: 700;
 }
 
@@ -4915,14 +4955,14 @@ button.homeInsightPill:hover:not(:disabled) {
 }
 
 .whBtnPrimary {
-  min-height: 40px;
+  min-height: 32px;
 }
 
 .whBtnIcon {
-  min-width: 40px;
-  min-height: 40px;
-  padding: 0 10px;
-  font-size: 18px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -5021,19 +5061,35 @@ button.whMenuItem:hover,
   border-radius: 8px;
 }
 
+.whControlBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
 .whSearchRow {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 240px;
+  min-width: min(100%, 200px);
 }
 
 .whSearchInput {
-  flex: 1 1 200px;
+  flex: 1 1 120px;
   min-width: 0;
-  padding: 10px 12px;
+  width: auto;
+  height: 34px;
+  padding: 6px 10px;
   border: 1px solid #d8dde7;
-  border-radius: 10px;
-  font-size: 15px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.whBtnFind {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .whSearchInput:focus {
@@ -5046,14 +5102,28 @@ button.whMenuItem:hover,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex: 1 1 320px;
 }
 
 .whChips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
   flex: 1 1 auto;
+}
+
+.whLimitChip.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.warehouseMode .whLimitChip.active {
+  background: #ea580c;
+  border-color: #ea580c;
+  color: #fff;
 }
 
 .whFilterToggle.active {
@@ -5064,12 +5134,25 @@ button.whMenuItem:hover,
 .whFiltersPanel {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 16px;
+  gap: 8px 12px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 8px 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
+}
+
+.warehouseStockView .whFiltersPanel select {
+  width: auto;
+  min-width: 140px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.warehouseStockView .whFiltersPanel input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
 }
 
 .whFiltersPanel label:not(.whCheck) {
@@ -5364,19 +5447,41 @@ button.whMenuItem:hover,
     justify-content: flex-end;
   }
 
-  .whSearchRow .secondaryBtn {
-    flex: 0 0 auto;
+  .warehouseStockView button {
+    min-height: 32px;
+  }
+
+  .whControlBar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .whSearchRow {
+    width: 100%;
   }
 
   .whToolbar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
   }
 
   .whChips {
+    flex: 1 1 auto;
     overflow-x: auto;
     flex-wrap: nowrap;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .whChips .chip {
+    flex-shrink: 0;
+  }
+
+  .whFilterToggle,
+  .whLimitChip {
+    flex-shrink: 0;
   }
 }
 
