@@ -48,6 +48,7 @@ import {
   computeLimitImportDiffView,
   limitTreeIndentPx
 } from "./widgets/limits/limitImportDiffUtils";
+import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import {
@@ -769,6 +770,7 @@ function App() {
   // Legacy-состояния прямого прихода удалены — приёмка идёт через заявки.
   const [issues, setIssues] = useState<IssueRequest[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
+  const [adminIssueEditOpen, setAdminIssueEditOpen] = useState(false);
   const [issuesMessage, setIssuesMessage] = useState("");
   const [issuesTone, setIssuesTone] = useState<ResultTone>("neutral");
   const [issuesLoading, setIssuesLoading] = useState(false);
@@ -10222,6 +10224,13 @@ function App() {
               >
                 Удалить
               </button>
+              {me?.role === "ADMIN" &&
+              selectedIssue.status !== "CANCELLED" &&
+              selectedIssue.status !== "REJECTED" ? (
+                <button type="button" className="secondaryBtn" onClick={() => setAdminIssueEditOpen(true)}>
+                  Правка (админ)
+                </button>
+              ) : null}
             </div>
           </div>
           <p><strong>Склад:</strong> {selectedIssue.warehouse?.name || selectedIssue.warehouseId}</p>
@@ -10280,6 +10289,26 @@ function App() {
           </div>
         </aside>
       )}
+
+      {adminIssueEditOpen && selectedIssue && me?.role === "ADMIN" ? (
+        <AdminIssueEditModal
+          issue={selectedIssue}
+          materials={materials}
+          token={token}
+          apiUrl={API_URL}
+          fetchWithSession={fetchWithSession}
+          onClose={() => setAdminIssueEditOpen(false)}
+          onSaved={async () => {
+            setIssuesMessage("Выдача исправлена администратором.");
+            setIssuesTone("success");
+            await loadIssues();
+          }}
+          onError={(msg) => {
+            setIssuesMessage(msg);
+            setIssuesTone("error");
+          }}
+        />
+      ) : null}
 
       {drawerMode === "tool" && toolDetailModalId && activeTab !== "tools" && renderToolDetailDrawer()}
 

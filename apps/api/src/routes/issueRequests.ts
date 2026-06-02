@@ -40,6 +40,7 @@ const deleteIssueSchema = z.object({
   force: z.boolean().optional()
 });
 import { sha256File } from "../lib/fileHash.js";
+import { adminEditIssueRequest, adminEditIssueSchema } from "../lib/issueAdminEdit.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -999,6 +1000,28 @@ issueRequestsRouter.delete("/:id", requirePermission("issues.write"), async (req
   }).catch(() => undefined);
 
   return res.json({ ok: true, force });
+});
+
+issueRequestsRouter.patch("/:id/admin-edit", requirePermission("issues.read"), async (req: AuthedRequest, res) => {
+  if (req.user?.role !== "ADMIN") {
+    return res.status(403).json({ error: "ADMIN_ONLY" });
+  }
+  const id = String(req.params.id);
+  const parsed = adminEditIssueSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const scope = await getRequestDataScope(req);
+  const exists = await prisma.issueRequest.findFirst({ where: mergeIssueWhere(scope, { id }) });
+  if (!exists) {
+    return res.status(404).json({ error: "Issue request not found" });
+  }
+  const result = await adminEditIssueRequest({
+    issueId: id,
+    actorUserId: req.user!.userId,
+    input: parsed.data
+  });
+  return res.status(result.status).json(result.body);
 });
 
 issueRequestsRouter.patch(

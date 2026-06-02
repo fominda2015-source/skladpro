@@ -6648,3 +6648,28 @@ button.whMenuItem:hover,
   padding-left: 18px;
   font-size: 13px;
 }
+
+.adminIssueEditModal {
+  max-width: min(96vw, 720px);
+}
+.adminIssueEditHint {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.adminIssueEditField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.adminIssueEditField input,
+.adminIssueEditField textarea {
+  width: 100%;
+}
+.adminIssueEditLines h4 {
+  margin: 0 0 8px;
+}
+.adminIssueEditLines input[type="number"] {
+  width: 100%;
+}
