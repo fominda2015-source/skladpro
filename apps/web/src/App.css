@@ -3546,11 +3546,35 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   padding: 12px 14px;
 }
 .homeOverview .pageHeroStatLabel {
-  font-size: 13px;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: #0f172a;
+  text-transform: none;
+  letter-spacing: normal;
 }
 .homeOverview .pageHeroStatValue {
-  font-size: 28px;
-  line-height: 1.05;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-top: 4px;
+}
+.homeOverview .pageHeroStat.tone-warn .pageHeroStatLabel {
+  color: #b45309;
+}
+.homeOverview .pageHeroStat.tone-bad .pageHeroStatLabel {
+  color: #b91c1c;
+}
+.homeOverview .pageHeroStat.tone-ok .pageHeroStatLabel {
+  color: #15803d;
+}
+.homeOverview .pageHeroStat.tone-warn .pageHeroStatValue,
+.homeOverview .pageHeroStat.tone-bad .pageHeroStatValue,
+.homeOverview .pageHeroStat.tone-ok .pageHeroStatValue {
+  color: #64748b;
 }
 .homeOverview .pageHeroStat.tone-warn,
 .homeOverview .pageHeroStat.tone-bad {
@@ -3559,11 +3583,13 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 }
 .homeStatSubline {
   display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: #64748b;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
   font-weight: 600;
   line-height: 1.35;
+  text-transform: none;
+  letter-spacing: normal;
 }
 .homeOverviewMeta {
   font-weight: 400;
@@ -3827,6 +3853,13 @@ button.homeInsightPill:hover:not(:disabled) {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+.homeDrillModal--wide {
+  width: min(1280px, 98vw);
+  max-height: min(94vh, 960px);
+}
+.homeDrillModal--wide .homeDrillBody {
+  padding: 14px 18px;
 }
 .homeDrillHead {
   display: flex;

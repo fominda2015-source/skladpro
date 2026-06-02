@@ -3,8 +3,10 @@ import { API_URL } from "../../app/constants";
 import { LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { LimitStructureBars } from "../limits/LimitStructureBars";
-import { WarehouseStockView, type WarehouseStockRow } from "../warehouse/WarehouseStockView";
 import { receiptStatusLabel, receiptStatusTone } from "../receipts/receiptLabels";
+
+const metricFmt = (n: number) =>
+  Number.isFinite(Number(n)) ? Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "0";
 
 type Section = "SS" | "EOM";
 
@@ -105,6 +107,10 @@ function HomeDrillLimitsPanel({
   >({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  useEffect(() => {
+    setExpanded({});
+  }, [warehouseId, section]);
+
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -189,12 +195,37 @@ function HomeDrillLimitsPanel({
         const renderNode = (node: LimitImportNode, depth: number): ReactNode => {
           const children = childrenByParent.get(node.id) || [];
           const isGroup = node.nodeType === "GROUP";
-          const isExpanded = expanded[node.id] !== false;
+          const isExpanded = expanded[node.id] === true;
           const planned = Number(node.plannedQty || 0);
           const issued = node.materialId ? Number(issuedByMaterial[node.materialId] || 0) : 0;
           const arrived = node.materialId ? Number(supplyByMaterial[node.materialId]?.arrivedQty || 0) : 0;
+          const isOver = planned > 0 && issued > planned;
+          const directMaterials = children.filter((c) => c.nodeType === "MATERIAL");
+          const childGroups = children.filter((c) => c.nodeType === "GROUP");
 
           if (isGroup) {
+            const agg = (() => {
+              let plan = 0;
+              let arr = 0;
+              let iss = 0;
+              const walk = (id: string) => {
+                const n = tpl.nodes.find((x) => x.id === id);
+                if (!n) return;
+                if (n.nodeType === "MATERIAL") {
+                  const p = Number(n.plannedQty || 0);
+                  plan += p;
+                  if (n.materialId) {
+                    arr += Number(supplyByMaterial[n.materialId]?.arrivedQty || 0);
+                    iss += Number(issuedByMaterial[n.materialId] || 0);
+                  }
+                  return;
+                }
+                for (const ch of childrenByParent.get(id) || []) walk(ch.id);
+              };
+              walk(node.id);
+              return { plan, arrived: arr, issued: iss };
+            })();
+
             return (
               <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
                 <div className="limitGroupRow" style={{ gap: 6, padding: "4px 0" }}>
@@ -207,27 +238,88 @@ function HomeDrillLimitsPanel({
                   >
                     {children.length ? (isExpanded ? "▾" : "▸") : "•"}
                   </button>
-                  <strong>{safeName(node.title)}</strong>
+                  <strong style={{ color: "#243656" }}>{safeName(node.title)}</strong>
+                  {agg.plan > 0 ? (
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      {metricFmt(agg.issued)} / {metricFmt(agg.plan)}
+                    </span>
+                  ) : null}
                 </div>
-                {isExpanded ? children.map((ch) => renderNode(ch, depth + 1)) : null}
+                {isExpanded && agg.plan > 0 ? (
+                  <div style={{ margin: "4px 0 6px", paddingLeft: 36, maxWidth: 420 }}>
+                    <LimitStructureBars plan={agg.plan} issued={agg.issued} arrived={agg.arrived} compact />
+                  </div>
+                ) : null}
+                {isExpanded && directMaterials.length > 0 ? (
+                  <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
+                    <table className="limitMaterialsTable">
+                      <thead>
+                        <tr>
+                          <th>Материал</th>
+                          <th className="num">Ед.</th>
+                          <th className="num">План</th>
+                          <th className="num">Приход</th>
+                          <th className="num">Выдано</th>
+                          <th className="num">Привезти</th>
+                          <th className="num">В закупке</th>
+                          <th className="num">На складе</th>
+                          <th className="structureCell">Структура</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {directMaterials.map((m) => {
+                          const plan = Number(m.plannedQty || 0);
+                          const sm = m.materialId ? supplyByMaterial[m.materialId] : undefined;
+                          const arr = sm?.arrivedQty ?? 0;
+                          const iss = m.materialId ? Number(issuedByMaterial[m.materialId] || 0) : 0;
+                          const onOrd = sm?.onOrderQty ?? 0;
+                          const stk = sm?.stockQty ?? 0;
+                          const remain = Math.max(0, plan - arr);
+                          return (
+                            <tr key={`mt-${node.id}-${m.id}`}>
+                              <td className="matName">{safeName(String(m.materialName || m.title || ""))}</td>
+                              <td className="num">{m.unit || "шт"}</td>
+                              <td className="num">{metricFmt(plan)}</td>
+                              <td className="num">{m.materialId ? metricFmt(arr) : "—"}</td>
+                              <td className="num">{m.materialId ? metricFmt(iss) : "—"}</td>
+                              <td className="num">{m.materialId ? metricFmt(remain) : "—"}</td>
+                              <td className="num">{m.materialId ? metricFmt(onOrd) : "—"}</td>
+                              <td className="num">{m.materialId ? metricFmt(stk) : "—"}</td>
+                              <td className="structureCell">
+                                {m.materialId && plan > 0 ? (
+                                  <LimitStructureBars plan={plan} issued={iss} arrived={arr} />
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+                {isExpanded ? childGroups.map((ch) => renderNode(ch, depth + 1)) : null}
               </div>
             );
           }
 
+          const nodeTitle = String(node.materialName || node.title || "");
+          const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
           return (
-            <div key={node.id} className="limitMaterialRow" style={{ marginLeft: depth * 10, marginTop: 6 }}>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>
-                {safeName(String(node.materialName || node.title || "Материал"))}
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                план {planned.toLocaleString("ru-RU")} · выдано {issued.toLocaleString("ru-RU")} · приход{" "}
-                {arrived.toLocaleString("ru-RU")} {node.unit || "шт"}
+            <div key={node.id} className={`limitMaterialRow ${isOver ? "low" : ""}`} style={{ marginLeft: depth * 10, marginTop: 6 }}>
+              <div className="rightCardHeader" style={{ marginBottom: 8, gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ fontSize: 13 }}>{safeName(nodeTitle)}</strong>
+                  <div className="muted">{node.unit || "шт"}</div>
+                </div>
+                <span className={`badge ${isOver ? "bad" : "ok"}`}>{qtyText}</span>
               </div>
               {planned > 0 ? (
-                <LimitStructureBars plan={planned} issued={issued} arrived={arrived} compact />
-              ) : (
-                <span className="muted">отсутствует</span>
-              )}
+                <div style={{ marginTop: 6, maxWidth: 320 }}>
+                  <LimitStructureBars plan={planned} issued={issued} arrived={arrived} compact />
+                </div>
+              ) : null}
             </div>
           );
         };
@@ -246,132 +338,111 @@ function HomeDrillLimitsPanel({
   );
 }
 
-function HomeDrillWarehousePanel({
+function HomeDrillStockPanel({
   warehouseId,
-  section,
-  objectName,
   token,
   fetchWithSession,
   safeName
 }: {
   warehouseId: string;
-  section: Section;
-  objectName: string;
   token: string | null;
   fetchWithSession: typeof fetch;
   safeName: (v: string) => string;
 }) {
-  const [sectionTab, setSectionTab] = useState<Section>(section);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState<WarehouseStockRow[]>([]);
+  const [rows, setRows] = useState<StockApiRow[]>([]);
   const [search, setSearch] = useState("");
-  const [kindTab, setKindTab] = useState<"ALL" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR">("ALL");
 
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ warehouseId, section: sectionTab });
+    const params = new URLSearchParams({ warehouseId });
     if (search.trim()) params.set("q", search.trim());
     try {
       const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as StockApiRow[];
-      setRows(
-        data.map((r) => ({
-          id: r.id,
-          warehouseId: r.warehouseId,
-          warehouseName: safeName(r.warehouseName),
-          materialId: r.materialId,
-          materialName: safeName(r.materialName),
-          materialSku: r.materialSku,
-          materialUnit: r.materialUnit,
-          materialKind: r.materialKind,
-          unitPrice: r.unitPrice,
-          quantity: r.quantity,
-          reserved: r.reserved,
-          storageRoom: r.storageRoom,
-          storageCell: r.storageCell,
-          available: r.available,
-          isLow: r.isLow
-        }))
-      );
+      setRows((await res.json()) as StockApiRow[]);
     } catch (e) {
-      setError(`Не удалось загрузить склад: ${String(e)}`);
+      setError(`Не удалось загрузить остатки: ${String(e)}`);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [token, fetchWithSession, warehouseId, sectionTab, search, safeName]);
+  }, [token, fetchWithSession, warehouseId, search]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    let list = rows;
-    if (kindTab !== "ALL") list = list.filter((r) => r.materialKind === kindTab);
-    return list;
-  }, [rows, kindTab]);
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows
+      .filter((r) => {
+        if (!q) return true;
+        return (
+          r.materialName.toLowerCase().includes(q) ||
+          String(r.materialSku || "").toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => b.available - a.available || a.materialName.localeCompare(b.materialName, "ru"));
+  }, [rows, search]);
+
+  if (loading) return <LoadingState text="Загрузка остатков…" />;
+  if (error) return <p className="muted">{error}</p>;
 
   return (
-    <div className="homeDrillTabEmbed stockPanel">
-      <div className="tabs" style={{ marginBottom: 8 }}>
-        <button type="button" className={sectionTab === "SS" ? "active" : ""} onClick={() => setSectionTab("SS")}>
-          СС
-        </button>
-        <button type="button" className={sectionTab === "EOM" ? "active" : ""} onClick={() => setSectionTab("EOM")}>
-          ЭОМ
+    <div className="homeDrillStack">
+      <div className="toolbar" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void load();
+          }}
+          placeholder="Поиск ТМЦ (название, SKU)…"
+          style={{ minWidth: 260 }}
+        />
+        <button type="button" className="ghostBtn" onClick={() => void load()}>
+          ↻ Обновить
         </button>
       </div>
-      <WarehouseStockView
-        sectionLabel={`${safeName(objectName)} · раздел ${sectionTab === "SS" ? "СС" : "ЭОМ"}`}
-        rows={filtered}
-        totalVisible={filtered.length}
-        lowCount={filtered.filter((r) => r.isLow).length}
-        loading={loading}
-        error={error}
-        search={search}
-        onSearchChange={setSearch}
-        onSearchSubmit={() => void load()}
-        kindTab={kindTab}
-        onKindTabChange={setKindTab}
-        warehouseFilterId={warehouseId}
-        onWarehouseFilterChange={() => undefined}
-        warehouseOptions={[{ id: warehouseId, name: objectName }]}
-        limitMaterialsOnly={false}
-        onLimitMaterialsOnlyToggle={() => undefined}
-        onlyAvailable={false}
-        onOnlyAvailableChange={() => undefined}
-        onlyLow={false}
-        onOnlyLowChange={() => undefined}
-        onlyFactNames={false}
-        onOnlyFactNamesChange={() => undefined}
-        showSku={true}
-        onShowSkuChange={() => undefined}
-        showReserve={true}
-        onShowReserveChange={() => undefined}
-        showPrice={false}
-        onShowPriceChange={() => undefined}
-        canWriteOperations={false}
-        canOpenMaterialCard={false}
-        isAdmin={false}
-        onAddMaterial={() => undefined}
-        onOpenJournal={() => undefined}
-        exportSlot={null}
-        expandedRowId=""
-        onToggleExpand={() => undefined}
-        onOpenMaterialCard={() => undefined}
-        onDeleteMaterial={() => undefined}
-        movementsByKey={new Map()}
-        mappingsByMaterialId={new Map()}
-        acceptedByMaterialId={new Map()}
-        movementsLoading={false}
-        movementsError=""
-      />
+      <div className="erpTableWrap homeDrillTable">
+        <table className="erpTable desktopTable">
+          <thead>
+            <tr>
+              <th>ТМЦ</th>
+              <th>Раздел</th>
+              <th>Ед.</th>
+              <th>В наличии</th>
+              <th>Резерв</th>
+              <th>Количество</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.slice(0, 200).map((r) => (
+              <tr key={`drill-stock-${r.id}`}>
+                <td>{safeName(r.materialName)}</td>
+                <td>{r.section}</td>
+                <td>{r.materialUnit}</td>
+                <td>{r.available.toLocaleString("ru-RU")}</td>
+                <td>{r.reserved.toLocaleString("ru-RU")}</td>
+                <td>{r.quantity.toLocaleString("ru-RU")}</td>
+              </tr>
+            ))}
+            {!visible.length ? (
+              <tr>
+                <td colSpan={6} className="muted">
+                  ТМЦ не найдено.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -391,6 +462,10 @@ function HomeDrillReceiptsPanel({
   const [error, setError] = useState("");
   const [rows, setRows] = useState<ReceiptRequestRow[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setExpanded({});
+  }, [warehouseId]);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -439,7 +514,7 @@ function HomeDrillReceiptsPanel({
           </thead>
           <tbody>
             {rows.map((row) => {
-              const isExpanded = expanded[row.id] !== false;
+              const isExpanded = expanded[row.id] === true;
               const totalQty = row.items.reduce((s, it) => s + Number(it.quantity), 0);
               const acceptedQty = row.items.reduce((s, it) => s + Number(it.acceptedQty || 0), 0);
               const donePct = totalQty > 0 ? Math.min(100, Math.round((acceptedQty / totalQty) * 100)) : 0;
@@ -517,7 +592,7 @@ function HomeDrillReceiptsPanel({
 
 export function HomeDrillContent({
   warehouseId,
-  objectName,
+  objectName: _objectName,
   drillKind,
   drillKey,
   token,
@@ -534,10 +609,8 @@ export function HomeDrillContent({
 
   if (isStock) {
     return (
-      <HomeDrillWarehousePanel
+      <HomeDrillStockPanel
         warehouseId={warehouseId}
-        section={defaultSection}
-        objectName={objectName}
         token={token}
         fetchWithSession={fetchWithSession}
         safeName={safeName}

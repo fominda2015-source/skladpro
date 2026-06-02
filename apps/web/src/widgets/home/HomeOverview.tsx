@@ -1268,6 +1268,9 @@ export function HomeOverview({
         <HomeDrillModal
           title={drillTitle}
           subtitle={`${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`}
+          size={
+            drill.key === "limitsSs" || drill.key === "limitsEom" || drill.key === "limits" ? "wide" : "default"
+          }
           onClose={() => setDrill(null)}
           onBack={goBack}
           onForward={goForward}

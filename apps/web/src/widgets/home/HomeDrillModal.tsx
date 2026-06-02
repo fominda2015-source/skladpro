@@ -10,6 +10,8 @@ type Props = {
   onForward?: () => void;
   canBack?: boolean;
   canForward?: boolean;
+  /** Широкое окно для лимитов (таблицы как во вкладке) */
+  size?: "default" | "wide";
   children: ReactNode;
 };
 
@@ -23,11 +25,15 @@ export function HomeDrillModal({
   onForward,
   canBack = false,
   canForward = false,
+  size = "default",
   children
 }: Props) {
   return (
     <div className="homeDrillBackdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="homeDrillModal card" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`homeDrillModal card${size === "wide" ? " homeDrillModal--wide" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <header className="homeDrillHead">
           <div>
             <h3>{title}</h3>

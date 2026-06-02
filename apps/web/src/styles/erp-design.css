@@ -197,11 +197,17 @@
   background: transparent;
 }
 .homeDrillTabEmbed {
-  max-height: min(70vh, 640px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
+}
+.homeDrillTabEmbed.limitsWorkspace {
+  min-width: 0;
 }
 .homeDrillTabEmbed .limitTemplateCard {
   margin-top: 8px;
+}
+.homeDrillModal--wide .homeDrillTabEmbed {
+  max-height: none;
 }
 
 .homeToolbarHint {
