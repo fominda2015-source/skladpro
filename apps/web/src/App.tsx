@@ -3165,36 +3165,6 @@ function App() {
     }
   }
 
-  function buildAllRemainingAcceptanceMappings(row: ReceiptRequestRow) {
-    const mappings: ReturnType<typeof buildReceiptAcceptanceMappings> = [];
-    for (const it of row.items) {
-      if (!isReceiptItemOpen(it)) continue;
-      const remaining = receiptItemRemainingQty(it);
-      if (remaining <= 0) continue;
-      const draft = acceptanceDrafts[row.id]?.[it.id];
-      const explicitName = (draft?.newName ?? "").trim();
-      const explicitUnit = (draft?.newUnit ?? "").trim();
-      const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
-      const priceNum = priceRaw === "" ? null : Number(priceRaw);
-      mappings.push({
-        itemId: it.id,
-        newMaterialName: explicitName || it.mappedMaterial?.name || it.sourceName,
-        newMaterialUnit: explicitUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
-        acceptedQty: remaining,
-        limitNodeId: draft?.limitNodeId || it.limitNodeId || null,
-        category: draft?.category || it.category || null,
-        unitPrice:
-          priceNum != null && Number.isFinite(priceNum)
-            ? priceNum
-            : it.unitPrice != null
-              ? Number(it.unitPrice)
-              : null,
-        storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
-      });
-    }
-    return mappings;
-  }
-
   function buildReceiptAcceptanceMappings(row: ReceiptRequestRow) {
     const drafts = acceptanceDrafts[row.id] || {};
     const mappings: Array<{
@@ -3426,52 +3396,6 @@ function App() {
         return next;
       });
     }
-  }
-
-  async function submitAllRemainingReceiptAcceptance(
-    row: ReceiptRequestRow,
-    extraFiles: File[] = []
-  ): Promise<boolean> {
-    const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
-    const mappings = buildAllRemainingAcceptanceMappings(freshRow);
-    if (!mappings.length) {
-      setOpsMessage(`По заявке ${row.number} нет открытых позиций для приёмки`);
-      return false;
-    }
-    for (const m of mappings) {
-      const it = freshRow.items.find((x) => x.id === m.itemId);
-      if (!it) continue;
-      const remaining = receiptItemRemainingQty(it);
-      if (m.acceptedQty > remaining) {
-        if (!token) return false;
-        try {
-          const r = await fetchWithSession(
-            `${API_URL}/api/receipt-requests/${encodeURIComponent(freshRow.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (r.ok) {
-            const data = (await r.json()) as {
-              current: Array<{ id: string; path: string }>;
-              otherSections: Array<{ id: string; path: string }>;
-            };
-            setReceiptOverageModal({
-              row: freshRow,
-              itemId: it.id,
-              extraFiles,
-              mappings,
-              sourceName: it.sourceName,
-              orderedQty: parseMaterialQty(it.quantity),
-              acceptedQty: m.acceptedQty,
-              suggestions: { current: data.current || [], otherSections: data.otherSections || [] }
-            });
-            return false;
-          }
-        } catch {
-          // fallback — сервер вернёт 409
-        }
-      }
-    }
-    return postReceiptAcceptance(freshRow, mappings, extraFiles);
   }
 
   async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
@@ -7092,7 +7016,7 @@ function App() {
                                       newName: existing.newName || it.mappedMaterial?.name || it.sourceName,
                                       newUnit: existing.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
                                       qty: String(remaining),
-                                      limitNodeId: existing.limitNodeId ?? it.limitNodeId,
+                                      limitNodeId: existing.limitNodeId ?? it.limitNodeId ?? undefined,
                                       category: existing.category ?? it.category ?? "",
                                       unitPrice:
                                         existing.unitPrice ??
