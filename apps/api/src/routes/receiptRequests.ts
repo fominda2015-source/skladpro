@@ -19,6 +19,13 @@ import {
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtySchema, toQtyNumber } from "../lib/quantity.js";
+import {
+  isReceiptFullyAccepted,
+  isReceiptItemOpen as receiptItemIsOpen,
+  receiptAcceptedQty,
+  receiptItemRemaining,
+  receiptPlannedQty
+} from "../lib/receiptQty.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, findMaterialNodeByLimitPath, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
@@ -143,15 +150,12 @@ type ReceiptRequestWithRelations = Prisma.ReceiptRequestGetPayload<{ include: ty
 function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
   const items = row.items.map((it) => ({
     ...it,
-    quantity: Math.round(Number(it.quantity)),
-    acceptedQty: toQtyNumber(it.acceptedQty),
+    quantity: receiptPlannedQty(it.quantity),
+    acceptedQty: receiptAcceptedQty(it.acceptedQty),
     unitPrice: toQtyNumber(it.unitPrice)
   }));
-  const hasOpenItems = items.some((it) => {
-    const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
-    return remaining > 1e-6;
-  });
-  const anyAccepted = items.some((it) => Number(it.acceptedQty || 0) > 1e-6);
+  const hasOpenItems = items.some((it) => receiptItemIsOpen(it));
+  const anyAccepted = items.some((it) => receiptAcceptedQty(it.acceptedQty) > 0);
   let status = row.status;
   if (status !== "CANCELLED" && !hasOpenItems) {
     status = "RECEIVED";
@@ -178,10 +182,7 @@ function receiptRequestHasOpenItems(row: {
   items: Array<{ quantity: number; acceptedQty: number | null }>;
 }): boolean {
   if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
-  return row.items.some((it) => {
-    const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
-    return remaining > 1e-6;
-  });
+  return row.items.some((it) => receiptItemIsOpen(it));
 }
 
 export const receiptRequestsRouter = Router();
@@ -627,8 +628,8 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
   return res.json({
     itemId: item.id,
     sourceName: item.sourceName,
-    orderedQty: Number(item.quantity),
-    acceptedQty: Number(item.acceptedQty || 0),
+    orderedQty: receiptPlannedQty(item.quantity),
+    acceptedQty: receiptAcceptedQty(item.acceptedQty),
     currentTemplateId: row.objectLimitTemplateId,
     ...picks
   });
@@ -713,8 +714,8 @@ receiptRequestsRouter.post(
           error: `Для «${it.sourceName}» нужно выбрать материал или ввести новое название`
         });
       }
-      const remaining = Number(it.quantity) - Number(it.acceptedQty || 0);
-      const isOver = m.acceptedQty > remaining + 1e-6;
+      const remaining = receiptItemRemaining(it);
+      const isOver = m.acceptedQty > remaining;
       if (isOver && !parsed.data.allowOverage) {
         let materialId = m.materialId;
         if (!materialId && m.newMaterialName?.trim()) {
@@ -731,9 +732,9 @@ receiptRequestsRouter.post(
         );
         return res.status(409).json({
           error: "RECEIPT_OVERAGE_NEEDS_CONFIRM",
-          message: `По «${it.sourceName}» в заявке ${Number(it.quantity)}, осталось ${remaining}, передали ${m.acceptedQty}`,
+          message: `По «${it.sourceName}» в заявке ${receiptPlannedQty(it.quantity)}, осталось ${remaining}, передали ${m.acceptedQty}`,
           itemId: m.itemId,
-          orderedQty: Number(it.quantity),
+          orderedQty: receiptPlannedQty(it.quantity),
           remainingQty: remaining,
           acceptedQty: m.acceptedQty,
           suggestions: picks
@@ -1003,20 +1004,13 @@ receiptRequestsRouter.post(
         }
       }
 
-      // Пересчёт статуса: смотрим, есть ли позиции, где осталось принять > 0.
+      // Пересчёт статуса по округлённым количествам (как в UI).
       const fresh = await tx.receiptRequest.findUnique({
         where: { id: row.id },
         include: { items: true }
       });
-      let allDone = true;
-      let anyAccepted = false;
-      for (const it of fresh?.items ?? []) {
-        const acc = Number(it.acceptedQty || 0);
-        if (acc > 0) anyAccepted = true;
-        if (acc + 1e-6 < Number(it.quantity)) {
-          allDone = false;
-        }
-      }
+      const allDone = isReceiptFullyAccepted(fresh?.items ?? []);
+      const anyAccepted = (fresh?.items ?? []).some((it) => receiptAcceptedQty(it.acceptedQty) > 0);
       await tx.receiptRequest.update({
         where: { id: row.id },
         data: {
@@ -1036,10 +1030,10 @@ receiptRequestsRouter.post(
 
       for (const r of resolved) {
         if (r.campCategory || !r.materialId) continue;
-        const prevAccepted = Number(r.item.acceptedQty || 0);
+        const prevAccepted = receiptAcceptedQty(r.item.acceptedQty);
         const newTotal = prevAccepted + r.acceptedQty;
-        const ordered = Number(r.item.quantity);
-        if (newTotal <= ordered + 1e-6) continue;
+        const ordered = receiptPlannedQty(r.item.quantity);
+        if (newTotal <= ordered) continue;
 
         const excessQty = newTotal - ordered;
         let limitNodeId = r.limitNodeId;

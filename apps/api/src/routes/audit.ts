@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 import { Router, type NextFunction, type Response } from "express";
 import { prisma } from "../lib/prisma.js";
+import { isReceiptFullyAccepted, receiptAcceptedQty } from "../lib/receiptQty.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 export const auditRouter = Router();
@@ -732,13 +733,8 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
             where: { id: requestId },
             include: { items: true }
           });
-          let anyAccepted = false;
-          let allDone = true;
-          for (const it of fresh?.items ?? []) {
-            const acc = Number(it.acceptedQty || 0);
-            if (acc > 0) anyAccepted = true;
-            if (acc + 1e-6 < Number(it.quantity)) allDone = false;
-          }
+          const anyAccepted = (fresh?.items ?? []).some((it) => receiptAcceptedQty(it.acceptedQty) > 0);
+          const allDone = isReceiptFullyAccepted(fresh?.items ?? []);
           await tx.receiptRequest.update({
             where: { id: requestId },
             data: {

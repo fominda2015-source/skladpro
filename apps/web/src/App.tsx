@@ -598,22 +598,18 @@ type MaterialMappingRow = {
   targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
 };
 
-const RECEIPT_QTY_EPS = 0.5;
-
 function isReceiptItemOpen(it: ReceiptRequestItem): boolean {
-  const total = parseMaterialQty(it.quantity);
-  const accepted = parseMaterialQty(it.acceptedQty);
-  return accepted + RECEIPT_QTY_EPS < total;
+  return receiptItemRemainingQty(it) > 0;
 }
 
 function receiptItemRemainingQty(it: ReceiptRequestItem): number {
   const remaining = parseMaterialQty(it.quantity) - parseMaterialQty(it.acceptedQty);
-  return remaining > RECEIPT_QTY_EPS ? remaining : 0;
+  return remaining > 0 ? remaining : 0;
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
   const hasOpenItems = row.items.some(isReceiptItemOpen);
-  const anyAccepted = row.items.some((it) => parseMaterialQty(it.acceptedQty) > RECEIPT_QTY_EPS);
+  const anyAccepted = row.items.some((it) => parseMaterialQty(it.acceptedQty) > 0);
   if (row.status === "CANCELLED") return row;
   if (!hasOpenItems) {
     return { ...row, status: "RECEIVED" };
@@ -3003,7 +2999,6 @@ function App() {
 
   function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
     const normalized = normalizeReceiptRequest(updated);
-    receiptRequestsLoadSeq.current += 1;
     setReceiptRequests((prev) => {
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
@@ -3281,13 +3276,21 @@ function App() {
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
       let acceptBody: { receiptRequest?: ReceiptRequestRow | null } = {};
+      let gotFreshReceipt = false;
       try {
         acceptBody = (await res.json()) as { receiptRequest?: ReceiptRequestRow | null };
       } catch {
         acceptBody = {};
       }
       if (acceptBody.receiptRequest) {
+        gotFreshReceipt = true;
         const normalized = applyReceiptRequestUpdate(acceptBody.receiptRequest);
+        const openLeft = normalized.items.filter(isReceiptItemOpen).length;
+        if (openLeft > 0) {
+          setOpsMessage(
+            `Принято позиций: ${mappings.length}. По заявке ${row.number} осталось открытых позиций: ${openLeft}`
+          );
+        }
         setLimitSuggestions((prev) => {
           const next = { ...prev };
           delete next[row.id];
@@ -3318,7 +3321,7 @@ function App() {
             for (const it of updatedItems) {
               const acc = parseMaterialQty(it.acceptedQty);
               if (acc > 0) anyAccepted = true;
-              if (acc + 1e-6 < parseMaterialQty(it.quantity)) allDone = false;
+              if (receiptItemRemainingQty(it) > 0) allDone = false;
             }
             receiptFullyAccepted = allDone;
             return normalizeReceiptRequest({
@@ -3366,7 +3369,9 @@ function App() {
         return next;
       });
       await loadMaterialMappings();
-      void loadReceiptRequests();
+      if (!gotFreshReceipt) {
+        void loadReceiptRequests();
+      }
       await loadStocks(q);
       await loadOperations();
       await loadNotifications();
@@ -3402,8 +3407,8 @@ function App() {
     for (const m of mappings) {
       const it = freshRow.items.find((x) => x.id === m.itemId);
       if (!it) continue;
-      const remaining = parseMaterialQty(it.quantity) - parseMaterialQty(it.acceptedQty);
-      if (m.acceptedQty > remaining + 1e-6) {
+      const remaining = receiptItemRemainingQty(it);
+      if (m.acceptedQty > remaining) {
         if (!token) return false;
         try {
           const r = await fetchWithSession(
