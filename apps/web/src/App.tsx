@@ -582,6 +582,7 @@ type ReceiptRequestRow = {
   section: "SS" | "EOM";
   status: "NEW" | "IN_PROGRESS" | "RECEIVED" | "CANCELLED";
   sourceFileName?: string | null;
+  externalOrderNumber?: string | null;
   items: ReceiptRequestItem[];
   createdAt: string;
   fromLimit?: boolean;
@@ -3064,8 +3065,16 @@ function App() {
       setOpsMessage(serverMsg || "Не удалось загрузить заявку из Excel");
       return;
     }
-    const created = (await res.json()) as ReceiptRequestRow;
-    setOpsMessage(`Заявка ${created.number} загружена (${created.items?.length || 0} поз.)`);
+    const created = (await res.json()) as ReceiptRequestRow & {
+      detectedOrderNumber?: string | null;
+    };
+    const orderHint =
+      created.externalOrderNumber && created.externalOrderNumber !== created.number.replace(/^ORD-/, "").split("-")[0]
+        ? ` · номер в файле: ${created.externalOrderNumber}`
+        : created.detectedOrderNumber && !created.externalOrderNumber
+          ? ` · номер в файле: ${created.detectedOrderNumber}`
+          : "";
+    setOpsMessage(`Заявка ${created.number} загружена (${created.items?.length || 0} поз.)${orderHint}`);
     setReceiptRequestFile(null);
     setLimitPromptTemplateId("");
     setLimitPromptRequest(created);
@@ -6559,6 +6568,11 @@ function App() {
                   </td>
                   <td>
                     <strong>{row.number}</strong>
+                    {row.externalOrderNumber && row.number !== `ORD-${row.externalOrderNumber}` ? (
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        № в файле: {row.externalOrderNumber}
+                      </div>
+                    ) : null}
                     {row.fromLimit ? (
                       <div className="muted" style={{ fontSize: 11 }}>
                         Из лимита{linkedTemplate ? ` · ${safeName(linkedTemplate.title)}` : ""}

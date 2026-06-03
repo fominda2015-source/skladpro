@@ -31,6 +31,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, findMaterialNodeByLimitPath, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
+import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
@@ -260,12 +261,18 @@ receiptRequestsRouter.post(
       });
     }
 
-    const receiptNumber = orderNumber
-      ? `ORD-${orderNumber}`
-      : `ORD-${String((await prisma.receiptRequest.count()) + 1).padStart(5, "0")}`;
-
     const sourceFileName = decodeUploadedOriginalName(req.file.originalname);
     const objectWhere = { warehouseId: parsed.data.warehouseId };
+
+    let receiptNumber: string;
+    let externalOrderNumber: string | null;
+    try {
+      const allocated = await allocateReceiptRequestNumber(parsed.data.warehouseId, orderNumber);
+      receiptNumber = allocated.number;
+      externalOrderNumber = allocated.externalOrderNumber;
+    } catch {
+      return res.status(500).json({ error: "Не удалось выделить номер заявки" });
+    }
 
     const dupByFile = await prisma.receiptRequest.findFirst({
       where: {
@@ -279,22 +286,6 @@ receiptRequestsRouter.post(
         error: "DUPLICATE_FILE",
         message: `Файл «${sourceFileName}» уже загружался на этом объекте (заявка ${dupByFile.number}).`
       });
-    }
-
-    if (orderNumber) {
-      const dupByOrder = await prisma.receiptRequest.findFirst({
-        where: {
-          ...objectWhere,
-          OR: [{ externalOrderNumber: orderNumber }, { number: receiptNumber }]
-        },
-        select: { id: true, number: true }
-      });
-      if (dupByOrder) {
-        return res.status(409).json({
-          error: "DUPLICATE_ORDER",
-          message: `Заявка с номером ${orderNumber} уже есть на этом объекте (${dupByOrder.number}).`
-        });
-      }
     }
 
     try {
@@ -314,7 +305,7 @@ receiptRequestsRouter.post(
         const receipt = await tx.receiptRequest.create({
           data: {
             number: receiptNumber,
-            externalOrderNumber: orderNumber ?? null,
+            externalOrderNumber,
             warehouseId: parsed.data.warehouseId,
             section: parsed.data.section,
             sourceFileName,
