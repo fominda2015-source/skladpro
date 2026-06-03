@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
 import { useViewportContext } from "../layout/ViewportRoot";
-import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "./UserAvatar";
 import { ChatComposer } from "./ChatComposer";
 import { isImageAttachment } from "./chatFiles";
@@ -114,7 +113,7 @@ export function ChatPanel({
   onRefresh,
   onPeerProfileClick
 }: Props) {
-  const { isMobile } = useViewportContext();
+  const { isMobile, isCompact } = useViewportContext();
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
@@ -123,7 +122,9 @@ export function ChatPanel({
   const peer = useMemo(() => users.find((u) => u.id === peerUserId), [users, peerUserId]);
   const canSend = Boolean(text.trim() || attachments.length);
   const showThread = Boolean(peerUserId && peer);
-  const showList = !isMobile || !showThread;
+  /** На телефоне и компактных экранах — диалог на всю вкладку, список скрываем. */
+  const threadFocus = (isMobile || isCompact) && showThread;
+  const showList = !threadFocus;
 
   const updateScrollDownVisibility = useCallback(() => {
     const node = messagesRef.current;
@@ -184,26 +185,49 @@ export function ChatPanel({
     );
 
   return (
-    <div className={`chatPage ${isMobile && showThread ? "chatPage--thread" : ""}`}>
-      <PageHero
-        variant="compact"
-        icon="💬"
-        title="Чат"
-        subtitle="Личные сообщения с коллегами"
-        stats={[
-          { label: "Диалогов", value: recent.length, tone: "neutral" },
-          { label: "Непрочитанных", value: unreadTotal, tone: unreadTotal > 0 ? "warn" : "neutral" }
-        ]}
-        actions={
-          <button type="button" className="ghostBtn" onClick={onRefresh}>
-            ↻ Обновить
-          </button>
-        }
-      />
+    <div
+      className={[
+        "chatPage",
+        threadFocus ? "chatPage--thread" : "",
+        showList && !showThread ? "chatPage--list" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {!threadFocus ? (
+        <header className="chatToolbar" aria-label="Чат">
+          <div className="chatToolbarMain">
+            <span className="chatToolbarIcon" aria-hidden>
+              💬
+            </span>
+            <div className="chatToolbarText">
+              <strong>Чат</strong>
+              <span className="muted">Личные сообщения</span>
+            </div>
+          </div>
+          <div className="chatToolbarMeta">
+            {unreadTotal > 0 ? (
+              <span className="chatToolbarBadge" title="Непрочитанных">
+                {unreadTotal > 99 ? "99+" : unreadTotal}
+              </span>
+            ) : null}
+            <span className="chatToolbarStat muted">
+              {recent.length} {recent.length === 1 ? "диалог" : recent.length < 5 ? "диалога" : "диалогов"}
+            </span>
+            <button type="button" className="ghostBtn chatToolbarRefresh" onClick={onRefresh}>
+              ↻
+            </button>
+          </div>
+        </header>
+      ) : null}
 
-      {error ? <ErrorState text={error} /> : null}
+      {error ? (
+        <div className="chatPageError">
+          <ErrorState text={error} />
+        </div>
+      ) : null}
 
-      <div className="chatLayout">
+      <div className={`chatLayout${threadFocus ? " chatLayout--threadFocus" : ""}`}>
         {showList ? (
           <aside className="chatSidebar" aria-label="Список диалогов">
             <div className="chatSidebarSearch">
@@ -322,7 +346,7 @@ export function ChatPanel({
         {showThread ? (
           <section className="chatThread" aria-label="Переписка">
             <header className="chatThreadHead">
-              {isMobile ? (
+              {threadFocus ? (
                 <button type="button" className="ghostBtn chatBackBtn" onClick={onBackToList}>
                   ← Назад
                 </button>
@@ -429,7 +453,7 @@ export function ChatPanel({
             />
           </section>
         ) : (
-          <section className="chatThread chatThread--placeholder" aria-hidden={isMobile}>
+          <section className="chatThread chatThread--placeholder" aria-hidden={threadFocus}>
             <div className="chatPlaceholder">
               <span className="chatPlaceholderIcon" aria-hidden>
                 💬

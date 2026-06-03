@@ -388,9 +388,10 @@ html[data-compact="1"] .sectionToggleBtn {
 
 /* ========== Модалки / drawer — bottom sheet на узком контейнере viewport ========== */
 @supports (height: 100dvh) {
-  .canvas--chat {
-    height: calc(100dvh - var(--app-header, 2.5rem) - var(--app-bottom, 0px));
-    max-height: calc(100dvh - var(--app-header, 2.5rem) - var(--app-bottom, 0px));
+  .shell:has(> .canvas--chat) {
+    height: calc(100dvh - var(--app-bottom, 0px));
+    max-height: calc(100dvh - var(--app-bottom, 0px));
+    min-height: 0;
   }
 
   .materialReportPage {

@@ -167,7 +167,7 @@ export function ChatComposer({
           onChange={(e) => onTextChange(e.target.value)}
           onPaste={onPaste}
           placeholder="Сообщение… (Ctrl+V — вставить скрин)"
-          rows={3}
+          rows={2}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
