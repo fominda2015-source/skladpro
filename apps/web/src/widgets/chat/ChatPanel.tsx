@@ -3,6 +3,7 @@ import { ErrorState } from "../../shared/ui/StateViews";
 import { useViewportContext } from "../layout/ViewportRoot";
 import { UserAvatar } from "./UserAvatar";
 import { ChatComposer } from "./ChatComposer";
+import { ChatImageLightbox } from "./ChatImageLightbox";
 import { isImageAttachment } from "./chatFiles";
 
 export type ChatUser = {
@@ -118,6 +119,7 @@ export function ChatPanel({
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [imageLightbox, setImageLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const peer = useMemo(() => users.find((u) => u.id === peerUserId), [users, peerUserId]);
   const canSend = Boolean(text.trim() || attachments.length);
@@ -393,15 +395,15 @@ export function ChatPanel({
                       {row.item.text ? <p className="chatBubbleText">{row.item.text}</p> : null}
                       {row.item.attachments?.map((a) =>
                         isImageAttachment(a.mimeType, a.fileName) ? (
-                          <a
+                          <button
                             key={a.id}
-                            href={a.dataUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="chatBubbleImageLink"
+                            type="button"
+                            className="chatBubbleImageBtn"
+                            title="Открыть изображение"
+                            onClick={() => setImageLightbox({ src: a.dataUrl, alt: a.fileName })}
                           >
                             <img src={a.dataUrl} alt={a.fileName} className="chatBubbleImage" loading="lazy" />
-                          </a>
+                          </button>
                         ) : (
                           <a
                             key={a.id}
@@ -464,6 +466,14 @@ export function ChatPanel({
           </section>
         )}
       </div>
+
+      {imageLightbox ? (
+        <ChatImageLightbox
+          src={imageLightbox.src}
+          alt={imageLightbox.alt}
+          onClose={() => setImageLightbox(null)}
+        />
+      ) : null}
     </div>
   );
 }

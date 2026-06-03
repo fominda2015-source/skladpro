@@ -1916,10 +1916,23 @@ tr.low {
   line-height: 1;
   color: #64748b;
 }
-.chatBubbleImageLink {
+.chatBubbleImageBtn {
   display: block;
   margin-top: 6px;
   max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 10px;
+  line-height: 0;
+}
+.chatBubbleImageBtn:hover .chatBubbleImage {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+.chatBubbleImageBtn:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
 }
 .chatBubbleImage {
   display: block;
@@ -1928,10 +1941,98 @@ tr.low {
   border-radius: 10px;
   object-fit: contain;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+}
+.chatImageLightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 16px 24px;
+  background: rgba(15, 23, 42, 0.88);
+  box-sizing: border-box;
+}
+.chatImageLightboxClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chatImageLightboxClose:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.chatImageLightboxImg {
+  max-width: min(96vw, 1200px);
+  max-height: min(82vh, 900px);
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.chatImageLightboxCaption {
+  margin: 0;
+  max-width: min(96vw, 640px);
+  text-align: center;
+  font-size: 13px;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chatEmojiWrap {
+  position: relative;
+  grid-column: 2;
+}
+.chatEmojiPicker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(280px, calc(100vw - 32px));
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+.chatEmojiPickerGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+.chatEmojiPickerBtn {
+  width: 100%;
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+}
+.chatEmojiPickerBtn:hover {
+  background: #f1f5f9;
+}
+.chatEmojiPickerBtn:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
 }
 .chatComposerRow {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-columns: 40px 40px minmax(0, 1fr) 40px;
   align-items: end;
   gap: 8px;
 }
@@ -1944,8 +2045,22 @@ tr.low {
   padding: 0;
   margin: 0;
 }
+.chatComposerRow .chatEmojiBtn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  margin: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+.chatComposerRow .chatEmojiBtn.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
 .chatComposerRow .chatSendBtn {
-  grid-column: 3;
+  grid-column: 4;
   width: 40px;
   min-width: 40px;
   height: 40px;
@@ -1954,7 +2069,7 @@ tr.low {
   margin: 0;
 }
 .chatComposerRow textarea.chatComposerInput {
-  grid-column: 2;
+  grid-column: 3;
   width: 100% !important;
   height: auto !important;
   min-height: 44px !important;

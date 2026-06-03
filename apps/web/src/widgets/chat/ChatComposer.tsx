@@ -5,6 +5,7 @@ import {
   mergeChatFiles,
   pickFilesFromClipboard
 } from "./chatFiles";
+import { ChatEmojiPicker } from "./ChatEmojiPicker";
 
 type Props = {
   text: string;
@@ -28,8 +29,10 @@ export function ChatComposer({
   onFileReject
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const fileKey = (f: File, i: number) => `${f.name}-${f.size}-${f.lastModified}-${i}`;
 
@@ -77,6 +80,23 @@ export function ChatComposer({
     e.stopPropagation();
     setDragOver(false);
     if (e.dataTransfer.files?.length) addFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const insertEmoji = (emoji: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      onTextChange(text + emoji);
+      return;
+    }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    onTextChange(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + emoji.length;
+      ta.setSelectionRange(pos, pos);
+    });
   };
 
   return (
@@ -146,10 +166,30 @@ export function ChatComposer({
           type="button"
           className="ghostBtn chatAttachBtn"
           title="Прикрепить файл"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            setEmojiOpen(false);
+            fileInputRef.current?.click();
+          }}
         >
           📎
         </button>
+        <div className="chatEmojiWrap">
+          <button
+            type="button"
+            className={`ghostBtn chatEmojiBtn${emojiOpen ? " active" : ""}`}
+            title="Эмодзи"
+            aria-expanded={emojiOpen}
+            aria-haspopup="dialog"
+            onClick={() => setEmojiOpen((v) => !v)}
+          >
+            🙂
+          </button>
+          <ChatEmojiPicker
+            open={emojiOpen}
+            onClose={() => setEmojiOpen(false)}
+            onPick={insertEmoji}
+          />
+        </div>
         <input
           ref={fileInputRef}
           className="chatHiddenFile"
@@ -162,10 +202,12 @@ export function ChatComposer({
           }}
         />
         <textarea
+          ref={textareaRef}
           className="chatComposerInput"
           value={text}
           onChange={(e) => onTextChange(e.target.value)}
           onPaste={onPaste}
+          onFocus={() => setEmojiOpen(false)}
           placeholder="Сообщение… (Ctrl+V — вставить скрин)"
           rows={2}
           onKeyDown={(e) => {
