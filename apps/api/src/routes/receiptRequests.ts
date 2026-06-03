@@ -1229,14 +1229,11 @@ receiptRequestsRouter.post(
   }
 );
 
-// Ручное закрытие заявки (статус RECEIVED) — для «зависших» после приёмки; только ADMIN.
+// Ручное закрытие заявки (статус RECEIVED) — для «зависших» после приёмки.
 receiptRequestsRouter.patch(
   "/:id/close",
   requirePermission("operations.write"),
   async (req: AuthedRequest, res) => {
-    if (req.user?.role !== "ADMIN") {
-      return res.status(403).json({ error: "Только администратор может закрыть заявку вручную" });
-    }
     const id = String(req.params.id);
     const parsed = closeReceiptSchema.safeParse(req.body ?? {});
     if (!parsed.success) {

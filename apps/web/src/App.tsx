@@ -3671,8 +3671,8 @@ function App() {
   }
 
   async function closeReceiptRequest(receiptId: string): Promise<boolean> {
-    if (!token || me?.role !== "ADMIN") {
-      setOpsMessage("Закрыть заявку вручную может только администратор");
+    if (!token || !canWriteOperations) {
+      setOpsMessage("Недостаточно прав для закрытия заявки");
       return false;
     }
     const reasonRaw = window.prompt(
@@ -6637,11 +6637,11 @@ function App() {
                       >
                         Лимит
                       </button>
-                      {!finished && me?.role === "ADMIN" ? (
+                      {!finished && canWriteOperations ? (
                         <button
                           type="button"
                           className="ghostBtn"
-                          title="Принудительно перевести в «принята полностью»"
+                          title="Закрыть заявку: все позиции будут отмечены как принятые"
                           onClick={() => void closeReceiptRequest(row.id)}
                         >
                           Закрыть
@@ -6687,17 +6687,19 @@ function App() {
                     </datalist>
 
                     {(() => {
-                      const itemsLeft = finished ? [] : row.items.filter(isReceiptItemOpen);
-                      const selectedCount = itemsLeft.filter((it) => {
+                      const itemsOpen = finished ? [] : row.items.filter(isReceiptItemOpen);
+                      const itemsDone = finished ? [] : row.items.filter((it) => !isReceiptItemOpen(it));
+                      const tableColSpan = row.objectLimitTemplateId ? 10 : 9;
+                      const selectedCount = itemsOpen.filter((it) => {
                         const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
                         return Number.isFinite(q) && q > 0;
                       }).length;
-                      const allSelected = itemsLeft.length > 0 && selectedCount === itemsLeft.length;
+                      const allSelected = itemsOpen.length > 0 && selectedCount === itemsOpen.length;
                       const someSelected = selectedCount > 0;
                       const setSelectAll = (checked: boolean) => {
                         setAcceptanceDrafts((prev) => {
                           const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
-                          for (const it of itemsLeft) {
+                          for (const it of itemsOpen) {
                             const remaining = receiptItemRemainingQty(it);
                             const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
                             next[row.id][it.id] = checked
@@ -6746,20 +6748,20 @@ function App() {
                                   if (el) el.indeterminate = !allSelected && someSelected;
                                 }}
                                 onChange={(e) => setSelectAll(e.target.checked)}
-                                disabled={finished || !itemsLeft.length}
+                                disabled={finished || !itemsOpen.length}
                               />
                               <span>
                                 {allSelected
                                   ? "Снять все"
                                   : someSelected
-                                  ? `Выбрано ${selectedCount} из ${itemsLeft.length}`
+                                  ? `Выбрано ${selectedCount} из ${itemsOpen.length}`
                                   : "Выбрать все оставшиеся"}
                               </span>
                             </label>
                           </div>
 
                           <div className="erpTableWrap" style={{ marginTop: 8 }}>
-                            {itemsLeft.length === 0 ? (
+                            {itemsOpen.length === 0 && itemsDone.length === 0 ? (
                               <p className="muted" style={{ padding: "8px 0" }}>
                                 Все позиции по этой заявке уже приняты.
                               </p>
@@ -6780,10 +6782,70 @@ function App() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {itemsLeft.map((it) => {
+                                {itemsDone.length > 0 && itemsOpen.length > 0 ? (
+                                  <tr className="receiptRow--section">
+                                    <td
+                                      colSpan={tableColSpan}
+                                      className="muted"
+                                      style={{ fontSize: 12, fontWeight: 600, paddingTop: 12 }}
+                                    >
+                                      Уже принято ({itemsDone.length})
+                                    </td>
+                                  </tr>
+                                ) : null}
+                                {itemsDone.map((it) => {
+                                  const total = parseMaterialQty(it.quantity);
+                                  const accepted = parseMaterialQty(it.acceptedQty);
+                                  const displayName = it.mappedMaterial?.name || it.sourceName;
+                                  const displayUnit = it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  return (
+                                    <tr key={`done-${it.id}`} className="receiptRow--accepted">
+                                      <td>
+                                        <span className="receiptAcceptedMark" title="Принято">
+                                          ✓
+                                        </span>
+                                      </td>
+                                      <td style={{ maxWidth: 280 }} title={it.sourceName}>
+                                        {it.sourceName}
+                                      </td>
+                                      <td>
+                                        <strong>
+                                          {formatMaterialQty(accepted)} / {formatMaterialQty(total)}
+                                        </strong>{" "}
+                                        <span className="muted">{it.sourceUnit || "шт"}</span>
+                                      </td>
+                                      <td>{displayName}</td>
+                                      <td>{displayUnit}</td>
+                                      <td className="muted">—</td>
+                                      <td>
+                                        {it.category ? receiptItemCategoryLabel(it.category) : "—"}
+                                      </td>
+                                      <td>{it.unitPrice != null ? String(it.unitPrice) : "—"}</td>
+                                      <td>{it.storagePlace || "—"}</td>
+                                      {row.objectLimitTemplateId ? (
+                                        <td className="muted" style={{ fontSize: 12 }}>
+                                          {it.limitSectionPath || "—"}
+                                        </td>
+                                      ) : null}
+                                    </tr>
+                                  );
+                                })}
+                                {itemsOpen.length > 0 && itemsDone.length > 0 ? (
+                                  <tr className="receiptRow--section">
+                                    <td
+                                      colSpan={tableColSpan}
+                                      className="muted"
+                                      style={{ fontSize: 12, fontWeight: 600, paddingTop: 12 }}
+                                    >
+                                      Осталось принять ({itemsOpen.length})
+                                    </td>
+                                  </tr>
+                                ) : null}
+                                {itemsOpen.map((it) => {
                                   const total = parseMaterialQty(it.quantity);
                                   const accepted = parseMaterialQty(it.acceptedQty);
                                   const remaining = receiptItemRemainingQty(it);
+                                  const hasPartialAccept = accepted > 0;
                                   const draft = drafts[it.id] || {
                                     newName: "",
                                     newUnit: "",
@@ -6864,9 +6926,18 @@ function App() {
                                   return (
                                     <tr
                                       key={it.id}
-                                      style={{
-                                        background: isPicked ? "rgba(34, 197, 94, 0.08)" : undefined
-                                      }}
+                                      className={
+                                        isPicked
+                                          ? "receiptRow--partial"
+                                          : hasPartialAccept
+                                            ? "receiptRow--partial"
+                                            : undefined
+                                      }
+                                      style={
+                                        isPicked && !hasPartialAccept
+                                          ? { background: "rgba(34, 197, 94, 0.08)" }
+                                          : undefined
+                                      }
                                     >
                                       <td>
                                         <input
@@ -7031,7 +7102,7 @@ function App() {
                               disabled={
                                 finished ||
                                 !canWriteOperations ||
-                                itemsLeft.length === 0 ||
+                                itemsOpen.length === 0 ||
                                 Boolean(acceptanceSubmitting[row.id])
                               }
                               onClick={() => {
@@ -7039,7 +7110,7 @@ function App() {
                                 setPendingAcceptanceRequestId(row.id);
                                 setAcceptanceDrafts((prev) => {
                                   const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
-                                  for (const it of itemsLeft) {
+                                  for (const it of itemsOpen) {
                                     const remaining = receiptItemRemainingQty(it);
                                     const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
                                     next[row.id][it.id] = {
@@ -7058,7 +7129,7 @@ function App() {
                                 });
                               }}
                             >
-                              Принять все оставшиеся ({itemsLeft.length})
+                              Принять все оставшиеся ({itemsOpen.length})
                             </button>
                             <button
                               type="button"
