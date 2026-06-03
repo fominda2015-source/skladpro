@@ -608,6 +608,59 @@ function receiptItemRemainingQty(it: ReceiptRequestItem): number {
   return remaining > 0 ? remaining : 0;
 }
 
+/** Стабильный порядок: сначала полностью принятые, затем остальные (как в Excel). */
+function sortReceiptItemsForView(items: ReceiptRequestItem[]): ReceiptRequestItem[] {
+  return items
+    .map((it, index) => ({ it, index }))
+    .sort((a, b) => {
+      const aDone = isReceiptItemOpen(a.it) ? 1 : 0;
+      const bDone = isReceiptItemOpen(b.it) ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      return a.index - b.index;
+    })
+    .map(({ it }) => it);
+}
+
+function splitReceiptItems(items: ReceiptRequestItem[]) {
+  const sorted = sortReceiptItemsForView(items);
+  return {
+    itemsOpen: sorted.filter(isReceiptItemOpen),
+    itemsDone: sorted.filter((it) => !isReceiptItemOpen(it))
+  };
+}
+
+type ReceiptAcceptanceDelta = { itemId: string; acceptedQty: number };
+
+function mergeReceiptItemAccepted(
+  prev: ReceiptRequestItem | undefined,
+  next: ReceiptRequestItem,
+  delta?: ReceiptAcceptanceDelta
+): ReceiptRequestItem {
+  const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
+  const nextAcc = parseMaterialQty(next.acceptedQty);
+  const deltaAcc = delta?.acceptedQty ?? 0;
+  const acc = Math.max(nextAcc, deltaAcc > 0 ? prevAcc + deltaAcc : prevAcc);
+  if (acc <= 0) return next;
+  return { ...next, acceptedQty: acc };
+}
+
+function mergeReceiptRequestRow(
+  prev: ReceiptRequestRow | undefined,
+  next: ReceiptRequestRow,
+  acceptanceDelta?: ReceiptAcceptanceDelta[]
+): ReceiptRequestRow {
+  const prevById = new Map((prev?.items ?? []).map((it) => [it.id, it]));
+  const deltaById = new Map((acceptanceDelta ?? []).map((d) => [d.itemId, d]));
+  const mergedItems = next.items.map((it) =>
+    mergeReceiptItemAccepted(prevById.get(it.id), it, deltaById.get(it.id))
+  );
+  const seen = new Set(mergedItems.map((it) => it.id));
+  for (const it of prev?.items ?? []) {
+    if (!seen.has(it.id)) mergedItems.push(it);
+  }
+  return normalizeReceiptRequest({ ...next, items: mergedItems });
+}
+
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
   if (row.status === "CANCELLED" || row.status === "RECEIVED") {
     return row;
@@ -2997,13 +3050,21 @@ function App() {
     if (!res.ok) return;
     if (seq !== receiptRequestsLoadSeq.current) return;
     const rows = (await res.json()) as ReceiptRequestRow[];
-    setReceiptRequests(rows.map(normalizeReceiptRequest));
+    setReceiptRequests((prev) => {
+      const prevById = new Map(prev.map((r) => [r.id, r]));
+      return rows.map((r) => mergeReceiptRequestRow(prevById.get(r.id), r));
+    });
   }
 
-  function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
-    const normalized = normalizeReceiptRequest(updated);
+  function applyReceiptRequestUpdate(
+    updated: ReceiptRequestRow,
+    opts?: { acceptanceDelta?: ReceiptAcceptanceDelta[] }
+  ) {
     receiptRequestsLoadSeq.current += 1;
+    let normalized!: ReceiptRequestRow;
     setReceiptRequests((prev) => {
+      const prevRow = prev.find((r) => r.id === updated.id);
+      normalized = mergeReceiptRequestRow(prevRow, updated, opts?.acceptanceDelta);
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
       const next = [...prev];
@@ -3288,69 +3349,30 @@ function App() {
         `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
       let acceptBody: { receiptRequest?: ReceiptRequestRow | null } = {};
-      let gotFreshReceipt = false;
       try {
         acceptBody = (await res.json()) as { receiptRequest?: ReceiptRequestRow | null };
       } catch {
         acceptBody = {};
       }
-      if (acceptBody.receiptRequest) {
-        gotFreshReceipt = true;
-        const normalized = applyReceiptRequestUpdate(acceptBody.receiptRequest);
-        const openLeft = normalized.items.filter(isReceiptItemOpen).length;
-        if (openLeft > 0) {
-          setOpsMessage(
-            `Принято позиций: ${mappings.length}. По заявке ${row.number} осталось открытых позиций: ${openLeft}`
-          );
-        }
-        setLimitSuggestions((prev) => {
+      const acceptanceDelta: ReceiptAcceptanceDelta[] = mappings.map((m) => ({
+        itemId: m.itemId,
+        acceptedQty: m.acceptedQty
+      }));
+      const normalized = applyReceiptRequestUpdate(acceptBody.receiptRequest ?? row, {
+        acceptanceDelta
+      });
+      const openLeft = normalized.items.filter(isReceiptItemOpen).length;
+      if (openLeft > 0) {
+        setOpsMessage(
+          `Принято позиций: ${mappings.length}. По заявке ${row.number} осталось открытых позиций: ${openLeft}`
+        );
+      }
+      if (!isOpenReceiptRequest(normalized)) {
+        setExpandedReceiptIds((prev) => {
           const next = { ...prev };
           delete next[row.id];
           return next;
         });
-        if (!isOpenReceiptRequest(normalized)) {
-          setExpandedReceiptIds((prev) => {
-            const next = { ...prev };
-            delete next[row.id];
-            return next;
-          });
-        }
-      } else {
-        let receiptFullyAccepted = false;
-        setReceiptRequests((prev) =>
-          prev.map((r) => {
-            if (r.id !== row.id) return normalizeReceiptRequest(r);
-            const updatedItems = r.items.map((it) => {
-              const m = mappings.find((x) => x.itemId === it.id);
-              if (!m) return it;
-              return {
-                ...it,
-                acceptedQty: parseMaterialQty(it.acceptedQty) + m.acceptedQty
-              };
-            });
-            let allDone = true;
-            let anyAccepted = false;
-            for (const it of updatedItems) {
-              const acc = parseMaterialQty(it.acceptedQty);
-              if (acc > 0) anyAccepted = true;
-              if (receiptItemRemainingQty(it) > 0) allDone = false;
-            }
-            receiptFullyAccepted = allDone;
-            return normalizeReceiptRequest({
-              ...r,
-              items: updatedItems,
-              status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : r.status
-            });
-          })
-        );
-        receiptRequestsLoadSeq.current += 1;
-        if (receiptFullyAccepted) {
-          setExpandedReceiptIds((prev) => {
-            const next = { ...prev };
-            delete next[row.id];
-            return next;
-          });
-        }
       }
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
@@ -3381,9 +3403,6 @@ function App() {
         return next;
       });
       await loadMaterialMappings();
-      if (!gotFreshReceipt) {
-        void loadReceiptRequests();
-      }
       await loadStocks(q);
       await loadOperations();
       await loadNotifications();
@@ -6687,8 +6706,7 @@ function App() {
                     </datalist>
 
                     {(() => {
-                      const itemsOpen = finished ? [] : row.items.filter(isReceiptItemOpen);
-                      const itemsDone = finished ? [] : row.items.filter((it) => !isReceiptItemOpen(it));
+                      const { itemsOpen, itemsDone } = splitReceiptItems(row.items);
                       const tableColSpan = row.objectLimitTemplateId ? 10 : 9;
                       const selectedCount = itemsOpen.filter((it) => {
                         const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
