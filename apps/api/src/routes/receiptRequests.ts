@@ -22,6 +22,7 @@ import { materialQtySchema, toQtyNumber } from "../lib/quantity.js";
 import {
   isReceiptFullyAccepted,
   isReceiptItemOpen as receiptItemIsOpen,
+  plannedQtyForItemClose,
   receiptAcceptedQty,
   receiptCompletionStatus,
   receiptItemRemaining,
@@ -156,10 +157,13 @@ function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
     acceptedQty: receiptAcceptedQty(it.acceptedQty),
     unitPrice: toQtyNumber(it.unitPrice)
   }));
+  if (row.status === "CANCELLED" || row.status === "RECEIVED") {
+    return { ...row, status: row.status, items };
+  }
   const hasOpenItems = items.some((it) => receiptItemIsOpen(it));
   const anyAccepted = items.some((it) => receiptAcceptedQty(it.acceptedQty) > 0);
-  let status = row.status;
-  if (status !== "CANCELLED" && !hasOpenItems) {
+  let status: ReceiptRequestWithRelations["status"] = row.status;
+  if (!hasOpenItems) {
     status = "RECEIVED";
   } else if (status === "NEW" && anyAccepted) {
     status = "IN_PROGRESS";
@@ -182,6 +186,23 @@ async function loadSerializedReceiptRequest(id: string) {
 
 type ReceiptTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
+async function completeAllReceiptItems(
+  receiptId: string,
+  items: Array<{ id: string; quantity: unknown }>,
+  tx: ReceiptTx | typeof prisma = prisma
+) {
+  for (const it of items) {
+    await tx.receiptRequestItem.update({
+      where: { id: it.id },
+      data: { acceptedQty: plannedQtyForItemClose(it) }
+    });
+  }
+  await tx.receiptRequest.update({
+    where: { id: receiptId },
+    data: { status: "RECEIVED", acceptedAt: new Date() }
+  });
+}
+
 async function reconcileReceiptRequestStatus(receiptId: string, tx: ReceiptTx | typeof prisma = prisma) {
   const row = await tx.receiptRequest.findUnique({
     where: { id: receiptId },
@@ -190,11 +211,18 @@ async function reconcileReceiptRequestStatus(receiptId: string, tx: ReceiptTx | 
   if (!row || row.status === "CANCELLED" || row.status === "RECEIVED") return row;
   const next = receiptCompletionStatus(row, row.items);
   if (next.status === row.status) return row;
+  if (next.status === "RECEIVED") {
+    await completeAllReceiptItems(receiptId, row.items, tx);
+    return tx.receiptRequest.findUnique({
+      where: { id: receiptId },
+      include: { items: true }
+    });
+  }
   return tx.receiptRequest.update({
     where: { id: receiptId },
     data: {
       status: next.status,
-      acceptedAt: next.status === "RECEIVED" ? next.acceptedAt : row.acceptedAt
+      acceptedAt: row.acceptedAt
     },
     include: { items: true }
   });
@@ -1041,7 +1069,15 @@ receiptRequestsRouter.post(
         }
       }
 
-      await reconcileReceiptRequestStatus(row.id, tx);
+      const freshAfterAccept = await tx.receiptRequest.findUnique({
+        where: { id: row.id },
+        include: { items: true }
+      });
+      if (freshAfterAccept && isReceiptFullyAccepted(freshAfterAccept.items)) {
+        await completeAllReceiptItems(row.id, freshAfterAccept.items, tx);
+      } else {
+        await reconcileReceiptRequestStatus(row.id, tx);
+      }
 
       const overageActions: Array<{
         itemId: string;
@@ -1227,17 +1263,14 @@ receiptRequestsRouter.patch(
     if (row.status === "CANCELLED") {
       return res.status(409).json({ error: "Заявка отменена — закрытие недоступно" });
     }
-    const updated = await prisma.receiptRequest.update({
-      where: { id },
-      data: {
-        status: "RECEIVED",
-        acceptedAt: row.acceptedAt ?? new Date()
-      },
-      include: {
-        items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
-        limitTemplate: { select: { id: true, title: true } }
-      }
+    await prisma.$transaction(async (tx) => {
+      await completeAllReceiptItems(id, row.items, tx);
     });
+    const updated = await prisma.receiptRequest.findUnique({
+      where: { id },
+      include: receiptRequestInclude
+    });
+    if (!updated) return res.status(404).json({ error: "Receipt request not found" });
     await recordAudit({
       userId: req.user!.userId,
       action: "RECEIPT_REQUEST_CLOSE",

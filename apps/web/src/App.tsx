@@ -609,9 +609,11 @@ function receiptItemRemainingQty(it: ReceiptRequestItem): number {
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
+  if (row.status === "CANCELLED" || row.status === "RECEIVED") {
+    return row;
+  }
   const hasOpenItems = row.items.some(isReceiptItemOpen);
   const anyAccepted = row.items.some((it) => parseMaterialQty(it.acceptedQty) > 0);
-  if (row.status === "CANCELLED") return row;
   if (!hasOpenItems) {
     return { ...row, status: "RECEIVED" };
   }
@@ -3698,17 +3700,31 @@ function App() {
       setOpsMessage(detail || `Не удалось закрыть заявку (HTTP ${r.status})`);
       return false;
     }
-    setOpsMessage("Заявка закрыта вручную");
+    let updated: ReceiptRequestRow;
+    try {
+      updated = (await r.json()) as ReceiptRequestRow;
+    } catch {
+      setOpsMessage("Заявка закрыта, но не удалось прочитать ответ сервера — обновите страницу");
+      void loadReceiptRequests();
+      return true;
+    }
+    const normalized = applyReceiptRequestUpdate(updated);
+    setAcceptanceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[receiptId];
+      return next;
+    });
     setExpandedReceiptIds((prev) => {
       const next = { ...prev };
       delete next[receiptId];
       return next;
     });
-    try {
-      const updated = (await r.json()) as ReceiptRequestRow;
-      applyReceiptRequestUpdate(updated);
-    } catch {
-      await loadReceiptRequests();
+    if (isOpenReceiptRequest(normalized)) {
+      setOpsMessage(
+        `Заявка ${normalized.number}: статус «${receiptStatusLabel(normalized.status)}», открытых позиций ${normalized.items.filter(isReceiptItemOpen).length}`
+      );
+    } else {
+      setOpsMessage(`Заявка ${normalized.number} закрыта вручную`);
     }
     return true;
   }
@@ -6671,7 +6687,7 @@ function App() {
                     </datalist>
 
                     {(() => {
-                      const itemsLeft = row.items.filter(isReceiptItemOpen);
+                      const itemsLeft = finished ? [] : row.items.filter(isReceiptItemOpen);
                       const selectedCount = itemsLeft.filter((it) => {
                         const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
                         return Number.isFinite(q) && q > 0;

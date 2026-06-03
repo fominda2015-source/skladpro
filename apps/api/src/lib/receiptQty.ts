@@ -27,6 +27,11 @@ export function isReceiptFullyAccepted(items: Array<{ quantity: unknown; accepte
   return items.length === 0 || items.every((it) => !isReceiptItemOpen(it));
 }
 
+/** Принудительно закрывает все позиции: acceptedQty = план (целое). */
+export function plannedQtyForItemClose(item: { quantity: unknown }): number {
+  return receiptPlannedQty(item.quantity);
+}
+
 export function receiptCompletionStatus(
   row: { status: string; acceptedAt?: Date | null },
   items: Array<{ quantity: unknown; acceptedQty?: unknown | null }>
