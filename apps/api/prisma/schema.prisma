@@ -871,6 +871,9 @@ model IssueRequest {
   stockMovements StockMovement[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
+
+  @@index([createdAt])
+  @@index([warehouseId, section, createdAt])
 }
 
 model ObjectLimitTemplate {
@@ -1016,6 +1019,7 @@ model IssueRequestItem {
   material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
   limitNode      ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
 
+  @@index([issueRequestId])
   @@index([limitNodeId])
 }
 

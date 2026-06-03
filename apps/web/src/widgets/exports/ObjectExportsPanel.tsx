@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { buildExportApiUrl, downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
 import { ExportProgressBar } from "./ExportProgressBar";
 
 export type ExportSectionId =
@@ -64,37 +64,43 @@ export function ObjectExportsPanel(props: Props) {
     setBusyId(section);
     setMessage("");
     setProgress(null);
-    const url = new URL(`${apiUrl}/api/exports/${section}.xlsx`);
-    if (period === "custom") {
-      if (!from || !to) {
-        setMessage("Укажите даты периода");
-        setBusyId("");
+    try {
+      const url = buildExportApiUrl(apiUrl, section);
+      if (period === "custom") {
+        if (!from || !to) {
+          setMessage("Укажите даты периода");
+          return;
+        }
+        url.searchParams.set("from", from);
+        url.searchParams.set("to", to);
+      } else {
+        url.searchParams.set("period", period);
+      }
+      if (warehouseId) {
+        url.searchParams.set("warehouseId", warehouseId);
+        url.searchParams.set("section", sectionFilter === "EOM" ? "EOM" : "SS");
+      }
+      const result = await downloadExportXlsx(
+        fetchWithSession,
+        url.toString(),
+        token,
+        `${section}.xlsx`,
+        setProgress
+      );
+      if (!result.ok) {
+        setMessage(result.error);
+        setProgress(null);
         return;
       }
-      url.searchParams.set("from", from);
-      url.searchParams.set("to", to);
-    } else {
-      url.searchParams.set("period", period);
-    }
-    if (warehouseId) {
-      url.searchParams.set("warehouseId", warehouseId);
-      url.searchParams.set("section", sectionFilter === "EOM" ? "EOM" : "SS");
-    }
-    const result = await downloadExportXlsx(
-      fetchWithSession,
-      url.toString(),
-      token,
-      `${section}.xlsx`,
-      setProgress
-    );
-    setBusyId("");
-    if (!result.ok) {
-      setMessage(result.error);
+      setMessage("Файл скачан");
+      setTimeout(() => setProgress(null), 2000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(msg.includes("Invalid URL") ? "Неверный адрес API (VITE_API_URL)" : msg);
       setProgress(null);
-      return;
+    } finally {
+      setBusyId("");
     }
-    setMessage("Файл скачан");
-    setTimeout(() => setProgress(null), 2000);
   }
 
   if (!allowed.length) {

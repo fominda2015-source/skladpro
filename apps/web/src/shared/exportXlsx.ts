@@ -1,3 +1,16 @@
+/** URL экспорта: при пустом apiUrl (nginx, same-origin) — относительный путь для fetch. */
+export function buildExportApiUrl(apiUrl: string, section: string): URL {
+  const path = `/api/exports/${section}.xlsx`;
+  const base = apiUrl.replace(/\/+$/, "");
+  if (base) {
+    return new URL(path, `${base}/`);
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return new URL(path, window.location.origin);
+  }
+  return new URL(`http://127.0.0.1${path}`);
+}
+
 /** Скачивание .xlsx из API с разбором ошибок, таймаутом и прогрессом. */
 export type ExportProgressState = {
   phase: "waiting" | "downloading" | "saving" | "done";

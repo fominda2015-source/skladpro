@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   getRequestDataScope,
+  resolveReadScope,
   mergeIssueWhere,
   operationWhereFromScope,
   stockWhereFromScope,
@@ -209,6 +210,27 @@ function requireSectionPerm(section: string) {
     const owned = Array.isArray(req.user?.permissions) ? req.user!.permissions : [];
     if (perms.some((p) => owned.includes(p))) return next();
     return res.status(403).json({ error: "Недостаточно прав на экспорт раздела" });
+  };
+}
+
+type ExportHandler = (
+  req: AuthedRequest,
+  res: import("express").Response
+) => void | Promise<void> | Promise<unknown>;
+
+function withExportError(label: string, handler: ExportHandler): ExportHandler {
+  return async (req, res) => {
+    try {
+      await handler(req, res);
+    } catch (e) {
+      console.error(`export ${label} failed:`, e);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error:
+            "Не удалось сформировать Excel-отчёт. Сузьте период, выберите один объект или обратитесь к администратору."
+        });
+      }
+    }
   };
 }
 
@@ -506,11 +528,16 @@ exportsRouter.get("/tools.xlsx", requireSectionPerm("tools"), async (req: Authed
 });
 
 // Выдачи: заявки на выдачу за период (по createdAt) + позиции.
-exportsRouter.get("/issues.xlsx", requireSectionPerm("issues"), async (req: AuthedRequest, res) => {
+exportsRouter.get(
+  "/issues.xlsx",
+  requireSectionPerm("issues"),
+  withExportError("issues", async (req: AuthedRequest, res) => {
   const range = parseRange(req.query as Record<string, unknown>);
   if ("error" in range) return res.status(400).json({ error: range.error });
-  const scope = await getRequestDataScope(req);
-  const exportWh = parseExportWarehouseQuery(req.query as Record<string, unknown>, scope);
+  const exportWhQ = req.query as Record<string, unknown>;
+  const whHint = typeof exportWhQ.warehouseId === "string" ? exportWhQ.warehouseId : undefined;
+  const scope = await resolveReadScope(req, { warehouseId: whHint });
+  const exportWh = parseExportWarehouseQuery(exportWhQ, scope);
   if (exportWh.error) return res.status(403).json({ error: exportWh.error });
 
   const where: Prisma.IssueRequestWhereInput = mergeIssueWhere(scope, {
@@ -524,12 +551,25 @@ exportsRouter.get("/issues.xlsx", requireSectionPerm("issues"), async (req: Auth
   });
   const issues = await prisma.issueRequest.findMany({
     where,
-    include: {
-      warehouse: true,
-      project: true,
-      requestedBy: true,
-      approvedBy: true,
-      items: { include: { material: true } }
+    select: {
+      createdAt: true,
+      number: true,
+      status: true,
+      flowType: true,
+      section: true,
+      responsibleName: true,
+      actualRecipientName: true,
+      note: true,
+      warehouse: { select: { name: true } },
+      project: { select: { name: true } },
+      requestedBy: { select: { fullName: true } },
+      approvedBy: { select: { fullName: true } },
+      items: {
+        select: {
+          quantity: true,
+          material: { select: { name: true, unit: true } }
+        }
+      }
     },
     orderBy: { createdAt: "desc" },
     take: EXPORT_ISSUE_LIMIT
@@ -573,7 +613,8 @@ exportsRouter.get("/issues.xlsx", requireSectionPerm("issues"), async (req: Auth
   appendSheet(wb, "Заявки", header);
   appendSheet(wb, "Позиции", lines);
   sendXlsx(res, wb, `issues_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`);
-});
+  })
+);
 
 // Поступления: заявки на приход (ReceiptRequest) + операции типа INCOME за период.
 exportsRouter.get("/receipts.xlsx", requireSectionPerm("receipts"), async (req: AuthedRequest, res) => {

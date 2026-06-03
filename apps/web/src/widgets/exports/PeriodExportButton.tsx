@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { buildExportApiUrl, downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
 import { ExportProgressBar } from "./ExportProgressBar";
 
 type Section = "stocks" | "limits" | "materialReport" | "tools" | "issues" | "receipts";
@@ -45,32 +45,38 @@ export function PeriodExportButton({
     setBusy(true);
     setErr("");
     setProgress(null);
-    const url = new URL(`${apiUrl}/api/exports/${section}.xlsx`);
-    if (period === "custom") {
-      if (!from || !to) {
-        setErr("Укажи обе даты");
-        setBusy(false);
-        return;
+    try {
+      const url = buildExportApiUrl(apiUrl, section);
+      if (period === "custom") {
+        if (!from || !to) {
+          setErr("Укажи обе даты");
+          return;
+        }
+        url.searchParams.set("from", from);
+        url.searchParams.set("to", to);
+      } else {
+        url.searchParams.set("period", period);
       }
-      url.searchParams.set("from", from);
-      url.searchParams.set("to", to);
-    } else {
-      url.searchParams.set("period", period);
+      if (warehouseId) {
+        url.searchParams.set("warehouseId", warehouseId);
+        if (sectionFilter) url.searchParams.set("section", sectionFilter);
+      }
+      const result = await downloadExportXlsx(
+        fetchWithSession,
+        url.toString(),
+        token,
+        `${section}.xlsx`,
+        setProgress
+      );
+      if (!result.ok) setErr(result.error);
+      setTimeout(() => setProgress(null), result.ok ? 2000 : 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg.includes("Invalid URL") ? "Неверный адрес API (VITE_API_URL)" : msg);
+      setProgress(null);
+    } finally {
+      setBusy(false);
     }
-    if (warehouseId) {
-      url.searchParams.set("warehouseId", warehouseId);
-      if (sectionFilter) url.searchParams.set("section", sectionFilter);
-    }
-    const result = await downloadExportXlsx(
-      fetchWithSession,
-      url.toString(),
-      token,
-      `${section}.xlsx`,
-      setProgress
-    );
-    if (!result.ok) setErr(result.error);
-    setBusy(false);
-    setTimeout(() => setProgress(null), result.ok ? 2000 : 0);
   }
 
   return (
