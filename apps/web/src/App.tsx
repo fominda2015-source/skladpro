@@ -2999,6 +2999,7 @@ function App() {
 
   function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
     const normalized = normalizeReceiptRequest(updated);
+    receiptRequestsLoadSeq.current += 1;
     setReceiptRequests((prev) => {
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
@@ -3162,6 +3163,36 @@ function App() {
     } catch {
       // ignore network errors — подсказки опциональны
     }
+  }
+
+  function buildAllRemainingAcceptanceMappings(row: ReceiptRequestRow) {
+    const mappings: ReturnType<typeof buildReceiptAcceptanceMappings> = [];
+    for (const it of row.items) {
+      if (!isReceiptItemOpen(it)) continue;
+      const remaining = receiptItemRemainingQty(it);
+      if (remaining <= 0) continue;
+      const draft = acceptanceDrafts[row.id]?.[it.id];
+      const explicitName = (draft?.newName ?? "").trim();
+      const explicitUnit = (draft?.newUnit ?? "").trim();
+      const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
+      const priceNum = priceRaw === "" ? null : Number(priceRaw);
+      mappings.push({
+        itemId: it.id,
+        newMaterialName: explicitName || it.mappedMaterial?.name || it.sourceName,
+        newMaterialUnit: explicitUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
+        acceptedQty: remaining,
+        limitNodeId: draft?.limitNodeId || it.limitNodeId || null,
+        category: draft?.category || it.category || null,
+        unitPrice:
+          priceNum != null && Number.isFinite(priceNum)
+            ? priceNum
+            : it.unitPrice != null
+              ? Number(it.unitPrice)
+              : null,
+        storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
+      });
+    }
+    return mappings;
   }
 
   function buildReceiptAcceptanceMappings(row: ReceiptRequestRow) {
@@ -3395,6 +3426,52 @@ function App() {
         return next;
       });
     }
+  }
+
+  async function submitAllRemainingReceiptAcceptance(
+    row: ReceiptRequestRow,
+    extraFiles: File[] = []
+  ): Promise<boolean> {
+    const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
+    const mappings = buildAllRemainingAcceptanceMappings(freshRow);
+    if (!mappings.length) {
+      setOpsMessage(`По заявке ${row.number} нет открытых позиций для приёмки`);
+      return false;
+    }
+    for (const m of mappings) {
+      const it = freshRow.items.find((x) => x.id === m.itemId);
+      if (!it) continue;
+      const remaining = receiptItemRemainingQty(it);
+      if (m.acceptedQty > remaining) {
+        if (!token) return false;
+        try {
+          const r = await fetchWithSession(
+            `${API_URL}/api/receipt-requests/${encodeURIComponent(freshRow.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (r.ok) {
+            const data = (await r.json()) as {
+              current: Array<{ id: string; path: string }>;
+              otherSections: Array<{ id: string; path: string }>;
+            };
+            setReceiptOverageModal({
+              row: freshRow,
+              itemId: it.id,
+              extraFiles,
+              mappings,
+              sourceName: it.sourceName,
+              orderedQty: parseMaterialQty(it.quantity),
+              acceptedQty: m.acceptedQty,
+              suggestions: { current: data.current || [], otherSections: data.otherSections || [] }
+            });
+            return false;
+          }
+        } catch {
+          // fallback — сервер вернёт 409
+        }
+      }
+    }
+    return postReceiptAcceptance(freshRow, mappings, extraFiles);
   }
 
   async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
@@ -3694,7 +3771,12 @@ function App() {
       delete next[receiptId];
       return next;
     });
-    await loadReceiptRequests();
+    try {
+      const updated = (await r.json()) as ReceiptRequestRow;
+      applyReceiptRequestUpdate(updated);
+    } catch {
+      await loadReceiptRequests();
+    }
     return true;
   }
 
@@ -6989,6 +7071,40 @@ function App() {
                               onClick={() => void openReceiptInvoice(row.id)}
                             >
                               Счёт к заявке
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                finished ||
+                                !canWriteOperations ||
+                                itemsLeft.length === 0 ||
+                                Boolean(acceptanceSubmitting[row.id])
+                              }
+                              onClick={() => {
+                                setPendingAcceptanceFiles([]);
+                                setPendingAcceptanceRequestId(row.id);
+                                setAcceptanceDrafts((prev) => {
+                                  const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
+                                  for (const it of itemsLeft) {
+                                    const remaining = receiptItemRemainingQty(it);
+                                    const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
+                                    next[row.id][it.id] = {
+                                      newName: existing.newName || it.mappedMaterial?.name || it.sourceName,
+                                      newUnit: existing.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт",
+                                      qty: String(remaining),
+                                      limitNodeId: existing.limitNodeId ?? it.limitNodeId,
+                                      category: existing.category ?? it.category ?? "",
+                                      unitPrice:
+                                        existing.unitPrice ??
+                                        (it.unitPrice != null ? String(it.unitPrice) : ""),
+                                      storagePlace: existing.storagePlace ?? it.storagePlace ?? ""
+                                    };
+                                  }
+                                  return next;
+                                });
+                              }}
+                            >
+                              Принять все оставшиеся ({itemsLeft.length})
                             </button>
                             <button
                               type="button"
@@ -11721,11 +11837,12 @@ function App() {
           onCancel={() => setReceiptOverageModal(null)}
           onConfirm={(limitNodeId, allowOverage) => {
             const { row, itemId, mappings, extraFiles } = receiptOverageModal;
+            const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
             const nextMappings = mappings.map((m) =>
               m.itemId === itemId ? { ...m, limitNodeId: limitNodeId ?? m.limitNodeId } : m
             );
             setReceiptOverageModal(null);
-            void postReceiptAcceptance(row, nextMappings, extraFiles, { allowOverage });
+            void postReceiptAcceptance(freshRow, nextMappings, extraFiles, { allowOverage });
           }}
         />
       ) : null}

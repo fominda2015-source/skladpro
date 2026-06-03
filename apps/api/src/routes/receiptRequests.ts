@@ -23,6 +23,7 @@ import {
   isReceiptFullyAccepted,
   isReceiptItemOpen as receiptItemIsOpen,
   receiptAcceptedQty,
+  receiptCompletionStatus,
   receiptItemRemaining,
   receiptPlannedQty
 } from "../lib/receiptQty.js";
@@ -170,11 +171,32 @@ function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
 }
 
 async function loadSerializedReceiptRequest(id: string) {
+  await reconcileReceiptRequestStatus(id);
   const row = await prisma.receiptRequest.findUnique({
     where: { id },
     include: receiptRequestInclude
   });
   return row ? serializeReceiptRequest(row) : null;
+}
+
+type ReceiptTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function reconcileReceiptRequestStatus(receiptId: string, tx: ReceiptTx | typeof prisma = prisma) {
+  const row = await tx.receiptRequest.findUnique({
+    where: { id: receiptId },
+    include: { items: true }
+  });
+  if (!row || row.status === "CANCELLED" || row.status === "RECEIVED") return row;
+  const next = receiptCompletionStatus(row, row.items);
+  if (next.status === row.status) return row;
+  return tx.receiptRequest.update({
+    where: { id: receiptId },
+    data: {
+      status: next.status,
+      acceptedAt: next.status === "RECEIVED" ? next.acceptedAt : row.acceptedAt
+    },
+    include: { items: true }
+  });
 }
 
 function receiptRequestHasOpenItems(row: {
@@ -664,7 +686,19 @@ receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     orderBy: { createdAt: "desc" },
     take: 100
   });
-  const serialized = rows.map(serializeReceiptRequest);
+  let list = rows;
+  const stale = rows.filter(
+    (row) => row.status !== "CANCELLED" && row.status !== "RECEIVED" && isReceiptFullyAccepted(row.items)
+  );
+  if (stale.length) {
+    await Promise.all(stale.map((row) => reconcileReceiptRequestStatus(row.id)));
+    list = await prisma.receiptRequest.findMany({
+      where: { id: { in: rows.map((r) => r.id) } },
+      include: receiptRequestInclude,
+      orderBy: { createdAt: "desc" }
+    });
+  }
+  const serialized = list.map(serializeReceiptRequest);
   const filtered = openOnly ? serialized.filter(receiptRequestHasOpenItems) : serialized;
   return res.json(filtered);
 });
@@ -715,6 +749,11 @@ receiptRequestsRouter.post(
         });
       }
       const remaining = receiptItemRemaining(it);
+      if (remaining <= 0 && !parsed.data.allowOverage) {
+        return res.status(400).json({
+          error: `Позиция «${it.sourceName}» уже принята полностью`
+        });
+      }
       const isOver = m.acceptedQty > remaining;
       if (isOver && !parsed.data.allowOverage) {
         let materialId = m.materialId;
@@ -801,6 +840,9 @@ receiptRequestsRouter.post(
         const unitHint = m.newMaterialUnit?.trim() || it.sourceUnit || "шт";
         const itemCategory = m.category ?? it.category ?? null;
         const campCategory = receiptCategoryToCampCategory(itemCategory);
+        const remainingBefore = receiptItemRemaining(it);
+        const acceptedQty = parsed.data.allowOverage ? m.acceptedQty : Math.min(m.acceptedQty, remainingBefore);
+        if (acceptedQty <= 0) continue;
         let materialId: string | undefined = m.materialId;
         if (!campCategory) {
           if (!materialId && m.newMaterialName?.trim()) {
@@ -813,11 +855,15 @@ receiptRequestsRouter.post(
         resolved.push({
           item: it,
           materialId: materialId ?? null,
-          acceptedQty: m.acceptedQty,
+          acceptedQty,
           sourceUnit: unitHint,
           limitNodeId: m.limitNodeId ?? null,
           campCategory
         });
+      }
+
+      if (!resolved.length) {
+        throw new Error("Нет позиций для приёмки — возможно, выбранные строки уже приняты полностью");
       }
 
       const stockResolved = resolved.filter((r) => !r.campCategory && r.materialId);
@@ -1004,20 +1050,7 @@ receiptRequestsRouter.post(
         }
       }
 
-      // Пересчёт статуса по округлённым количествам (как в UI).
-      const fresh = await tx.receiptRequest.findUnique({
-        where: { id: row.id },
-        include: { items: true }
-      });
-      const allDone = isReceiptFullyAccepted(fresh?.items ?? []);
-      const anyAccepted = (fresh?.items ?? []).some((it) => receiptAcceptedQty(it.acceptedQty) > 0);
-      await tx.receiptRequest.update({
-        where: { id: row.id },
-        data: {
-          status: allDone ? "RECEIVED" : anyAccepted ? "IN_PROGRESS" : row.status,
-          acceptedAt: allDone ? new Date() : row.acceptedAt
-        }
-      });
+      await reconcileReceiptRequestStatus(row.id, tx);
 
       const overageActions: Array<{
         itemId: string;
@@ -1197,7 +1230,8 @@ receiptRequestsRouter.patch(
       throw e;
     }
     if (row.status === "RECEIVED") {
-      return res.json(row);
+      const serialized = await loadSerializedReceiptRequest(id);
+      return res.json(serialized);
     }
     if (row.status === "CANCELLED") {
       return res.status(409).json({ error: "Заявка отменена — закрытие недоступно" });
@@ -1241,7 +1275,7 @@ receiptRequestsRouter.patch(
       entityId: id,
       excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
     }).catch(() => undefined);
-    return res.json(updated);
+    return res.json(serializeReceiptRequest(updated));
   }
 );
 
