@@ -5456,7 +5456,7 @@ function App() {
             </label>
             <label>
               Раздел
-              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+              <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
                 <button
                   type="button"
                   className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
@@ -11390,7 +11390,7 @@ function App() {
             </label>
             <label>
               Раздел
-              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+              <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
                 <button
                   type="button"
                   className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}

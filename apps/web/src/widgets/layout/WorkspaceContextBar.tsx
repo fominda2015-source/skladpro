@@ -80,9 +80,12 @@ export function WorkspaceContextBar(props: Props) {
           </select>
         </label>
       ) : null}
-      <div className="workspaceContextSection">
+      <div className="workspaceContextSection workspaceContextSection--accent">
         <span className="workspaceContextLabel">Раздел</span>
-        <div className="sectionToggle workspaceContextSectionToggle" aria-label="Раздел СС/ЭОМ">
+        <div
+          className="sectionToggle sectionToggle--accent workspaceContextSectionToggle"
+          aria-label="Раздел СС/ЭОМ"
+        >
           <button
             type="button"
             className={`sectionToggleBtn ${section === "SS" ? "active" : ""}`}
