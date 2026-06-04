@@ -148,7 +148,6 @@ html[data-compact="1"] .sectionToggleBtn {
   align-items: flex-start;
 }
 
-.homeOverview .pageHeroStats,
 .limitsRiskPanel .pageHeroStats {
   display: grid;
   flex-wrap: unset;
@@ -156,7 +155,6 @@ html[data-compact="1"] .sectionToggleBtn {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
 }
 
-.homeOverview .pageHeroStat,
 .limitsRiskPanel .pageHeroStat {
   flex: unset;
   min-width: 0;
