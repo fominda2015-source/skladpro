@@ -7945,18 +7945,18 @@ function App() {
             <div className="rightCardHeader" style={{ gap: 12 }}>
               <div>
                 <h3>Загрузить Excel</h3>
-                <p className="muted">
-                  Перетащи файл сюда или выбери вручную. Поддерживаются .xlsx и .xls.
-                </p>
-                <p className="muted" style={{ marginTop: 4 }}>
-                  Формат: жёлтым выделены заголовки разделов (можно «Раздел#Подраздел»),
-                  материалы — без заливки. Колонки: B — наименование, F — ед. изм.,
-                  G — кол-во по бюджету (если пусто — берём I).
-                </p>
+                <p className="muted">Перетащите файл сюда или выберите вручную (.xlsx, .xls).</p>
+                <details className="uploadHintDetails">
+                  <summary>Требования к формату файла</summary>
+                  <p className="muted">
+                    Жёлтым — заголовки разделов («Раздел#Подраздел»), материалы без заливки. Колонки: B — наименование,
+                    F — ед. изм., G — кол-во по бюджету (если пусто — I).
+                  </p>
+                </details>
               </div>
               {limitImportFile && <span className="badge ok">Выбран файл</span>}
             </div>
-            <div className="toolbar" style={{ marginTop: 8 }}>
+            <div className="toolbar" style={{ marginTop: 6 }}>
               <input
                 type="file"
                 accept=".xlsx,.xls"

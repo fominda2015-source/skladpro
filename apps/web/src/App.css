@@ -251,11 +251,11 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
   background: #f3f6fa;
   border-bottom: 1px solid #e6eaf2;
-  padding: 8px 2px 14px;
-  margin-bottom: 14px;
+  padding: 6px 2px 8px;
+  margin-bottom: 8px;
 }
 
 @media (min-width: 901px) {
@@ -303,7 +303,6 @@ label {
 }
 
 input,
-button,
 select,
 textarea {
   height: 40px;
@@ -312,6 +311,20 @@ textarea {
   padding: 0 12px;
   font-size: 14px;
   width: 100%;
+}
+
+button {
+  height: 40px;
+  border: none;
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 14px;
+  width: auto;
+  max-width: 100%;
+  cursor: pointer;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
 }
 
 input,
@@ -335,14 +348,6 @@ input[type="checkbox"] {
   padding: 0;
 }
 
-button {
-  cursor: pointer;
-  border: none;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 600;
-}
-
 button:hover {
   background: #1f56cf;
 }
@@ -359,9 +364,21 @@ button:hover {
   flex-wrap: wrap;
   background: #fff;
   border: 1px solid #e6ebf5;
-  border-radius: 14px;
-  padding: 8px;
-  box-shadow: 0 4px 16px rgba(12, 24, 52, 0.04);
+  border-radius: 12px;
+  padding: 6px 8px;
+  box-shadow: 0 2px 10px rgba(12, 24, 52, 0.04);
+}
+
+.topToolbar input {
+  flex: 1 1 180px;
+  min-width: 120px;
+  max-width: 420px;
+}
+
+.topToolbar button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 14px;
 }
 
 .sectionToggle {
@@ -562,10 +579,16 @@ button:hover {
 .workspaceContextGlobal {
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 12px 16px;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
-  margin-bottom: 10px;
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  margin-bottom: 6px;
+}
+
+.workspaceContextGlobal:hover {
+  transform: none;
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .workspaceContextGlobal .workspaceContextBar {
@@ -606,48 +629,51 @@ button:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 14px 20px;
-  padding: 12px 14px;
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  gap: 8px 16px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .workspaceContextLabel {
   display: block;
-  margin-bottom: 6px;
-  font-size: 11px;
+  margin-bottom: 3px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #475569;
+  color: #64748b;
 }
 
 .workspaceContextObject {
-  flex: 1 1 280px;
-  min-width: min(100%, 240px);
+  flex: 1 1 200px;
+  max-width: min(100%, 380px);
+  min-width: 0;
   margin: 0;
 }
 
 .workspaceContextObjectSelect {
-  min-height: 44px;
-  font-size: 15px;
-  font-weight: 700;
+  height: 36px;
+  min-height: 36px;
+  font-size: 14px;
+  font-weight: 600;
   border-color: #93c5fd;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+  box-shadow: none;
 }
 
 .workspaceContextObjectStatic .workspaceContextObjectValue {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  height: 36px;
+  min-height: 36px;
   padding: 0 12px;
   border: 1px solid #dbe1ec;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: #0f172a;
 }
 
@@ -656,12 +682,19 @@ button:hover {
 }
 
 .workspaceContextSectionToggle {
-  height: 44px;
+  height: 36px;
 }
 
-.toolbar input {
-  flex: 1;
-  min-width: 220px;
+.toolbar input[type="file"],
+.toolbar input[type="search"],
+.toolbar input:not([type]) {
+  flex: 1 1 200px;
+  min-width: 140px;
+  max-width: 100%;
+}
+
+.toolbar button {
+  flex: 0 0 auto;
 }
 
 .grid2 {
@@ -677,8 +710,25 @@ button:hover {
 }
 
 .tabs button,
-.toolbar button {
+.toolbar button,
+.topToolbar button,
+.pageHeroActions button,
+.pageHeroStat,
+.sectionToggleBtn,
+.userAccountMenuTrigger,
+.userAccountMenuItem,
+.ghostBtn,
+.primaryBtn,
+.secondaryBtn,
+.dangerBtn,
+.miniActionBtn,
+.periodExportBtn button {
   width: auto;
+}
+
+.form button,
+.loginCard button {
+  width: 100%;
 }
 
 .badge {
@@ -4081,7 +4131,7 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 
 .pageHeroTitle {
   margin: 0;
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1.25;
   font-weight: 700;
   color: #0f172a;
@@ -4091,16 +4141,23 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .pageHero {
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
+
+.pageHero:hover {
+  transform: none;
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
 .pageHero.compact {
-  padding: 10px 14px;
+  padding: 8px 12px;
 }
 .pageHeroMain {
   display: flex;
@@ -4117,17 +4174,17 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   flex: 1 1 auto;
 }
 .pageHeroIcon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #1d4ed8 0%, #4f46e5 100%);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 15px;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 }
 .pageHeroTitleText {
   min-width: 0;
@@ -4142,23 +4199,62 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
+  flex: 0 1 auto;
+  justify-content: flex-end;
 }
+
+.pageHeroActions .ghostBtn,
+.pageHeroActions .primaryBtn,
+.pageHeroActions button:not(.sectionToggleBtn) {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.pageHeroActions .periodExportBtn {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+  max-width: min(100%, 520px);
+}
+
+.pageHeroActions .periodExportBtn select {
+  width: auto;
+  min-width: 88px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+.pageHeroActions .periodExportBtn button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .pageHeroStats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
-}
-.pageHeroStat {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 8px 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.pageHeroStat {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #f8fafc;
   text-align: left;
   font: inherit;
   color: inherit;
+  flex: 0 0 auto;
 }
 .pageHeroStat.interactive {
   cursor: pointer;
@@ -4184,15 +4280,22 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   font-size: 11px;
   font-weight: 600;
   color: #64748b;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
 }
+
+.pageHeroStatLabel::after {
+  content: ":";
+}
+
 .pageHeroStatValue {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 800;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
-  margin-top: 1px;
+  margin-top: 0;
+  white-space: nowrap;
 }
 .pageHeroStat.tone-warn .pageHeroStatValue {
   color: #b45309;
@@ -4208,13 +4311,23 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .filterStrip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 6px 10px;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  margin-bottom: 10px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
+.filterStrip:hover {
+  transform: none;
+}
+
+.filterStripActions button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 .filterStripSearch {
   flex: 1 1 220px;
@@ -4426,8 +4539,13 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   gap: 12px;
 }
 .homeOverview .pageHeroStats {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.homeOverview .pageHeroStatLabel::after {
+  content: none;
 }
 .homeOverview .pageHeroStat {
   min-height: 88px;
@@ -6483,16 +6601,37 @@ button.whMenuItem:hover,
 }
 
 .periodExportBtn {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  align-items: stretch;
-  gap: 8px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fafafa;
-  min-width: 200px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.periodExportBtn select {
+  width: auto;
+  min-width: 88px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+.periodExportBtn input[type="date"] {
+  width: auto;
+  min-width: 120px;
+  flex: 0 0 auto;
+}
+
+.periodExportBtn button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .periodExportBtn > .exportProgressWrap {
