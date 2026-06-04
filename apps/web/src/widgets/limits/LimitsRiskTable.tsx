@@ -11,7 +11,7 @@ import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/Mob
 type Props = {
   templates: LimitRiskTemplate[];
   issuedTotalsByMaterialId: Map<string, number>;
-  limitSupplyByMaterialId: Record<string, { arrivedQty?: number }>;
+  arrivedByLimitNodeId: Record<string, number>;
   showOnlyRisk: boolean;
   onShowOnlyRiskChange: (value: boolean) => void;
   onOpenMaterial?: (materialId: string) => void;
@@ -44,14 +44,14 @@ function rowClass(risk: LimitMaterialRiskRow["risk"]) {
 export function LimitsRiskTable({
   templates,
   issuedTotalsByMaterialId,
-  limitSupplyByMaterialId,
+  arrivedByLimitNodeId,
   showOnlyRisk,
   onShowOnlyRiskChange,
   onOpenMaterial
 }: Props) {
   const allRows = useMemo(
-    () => buildLimitMaterialRows(templates, issuedTotalsByMaterialId, limitSupplyByMaterialId),
-    [templates, issuedTotalsByMaterialId, limitSupplyByMaterialId]
+    () => buildLimitMaterialRows(templates, issuedTotalsByMaterialId, arrivedByLimitNodeId),
+    [templates, issuedTotalsByMaterialId, arrivedByLimitNodeId]
   );
   const stats = useMemo(() => computeLimitRiskStats(allRows), [allRows]);
   const rows = useMemo(

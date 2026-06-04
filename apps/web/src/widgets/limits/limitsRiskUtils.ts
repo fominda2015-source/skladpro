@@ -7,6 +7,7 @@ export type LimitRiskNode = {
   materialName?: string | null;
   unit?: string | null;
   plannedQty?: string | number | null;
+  issuedQty?: string | number | null;
 };
 
 export type LimitRiskTemplate = {
@@ -55,15 +56,17 @@ function nodePath(nodes: LimitRiskNode[], nodeId: string): string {
 export function buildLimitMaterialRows(
   templates: LimitRiskTemplate[],
   issuedTotalsByMaterialId: Map<string, number>,
-  limitSupplyByMaterialId: Record<string, { arrivedQty?: number }>
+  arrivedByLimitNodeId: Record<string, number>
 ): LimitMaterialRiskRow[] {
   const rows: LimitMaterialRiskRow[] = [];
   for (const tpl of templates) {
     for (const n of tpl.nodes) {
       if (n.nodeType !== "MATERIAL") continue;
       const planned = Number(n.plannedQty || 0);
-      const issued = n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0;
-      const arrived = n.materialId ? Number(limitSupplyByMaterialId[n.materialId]?.arrivedQty || 0) : 0;
+      const issued =
+        Number(n.issuedQty || 0) ||
+        (n.materialId ? Number(issuedTotalsByMaterialId.get(n.materialId) || 0) : 0);
+      const arrived = Number(arrivedByLimitNodeId[n.id] || 0);
       const percent = planned > 0 ? Math.round((issued / planned) * 100) : 0;
       const remaining = planned > 0 ? planned - issued : 0;
       let risk: LimitMaterialRiskRow["risk"] = "ok";

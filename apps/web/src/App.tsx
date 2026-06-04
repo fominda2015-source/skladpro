@@ -106,6 +106,7 @@ import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { SidebarNav } from "./widgets/layout/SidebarNav";
 import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
+import { buildLimitReceiptMetricsFromReceipts } from "./widgets/limits/limitReceiptMetrics";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
@@ -897,6 +898,13 @@ function App() {
     () => receiptRequests.filter(isOpenReceiptRequest),
     [receiptRequests]
   );
+
+  const limitReceiptMetricsByNodeId = useMemo(() => {
+    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
+      return { arrivedByLimitNodeId: {} as Record<string, number>, onOrderByLimitNodeId: {} as Record<string, number> };
+    }
+    return buildLimitReceiptMetricsFromReceipts(receiptRequests, activeObjectId, objectSectionFilter);
+  }, [receiptRequests, activeObjectId, objectSectionFilter]);
   // Модалка «Заявка из лимита?» после загрузки Excel.
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
@@ -3433,6 +3441,7 @@ function App() {
       await loadOperations();
       if (row.objectLimitTemplateId || row.fromLimit) {
         await loadLimitTemplates().catch(() => undefined);
+        await loadReceiptRequests().catch(() => undefined);
       }
       await loadNotifications();
       if (canReadTools) {
@@ -5290,6 +5299,7 @@ function App() {
       void loadProjects();
       void loadLimitTemplates();
       void loadStockMovements();
+      void loadReceiptRequests();
       setExpandedLimitNodes({});
       setLimitNodeDrafts({});
       setLimitTemplateTitleDrafts({});
@@ -8065,13 +8075,9 @@ function App() {
                     }
                     if (node.nodeType === "MATERIAL") {
                       const plan = Number(node.plannedQty || 0);
-                      const sm = node.materialId ? limitSupplyByMaterialId[node.materialId] : undefined;
-                      const arrived = sm?.arrivedQty ?? 0;
+                      const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[nodeId] ?? 0;
                       const matNode = tpl.nodes.find((x) => x.id === nodeId);
-                      const issued = matNode?.materialId
-                        ? Number(matNode.issuedQty || 0) ||
-                          Number(issuedTotalsByMaterialId.get(matNode.materialId) || 0)
-                        : 0;
+                      const issued = Number(matNode?.issuedQty || 0);
                       const a: NodeAgg = { plan, arrived, issued };
                       aggByNodeId.set(nodeId, a);
                       return a;
@@ -8120,15 +8126,13 @@ function App() {
                   for (const n of tpl.nodes) if (n.nodeType === "GROUP") computeCounts(n.id);
 
                   const totalPlanned = materialNodes.reduce((sum, n) => sum + Number(n.plannedQty || 0), 0);
-                  const totalIssued = materialNodes.reduce((sum, n) => {
-                    const iss = n.materialId
-                      ? Number(n.issuedQty || 0) || Number(issuedTotalsByMaterialId.get(n.materialId) || 0)
-                      : 0;
-                    return sum + iss;
-                  }, 0);
-                  const totalArrived = materialNodes.reduce(
-                    (sum, n) =>
-                      sum + (n.materialId ? Number(limitSupplyByMaterialId[n.materialId]?.arrivedQty || 0) : 0),
+                  const totalIssued = materialNodes.reduce(
+                    (sum, n) => sum + Number(n.issuedQty || 0),
+                    0
+                  );
+                  const rootGroups = tpl.nodes.filter((n) => n.nodeType === "GROUP" && !n.parentId);
+                  const totalArrived = rootGroups.reduce(
+                    (sum, g) => sum + (computeAgg(g.id).arrived || 0),
                     0
                   );
                   const overallPct =
@@ -8160,13 +8164,8 @@ function App() {
                     const isGroup = node.nodeType === "GROUP";
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
                     const planned = Number(node.plannedQty || 0);
-                      const issued = node.materialId
-                        ? Number(node.issuedQty || 0) ||
-                          Number(issuedTotalsByMaterialId.get(node.materialId) || 0)
-                        : 0;
-                    const arrived = node.materialId
-                      ? Number(limitSupplyByMaterialId[node.materialId]?.arrivedQty || 0)
-                      : 0;
+                      const issued = Number(node.issuedQty || 0);
+                    const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[node.id] ?? 0;
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
@@ -8622,13 +8621,10 @@ function App() {
                               <tbody>
                                 {directMaterials.map((m) => {
                                   const plan = Number(m.plannedQty || 0);
-                                  const sm = m.materialId ? limitSupplyByMaterialId[m.materialId] : undefined;
-                                  const arrived = sm?.arrivedQty ?? 0;
-                                  const iss = m.materialId
-                                    ? Number(m.issuedQty || 0) || Number(issuedTotalsByMaterialId.get(m.materialId) || 0)
-                                    : 0;
-                                  const onOrd = sm?.onOrderQty ?? 0;
-                                  const stk = sm?.stockQty ?? 0;
+                                  const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[m.id] ?? 0;
+                                  const iss = Number(m.issuedQty || 0);
+                                  const onOrd = limitReceiptMetricsByNodeId.onOrderByLimitNodeId[m.id] ?? 0;
+                                  const stk = m.materialId ? limitSupplyByMaterialId[m.materialId]?.stockQty ?? 0 : 0;
                                   const transferredOut = Number(m.transferredOutQty || 0);
                                   const remain = Math.max(0, plan - arrived);
                                   const mDiff = importDiff?.statusByNodeId.get(m.id);
