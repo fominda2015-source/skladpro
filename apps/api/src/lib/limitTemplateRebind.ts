@@ -28,6 +28,8 @@ export async function rebindLinkedReceiptRequestsToTemplate(
     include: { items: true }
   });
 
+  const nodesByTemplateId = new Map<string, TreeNode[]>();
+
   let itemsRemapped = 0;
   for (const req of requests) {
     await tx.receiptRequest.update({
@@ -43,9 +45,13 @@ export async function rebindLinkedReceiptRequestsToTemplate(
       const oldNode = await tx.objectLimitNode.findUnique({ where: { id: item.limitNodeId } });
       if (!oldNode || oldNode.nodeType !== "MATERIAL") continue;
 
-      const oldTemplateNodes = await tx.objectLimitNode.findMany({
-        where: { templateId: oldNode.templateId }
-      });
+      let oldTemplateNodes = nodesByTemplateId.get(oldNode.templateId);
+      if (!oldTemplateNodes) {
+        oldTemplateNodes = await tx.objectLimitNode.findMany({
+          where: { templateId: oldNode.templateId }
+        });
+        nodesByTemplateId.set(oldNode.templateId, oldTemplateNodes);
+      }
       const oldById = new Map(oldTemplateNodes.map((n) => [n.id, n]));
       const pathKey = pathKeyForMaterialNode(oldNode, oldById);
       const nextEntry = nextIndex.get(pathKey);

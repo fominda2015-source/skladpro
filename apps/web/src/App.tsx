@@ -871,6 +871,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [limitsMessage, setLimitsMessage] = useState("");
   const [limitImportFile, setLimitImportFile] = useState<File | null>(null);
+  const [limitImportBusy, setLimitImportBusy] = useState(false);
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
   const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
@@ -1717,6 +1718,10 @@ function App() {
     if (activeTab === "warehouse" && stockFilterWarehouseId) return stockFilterWarehouseId;
     return "";
   }, [effectiveWarehouseId, activeTab, stockFilterWarehouseId]);
+  const limitsWarehouseId = useMemo(() => {
+    if (activeObjectId === ALL_OBJECTS_ID) return tabWarehouseFilters.limits || "";
+    return activeObjectId || "";
+  }, [activeObjectId, tabWarehouseFilters.limits]);
   const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
   const canWriteLimits = useMemo(
     () => hasPermission("limits.edit") || hasPermission("limits.write"),
@@ -2792,10 +2797,10 @@ function App() {
   }
 
   async function loadLimitTemplates() {
-    if (!token || !activeObjectId) return;
+    if (!token || !limitsWarehouseId) return;
     setLimitTemplatesLoading(true);
     const params = new URLSearchParams({
-      warehouseId: activeObjectId,
+      warehouseId: limitsWarehouseId,
       section: objectSectionFilter
     });
     try {
@@ -2842,52 +2847,80 @@ function App() {
   }
 
   async function uploadLimitTemplate() {
-    if (!token || !activeObjectId || !limitImportFile) return;
+    if (!token || !limitImportFile) return;
+    if (!limitsWarehouseId) {
+      setLimitsMessage("Выберите конкретный объект в шапке (не «Все объекты»).");
+      return;
+    }
     if (!canWriteLimits) {
       setLimitsMessage("Недостаточно прав для импорта лимитов");
       return;
     }
+    setLimitImportBusy(true);
+    setLimitsMessage("");
     const form = new FormData();
     form.append("file", limitImportFile);
-    form.append("warehouseId", activeObjectId);
+    form.append("warehouseId", limitsWarehouseId);
     form.append("section", objectSectionFilter);
-    const res = await fetchWithSession(`${API_URL}/api/limit-imports/upload`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form
-    });
-    if (!res.ok) {
-      setLimitsMessage("Не удалось загрузить лимиты из Excel");
-      return;
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/limit-imports/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        let msg = "Не удалось загрузить лимиты из Excel";
+        try {
+          const errBody = (await res.json()) as { error?: string; message?: string };
+          if (typeof errBody.message === "string" && errBody.message.trim()) {
+            msg = errBody.message.trim();
+          } else if (errBody.error === "Invalid body") {
+            msg = "Некорректные параметры (объект или раздел СС/ЭОМ)";
+          } else if (typeof errBody.error === "string" && errBody.error !== "Internal server error") {
+            msg = errBody.error;
+          }
+        } catch {
+          // ignore
+        }
+        setLimitsMessage(msg);
+        return;
+      }
+      const body = (await res.json()) as {
+        diff?: {
+          added: number;
+          removed: number;
+          qtyChanged: number;
+          preservedIssuedLines: number;
+        } | null;
+        rebind?: { requests: number; itemsRemapped: number };
+        rebindWarning?: string | null;
+      };
+      if (body.rebindWarning) {
+        setLimitsMessage(body.rebindWarning);
+      } else if (body.diff) {
+        const d = body.diff;
+        const rb = body.rebind;
+        const rebindNote =
+          rb && rb.requests > 0
+            ? ` Перепривязано приходных заявок к новому лимиту: ${rb.requests}${rb.itemsRemapped > 0 ? ` (позиций: ${rb.itemsRemapped})` : ""}.`
+            : "";
+        setLimitsMessage(
+          `Лимиты загружены. Новых позиций: ${d.added}, удалено: ${d.removed}, изменено кол-во: ${d.qtyChanged}, сохранено выдач по заполнению: ${d.preservedIssuedLines}.${rebindNote}`
+        );
+      } else {
+        setLimitsMessage("Лимиты загружены из Excel (первый импорт для раздела)");
+      }
+      if (body.rebind?.requests) {
+        await loadReceiptRequests().catch(() => undefined);
+      }
+      setLimitImportFile(null);
+      setExpandedLimitNodes({});
+      await loadLimitTemplates();
+    } catch (e) {
+      setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
+    } finally {
+      setLimitImportBusy(false);
     }
-    const body = (await res.json()) as {
-      diff?: {
-        added: number;
-        removed: number;
-        qtyChanged: number;
-        preservedIssuedLines: number;
-      } | null;
-      rebind?: { requests: number; itemsRemapped: number };
-    };
-    if (body.diff) {
-      const d = body.diff;
-      const rb = body.rebind;
-      const rebindNote =
-        rb && rb.requests > 0
-          ? ` Перепривязано приходных заявок к новому лимиту: ${rb.requests}${rb.itemsRemapped > 0 ? ` (позиций: ${rb.itemsRemapped})` : ""}.`
-          : "";
-      setLimitsMessage(
-        `Лимиты загружены. Новых позиций: ${d.added}, удалено: ${d.removed}, изменено кол-во: ${d.qtyChanged}, сохранено выдач по заполнению: ${d.preservedIssuedLines}.${rebindNote}`
-      );
-    } else {
-      setLimitsMessage("Лимиты загружены из Excel (первый импорт для раздела)");
-    }
-    if (body.rebind?.requests) {
-      await loadReceiptRequests().catch(() => undefined);
-    }
-    setLimitImportFile(null);
-    setExpandedLimitNodes({});
-    await loadLimitTemplates();
   }
 
   async function patchLimitTemplateTitle(templateId: string, title: string): Promise<boolean> {
@@ -5231,7 +5264,7 @@ function App() {
       setLimitNodeDrafts({});
       setLimitTemplateTitleDrafts({});
     }
-  }, [token, activeTab, activeObjectId, objectSectionFilter]);
+  }, [token, activeTab, limitsWarehouseId, objectSectionFilter]);
 
   useEffect(() => {
     if (!limitEditMode) {
@@ -7939,8 +7972,12 @@ function App() {
                   setLimitImportFile(file);
                 }}
               />
-              <button type="button" onClick={() => void uploadLimitTemplate()} disabled={!limitImportFile || !canWriteLimits}>
-                Импортировать
+              <button
+                type="button"
+                onClick={() => void uploadLimitTemplate()}
+                disabled={!limitImportFile || !canWriteLimits || limitImportBusy || !limitsWarehouseId}
+              >
+                {limitImportBusy ? "Импорт…" : "Импортировать"}
               </button>
             </div>
             {limitImportFile && <p className="muted">Файл: {limitImportFile.name}</p>}

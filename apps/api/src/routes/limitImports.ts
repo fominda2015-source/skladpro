@@ -18,6 +18,7 @@ import {
 } from "../lib/limitImportDiff.js";
 import { rebindLinkedReceiptRequestsToTemplate } from "../lib/limitTemplateRebind.js";
 import { findLimitMaterialNodesInSection } from "../lib/receiptOverageLimits.js";
+import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -324,12 +325,13 @@ limitImportsRouter.post(
   requirePermission("limits.edit"),
   upload.single("file"),
   async (req: AuthedRequest, res) => {
+    try {
     const parsed = importQuerySchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
     }
     if (!req.file?.buffer) {
-      return res.status(400).json({ error: "file is required" });
+      return res.status(400).json({ error: "file is required", message: "Выберите файл Excel" });
     }
     const scope = await getRequestDataScope(req);
     try {
@@ -339,19 +341,36 @@ limitImportsRouter.post(
       if (err.status === 403) return res.status(403).json({ error: err.message });
       throw e;
     }
-    const nodes = parseLimitSheet(req.file.buffer);
-    const title = parsed.data.title?.trim() || `Лимиты ${new Date().toLocaleDateString("ru-RU")}`;
-    const created = await prisma.$transaction(async (tx) => {
-      const previousTpl = await tx.objectLimitTemplate.findFirst({
-        where: {
-          warehouseId: parsed.data.warehouseId,
-          section: parsed.data.section
-        },
-        orderBy: { createdAt: "desc" },
-        include: { nodes: true }
+    let nodes: FlatNode[];
+    try {
+      nodes = parseLimitSheet(req.file.buffer);
+    } catch (e) {
+      const err = e as Error;
+      return res.status(400).json({
+        error: "INVALID_EXCEL",
+        message: err.message || "Не удалось разобрать Excel-файл"
       });
-      const prevIndex = previousTpl ? indexTemplateMaterials(previousTpl.nodes) : new Map();
+    }
+    if (!nodes.length) {
+      return res.status(400).json({
+        error: "EMPTY_SHEET",
+        message: "В файле не найдено строк лимита. Проверьте формат (жёлтые разделы, материалы без заливки)."
+      });
+    }
+    const title = parsed.data.title?.trim() || `Лимиты ${new Date().toLocaleDateString("ru-RU")}`;
 
+    const previousTpl = await prisma.objectLimitTemplate.findFirst({
+      where: {
+        warehouseId: parsed.data.warehouseId,
+        section: parsed.data.section
+      },
+      orderBy: { createdAt: "desc" },
+      include: { nodes: true }
+    });
+    const prevIndex = previousTpl ? indexTemplateMaterials(previousTpl.nodes) : new Map();
+
+    const created = await prisma.$transaction(
+      async (tx) => {
       const tpl = await tx.objectLimitTemplate.create({
         data: {
           warehouseId: parsed.data.warehouseId,
@@ -418,18 +437,33 @@ limitImportsRouter.post(
           : null;
       if (diff) diff.preservedIssuedLines = preservedIssuedLines;
 
-      const rebind =
-        previousTpl && previousTpl.nodes.length
-          ? await rebindLinkedReceiptRequestsToTemplate(tx, {
+      return { tpl, diff, nextNodes };
+    },
+      { timeout: 120_000 }
+    );
+
+    let rebind = { requests: 0, itemsRemapped: 0 };
+    let rebindWarning: string | null = null;
+    if (previousTpl && previousTpl.nodes.length) {
+      try {
+        rebind = await prisma.$transaction(
+          async (tx) =>
+            rebindLinkedReceiptRequestsToTemplate(tx, {
               warehouseId: parsed.data.warehouseId,
               section: parsed.data.section,
-              newTemplateId: tpl.id,
-              nextNodes
-            })
-          : { requests: 0, itemsRemapped: 0 };
+              newTemplateId: created.tpl.id,
+              nextNodes: created.nextNodes
+            }),
+          { timeout: 60_000 }
+        );
+      } catch (rebindErr) {
+        rebindWarning =
+          rebindErr instanceof Error
+            ? `Лимит загружен, но не удалось перепривязать заявки: ${rebindErr.message}`
+            : "Лимит загружен, но перепривязка заявок не выполнена";
+      }
+    }
 
-      return { tpl, diff, rebind };
-    });
     return res.status(201).json({
       id: created.tpl.id,
       nodes: nodes.length,
@@ -441,8 +475,20 @@ limitImportsRouter.post(
             preservedIssuedLines: created.diff.preservedIssuedLines
           }
         : null,
-      rebind: created.rebind
+      rebind,
+      rebindWarning
     });
+    } catch (error) {
+      const mapped = handlePrismaError(error);
+      if (mapped.status !== 500 || (mapped.body as { message?: string }).message) {
+        return res.status(mapped.status).json(mapped.body);
+      }
+      const err = error as Error;
+      return res.status(500).json({
+        error: "IMPORT_FAILED",
+        message: err.message || "Не удалось импортировать лимиты"
+      });
+    }
   }
 );
 
