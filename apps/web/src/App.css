@@ -140,6 +140,38 @@
   color: #9db2e7;
 }
 
+.navSectionTitle--wip {
+  color: #fbbf24;
+}
+
+.navBtnLabel {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.navBtn--wip {
+  border-color: rgba(251, 191, 36, 0.25);
+}
+
+.navBtn--wip:hover {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.navWipBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fbbf24;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.35));
+}
+
+.navWipBadgeSvg {
+  display: block;
+}
+
 .brandWrap {
   margin-bottom: 10px;
   padding: 10px 12px;

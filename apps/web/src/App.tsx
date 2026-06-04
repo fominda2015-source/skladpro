@@ -101,6 +101,7 @@ import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "./shared/quantity";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
+import { SidebarNav } from "./widgets/layout/SidebarNav";
 import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
@@ -720,7 +721,6 @@ function App() {
   const [manualStockUnitPrice, setManualStockUnitPrice] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
   const [qrScanError, setQrScanError] = useState("");
   const [qrStream, setQrStream] = useState<MediaStream | null>(null);
@@ -5629,79 +5629,29 @@ function App() {
           <p className="brandSub">Warehouse ERP</p>
         </div>
         <div className="sidebarNavScroll">
-          {canDashboard && <button className={`navBtn ${activeTab === "stocks" ? "active" : ""}`} onClick={() => setActiveTab("stocks")}><span className="navIcon">⌂</span>Главная</button>}
-          {canReadStocks && <button className={`navBtn ${activeTab === "warehouse" ? "active" : ""}`} onClick={() => setActiveTab("warehouse")}><span className="navIcon">▤</span>Склад</button>}
-          {canReadLimits && <button className={`navBtn ${activeTab === "limits" ? "active" : ""}`} onClick={() => setActiveTab("limits")}><span className="navIcon">⚑</span>Лимиты</button>}
-          {canReadIssues && <button className={`navBtn ${activeTab === "issues" ? "active" : ""}`} onClick={() => setActiveTab("issues")}><span className="navIcon">⇄</span>Выдачи</button>}
-          {canReadOperations && <button className={`navBtn ${activeTab === "operations" ? "active" : ""}`} onClick={() => setActiveTab("operations")}><span className="navIcon">↙</span>Приходы</button>}
-          {canReadIssues && <button className={`navBtn ${activeTab === "approvals" ? "active" : ""}`} onClick={() => setActiveTab("approvals")}><span className="navIcon">☑</span>Заявки</button>}
-          {canReadTools && <button className={`navBtn ${activeTab === "tools" ? "active" : ""}`} onClick={() => setActiveTab("tools")}><span className="navIcon">⚒</span>Инструменты</button>}
-          {canReadNotifications && (
-            <button
-              className={`navBtn ${activeTab === "notifications" ? "active" : ""}`}
-              type="button"
-              onClick={() => setActiveTab("notifications")}
-            >
-              <span className="navIcon">🔔</span>Уведомления
-              {unreadNotificationCount > 0 ? (
-                <span className="navUnreadBadge">
-                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                </span>
-              ) : null}
-            </button>
-          )}
-          <button
-            type="button"
-            className={`navBtn ${activeTab === "chat" ? "active" : ""}`}
-            onClick={() => setActiveTab("chat")}
-          >
-            <span className="navIcon">💬</span>Чат
-            {chatUnreadTotal > 0 ? (
-              <span className="navUnreadBadge">{chatUnreadTotal > 99 ? "99+" : chatUnreadTotal}</span>
-            ) : null}
-          </button>
-
-          <button
-            type="button"
-            className={`navBtn navMoreToggle ${sidebarMoreOpen ? "open" : ""}`}
-            onClick={() => setSidebarMoreOpen((v) => !v)}
-            aria-expanded={sidebarMoreOpen}
-          >
-            <span className="navIcon">{sidebarMoreOpen ? "▾" : "▸"}</span>Ещё
-          </button>
-
-          {sidebarMoreOpen ? (
-            <div className="navMoreGroup">
-              {canReadWaybills && <button className={`navBtn ${activeTab === "waybills" ? "active" : ""}`} onClick={() => setActiveTab("waybills")}><span className="navIcon">↔</span>Перемещения</button>}
-              {canReadDocuments && <button className={`navBtn ${activeTab === "documents" ? "active" : ""}`} onClick={() => setActiveTab("documents")}><span className="navIcon">▣</span>Документы</button>}
-              <button className={`navBtn ${activeTab === "acts" ? "active" : ""}`} onClick={() => setActiveTab("acts")}><span className="navIcon">▣</span>Акты</button>
-              {canMaterialReport && (
-                <button
-                  type="button"
-                  className={`navBtn ${activeTab === "materialReport" ? "active" : ""}`}
-                  onClick={() => setActiveTab("materialReport")}
-                >
-                  <span className="navIcon">▪</span>Материальный отчёт
-                </button>
-              )}
-              <button className={`navBtn ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}><span className="navIcon">📄</span>Сводка по объекту</button>
-              <button className={`navBtn ${activeTab === "camp" ? "active" : ""}`} onClick={() => setActiveTab("camp")}><span className="navIcon">▣</span>Городок</button>
-              {(canReadStocks || canWriteCatalog) && <button className={`navBtn ${activeTab === "catalog" ? "active" : ""}`} onClick={() => setActiveTab("catalog")}><span className="navIcon">▣</span>Справочники</button>}
-              {canReadTools && <button className={`navBtn ${activeTab === "qr" ? "active" : ""}`} onClick={() => setActiveTab("qr")}><span className="navIcon">⌁</span>QR-сканер</button>}
-              {(canReadIntegrations || canReadNotifications) && (
-                <button
-                  className={`navBtn ${activeTab === "integrations" ? "active" : ""}`}
-                  type="button"
-                  onClick={() => setActiveTab("integrations")}
-                >
-                  <span className="navIcon">⎘</span>Интеграции
-                </button>
-              )}
-              {canReadAudit && <button className={`navBtn ${activeTab === "audit" ? "active" : ""}`} onClick={() => setActiveTab("audit")}><span className="navIcon">◉</span>Логи действий</button>}
-              <button className={`navBtn ${activeTab === "feedback" ? "active" : ""}`} onClick={() => setActiveTab("feedback")}><span className="navIcon">🛠</span>Обратная связь</button>
-              {canManageUsers && <button className={`navBtn ${activeTab === "admin" ? "active" : ""}`} onClick={() => setActiveTab("admin")}><span className="navIcon">⚙</span>Доступы</button>}
-            </div>
-          ) : null}
+          <SidebarNav
+            activeTab={activeTab}
+            onSelectTab={(tab) => {
+              setActiveTab(tab as typeof activeTab);
+              setMobileNavOpen(false);
+            }}
+            canDashboard={canDashboard}
+            canReadStocks={canReadStocks}
+            canReadLimits={canReadLimits}
+            canMaterialReport={canMaterialReport}
+            canReadTools={canReadTools}
+            canReadIssues={canReadIssues}
+            canReadOperations={canReadOperations}
+            canReadWaybills={canReadWaybills}
+            canReadDocuments={canReadDocuments}
+            canWriteCatalog={canWriteCatalog}
+            canReadIntegrations={canReadIntegrations}
+            canReadNotifications={canReadNotifications}
+            canReadAudit={canReadAudit}
+            canManageUsers={canManageUsers}
+            unreadNotificationCount={unreadNotificationCount}
+            chatUnreadTotal={chatUnreadTotal}
+          />
         </div>
 
         <div className="sidebarFoot">
