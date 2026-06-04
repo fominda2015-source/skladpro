@@ -107,7 +107,11 @@ import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { SidebarNav } from "./widgets/layout/SidebarNav";
 import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
-import { buildLimitReceiptMetricsFromReceipts } from "./widgets/limits/limitReceiptMetrics";
+import {
+  buildLimitReceiptMetricsFromReceipts,
+  limitNodeArrivedQty,
+  mergeSupplyStockIntoArrivedMetrics
+} from "./widgets/limits/limitReceiptMetrics";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
@@ -911,7 +915,9 @@ function App() {
   );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   const [receiptLimitSourceFilter, setReceiptLimitSourceFilter] = useState<ReceiptLimitSourceFilter>("");
+  const [receiptSkipWarehouseStock, setReceiptSkipWarehouseStock] = useState(false);
   const receiptRequestsLoadSeq = useRef(0);
+  const sectionReloadSeq = useRef(0);
   const filteredReceiptRequests = useMemo(
     () => filterReceiptRequestsByLimitSource(receiptRequests, receiptLimitSourceFilter),
     [receiptRequests, receiptLimitSourceFilter]
@@ -921,25 +927,6 @@ function App() {
     [filteredReceiptRequests]
   );
 
-  const limitReceiptMetricsByNodeId = useMemo(() => {
-    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
-      return { arrivedByLimitNodeId: {} as Record<string, number>, onOrderByLimitNodeId: {} as Record<string, number> };
-    }
-    const limitMaterialNodes = limitTemplates.flatMap((tpl) =>
-      tpl.warehouseId === activeObjectId && tpl.section === objectSectionFilter
-        ? tpl.nodes
-            .filter((n) => n.nodeType === "MATERIAL")
-            .map((n) => ({ id: n.id, materialId: n.materialId ?? null }))
-        : []
-    );
-    return buildLimitReceiptMetricsFromReceipts(
-      receiptRequests,
-      stocks,
-      limitMaterialNodes,
-      activeObjectId,
-      objectSectionFilter
-    );
-  }, [receiptRequests, stocks, limitTemplates, activeObjectId, objectSectionFilter]);
   // Модалка «Заявка из лимита?» после загрузки Excel.
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
@@ -1721,6 +1708,43 @@ function App() {
     if (activeObjectId === ALL_OBJECTS_ID) return tabWarehouseFilters.limits || "";
     return activeObjectId || "";
   }, [activeObjectId, tabWarehouseFilters.limits]);
+
+  const limitReceiptMetricsByNodeId = useMemo(() => {
+    const limitWh =
+      activeObjectId === ALL_OBJECTS_ID ? limitsWarehouseId : activeObjectId;
+    if (!limitWh) {
+      return { arrivedByLimitNodeId: {} as Record<string, number>, onOrderByLimitNodeId: {} as Record<string, number> };
+    }
+    const limitMaterialNodes = limitTemplates.flatMap((tpl) =>
+      tpl.warehouseId === limitWh && tpl.section === objectSectionFilter
+        ? tpl.nodes
+            .filter((n) => n.nodeType === "MATERIAL")
+            .map((n) => ({ id: n.id, materialId: n.materialId ?? null }))
+        : []
+    );
+    const base = buildLimitReceiptMetricsFromReceipts(
+      receiptRequests,
+      stocks,
+      limitMaterialNodes,
+      limitWh,
+      objectSectionFilter
+    );
+    const arrivedByLimitNodeId = mergeSupplyStockIntoArrivedMetrics(
+      base.arrivedByLimitNodeId,
+      limitMaterialNodes,
+      limitSupplyByMaterialId
+    );
+    return { arrivedByLimitNodeId, onOrderByLimitNodeId: base.onOrderByLimitNodeId };
+  }, [
+    receiptRequests,
+    stocks,
+    limitTemplates,
+    activeObjectId,
+    limitsWarehouseId,
+    objectSectionFilter,
+    limitSupplyByMaterialId
+  ]);
+
   const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
   const canWriteLimits = useMemo(
     () => hasPermission("limits.edit") || hasPermission("limits.write"),
@@ -1838,7 +1862,7 @@ function App() {
     }
   }
 
-  async function loadStocks(search = "") {
+  async function loadStocks(search = "", sectionOverride?: "SS" | "EOM") {
     if (!token) {
       return;
     }
@@ -1848,7 +1872,7 @@ function App() {
     try {
       const params = new URLSearchParams();
       if (search) params.set("q", search);
-      params.set("section", objectSectionFilter);
+      params.set("section", sectionOverride ?? objectSectionFilter);
       const query = params.toString() ? `?${params.toString()}` : "";
       const res = await fetchWithSession(`${API_URL}/api/stocks${query}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -2005,8 +2029,55 @@ function App() {
     await updateAuthContext({ warehouseId, section: objectSectionFilter });
   }
 
+  function clearWorkspaceLists() {
+    setStocks([]);
+    setReceiptRequests([]);
+    setIssues([]);
+    setOperations([]);
+    setApprovalQueue([]);
+    setLimitTemplates([]);
+    setLimitIssuedTotals({});
+    setLimitSupplyByMaterialId({});
+  }
+
+  async function reloadWorkspaceData(section: "SS" | "EOM", tab: typeof activeTab) {
+    if (!token || mustPickObject || !activeObjectId) return;
+    const seq = ++sectionReloadSeq.current;
+    const tasks: Array<Promise<void>> = [
+      loadStocks(q, section),
+      loadIssues(section),
+      loadOperations(section),
+      loadApprovalQueue(section)
+    ];
+    const receiptWh =
+      activeObjectId === ALL_OBJECTS_ID
+        ? tabWarehouseFilters[tab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
+        : activeObjectId;
+    if (receiptWh) {
+      tasks.push(loadReceiptRequests(section, receiptWh));
+    } else {
+      setReceiptRequests([]);
+    }
+    if (limitsWarehouseId || activeObjectId !== ALL_OBJECTS_ID) {
+      tasks.push(loadLimitTemplates(section));
+    }
+    await Promise.all(tasks.map((p) => p.catch(() => undefined)));
+    if (seq !== sectionReloadSeq.current) return;
+    if (tab === "catalog" || tab === "operations" || tab === "tools" || tab === "warehouse") {
+      await loadCatalogData().catch(() => undefined);
+    }
+    if (tab === "issues") {
+      await loadProjects().catch(() => undefined);
+    }
+    if (tab === "documents") {
+      await loadDocuments().catch(() => undefined);
+    }
+  }
+
   function setSection(next: "SS" | "EOM") {
+    if (next === objectSectionFilter) return;
     setObjectSectionFilter(next);
+    clearWorkspaceLists();
     if (!token) return;
     if (activeObjectId === ALL_OBJECTS_ID) {
       void clearAuthContextWarehouse(next);
@@ -2795,12 +2866,12 @@ function App() {
     }
   }
 
-  async function loadLimitTemplates() {
+  async function loadLimitTemplates(sectionOverride?: "SS" | "EOM") {
     if (!token || !limitsWarehouseId) return;
     setLimitTemplatesLoading(true);
     const params = new URLSearchParams({
       warehouseId: limitsWarehouseId,
-      section: objectSectionFilter
+      section: sectionOverride ?? objectSectionFilter
     });
     try {
       const [templatesRes, issuedRes, supplyRes] = await Promise.all([
@@ -3035,12 +3106,21 @@ function App() {
     await loadLimitTemplates();
   }
 
-  async function loadReceiptRequests() {
-    if (!token || !activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
+  async function loadReceiptRequests(sectionOverride?: "SS" | "EOM", warehouseIdOverride?: string) {
+    if (!token) return;
+    const warehouseId =
+      warehouseIdOverride ??
+      (activeObjectId === ALL_OBJECTS_ID
+        ? tabWarehouseFilters[activeTab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
+        : activeObjectId);
+    if (!warehouseId) {
+      setReceiptRequests([]);
+      return;
+    }
     const seq = ++receiptRequestsLoadSeq.current;
     const params = new URLSearchParams({
-      warehouseId: activeObjectId,
-      section: objectSectionFilter,
+      warehouseId,
+      section: sectionOverride ?? objectSectionFilter,
       _: String(Date.now())
     });
     const res = await fetchWithSession(`${API_URL}/api/receipt-requests?${params.toString()}`, {
@@ -3272,7 +3352,11 @@ function App() {
     row: ReceiptRequestRow,
     mappings: ReturnType<typeof buildReceiptAcceptanceMappings>,
     extraFiles: File[],
-    opts?: { allowOverage?: boolean; allowLimitOverage?: boolean }
+    opts?: {
+      allowOverage?: boolean;
+      allowLimitOverage?: boolean;
+      skipWarehouseStock?: boolean;
+    }
   ): Promise<boolean> {
     if (!token) return false;
     const form = new FormData();
@@ -3282,7 +3366,8 @@ function App() {
         itemMappings: mappings,
         documentNumber: acceptanceDocNumbers[row.id] || undefined,
         allowOverage: opts?.allowOverage === true,
-        allowLimitOverage: opts?.allowLimitOverage === true
+        allowLimitOverage: opts?.allowLimitOverage === true,
+        skipWarehouseStock: opts?.skipWarehouseStock === true
       })
     );
     const filesToSend: File[] = [];
@@ -3463,7 +3548,11 @@ function App() {
     }
   }
 
-  async function submitReceiptAcceptance(row: ReceiptRequestRow, extraFiles: File[] = []): Promise<boolean> {
+  async function submitReceiptAcceptance(
+    row: ReceiptRequestRow,
+    extraFiles: File[] = [],
+    opts?: { skipWarehouseStock?: boolean }
+  ): Promise<boolean> {
     const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
     const mappings = buildReceiptAcceptanceMappings(freshRow);
     if (!mappings.length) {
@@ -3504,10 +3593,12 @@ function App() {
         }
       }
     }
-    return postReceiptAcceptance(freshRow, mappings, extraFiles);
+    return postReceiptAcceptance(freshRow, mappings, extraFiles, {
+      skipWarehouseStock: opts?.skipWarehouseStock ?? (isAdmin && receiptSkipWarehouseStock)
+    });
   }
 
-  async function loadIssues() {
+  async function loadIssues(sectionOverride?: "SS" | "EOM") {
     if (!token) return;
     setIssuesError("");
     setIssuesLoading(true);
@@ -3516,7 +3607,7 @@ function App() {
       if (issueStatusFilter) params.set("status", issueStatusFilter);
       if (issueBasisFilter) params.set("basisType", issueBasisFilter);
       if (activeTab === "issues" && issueFlowFilter) params.set("flowType", issueFlowFilter);
-      params.set("section", objectSectionFilter);
+      params.set("section", sectionOverride ?? objectSectionFilter);
       if (activeTab === "issues") {
         params.set("domain", issueIssuesDomain);
       }
@@ -4113,11 +4204,11 @@ function App() {
     }
   }
 
-  async function loadApprovalQueue() {
+  async function loadApprovalQueue(sectionOverride?: "SS" | "EOM") {
     if (!token) return;
     const params = new URLSearchParams();
     params.set("status", "ON_APPROVAL");
-    params.set("section", objectSectionFilter);
+    params.set("section", sectionOverride ?? objectSectionFilter);
     params.set("domain", approvalQueueTab);
     const res = await fetchWithSession(`${API_URL}/api/issues?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -4127,9 +4218,10 @@ function App() {
     setApprovalQueue(Array.isArray(payload) ? payload : payload.items);
   }
 
-  async function loadOperations() {
+  async function loadOperations(sectionOverride?: "SS" | "EOM") {
     if (!token) return;
-    const res = await fetchWithSession(`${API_URL}/api/operations?section=${encodeURIComponent(objectSectionFilter)}`, {
+    const section = sectionOverride ?? objectSectionFilter;
+    const res = await fetchWithSession(`${API_URL}/api/operations?section=${encodeURIComponent(section)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
@@ -4836,16 +4928,10 @@ function App() {
     void loadConversations();
   }, [token]);
 
-  // Перезагрузка данных при смене объекта или раздела СС/ЭОМ.
+  // Перезагрузка данных при смене объекта, раздела СС/ЭОМ или фильтра объекта на вкладке.
   useEffect(() => {
     if (!token || mustPickObject || !activeObjectId) return;
-    void loadStocks(q);
-    void loadIssues();
-    void loadReceiptRequests();
-    void loadOperations();
-    void loadLimitTemplates();
-    void loadApprovalQueue();
-    void loadCatalogData().catch(() => undefined);
+    void reloadWorkspaceData(objectSectionFilter, activeTab);
   }, [token, mustPickObject, activeObjectId, objectSectionFilter, tabWarehouseFilters, activeTab]);
 
   useEffect(() => {
@@ -5031,12 +5117,8 @@ function App() {
   useEffect(() => {
     if (token && (activeTab === "catalog" || activeTab === "operations")) {
       void loadCatalogData();
-      if (activeTab === "operations") {
-        void loadOperations();
-        void loadReceiptRequests();
-      }
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter, activeObjectId]);
+  }, [token, activeTab, toolSearch, toolStatusFilter]);
 
   useEffect(() => {
     if (token && activeTab === "issues") {
@@ -5287,23 +5369,24 @@ function App() {
   useEffect(() => {
     if (token && activeTab === "approvals") {
       setExpandedReceiptIds({});
-      void loadApprovalQueue();
-      void loadReceiptRequests();
     }
-  }, [token, activeTab, approvalQueueTab, objectSectionFilter, activeObjectId]);
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "approvals") return;
+    void loadApprovalQueue();
+  }, [token, activeTab, approvalQueueTab]);
 
   useEffect(() => {
     if (token && activeTab === "limits") {
       void loadCatalogData();
       void loadProjects();
-      void loadLimitTemplates();
       void loadStockMovements();
-      void loadReceiptRequests();
       setExpandedLimitNodes({});
       setLimitNodeDrafts({});
       setLimitTemplateTitleDrafts({});
     }
-  }, [token, activeTab, limitsWarehouseId, objectSectionFilter]);
+  }, [token, activeTab, limitsWarehouseId]);
 
   useEffect(() => {
     if (!limitEditMode) {
@@ -5314,12 +5397,9 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "warehouse") {
-      // Нужно для кнопки «Добавить материал вручную»: модал использует список складов и каталог материалов.
       void loadCatalogData().catch(() => undefined);
-      void loadLimitTemplates();
-      void loadReceiptRequests().catch(() => undefined);
     }
-  }, [token, activeTab, activeObjectId, objectSectionFilter]);
+  }, [token, activeTab]);
 
   useEffect(() => {
     if (token && activeTab === "documents") {
@@ -5649,6 +5729,16 @@ function App() {
               </li>
             ))}
           </ul>
+          {isAdmin ? (
+            <label className="whCheck" style={{ display: "block", marginBottom: 10 }}>
+              <input
+                type="checkbox"
+                checked={receiptSkipWarehouseStock}
+                onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
+              />
+              Без прихода на склад (только учёт по заявке)
+            </label>
+          ) : null}
           <label>
             Сканы документов (УПД, ТН, фото, можно несколько)
             <input
@@ -6656,7 +6746,7 @@ function App() {
                         <button
                           type="button"
                           className="ghostBtn"
-                          title="Закрыть заявку: все позиции будут отмечены как принятые"
+                          title="Закрыть заявку без прихода на склад: позиции отмечаются принятыми, остатки не меняются"
                           onClick={() => void closeReceiptRequest(row.id)}
                         >
                           Закрыть
@@ -7120,6 +7210,16 @@ function App() {
                           </div>
 
                           <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                            {isAdmin ? (
+                              <label className="whCheck" style={{ marginRight: 8 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={receiptSkipWarehouseStock}
+                                  onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
+                                />
+                                Без прихода на склад (только заявка)
+                              </label>
+                            ) : null}
                             <button
                               type="button"
                               className="ghostBtn"
@@ -8101,8 +8201,8 @@ function App() {
                     }
                     if (node.nodeType === "MATERIAL") {
                       const plan = Number(node.plannedQty || 0);
-                      const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[nodeId] ?? 0;
                       const matNode = tpl.nodes.find((x) => x.id === nodeId);
+                      const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[nodeId] ?? 0;
                       const issued = Number(matNode?.issuedQty || 0);
                       const a: NodeAgg = { plan, arrived, issued };
                       aggByNodeId.set(nodeId, a);
@@ -8191,7 +8291,12 @@ function App() {
                     const isExpanded = Boolean(expandedLimitNodes[node.id]);
                     const planned = Number(node.plannedQty || 0);
                       const issued = Number(node.issuedQty || 0);
-                    const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[node.id] ?? 0;
+                    const arrived = limitNodeArrivedQty(
+                      node.id,
+                      node.materialId,
+                      limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
+                      node.materialId ? limitSupplyByMaterialId[node.materialId] : null
+                    );
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
                     const qtyText = `${Math.round(issued)} / ${Number.isFinite(planned) ? planned : 0} ${node.unit || "шт"}`;
@@ -8647,10 +8752,16 @@ function App() {
                               <tbody>
                                 {directMaterials.map((m) => {
                                   const plan = Number(m.plannedQty || 0);
-                                  const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[m.id] ?? 0;
+                                  const supply = m.materialId ? limitSupplyByMaterialId[m.materialId] : undefined;
+                                  const arrived = limitNodeArrivedQty(
+                                    m.id,
+                                    m.materialId,
+                                    limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
+                                    supply
+                                  );
                                   const iss = Number(m.issuedQty || 0);
                                   const onOrd = limitReceiptMetricsByNodeId.onOrderByLimitNodeId[m.id] ?? 0;
-                                  const stk = m.materialId ? limitSupplyByMaterialId[m.materialId]?.stockQty ?? 0 : 0;
+                                  const stk = m.materialId ? supply?.stockQty ?? 0 : 0;
                                   const transferredOut = Number(m.transferredOutQty || 0);
                                   const remain = Math.max(0, plan - arrived);
                                   const mDiff = importDiff?.statusByNodeId.get(m.id);
@@ -12166,7 +12277,8 @@ function App() {
             void (async () => {
               const ok = await postReceiptAcceptance(freshRow, nextMappings, extraFiles, {
                 allowOverage: flags.allowOverage === true,
-                allowLimitOverage: flags.allowLimitOverage === true
+                allowLimitOverage: flags.allowLimitOverage === true,
+                skipWarehouseStock: isAdmin && receiptSkipWarehouseStock
               });
               if (ok) {
                 setPendingAcceptanceRequestId(null);

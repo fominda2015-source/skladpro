@@ -58,7 +58,7 @@ function receiptMetricsFromRequests(
 }
 
 /** Узел, на который относим остаток склада (где уже есть приход по заявкам). */
-function pickStockAttributionNode(
+export function pickStockAttributionNode(
   nodeIds: string[],
   arrivedByLimitNodeId: Record<string, number>
 ): string {
@@ -116,4 +116,40 @@ export function buildLimitReceiptMetricsFromReceipts(
   }
 
   return { arrivedByLimitNodeId, onOrderByLimitNodeId };
+}
+
+type SupplyMetricLike = { stockQty?: number; arrivedQty?: number };
+
+/** Приход по строке лимита: заявки на узел + движения INCOME + остаток на складе. */
+export function limitNodeArrivedQty(
+  nodeId: string,
+  materialId: string | null | undefined,
+  arrivedByLimitNodeId: Record<string, number>,
+  supply?: SupplyMetricLike | null
+): number {
+  const base = arrivedByLimitNodeId[nodeId] ?? 0;
+  if (!materialId || !supply) return base;
+  const stockQty = parseMaterialQty(supply.stockQty);
+  const movementArrived = parseMaterialQty(supply.arrivedQty);
+  return Math.max(base, movementArrived, stockQty);
+}
+
+/** Остаток/приход из supply-metrics — один раз на materialId (для агрегатов групп). */
+export function mergeSupplyStockIntoArrivedMetrics(
+  arrivedByLimitNodeId: Record<string, number>,
+  limitMaterialNodes: LimitMaterialNodeRef[],
+  supplyByMaterialId: Record<string, SupplyMetricLike>
+): Record<string, number> {
+  const next = { ...arrivedByLimitNodeId };
+  for (const [materialId, supply] of Object.entries(supplyByMaterialId)) {
+    const stockQty = parseMaterialQty(supply.stockQty);
+    const movementArrived = parseMaterialQty(supply.arrivedQty);
+    const extra = Math.max(stockQty, movementArrived);
+    if (extra <= 0) continue;
+    const nodeIds = limitMaterialNodes.filter((n) => n.materialId === materialId).map((n) => n.id);
+    if (!nodeIds.length) continue;
+    const targetId = pickStockAttributionNode(nodeIds, next);
+    next[targetId] = Math.max(next[targetId] || 0, extra);
+  }
+  return next;
 }

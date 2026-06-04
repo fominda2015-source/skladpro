@@ -336,8 +336,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                 <th className="whColNum whHideSm">Доступно</th>
                 <th className="whColNum whHideSm">Остаток</th>
                 {showReserve ? <th className="whColNum whHideSm">Резерв</th> : null}
-                <th className="whColLoc whHideMd">Место</th>
-                {showPrice ? <th className="whColNum whHideMd">Цена</th> : null}
+                <th className="whColLoc">Место</th>
+                <th className="whColNum">Цена</th>
                 <th className="whColAct" aria-label="Действия" />
               </tr>
             </thead>
@@ -346,7 +346,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                 const expanded = expandedRowId === row.id;
                 const updFactsCount = updFactsByMaterialId.get(row.materialId)?.size || 0;
                 const movements = movementsByKey.get(`${row.warehouseId}::${row.materialId}`) || [];
-                const colSpan = 5 + (showReserve ? 1 : 0) + (showPrice ? 1 : 0);
+                const colSpan = 6 + (showReserve ? 1 : 0);
 
                 return (
                   <Fragment key={row.id}>
@@ -395,6 +395,16 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                             {updFactsCount > 0 ? (
                               <span className="muted"> · УПД: {updFactsCount}</span>
                             ) : null}
+                            <span className="muted whHideMd">
+                              {" "}
+                              · {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
+                            </span>
+                            {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                              <span className="muted whHideMd">
+                                {" "}
+                                · {fmtQty(Number(row.unitPrice), 2)} ₽/ед.
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                       </td>
@@ -411,16 +421,14 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                           {fmtQty(Number(row.reserved))}
                         </td>
                       ) : null}
-                      <td className="whColLoc whHideMd muted">
+                      <td className="whColLoc muted">
                         {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
                       </td>
-                      {showPrice ? (
-                        <td className="whColNum whHideMd muted">
-                          {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
-                            ? `${fmtQty(Number(row.unitPrice), 2)} ₽`
-                            : "—"}
-                        </td>
-                      ) : null}
+                      <td className="whColNum muted">
+                        {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
+                          ? `${fmtQty(Number(row.unitPrice), 2)} ₽`
+                          : "—"}
+                      </td>
                       <td className="whColAct" onClick={(e) => e.stopPropagation()}>
                         <div className="whActBtns">
                           {canOpenMaterialCard ? (
