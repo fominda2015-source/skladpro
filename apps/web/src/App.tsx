@@ -101,6 +101,7 @@ import { ToolsInventoryBlock } from "./widgets/tools/ToolsInventoryBlock";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
+import { isUpdFactName } from "./shared/materialFactNames";
 import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "./shared/quantity";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { SidebarNav } from "./widgets/layout/SidebarNav";
@@ -600,14 +601,6 @@ type ReceiptRequestRow = {
   detectedOrderNumber?: string | null;
   detectedProjectTitle?: string | null;
 };
-type MaterialMappingRow = {
-  id: string;
-  sourceName: string;
-  sourceUnit?: string | null;
-  targetMaterialId: string;
-  targetMaterial?: { id: string; name: string; unit: string; sku?: string | null };
-};
-
 function isReceiptItemOpen(it: ReceiptRequestItem): boolean {
   return receiptItemRemainingQty(it) > 0;
 }
@@ -974,7 +967,6 @@ function App() {
   const [issueRecipientDraft, setIssueRecipientDraft] = useState("");
   const [issueRecipientSignedFile, setIssueRecipientSignedFile] = useState<File | null>(null);
   const [directIssueSignedFile, setDirectIssueSignedFile] = useState<File | null>(null);
-  const [materialMappings, setMaterialMappings] = useState<MaterialMappingRow[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
   const [docSearchQuery, setDocSearchQuery] = useState("");
@@ -1411,17 +1403,7 @@ function App() {
     limitMaterialNameSet
   ]);
 
-  const materialMappingsByTargetId = useMemo(() => {
-    const map = new Map<string, MaterialMappingRow[]>();
-    for (const row of materialMappings) {
-      const arr = map.get(row.targetMaterialId) || [];
-      arr.push(row);
-      map.set(row.targetMaterialId, arr);
-    }
-    return map;
-  }, [materialMappings]);
-
-  // Сколько чего пришло по каждому «фактическому названию», сгруппировано по
+  // Сколько принято по каждому названию из УПД (factLabel), сгруппировано по карточке материала.
   // материалу-таргету. Заполняется из acceptedQty по позициям заявок.
   const acceptedBySourceByTargetId = useMemo(() => {
     const map = new Map<
@@ -1434,16 +1416,18 @@ function App() {
         const accepted = parseMaterialQty(it.acceptedQty);
         if (!Number.isFinite(accepted) || accepted <= 0) continue;
         const factName = (it.factLabel || "").trim();
-        const displayName = factName || it.sourceName;
+        if (!factName) continue;
+        const canon = (it.mappedMaterial?.name || it.sourceName).trim();
+        if (!isUpdFactName(factName, canon)) continue;
         const displayUnit = (it.factUnit || "").trim() || it.sourceUnit || "";
-        const key = `${displayName}|${displayUnit}`;
+        const key = `${factName}|${displayUnit}`;
         const bucket = map.get(it.mappedMaterialId) || new Map();
         const prev = bucket.get(key);
         if (prev) {
           prev.quantity += accepted;
         } else {
           bucket.set(key, {
-            sourceName: displayName,
+            sourceName: factName,
             sourceUnit: displayUnit,
             quantity: accepted
           });
@@ -1469,11 +1453,7 @@ function App() {
       rows = rows.filter((r) => r.isLow);
     }
     if (stockOnlyWithFactNames) {
-      rows = rows.filter(
-        (r) =>
-          (materialMappingsByTargetId.get(r.materialId)?.length ?? 0) > 0 ||
-          (acceptedBySourceByTargetId.get(r.materialId)?.size ?? 0) > 0
-      );
+      rows = rows.filter((r) => (acceptedBySourceByTargetId.get(r.materialId)?.size ?? 0) > 0);
     }
     return rows;
   }, [
@@ -1483,7 +1463,6 @@ function App() {
     stockOnlyAvailable,
     stockOnlyLow,
     stockOnlyWithFactNames,
-    materialMappingsByTargetId,
     acceptedBySourceByTargetId
   ]);
 
@@ -1512,59 +1491,26 @@ function App() {
       if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
       const mid = s.materialId;
       const bucket = acceptedBySourceByTargetId.get(mid);
-      const maps = materialMappingsByTargetId.get(mid) ?? [];
-      const consumedUk = new Set<string>();
+      if (!bucket?.size) continue;
       const av = Number(s.available);
-      const pushRow = (partial: Omit<IssuePickCartLine, "pickKey"> & { pickKey: string }) => {
-        out.push(partial);
-      };
-
-      if (bucket?.size) {
-        for (const v of bucket.values()) {
-          const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
-          consumedUk.add(uk);
-          pushRow({
-            pickKey: `${mid}::a:${encodeURIComponent(uk)}`,
-            materialId: mid,
-            factLabel: v.sourceName,
-            canonName: s.materialName,
-            unit: v.sourceUnit || s.materialUnit,
-            sku: s.materialSku,
-            available: av,
-            acceptedQty: v.quantity
-          });
-        }
-      }
-      for (const m of maps) {
-        const uk = `${m.sourceName}|${m.sourceUnit || ""}`;
-        if (consumedUk.has(uk)) continue;
-        consumedUk.add(uk);
-        pushRow({
-          pickKey: `${mid}::m:${m.id}`,
+      for (const v of bucket.values()) {
+        const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
+        out.push({
+          pickKey: `${mid}::upd:${encodeURIComponent(uk)}`,
           materialId: mid,
-          factLabel: m.sourceName,
+          factLabel: v.sourceName,
           canonName: s.materialName,
-          unit: m.sourceUnit || s.materialUnit,
+          unit: v.sourceUnit || s.materialUnit,
           sku: s.materialSku,
-          available: av
-        });
-      }
-      if (consumedUk.size === 0) {
-        pushRow({
-          pickKey: `${mid}::nom`,
-          materialId: mid,
-          factLabel: null,
-          canonName: s.materialName,
-          unit: s.materialUnit,
-          sku: s.materialSku,
-          available: av
+          available: av,
+          acceptedQty: v.quantity
         });
       }
     }
     return out.sort((a, b) =>
-      (a.factLabel || a.canonName).localeCompare(b.factLabel || b.canonName, "ru", { sensitivity: "base" })
+      (a.factLabel || "").localeCompare(b.factLabel || "", "ru", { sensitivity: "base" })
     );
-  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, materialMappingsByTargetId]);
+  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId]);
 
   const issueFacingRowsFiltered = useMemo(() => {
     const qLower = issueMaterialSearch.trim().toLowerCase();
@@ -3086,19 +3032,6 @@ function App() {
     return normalized;
   }
 
-  async function loadMaterialMappings() {
-    if (!token || !activeObjectId) return;
-    const params = new URLSearchParams({
-      warehouseId: activeObjectId,
-      section: objectSectionFilter
-    });
-    const res = await fetchWithSession(`${API_URL}/api/material-mappings?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    setMaterialMappings((await res.json()) as MaterialMappingRow[]);
-  }
-
   async function uploadReceiptRequest() {
     if (!token || !receiptRequestFile) return;
     if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
@@ -3436,7 +3369,6 @@ function App() {
         delete next[row.id];
         return next;
       });
-      await loadMaterialMappings();
       await loadStocks(q);
       await loadOperations();
       if (row.objectLimitTemplateId || row.fromLimit) {
@@ -3866,12 +3798,17 @@ function App() {
       .map((row) => ({
         materialId: row.materialId,
         quantity: parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1) || MATERIAL_QTY_MIN,
-        factLabel: row.factLabel?.trim() ? row.factLabel.trim() : undefined,
+        factLabel: row.factLabel?.trim() || "",
         limitNodeId: row.limitNodeId || undefined
       }))
       .filter((line) => line.materialId && line.quantity > 0);
     if (!lines.length) {
       setIssuesMessage("Добавьте хотя бы один материал в список выдачи");
+      setIssuesTone("error");
+      return;
+    }
+    if (lines.some((line) => !line.factLabel)) {
+      setIssuesMessage("Выдача только по фактическим названиям из УПД — выберите строку из списка «Что выдавать»");
       setIssuesTone("error");
       return;
     }
@@ -4840,7 +4777,6 @@ function App() {
     void loadStocks(q);
     void loadIssues();
     void loadReceiptRequests();
-    void loadMaterialMappings();
     void loadOperations();
     void loadLimitTemplates();
     void loadApprovalQueue();
@@ -5033,7 +4969,6 @@ function App() {
       if (activeTab === "operations") {
         void loadOperations();
         void loadReceiptRequests();
-        void loadMaterialMappings();
       }
     }
   }, [token, activeTab, toolSearch, toolStatusFilter, objectSectionFilter, activeObjectId]);
@@ -5045,7 +4980,6 @@ function App() {
       void loadIssues();
       void loadStocks(q);
       void loadLimitTemplates().catch(() => undefined);
-      void loadMaterialMappings();
       void loadReceiptRequests();
     }
   }, [
@@ -5318,7 +5252,6 @@ function App() {
       // Нужно для кнопки «Добавить материал вручную»: модал использует список складов и каталог материалов.
       void loadCatalogData().catch(() => undefined);
       void loadLimitTemplates();
-      void loadMaterialMappings();
       void loadReceiptRequests().catch(() => undefined);
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
@@ -6017,8 +5950,7 @@ function App() {
             }}
             onDeleteMaterial={deleteWarehouseMaterial}
             movementsByKey={movementSlicesByStockKey}
-            mappingsByMaterialId={materialMappingsByTargetId}
-            acceptedByMaterialId={acceptedBySourceByTargetId}
+            updFactsByMaterialId={acceptedBySourceByTargetId}
             movementsLoading={stockMovementsLoading}
             movementsError={stockMovementsError}
           />
@@ -7458,8 +7390,8 @@ function App() {
                 <div>
                   <h3 style={{ margin: 0 }}>Что выдавать</h3>
                   <p className="muted" style={{ margin: "4px 0 0" }}>
-                    Сначала строки из <strong>фактических названий</strong> (УПД/сопоставления). Если названий несколько —
-                    они развёрнуты отдельно; остаток один на номенклатуру карточки.
+                    Только <strong>названия по УПД</strong> из принятых приходов (отдельно от номенклатуры карточки).
+                    Если названий несколько — каждое отдельной строкой; остаток на складе общий на карточку.
                   </p>
                 </div>
                 <span className="muted">
@@ -7478,14 +7410,14 @@ function App() {
                   if (!rows.length) {
                     return (
                       <p className="muted">
-                        Нет позиций с остатком или нет совпадений по поиску. Загрузите остатки и убедитесь, что есть
-                        сопоставления/приходы по заявкам.
+                        Нет позиций с остатком и УПД-названиями. При приёмке укажите «Как в УПД», отличное от
+                        номенклатуры в заявке.
                       </p>
                     );
                   }
                   return rows.map((r) => {
                     const selected = issuePickCart.some((p) => p.pickKey === r.pickKey);
-                    const title = r.factLabel ? safeName(r.factLabel) : safeName(r.canonName);
+                    const title = safeName(r.factLabel || r.canonName);
                     return (
                       <button
                         type="button"
@@ -7538,7 +7470,7 @@ function App() {
                       .filter((c) => c.materialId === row.materialId)
                       .reduce((acc, c) => acc + parseMaterialQty(issuePickQtyByKey[c.pickKey] ?? 1), 0);
                     const exceeds = stockRow ? totalSameMaterial > stockRow.available : false;
-                    const lineTitle = row.factLabel ? safeName(row.factLabel) : safeName(row.canonName);
+                    const lineTitle = safeName(row.factLabel || "");
                     return (
                       <div key={`cart-${row.pickKey}`} className={`issueCartRow ${exceeds ? "warn" : ""}`}>
                         <div className="issueCartName">

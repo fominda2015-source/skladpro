@@ -19,8 +19,7 @@ export type WarehouseStockRow = {
   isLow: boolean;
 };
 
-type MappingRow = { id: string; sourceName: string; sourceUnit?: string | null };
-type AcceptedEntry = { sourceName: string; sourceUnit: string; quantity: number };
+type UpdFactEntry = { sourceName: string; sourceUnit: string; quantity: number };
 type MovementSlice = {
   id: string;
   createdAt: string;
@@ -76,8 +75,8 @@ export type WarehouseStockViewProps = {
   onOpenMaterialCard: (materialId: string, warehouseId: string) => void;
   onDeleteMaterial: (materialId: string, materialName: string) => void;
   movementsByKey: Map<string, MovementSlice[]>;
-  mappingsByMaterialId: Map<string, MappingRow[]>;
-  acceptedByMaterialId: Map<string, Map<string, AcceptedEntry>>;
+  /** Принятые названия по УПД (только factLabel ≠ номенклатура карточки). */
+  updFactsByMaterialId: Map<string, Map<string, UpdFactEntry>>;
   movementsLoading?: boolean;
   movementsError?: string;
 };
@@ -142,8 +141,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     onOpenMaterialCard,
     onDeleteMaterial,
     movementsByKey,
-    mappingsByMaterialId,
-    acceptedByMaterialId,
+    updFactsByMaterialId,
     movementsLoading,
     movementsError
   } = props;
@@ -346,8 +344,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
             <tbody>
               {rows.map((row) => {
                 const expanded = expandedRowId === row.id;
-                const factsCount = mappingsByMaterialId.get(row.materialId)?.length || 0;
-                const acceptedCount = acceptedByMaterialId.get(row.materialId)?.size || 0;
+                const updFactsCount = updFactsByMaterialId.get(row.materialId)?.size || 0;
                 const movements = movementsByKey.get(`${row.warehouseId}::${row.materialId}`) || [];
                 const colSpan = 5 + (showReserve ? 1 : 0) + (showPrice ? 1 : 0);
 
@@ -395,8 +392,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                             {showSku && row.materialSku ? (
                               <span className="muted"> · {row.materialSku}</span>
                             ) : null}
-                            {(factsCount > 0 || acceptedCount > 0) ? (
-                              <span className="muted"> · факт: {factsCount + acceptedCount}</span>
+                            {updFactsCount > 0 ? (
+                              <span className="muted"> · УПД: {updFactsCount}</span>
                             ) : null}
                           </span>
                         </div>
@@ -551,32 +548,29 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                 </span>
                               ) : null}
                             </div>
-                            {(factsCount > 0 || acceptedCount > 0) ? (
+                            {updFactsCount > 0 ? (
                               <section className="whDetailBlock">
-                                <h4>Фактические названия</h4>
+                                <h4>Названия по УПД</h4>
+                                <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+                                  Номенклатура карточки: {row.materialName}
+                                </p>
                                 <ul className="whDetailList">
-                                  {[...(acceptedByMaterialId.get(row.materialId)?.values() || [])].map(
+                                  {[...(updFactsByMaterialId.get(row.materialId)?.values() || [])].map(
                                     (x, i) => (
-                                      <li key={`acc-${row.id}-${i}`}>
+                                      <li key={`upd-${row.id}-${i}`}>
                                         <strong>{x.sourceName}</strong> ({x.sourceUnit || row.materialUnit}) —{" "}
                                         принято {fmtQty(x.quantity)}
                                       </li>
                                     )
                                   )}
-                                  {(mappingsByMaterialId.get(row.materialId) || [])
-                                    .filter((m) => {
-                                      const bucket = acceptedByMaterialId.get(row.materialId);
-                                      return !bucket?.has(`${m.sourceName}|${m.sourceUnit || ""}`);
-                                    })
-                                    .map((m) => (
-                                      <li key={m.id}>
-                                        {m.sourceName} ({m.sourceUnit || row.materialUnit}) —{" "}
-                                        <span className="muted">не принято</span>
-                                      </li>
-                                    ))}
                                 </ul>
                               </section>
-                            ) : null}
+                            ) : (
+                              <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                                Фактических названий по УПД нет — при приёмке укажите наименование из документа,
+                                отличное от номенклатуры в заявке.
+                              </p>
+                            )}
                             <section className="whDetailBlock">
                               <h4>Движения</h4>
                               {movementsLoading ? <p className="muted">Загрузка…</p> : null}
