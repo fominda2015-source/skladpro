@@ -3415,6 +3415,9 @@ function App() {
       await loadMaterialMappings();
       await loadStocks(q);
       await loadOperations();
+      if (row.objectLimitTemplateId || row.fromLimit) {
+        await loadLimitTemplates().catch(() => undefined);
+      }
       await loadNotifications();
       if (canReadTools) {
         for (const m of mappings) {

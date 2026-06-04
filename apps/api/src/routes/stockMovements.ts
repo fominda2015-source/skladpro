@@ -135,7 +135,6 @@ stockMovementsRouter.get("/supply-metrics", async (req: AuthedRequest, res) => {
 
   const openReceiptItems = await prisma.receiptRequestItem.findMany({
     where: {
-      mappedMaterialId: { not: null },
       receiptRequest: {
         warehouseId,
         section,
@@ -145,13 +144,15 @@ stockMovementsRouter.get("/supply-metrics", async (req: AuthedRequest, res) => {
     select: {
       mappedMaterialId: true,
       quantity: true,
-      acceptedQty: true
+      acceptedQty: true,
+      limitNode: { select: { materialId: true } }
     }
   });
 
   const onOrderByMaterial = new Map<string, number>();
   for (const it of openReceiptItems) {
-    const mid = it.mappedMaterialId!;
+    const mid = it.mappedMaterialId || it.limitNode?.materialId;
+    if (!mid) continue;
     const rem = Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
     if (rem <= 0) continue;
     onOrderByMaterial.set(mid, (onOrderByMaterial.get(mid) || 0) + rem);

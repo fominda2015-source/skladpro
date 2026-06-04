@@ -13,8 +13,10 @@ import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from ".
 import { handlePrismaError } from "../lib/errors.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
+  attachMaterialToLimitNode,
   ensureMaterialInCurrentLimitTemplate,
   findLimitNodesAcrossWarehouse,
+  resolveMaterialIdForLimitNode,
   resolveReceiptAcceptLimitNode
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
@@ -187,15 +189,12 @@ async function resolveReceiptTargetMaterialId(
   item: { sourceName: string; sourceUnit: string; mappedMaterialId: string | null; limitNodeId: string | null },
   mapping: { materialId?: string; newMaterialName?: string }
 ): Promise<string | undefined> {
+  if (item.limitNodeId) {
+    const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
+    if (fromNode) return fromNode;
+  }
   if (mapping.materialId) return mapping.materialId;
   if (item.mappedMaterialId) return item.mappedMaterialId;
-  if (item.limitNodeId) {
-    const node = await tx.objectLimitNode.findUnique({
-      where: { id: item.limitNodeId },
-      select: { materialId: true }
-    });
-    if (node?.materialId) return node.materialId;
-  }
   const cardName = item.sourceName.trim();
   if (cardName) {
     return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт");
@@ -446,11 +445,15 @@ receiptRequestsRouter.post(
             if (!src) continue;
             const sync = await syncReceiptItemToLimitTemplate(tx, attachedTemplateId, src);
             if (sync.limitNodeId || sync.limitNameRenamed) {
+              const mappedMaterialId = sync.limitNodeId
+                ? await resolveMaterialIdForLimitNode(tx, sync.limitNodeId)
+                : null;
               await tx.receiptRequestItem.update({
                 where: { id: item.id },
                 data: {
                   limitNodeId: sync.limitNodeId,
-                  limitNameRenamed: sync.limitNameRenamed
+                  limitNameRenamed: sync.limitNameRenamed,
+                  ...(mappedMaterialId ? { mappedMaterialId } : {})
                 }
               });
             }
@@ -598,9 +601,14 @@ receiptRequestsRouter.patch(
             nameAlertNote: meta.nameAlertNote
           });
           if (sync.limitNodeId) {
+            const mappedMaterialId = await resolveMaterialIdForLimitNode(tx, sync.limitNodeId);
             await tx.receiptRequestItem.update({
               where: { id: item.id },
-              data: { limitNodeId: sync.limitNodeId, limitNameRenamed: sync.limitNameRenamed }
+              data: {
+                limitNodeId: sync.limitNodeId,
+                limitNameRenamed: sync.limitNameRenamed,
+                ...(mappedMaterialId ? { mappedMaterialId } : {})
+              }
             });
           }
         }
@@ -1021,6 +1029,8 @@ receiptRequestsRouter.post(
             acceptedQty: r.acceptedQty
           });
           r.limitNodeId = limitNodeId;
+        } else if (!campCategory && limitNodeId && r.materialId) {
+          await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
         }
 
         await tx.receiptRequestItem.update({

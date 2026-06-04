@@ -219,6 +219,40 @@ type ReceiptLimitItemRef = {
   externalComment: string | null;
 };
 
+/** materialId узла лимита (создаёт карточку по materialName узла, если в импорте не было id). */
+export async function resolveMaterialIdForLimitNode(tx: Tx, limitNodeId: string): Promise<string | null> {
+  const node = await tx.objectLimitNode.findUnique({
+    where: { id: limitNodeId },
+    select: { materialId: true, materialName: true, title: true, unit: true, nodeType: true }
+  });
+  if (!node || node.nodeType !== "MATERIAL") return null;
+  if (node.materialId) return node.materialId;
+  const name = String(node.materialName || node.title || "").trim();
+  if (!name) return null;
+  const unit = String(node.unit || "шт").trim() || "шт";
+  const existing = await tx.material.findFirst({ where: { name, unit } });
+  if (existing) return existing.id;
+  const created = await tx.material.create({ data: { name, unit } });
+  return created.id;
+}
+
+/** Синхронизирует materialId узла лимита с карточкой, по которой прошёл приход на склад. */
+export async function attachMaterialToLimitNode(
+  tx: Tx,
+  limitNodeId: string,
+  materialId: string
+): Promise<void> {
+  const node = await tx.objectLimitNode.findUnique({
+    where: { id: limitNodeId },
+    select: { nodeType: true, materialId: true }
+  });
+  if (!node || node.nodeType !== "MATERIAL" || node.materialId === materialId) return;
+  await tx.objectLimitNode.update({
+    where: { id: limitNodeId },
+    data: { materialId }
+  });
+}
+
 /** Подбор узла лимита при приёмке: явный выбор → уже привязанный → путь из заявки → создать строку в шаблоне. */
 export async function resolveReceiptAcceptLimitNode(
   tx: Tx,
@@ -231,8 +265,14 @@ export async function resolveReceiptAcceptLimitNode(
     acceptedQty: number;
   }
 ): Promise<string | null> {
-  if (opts.explicitLimitNodeId) return opts.explicitLimitNodeId;
-  if (item.limitNodeId) return item.limitNodeId;
+  if (opts.explicitLimitNodeId) {
+    if (opts.materialId) await attachMaterialToLimitNode(tx, opts.explicitLimitNodeId, opts.materialId);
+    return opts.explicitLimitNodeId;
+  }
+  if (item.limitNodeId) {
+    if (opts.materialId) await attachMaterialToLimitNode(tx, item.limitNodeId, opts.materialId);
+    return item.limitNodeId;
+  }
   if (!templateId || !opts.materialId) return null;
 
   const meta = analyzeCatalogNames(
@@ -254,7 +294,10 @@ export async function resolveReceiptAcceptLimitNode(
     limitDisplayName: meta.limitDisplayName,
     nameAlertNote: meta.nameAlertNote
   });
-  if (sync.limitNodeId) return sync.limitNodeId;
+  if (sync.limitNodeId) {
+    await attachMaterialToLimitNode(tx, sync.limitNodeId, opts.materialId);
+    return sync.limitNodeId;
+  }
 
   return ensureMaterialInCurrentLimitTemplate(
     tx,
