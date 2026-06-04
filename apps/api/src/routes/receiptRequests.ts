@@ -13,11 +13,16 @@ import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from ".
 import { handlePrismaError } from "../lib/errors.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
+  checkLimitPlanOverageForAccept,
+  resolvePrimaryReceiptLimitNode
+} from "../lib/receiptLimitBinding.js";
+import {
   attachMaterialToLimitNode,
   ensureMaterialInCurrentLimitTemplate,
   findLimitNodesAcrossWarehouse,
   resolveMaterialIdForLimitNode,
-  resolveReceiptAcceptLimitNode
+  resolveReceiptAcceptLimitNode,
+  spreadLimitNodePicks
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtySchema, toQtyNumber } from "../lib/quantity.js";
@@ -32,7 +37,7 @@ import {
 } from "../lib/receiptQty.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
-import { findReceiptInvoiceDoc, findMaterialNodeByLimitPath, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
+import { findReceiptInvoiceDoc, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 
@@ -77,6 +82,8 @@ const acceptItemSchema = z.object({
   // Если в шаблоне один и тот же материал лежит сразу в нескольких узлах,
   // мы спрашиваем пользователя «куда пихаем»; иначе пусто.
   limitNodeId: z.string().min(1).nullable().optional(),
+  /** Куда отнести излишек сверх плана лимита в текущем подразделе */
+  spreadLimitNodeId: z.string().min(1).nullable().optional(),
   category: receiptItemCategorySchema.nullable().optional(),
   unitPrice: z.number().nonnegative().nullable().optional(),
   storagePlace: z.string().max(200).nullable().optional()
@@ -95,7 +102,9 @@ const acceptSchema = z.object({
   documentNumber: z.string().max(120).optional(),
   note: z.string().max(500).optional(),
   /** Разрешить принять больше, чем осталось по заявке (критическое уведомление + лимиты). */
-  allowOverage: z.boolean().optional()
+  allowOverage: z.boolean().optional(),
+  /** Превышение плана лимита в подразделе позиции (перерасход или «размазать»). */
+  allowLimitOverage: z.boolean().optional()
 });
 
 const limitLinkSchema = z.object({
@@ -217,6 +226,94 @@ function receiptAcceptFactLabel(
   const limitName = item.sourceName.trim();
   if (raw === canon || raw === limitName) return null;
   return raw;
+}
+
+async function resolveReceiptItemMaterialIdForOverage(
+  it: {
+    sourceName: string;
+    sourceUnit: string;
+    mappedMaterialId: string | null;
+    limitNodeId: string | null;
+  },
+  mappingMaterialId?: string
+): Promise<string> {
+  if (mappingMaterialId) return mappingMaterialId;
+  if (it.limitNodeId) {
+    const fromNode = await resolveMaterialIdForLimitNode(prisma, it.limitNodeId);
+    if (fromNode) return fromNode;
+  }
+  if (it.mappedMaterialId) return it.mappedMaterialId;
+  const found = await prisma.material.findFirst({
+    where: { name: it.sourceName.trim(), unit: it.sourceUnit || "шт" }
+  });
+  return found?.id || "";
+}
+
+async function buildSpreadLimitSuggestions(
+  row: { warehouseId: string; objectLimitTemplateId: string | null },
+  it: {
+    id: string;
+    sourceName: string;
+    sourceUnit: string;
+    mappedMaterialId: string | null;
+    limitNodeId: string | null;
+    limitSectionPath: string | null;
+    limitCatalogNameN: string | null;
+    limitCatalogNameO: string | null;
+    acceptedQty: unknown;
+  },
+  mapping: { limitNodeId?: string | null; materialId?: string }
+) {
+  const materialId = await resolveReceiptItemMaterialIdForOverage(it, mapping.materialId);
+  const itemRef = {
+    id: it.id,
+    sourceName: it.sourceName,
+    mappedMaterialId: it.mappedMaterialId,
+    limitNodeId: mapping.limitNodeId ?? it.limitNodeId,
+    limitSectionPath: it.limitSectionPath,
+    limitCatalogNameN: it.limitCatalogNameN,
+    limitCatalogNameO: it.limitCatalogNameO,
+    acceptedQty: it.acceptedQty
+  };
+  let primaryNodeId: string | null = null;
+  let primaryPath = "";
+  if (row.objectLimitTemplateId) {
+    const allTree = await prisma.objectLimitNode.findMany({
+      where: { templateId: row.objectLimitTemplateId },
+      select: {
+        id: true,
+        parentId: true,
+        nodeType: true,
+        title: true,
+        materialName: true,
+        indexLabel: true,
+        materialId: true,
+        plannedQty: true
+      }
+    });
+    const materialNodes = allTree.filter((n) => n.nodeType === "MATERIAL");
+    const primary = resolvePrimaryReceiptLimitNode(allTree, materialNodes, itemRef);
+    primaryNodeId = primary?.id ?? null;
+  }
+  const picks = await findLimitNodesAcrossWarehouse(
+    row.warehouseId,
+    materialId,
+    it.sourceName,
+    row.objectLimitTemplateId
+  );
+  const spread = spreadLimitNodePicks(picks, primaryNodeId);
+  if (primaryNodeId) {
+    const hit = [...picks.current, ...picks.otherSections].find((p) => p.id === primaryNodeId);
+    primaryPath = hit?.path || "";
+  }
+  return {
+    primaryNodeId,
+    primaryPath,
+    suggestions: {
+      current: primaryNodeId && primaryPath ? [{ id: primaryNodeId, path: primaryPath }] : [],
+      otherSections: spread.map((p) => ({ id: p.id, path: p.path }))
+    }
+  };
 }
 
 const receiptRequestInclude = {
@@ -655,6 +752,7 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
     where: { templateId: row.objectLimitTemplateId, nodeType: "MATERIAL" },
     select: {
       id: true,
+      nodeType: true,
       title: true,
       indexLabel: true,
       materialId: true,
@@ -684,46 +782,36 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
     }
     return parts.join(" / ");
   }
-  const normalize = (s: string | null | undefined) =>
-    String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-  function nodeMatchesItem(
-    node: (typeof nodes)[number],
-    materialId: string | null,
-    sourceName: string
-  ): boolean {
-    if (materialId && node.materialId && node.materialId === materialId) return true;
-    if (!materialId && node.materialName && sourceName && normalize(node.materialName) === normalize(sourceName)) {
-      return true;
-    }
-    return false;
-  }
   const result = row.items.map((it) => {
-    const searchNames = [
-      it.sourceName,
-      it.limitCatalogNameN || "",
-      it.limitCatalogNameO || ""
-    ];
-    let matched = nodes.filter((n) => nodeMatchesItem(n, it.mappedMaterialId ?? null, it.sourceName));
-    if (!matched.length && it.limitSectionPath?.trim()) {
-      const byPath = findMaterialNodeByLimitPath(allNodes, it.limitSectionPath, searchNames);
-      if (byPath) {
-        matched = nodes.filter((n) => n.id === byPath.id);
-      }
-    }
-    if (it.limitNodeId && !matched.some((n) => n.id === it.limitNodeId)) {
-      const pinned = nodes.find((n) => n.id === it.limitNodeId);
-      if (pinned) matched = [pinned, ...matched];
-    }
-    const suggestions = matched.map((n) => ({
-        id: n.id,
-        title: n.title,
-        indexLabel: n.indexLabel,
-        path: pathFor(n.id),
-        plannedQty: n.plannedQty != null ? Number(n.plannedQty) : null,
-        issuedQty: n.issuedQty != null ? Number(n.issuedQty) : 0,
-        unit: n.unit
-      }));
-    return { itemId: it.id, currentLimitNodeId: it.limitNodeId ?? null, suggestions };
+    const primary = resolvePrimaryReceiptLimitNode(allNodes, nodes, {
+      id: it.id,
+      sourceName: it.sourceName,
+      mappedMaterialId: it.mappedMaterialId,
+      limitNodeId: it.limitNodeId,
+      limitSectionPath: it.limitSectionPath,
+      limitCatalogNameN: it.limitCatalogNameN,
+      limitCatalogNameO: it.limitCatalogNameO,
+      acceptedQty: it.acceptedQty
+    });
+    const node = primary ? nodes.find((n) => n.id === primary.id) : undefined;
+    const suggestions = node
+      ? [
+          {
+            id: node.id,
+            title: node.title,
+            indexLabel: node.indexLabel,
+            path: pathFor(node.id),
+            plannedQty: node.plannedQty != null ? Number(node.plannedQty) : null,
+            issuedQty: node.issuedQty != null ? Number(node.issuedQty) : 0,
+            unit: node.unit
+          }
+        ]
+      : [];
+    return {
+      itemId: it.id,
+      currentLimitNodeId: primary?.id ?? it.limitNodeId ?? null,
+      suggestions
+    };
   });
   return res.json({ items: result, hasTemplate: true });
 });
@@ -747,20 +835,19 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
   }
   const item = itemId ? row.items.find((it) => it.id === itemId) : row.items[0];
   if (!item) return res.status(400).json({ error: "itemId обязателен" });
-  const materialId = materialIdQ || item.mappedMaterialId || "";
-  const picks = await findLimitNodesAcrossWarehouse(
-    row.warehouseId,
-    materialId,
-    item.sourceName,
-    row.objectLimitTemplateId
-  );
+  const spreadInfo = await buildSpreadLimitSuggestions(row, item, {
+    limitNodeId: item.limitNodeId,
+    materialId: materialIdQ || item.mappedMaterialId || undefined
+  });
   return res.json({
     itemId: item.id,
     sourceName: item.sourceName,
     orderedQty: receiptPlannedQty(item.quantity),
     acceptedQty: receiptAcceptedQty(item.acceptedQty),
     currentTemplateId: row.objectLimitTemplateId,
-    ...picks
+    primaryNodeId: spreadInfo.primaryNodeId,
+    primaryPath: spreadInfo.primaryPath,
+    ...spreadInfo.suggestions
   });
 });
 
@@ -867,52 +954,100 @@ receiptRequestsRouter.post(
           error: `Позиция «${it.sourceName}» уже принята полностью`
         });
       }
+      const bindLimitNodeId = m.limitNodeId ?? it.limitNodeId ?? null;
+
+      if (row.objectLimitTemplateId && !parsed.data.allowLimitOverage) {
+        const allTree = await prisma.objectLimitNode.findMany({
+          where: { templateId: row.objectLimitTemplateId },
+          select: { id: true, parentId: true, title: true, indexLabel: true }
+        });
+        type PathNode = { id: string; parentId: string | null; title: string; indexLabel: string | null };
+        const nodeById = new Map<string, PathNode>(allTree.map((n) => [n.id, n]));
+        const pathFor = (nodeId: string) => {
+          const parts: string[] = [];
+          let cur: string | null = nodeId;
+          for (let guard = 0; guard < 64 && cur && nodeById.has(cur); guard += 1) {
+            const pathNode: PathNode = nodeById.get(cur)!;
+            const label = [pathNode.indexLabel, pathNode.title].filter(Boolean).join(" ").trim();
+            if (label) parts.unshift(label);
+            cur = pathNode.parentId;
+          }
+          return parts.join(" / ");
+        };
+        const limitOver = await checkLimitPlanOverageForAccept(
+          prisma,
+          row.objectLimitTemplateId,
+          {
+            id: it.id,
+            sourceName: it.sourceName,
+            mappedMaterialId: it.mappedMaterialId,
+            limitNodeId: bindLimitNodeId,
+            limitSectionPath: it.limitSectionPath,
+            limitCatalogNameN: it.limitCatalogNameN,
+            limitCatalogNameO: it.limitCatalogNameO,
+            acceptedQty: it.acceptedQty
+          },
+          m.acceptedQty,
+          pathFor
+        );
+        if (limitOver) {
+          const spreadInfo = await buildSpreadLimitSuggestions(row, it, {
+            limitNodeId: bindLimitNodeId,
+            materialId: m.materialId
+          });
+          const spread = spreadInfo.suggestions.otherSections;
+          if (spread.length > 0 && !m.spreadLimitNodeId) {
+            return res.status(409).json({
+              error: "RECEIPT_LIMIT_OVERAGE_PICK",
+              kind: "limit_plan",
+              message: `По «${it.sourceName}» в подразделе «${limitOver.primaryPath}» план ${limitOver.plannedQty}, уже ${limitOver.receivedOnNode}, принимаете ${m.acceptedQty} — выберите, куда отнести излишек ${limitOver.excessQty}`,
+              itemId: m.itemId,
+              ...limitOver,
+              suggestions: spreadInfo.suggestions
+            });
+          }
+          if (!spread.length) {
+            return res.status(409).json({
+              error: "RECEIPT_LIMIT_OVERAGE_CONFIRM",
+              kind: "limit_plan",
+              message: `По «${it.sourceName}» в подразделе «${limitOver.primaryPath}» превышение плана на ${limitOver.excessQty} — в других разделах лимита материал не найден`,
+              itemId: m.itemId,
+              ...limitOver,
+              suggestions: spreadInfo.suggestions
+            });
+          }
+        }
+      }
+
       const isOver = m.acceptedQty > remaining;
       if (isOver && !parsed.data.allowOverage) {
-        let materialId = m.materialId || it.mappedMaterialId || undefined;
-        if (!materialId) {
-          const found = await prisma.material.findFirst({
-            where: { name: it.sourceName.trim(), unit: it.sourceUnit || "шт" }
-          });
-          materialId = found?.id;
-        }
-        const picks = await findLimitNodesAcrossWarehouse(
-          row.warehouseId,
-          materialId || "",
-          it.sourceName,
-          row.objectLimitTemplateId
-        );
+        const spreadInfo = await buildSpreadLimitSuggestions(row, it, {
+          limitNodeId: bindLimitNodeId,
+          materialId: m.materialId
+        });
         return res.status(409).json({
           error: "RECEIPT_OVERAGE_NEEDS_CONFIRM",
+          kind: "receipt_order",
           message: `По «${it.sourceName}» в заявке ${receiptPlannedQty(it.quantity)}, осталось ${remaining}, передали ${m.acceptedQty}`,
           itemId: m.itemId,
           orderedQty: receiptPlannedQty(it.quantity),
           remainingQty: remaining,
           acceptedQty: m.acceptedQty,
-          suggestions: picks
+          suggestions: spreadInfo.suggestions
         });
       }
-      if (isOver && parsed.data.allowOverage) {
-        let materialId = m.materialId || it.mappedMaterialId || undefined;
-        if (!materialId) {
-          const found = await prisma.material.findFirst({
-            where: { name: it.sourceName.trim(), unit: it.sourceUnit || "шт" }
-          });
-          materialId = found?.id;
-        }
-        const picks = await findLimitNodesAcrossWarehouse(
-          row.warehouseId,
-          materialId || "",
-          it.sourceName,
-          row.objectLimitTemplateId
-        );
-        const hasOther = picks.otherSections.length > 0;
-        if (hasOther && !m.limitNodeId) {
+      if (isOver && parsed.data.allowOverage && !m.spreadLimitNodeId) {
+        const spreadInfo = await buildSpreadLimitSuggestions(row, it, {
+          limitNodeId: bindLimitNodeId,
+          materialId: m.materialId
+        });
+        if (spreadInfo.suggestions.otherSections.length > 0) {
           return res.status(409).json({
             error: "RECEIPT_OVERAGE_PICK_LIMIT",
+            kind: "receipt_order",
             message: `Превышение по «${it.sourceName}»: выберите раздел лимита для излишка`,
             itemId: m.itemId,
-            suggestions: picks
+            suggestions: spreadInfo.suggestions
           });
         }
       }
@@ -920,7 +1055,7 @@ receiptRequestsRouter.post(
 
     // Валидация limitNodeId — узел должен принадлежать шаблону этой заявки.
     const proposedNodeIds = parsed.data.itemMappings
-      .map((m) => m.limitNodeId)
+      .flatMap((m) => [m.limitNodeId, m.spreadLimitNodeId])
       .filter((x): x is string => typeof x === "string" && x.length > 0);
     if (proposedNodeIds.length && !row.objectLimitTemplateId) {
       return res.status(400).json({ error: "Заявка не привязана к шаблону лимита" });
@@ -1135,6 +1270,67 @@ receiptRequestsRouter.post(
             createdById: req.user!.userId
           });
         }
+
+        if (row.objectLimitTemplateId && r.materialId && r.limitNodeId && mapping) {
+          const allTree = await tx.objectLimitNode.findMany({
+            where: { templateId: row.objectLimitTemplateId },
+            select: { id: true, parentId: true, title: true, indexLabel: true }
+          });
+          type PathNode = { id: string; parentId: string | null; title: string; indexLabel: string | null };
+          const nodeById = new Map<string, PathNode>(allTree.map((n) => [n.id, n]));
+          const pathFor = (nodeId: string) => {
+            const parts: string[] = [];
+            let cur: string | null = nodeId;
+            for (let guard = 0; guard < 64 && cur && nodeById.has(cur); guard += 1) {
+              const pathNode: PathNode = nodeById.get(cur)!;
+              const label = [pathNode.indexLabel, pathNode.title].filter(Boolean).join(" ").trim();
+              if (label) parts.unshift(label);
+              cur = pathNode.parentId;
+            }
+            return parts.join(" / ");
+          };
+          const limitOver = await checkLimitPlanOverageForAccept(
+            tx,
+            row.objectLimitTemplateId,
+            {
+              id: r.item.id,
+              sourceName: r.item.sourceName,
+              mappedMaterialId: r.materialId,
+              limitNodeId: r.limitNodeId,
+              limitSectionPath: r.item.limitSectionPath,
+              limitCatalogNameN: r.item.limitCatalogNameN,
+              limitCatalogNameO: r.item.limitCatalogNameO,
+              acceptedQty: r.item.acceptedQty
+            },
+            r.acceptedQty,
+            pathFor
+          );
+          if (limitOver && limitOver.excessQty > 0) {
+            const spreadId = mapping.spreadLimitNodeId;
+            if (spreadId) {
+              await attachMaterialToLimitNode(tx, spreadId, r.materialId);
+              const spreadNode = await tx.objectLimitNode.findUnique({
+                where: { id: spreadId },
+                select: { plannedQty: true }
+              });
+              const planned = Number(spreadNode?.plannedQty || 0);
+              await tx.objectLimitNode.update({
+                where: { id: spreadId },
+                data: { plannedQty: planned + limitOver.excessQty }
+              });
+            } else if (parsed.data.allowLimitOverage) {
+              const primaryNode = await tx.objectLimitNode.findUnique({
+                where: { id: r.limitNodeId },
+                select: { plannedQty: true }
+              });
+              const planned = Number(primaryNode?.plannedQty || 0);
+              await tx.objectLimitNode.update({
+                where: { id: r.limitNodeId },
+                data: { plannedQty: planned + limitOver.excessQty }
+              });
+            }
+          }
+        }
       }
 
       // Сохраним опциональные сканы УПД/ТН и прикрепим каждый и к заявке, и к операции.
@@ -1201,35 +1397,54 @@ receiptRequestsRouter.post(
 
       for (const r of resolved) {
         if (r.campCategory || !r.materialId) continue;
+        const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
         const prevAccepted = receiptAcceptedQty(r.item.acceptedQty);
         const newTotal = prevAccepted + r.acceptedQty;
         const ordered = receiptPlannedQty(r.item.quantity);
         if (newTotal <= ordered) continue;
 
         const excessQty = newTotal - ordered;
-        let limitNodeId = r.limitNodeId;
-        let autoCreated = false;
         let targetPath: string | undefined;
+        let autoCreated = false;
 
-        const picks = await findLimitNodesAcrossWarehouse(
-          row.warehouseId,
-          r.materialId,
-          r.item.sourceName,
-          row.objectLimitTemplateId
-        );
-
-        if (!limitNodeId && picks.otherSections.length === 1) {
-          limitNodeId = picks.otherSections[0]!.id;
-          targetPath = picks.otherSections[0]!.path;
-        } else if (!limitNodeId && picks.current.length === 1) {
-          limitNodeId = picks.current[0]!.id;
-          targetPath = picks.current[0]!.path;
-        } else if (!limitNodeId && row.objectLimitTemplateId) {
+        if (mapping?.spreadLimitNodeId && row.objectLimitTemplateId) {
+          await attachMaterialToLimitNode(tx, mapping.spreadLimitNodeId, r.materialId);
+          const spreadNode = await tx.objectLimitNode.findUnique({
+            where: { id: mapping.spreadLimitNodeId },
+            select: { plannedQty: true }
+          });
+          const planned = Number(spreadNode?.plannedQty || 0);
+          await tx.objectLimitNode.update({
+            where: { id: mapping.spreadLimitNodeId },
+            data: { plannedQty: planned + excessQty }
+          });
+          const spreadInfo = await buildSpreadLimitSuggestions(row, r.item, {
+            limitNodeId: r.limitNodeId,
+            materialId: r.materialId ?? undefined
+          });
+          const hit = spreadInfo.suggestions.otherSections.find((s) => s.id === mapping.spreadLimitNodeId);
+          targetPath = hit?.path;
+        } else if (parsed.data.allowOverage && r.limitNodeId && row.objectLimitTemplateId) {
+          const primaryNode = await tx.objectLimitNode.findUnique({
+            where: { id: r.limitNodeId },
+            select: { plannedQty: true }
+          });
+          const planned = Number(primaryNode?.plannedQty || 0);
+          await tx.objectLimitNode.update({
+            where: { id: r.limitNodeId },
+            data: { plannedQty: planned + excessQty }
+          });
+          const spreadInfo = await buildSpreadLimitSuggestions(row, r.item, {
+            limitNodeId: r.limitNodeId,
+            materialId: r.materialId ?? undefined
+          });
+          targetPath = spreadInfo.primaryPath || "текущий подраздел (перерасход по заявке)";
+        } else if (!r.limitNodeId && row.objectLimitTemplateId) {
           const mat = await tx.material.findUnique({
             where: { id: r.materialId },
             select: { name: true, unit: true }
           });
-          limitNodeId = await ensureMaterialInCurrentLimitTemplate(
+          const createdNodeId = await ensureMaterialInCurrentLimitTemplate(
             tx,
             row.objectLimitTemplateId,
             r.materialId,
@@ -1239,12 +1454,9 @@ receiptRequestsRouter.post(
           );
           autoCreated = true;
           targetPath = "текущий раздел лимита (добавлено автоматически)";
-        }
-
-        if (limitNodeId) {
           await tx.receiptRequestItem.update({
             where: { id: r.item.id },
-            data: { limitNodeId }
+            data: { limitNodeId: createdNodeId }
           });
         }
 
@@ -1252,7 +1464,7 @@ receiptRequestsRouter.post(
           itemId: r.item.id,
           sourceName: r.item.sourceName,
           excessQty,
-          limitNodeId: limitNodeId || "",
+          limitNodeId: r.limitNodeId || "",
           autoCreated,
           targetPath
         });

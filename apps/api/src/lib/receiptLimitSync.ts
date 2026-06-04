@@ -59,8 +59,7 @@ export function findMaterialNodeByLimitPath(
   };
 
   const inScope = scoped.find(matchNode);
-  if (inScope) return inScope;
-  return materials.find(matchNode) ?? null;
+  return inScope ?? null;
 }
 
 export type ReceiptLimitSyncInput = {

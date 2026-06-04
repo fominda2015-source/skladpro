@@ -116,6 +116,16 @@ export async function findLimitNodesAcrossWarehouse(
   return { current, otherSections };
 }
 
+/** Узлы того же материала в других подразделах (для «размазать» излишек), без основного узла. */
+export function spreadLimitNodePicks(
+  picks: { current: LimitNodePick[]; otherSections: LimitNodePick[] },
+  excludeNodeId?: string | null
+): LimitNodePick[] {
+  const all = [...picks.current, ...picks.otherSections];
+  if (!excludeNodeId) return all;
+  return all.filter((p) => p.id !== excludeNodeId);
+}
+
 /** Все узлы MATERIAL в лимитах объекта и раздела (СС/ЭОМ) — для выбора подраздела при выдаче */
 export async function findLimitMaterialNodesInSection(
   warehouseId: string,

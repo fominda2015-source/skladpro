@@ -934,20 +934,18 @@ function App() {
   const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
   const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
   const [receiptOverageModal, setReceiptOverageModal] = useState<null | {
+    kind: "receipt_order" | "limit_plan";
     row: ReceiptRequestRow;
     itemId: string;
     extraFiles: File[];
-    mappings: Array<{
-      itemId: string;
-      materialId?: string;
-      newMaterialName?: string;
-      newMaterialUnit?: string;
-      acceptedQty: number;
-      limitNodeId?: string | null;
-    }>;
+    mappings: ReturnType<typeof buildReceiptAcceptanceMappings>;
     sourceName: string;
-    orderedQty: number;
+    orderedQty?: number;
     acceptedQty: number;
+    plannedQty?: number;
+    receivedOnNode?: number;
+    primaryPath?: string;
+    excessQty?: number;
     suggestions: { current: Array<{ id: string; path: string }>; otherSections: Array<{ id: string; path: string }> };
   }>(null);
   const [showCriticalAssignedModal, setShowCriticalAssignedModal] = useState(false);
@@ -3252,6 +3250,7 @@ function App() {
       newMaterialUnit?: string;
       acceptedQty: number;
       limitNodeId?: string | null;
+      spreadLimitNodeId?: string | null;
       category?: ReceiptItemCategory | null;
       unitPrice?: number | null;
       storagePlace?: string | null;
@@ -3290,7 +3289,7 @@ function App() {
     row: ReceiptRequestRow,
     mappings: ReturnType<typeof buildReceiptAcceptanceMappings>,
     extraFiles: File[],
-    opts?: { allowOverage?: boolean }
+    opts?: { allowOverage?: boolean; allowLimitOverage?: boolean }
   ): Promise<boolean> {
     if (!token) return false;
     const form = new FormData();
@@ -3299,7 +3298,8 @@ function App() {
       JSON.stringify({
         itemMappings: mappings,
         documentNumber: acceptanceDocNumbers[row.id] || undefined,
-        allowOverage: opts?.allowOverage === true
+        allowOverage: opts?.allowOverage === true,
+        allowLimitOverage: opts?.allowLimitOverage === true
       })
     );
     const filesToSend: File[] = [];
@@ -3323,10 +3323,13 @@ function App() {
         } catch {
           // ignore
         }
-        if (
-          res.status === 409 &&
-          (body.error === "RECEIPT_OVERAGE_NEEDS_CONFIRM" || body.error === "RECEIPT_OVERAGE_PICK_LIMIT")
-        ) {
+        const overageErrors = [
+          "RECEIPT_OVERAGE_NEEDS_CONFIRM",
+          "RECEIPT_OVERAGE_PICK_LIMIT",
+          "RECEIPT_LIMIT_OVERAGE_PICK",
+          "RECEIPT_LIMIT_OVERAGE_CONFIRM"
+        ];
+        if (res.status === 409 && overageErrors.includes(String(body.error))) {
           const itemId = typeof body.itemId === "string" ? body.itemId : mappings[0]?.itemId;
           const it = row.items.find((x) => x.id === itemId) || row.items[0];
           const m = mappings.find((x) => x.itemId === it?.id);
@@ -3334,15 +3337,28 @@ function App() {
             (body.suggestions as
               | { current: Array<{ id: string; path: string }>; otherSections: Array<{ id: string; path: string }> }
               | undefined) ?? { current: [], otherSections: [] };
+          const kind =
+            body.kind === "limit_plan" ||
+            body.error === "RECEIPT_LIMIT_OVERAGE_PICK" ||
+            body.error === "RECEIPT_LIMIT_OVERAGE_CONFIRM"
+              ? ("limit_plan" as const)
+              : ("receipt_order" as const);
           if (it && m) {
             setReceiptOverageModal({
+              kind,
               row,
               itemId: it.id,
               extraFiles,
               mappings,
               sourceName: it.sourceName,
-              orderedQty: Number(body.orderedQty ?? it.quantity),
+              orderedQty:
+                kind === "receipt_order" ? Number(body.orderedQty ?? it.quantity) : undefined,
               acceptedQty: m.acceptedQty,
+              plannedQty: typeof body.plannedQty === "number" ? body.plannedQty : undefined,
+              receivedOnNode:
+                typeof body.receivedOnNode === "number" ? body.receivedOnNode : undefined,
+              primaryPath: typeof body.primaryPath === "string" ? body.primaryPath : undefined,
+              excessQty: typeof body.excessQty === "number" ? body.excessQty : undefined,
               suggestions
             });
             return false;
@@ -3465,6 +3481,7 @@ function App() {
               otherSections: Array<{ id: string; path: string }>;
             };
             setReceiptOverageModal({
+              kind: "receipt_order",
               row: freshRow,
               itemId: it.id,
               extraFiles,
@@ -11786,19 +11803,32 @@ function App() {
 
       {receiptOverageModal ? (
         <ReceiptOverageModal
+          kind={receiptOverageModal.kind}
           sourceName={receiptOverageModal.sourceName}
           orderedQty={receiptOverageModal.orderedQty}
           acceptedQty={receiptOverageModal.acceptedQty}
+          plannedQty={receiptOverageModal.plannedQty}
+          receivedOnNode={receiptOverageModal.receivedOnNode}
+          primaryPath={receiptOverageModal.primaryPath}
+          excessQty={receiptOverageModal.excessQty}
           suggestions={receiptOverageModal.suggestions}
           onCancel={() => setReceiptOverageModal(null)}
-          onConfirm={(limitNodeId, allowOverage) => {
+          onConfirm={(spreadLimitNodeId, flags) => {
             const { row, itemId, mappings, extraFiles } = receiptOverageModal;
             const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
             const nextMappings = mappings.map((m) =>
-              m.itemId === itemId ? { ...m, limitNodeId: limitNodeId ?? m.limitNodeId } : m
+              m.itemId === itemId
+                ? {
+                    ...m,
+                    ...(spreadLimitNodeId ? { spreadLimitNodeId } : {})
+                  }
+                : m
             );
             setReceiptOverageModal(null);
-            void postReceiptAcceptance(freshRow, nextMappings, extraFiles, { allowOverage });
+            void postReceiptAcceptance(freshRow, nextMappings, extraFiles, {
+              allowOverage: flags.allowOverage === true,
+              allowLimitOverage: flags.allowLimitOverage === true
+            });
           }}
         />
       ) : null}
