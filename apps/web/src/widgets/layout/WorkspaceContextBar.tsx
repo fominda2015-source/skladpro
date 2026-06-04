@@ -2,6 +2,13 @@ import { ALL_OBJECTS_ID } from "../../app/constants";
 
 type ObjectOption = { id: string; name: string };
 
+type TabFilterProps = {
+  value: string;
+  warehouses: ObjectOption[];
+  sectionLabel?: string;
+  onChange: (warehouseId: string) => void;
+};
+
 type Props = {
   activeObjectId: string;
   canViewAllObjects: boolean;
@@ -10,6 +17,7 @@ type Props = {
   onSelectObject: (warehouseId: string) => void;
   onSelectSection: (section: "SS" | "EOM") => void;
   hideObjectSelect?: boolean;
+  tabFilter?: TabFilterProps;
 };
 
 export function WorkspaceContextBar(props: Props) {
@@ -20,7 +28,8 @@ export function WorkspaceContextBar(props: Props) {
     section,
     onSelectObject,
     onSelectSection,
-    hideObjectSelect = false
+    hideObjectSelect = false,
+    tabFilter
   } = props;
 
   return (
@@ -48,6 +57,27 @@ export function WorkspaceContextBar(props: Props) {
           <span className="workspaceContextObjectValue">Все объекты</span>
         </div>
       )}
+      {tabFilter ? (
+        <label className="workspaceContextObject workspaceContextTabFilter">
+          <span className="workspaceContextLabel">Объект на вкладке</span>
+          <select
+            className="workspaceContextObjectSelect"
+            value={tabFilter.value}
+            onChange={(e) => tabFilter.onChange(e.target.value)}
+            aria-label="Фильтр по объекту на вкладке"
+          >
+            <option value="">Все доступные объекты</option>
+            {tabFilter.warehouses.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+          {tabFilter.sectionLabel ? (
+            <span className="workspaceContextTabHint muted">{tabFilter.sectionLabel}</span>
+          ) : null}
+        </label>
+      ) : null}
       <div className="workspaceContextSection">
         <span className="workspaceContextLabel">Раздел</span>
         <div className="sectionToggle workspaceContextSectionToggle" aria-label="Раздел СС/ЭОМ">

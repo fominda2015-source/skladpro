@@ -21,7 +21,7 @@ export type DocumentRow = {
 type DocTypeTab = { id: string; label: string };
 
 type Props = {
-  objectFilter: ReactNode;
+  objectFilter?: ReactNode;
   documents: DocumentRow[];
   visibleDocs: DocumentRow[];
   selectedDocumentId: string;

@@ -41,7 +41,7 @@ type Props = {
   section: "SS" | "EOM";
   canWriteoff: boolean;
   safeName: (s: string) => string;
-  objectFilter: ReactNode;
+  objectFilter?: ReactNode;
   exportAction?: ReactNode;
 };
 

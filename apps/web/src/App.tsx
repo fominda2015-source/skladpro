@@ -75,7 +75,6 @@ import { ReportsSnapshotHero } from "./widgets/reports/ReportsSnapshotHero";
 import { StatusBadge } from "./shared/ui/StatusBadge";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
-import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
 import { UserAccountMenu } from "./widgets/layout/UserAccountMenu";
 import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
@@ -1700,7 +1699,9 @@ function App() {
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => isAdmin, [me?.role]);
-  const isAdminHeaderLayout = activeTab === "admin" && canManageUsers;
+  const showWorkspaceContext = Boolean(
+    me && activeTab !== "profile" && activeTab !== "settings" && activeTab !== "password"
+  );
   const canWriteCatalog = useMemo(
     () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
     [me]
@@ -2027,15 +2028,30 @@ function App() {
     void updateAuthContext({ warehouseId: activeObjectId, section: next });
   }
 
-  function renderTabObjectFilter() {
-    if (!isAllObjectsView || activeTab === "stocks") return null;
+  function renderWorkspaceContextPanel() {
+    const tabFilter =
+      isAllObjectsView && activeTab !== "stocks"
+        ? {
+            value: tabWarehouseFilters[activeTab] || "",
+            warehouses: objectFilterWarehouses,
+            sectionLabel: `Раздел: ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`,
+            onChange: (id: string) => setTabWarehouseFilters((prev) => ({ ...prev, [activeTab]: id }))
+          }
+        : undefined;
+
     return (
-      <TabObjectFilter
-        value={tabWarehouseFilters[activeTab] || ""}
-        onChange={(id) => setTabWarehouseFilters((prev) => ({ ...prev, [activeTab]: id }))}
-        warehouses={objectFilterWarehouses}
-        sectionLabel={`Раздел: ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
-      />
+      <section className="workspaceContextGlobal" aria-label="Контекст работы">
+        <WorkspaceContextBar
+          activeObjectId={activeObjectId}
+          canViewAllObjects={canViewAllObjects}
+          objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
+          section={objectSectionFilter}
+          onSelectObject={(id) => void selectTopObject(id)}
+          onSelectSection={(next) => setSection(next)}
+          hideObjectSelect={activeTab === "stocks"}
+          tabFilter={tabFilter}
+        />
+      </section>
     );
   }
 
@@ -5744,51 +5760,9 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            {!isAdminHeaderLayout ? (
-              activeTab !== "stocks" ? (
-                <select
-                  value={activeObjectId}
-                  onChange={(e) => {
-                    void selectTopObject(e.target.value);
-                  }}
-                >
-                  {canViewAllObjects ? (
-                    <option value={ALL_OBJECTS_ID}>Все объекты</option>
-                  ) : null}
-                  {availableObjects.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      Объект: {safeName(o.name)}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="homeToolbarHint muted" title="На главной показана сводка по всем объектам">
-                  Все объекты
-                </span>
-              )
-            ) : null}
-            {!isAdminHeaderLayout ? (
-              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
-                <button
-                  type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                  onClick={() => setSection("SS")}
-                >
-                  СС
-                </button>
-                <button
-                  type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                  onClick={() => setSection("EOM")}
-                >
-                  ЭОМ
-                </button>
-              </div>
-            ) : null}
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
-
-            {isAdminHeaderLayout && me ? (
+            {me ? (
               <UserAccountMenu
                 fullName={me.fullName}
                 avatar={<UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />}
@@ -5796,29 +5770,10 @@ function App() {
                 onSettings={() => setActiveTab("settings")}
                 onLogout={onLogout}
               />
-            ) : (
-              <>
-                <button className="topIconBtn" type="button" onClick={() => setActiveTab("profile")}>
-                  Профиль
-                </button>
-                <button className="topIconBtn" type="button" onClick={() => setActiveTab("settings")}>
-                  Настройки
-                </button>
-                <button className="topIconBtn topIconBtnDanger" type="button" onClick={onLogout}>
-                  Выйти
-                </button>
-                {me ? (
-                  <span className="userChip">
-                    <span className="userAvatar">
-                      <UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />
-                    </span>
-                    <span>{me.fullName}</span>
-                  </span>
-                ) : null}
-              </>
-            )}
+            ) : null}
           </div>
         </header>
+        {showWorkspaceContext ? renderWorkspaceContextPanel() : null}
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
@@ -5947,7 +5902,6 @@ function App() {
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">
-          {renderTabObjectFilter()}
           <WarehouseStockView
             sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
             rows={warehouseDisplayRows.map((row) => ({
@@ -6047,7 +6001,7 @@ function App() {
           sectionFilter={objectSectionFilter}
           warehouses={warehouses}
           canWrite={canWriteMaterialCards}
-          objectFilterSlot={renderTabObjectFilter()}
+          objectFilterSlot={null}
         />
       )}
 
@@ -6356,7 +6310,6 @@ function App() {
 
       {activeTab === "notifications" && canReadNotifications && (
         <div>
-          {renderTabObjectFilter()}
           <PageHero
             icon="🔔"
             title="Уведомления"
@@ -6472,7 +6425,6 @@ function App() {
 
       {activeTab === "operations" && (
         <div className="receiptsWorkspace">
-          {renderTabObjectFilter()}
           <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 6 }}>
             <button
               type="button"
@@ -7306,7 +7258,6 @@ function App() {
 
       {activeTab === "issues" && (
         <div className="issuesWorkspace">
-          {renderTabObjectFilter()}
           <PageHero
             icon="⇄"
             title="Выдачи со склада"
@@ -7920,7 +7871,6 @@ function App() {
 
       {activeTab === "limits" && (
         <div className="limitsWorkspace">
-          {renderTabObjectFilter()}
           <PageHero
             icon="▧"
             title="Лимиты"
@@ -8886,7 +8836,6 @@ function App() {
           section={objectSectionFilter}
           canWriteoff={canMaterialWriteoff}
           safeName={safeName}
-          objectFilter={renderTabObjectFilter()}
           exportAction={
             <PeriodExportButton
               section="materialReport"
@@ -8903,7 +8852,6 @@ function App() {
 
       {activeTab === "approvals" && (
         <div>
-          {renderTabObjectFilter()}
           <PageHero
             icon="☑"
             title="Заявки"
@@ -9138,7 +9086,6 @@ function App() {
 
         return (
           <DocumentsTabView
-            objectFilter={renderTabObjectFilter()}
             documents={documents}
             visibleDocs={visibleDocs}
             selectedDocumentId={selectedDocumentId}
@@ -9195,7 +9142,6 @@ function App() {
 
       {activeTab === "waybills" && (
         <div>
-          {renderTabObjectFilter()}
           <TransfersTab
             token={token}
             fetchWithSession={fetchWithSession}
@@ -9925,7 +9871,6 @@ function App() {
           className={`toolsWorkspace${drawerMode === "tool" && toolDetailModalId ? " toolsWorkspace--drawer" : ""}`}
         >
           <div className="toolsWorkspaceMain">
-          {renderTabObjectFilter()}
           <PageHero
             icon="⚒"
             title="Инструменты"
@@ -10502,7 +10447,6 @@ function App() {
 
       {activeTab === "reports" && (
         <div>
-          {renderTabObjectFilter()}
           <ReportsSnapshotHero
             warehouseName={
               effectiveWarehouseId
@@ -10811,16 +10755,6 @@ function App() {
             icon="⚙"
             title="Управление доступами"
             subtitle="Пользователи · роли · объекты и проекты"
-            context={
-              <WorkspaceContextBar
-                activeObjectId={activeObjectId}
-                canViewAllObjects={canViewAllObjects}
-                objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
-                section={objectSectionFilter}
-                onSelectObject={(id) => void selectTopObject(id)}
-                onSelectSection={(next) => setSection(next)}
-              />
-            }
             stats={[
               { label: "Пользователей", value: users.length },
               { label: "Объектов", value: warehouses.length }

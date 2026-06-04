@@ -559,6 +559,49 @@ button:hover {
   width: 100%;
 }
 
+.workspaceContextGlobal {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  margin-bottom: 10px;
+}
+
+.workspaceContextGlobal .workspaceContextBar {
+  border: none;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.workspaceContextTabFilter {
+  position: relative;
+}
+
+.workspaceContextTabHint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.canvas--chat > .workspaceContextGlobal {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+
+.canvas--chat > .workspaceContextGlobal .workspaceContextBar {
+  gap: 10px 14px;
+  padding: 8px 10px;
+}
+
+.canvas--chat > .workspaceContextGlobal .workspaceContextObjectSelect,
+.canvas--chat > .workspaceContextGlobal .workspaceContextSectionToggle {
+  min-height: 36px;
+}
+
 .workspaceContextBar {
   display: flex;
   flex-wrap: wrap;
