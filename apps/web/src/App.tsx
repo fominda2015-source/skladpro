@@ -644,13 +644,9 @@ function mergeReceiptItemAccepted(
 ): ReceiptRequestItem {
   const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
   const nextAcc = parseMaterialQty(next.acceptedQty);
-  const deltaAcc = delta?.acceptedQty ?? 0;
-  const batchIfDelta = deltaAcc > 0 ? prevAcc + deltaAcc : prevAcc;
-  // Ответ accept уже содержит накопительный acceptedQty — не дублируем дельту этой приёмки.
-  const acc =
-    deltaAcc > 0 && nextAcc >= batchIfDelta
-      ? Math.max(prevAcc, nextAcc)
-      : Math.max(prevAcc, nextAcc, batchIfDelta);
+  const addAcc = delta?.acceptedQty ? parseMaterialQty(delta.acceptedQty) : 0;
+  // Никогда не уменьшаем принятое: защита от устаревших ответов списка заявок.
+  const acc = Math.max(prevAcc, nextAcc, prevAcc + addAcc);
   if (acc <= 0) return next;
   return { ...next, acceptedQty: acc };
 }
@@ -2062,7 +2058,7 @@ function App() {
         ? tabWarehouseFilters[tab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
         : activeObjectId;
     if (receiptWh) {
-      tasks.push(loadReceiptRequests(section, receiptWh, seq));
+      tasks.push(loadReceiptRequests(section, receiptWh, seq).then(() => undefined));
     } else {
       setReceiptRequests([]);
     }
@@ -3125,8 +3121,8 @@ function App() {
     sectionOverride?: "SS" | "EOM",
     warehouseIdOverride?: string,
     workspaceReloadSeq?: number
-  ) {
-    if (!token) return;
+  ): Promise<ReceiptRequestRow[] | null> {
+    if (!token) return null;
     const warehouseId =
       warehouseIdOverride ??
       (activeObjectId === ALL_OBJECTS_ID
@@ -3134,9 +3130,9 @@ function App() {
         : activeObjectId);
     if (!warehouseId) {
       setReceiptRequests([]);
-      return;
+      return [];
     }
-    const seq = workspaceReloadSeq == null ? ++receiptRequestsLoadSeq.current : workspaceReloadSeq;
+    const listSeq = ++receiptRequestsLoadSeq.current;
     const params = new URLSearchParams({
       warehouseId,
       section: sectionOverride ?? objectSectionFilter,
@@ -3146,24 +3142,23 @@ function App() {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store"
     });
-    if (!res.ok) return;
-    if (workspaceReloadSeq != null) {
-      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
-    } else if (seq !== receiptRequestsLoadSeq.current) {
-      return;
-    }
+    if (!res.ok) return null;
+    if (isStaleWorkspaceReload(workspaceReloadSeq)) return null;
+    if (listSeq !== receiptRequestsLoadSeq.current) return null;
     const rows = (await res.json()) as ReceiptRequestRow[];
+    let merged!: ReceiptRequestRow[];
     setReceiptRequests((prev) => {
       const prevById = new Map(prev.map((r) => [r.id, r]));
-      return rows.map((r) => mergeReceiptRequestRow(prevById.get(r.id), r));
+      merged = rows.map((r) => mergeReceiptRequestRow(prevById.get(r.id), r));
+      return merged;
     });
+    return merged;
   }
 
   function applyReceiptRequestUpdate(
     updated: ReceiptRequestRow,
     opts?: { acceptanceDelta?: ReceiptAcceptanceDelta[] }
   ) {
-    receiptRequestsLoadSeq.current += 1;
     let normalized!: ReceiptRequestRow;
     setReceiptRequests((prev) => {
       const prevRow = prev.find((r) => r.id === updated.id);
@@ -3476,29 +3471,14 @@ function App() {
       const serverRow = acceptBody.receiptRequest ?? null;
       let normalized: ReceiptRequestRow;
       if (serverRow) {
-        normalized = applyReceiptRequestUpdate(serverRow);
+        normalized = applyReceiptRequestUpdate(serverRow, { acceptanceDelta });
       } else {
         normalized = applyReceiptRequestUpdate(row, { acceptanceDelta });
-        try {
-          const params = new URLSearchParams({
-            warehouseId: row.warehouseId,
-            section: row.section,
-            _: String(Date.now())
-          });
-          const refreshRes = await fetchWithSession(
-            `${API_URL}/api/receipt-requests?${params.toString()}`,
-            { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-          );
-          if (refreshRes.ok) {
-            const rows = (await refreshRes.json()) as ReceiptRequestRow[];
-            const refreshed = rows.find((x) => x.id === row.id);
-            if (refreshed) {
-              normalized = applyReceiptRequestUpdate(refreshed);
-            }
-          }
-        } catch {
-          // оставляем результат merge по дельте
-        }
+      }
+      const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
+      const synced = syncedRows?.find((r) => r.id === row.id);
+      if (synced) {
+        normalized = synced;
       }
       const openLeft = normalized.items.filter(isReceiptItemOpen).length;
       if (openLeft > 0) {
