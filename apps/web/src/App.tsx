@@ -76,6 +76,8 @@ import { StatusBadge } from "./shared/ui/StatusBadge";
 import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { TabObjectFilter } from "./widgets/layout/TabObjectFilter";
+import { UserAccountMenu } from "./widgets/layout/UserAccountMenu";
+import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { TransfersTab } from "./widgets/transfers/TransfersTab";
@@ -1698,6 +1700,7 @@ function App() {
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => isAdmin, [me?.role]);
+  const isAdminHeaderLayout = activeTab === "admin" && canManageUsers;
   const canWriteCatalog = useMemo(
     () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
     [me]
@@ -5741,60 +5744,79 @@ function App() {
           </div>
           <div className="toolbar topToolbar">
             <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            {activeTab !== "stocks" ? (
-              <select
-                value={activeObjectId}
-                onChange={(e) => {
-                  void selectTopObject(e.target.value);
-                }}
-              >
-                {canViewAllObjects ? (
-                  <option value={ALL_OBJECTS_ID}>Все объекты</option>
-                ) : null}
-                {availableObjects.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    Объект: {safeName(o.name)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="homeToolbarHint muted" title="На главной показана сводка по всем объектам">
-                Все объекты
-              </span>
-            )}
-            <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
-              <button
-                type="button"
-                className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                onClick={() => setSection("SS")}
-              >
-                СС
-              </button>
-              <button
-                type="button"
-                className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                onClick={() => setSection("EOM")}
-              >
-                ЭОМ
-              </button>
-            </div>
+            {!isAdminHeaderLayout ? (
+              activeTab !== "stocks" ? (
+                <select
+                  value={activeObjectId}
+                  onChange={(e) => {
+                    void selectTopObject(e.target.value);
+                  }}
+                >
+                  {canViewAllObjects ? (
+                    <option value={ALL_OBJECTS_ID}>Все объекты</option>
+                  ) : null}
+                  {availableObjects.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      Объект: {safeName(o.name)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="homeToolbarHint muted" title="На главной показана сводка по всем объектам">
+                  Все объекты
+                </span>
+              )
+            ) : null}
+            {!isAdminHeaderLayout ? (
+              <div className="sectionToggle" aria-label="Раздел СС/ЭОМ">
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                  onClick={() => setSection("SS")}
+                >
+                  СС
+                </button>
+                <button
+                  type="button"
+                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                  onClick={() => setSection("EOM")}
+                >
+                  ЭОМ
+                </button>
+              </div>
+            ) : null}
             <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
             {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
 
-
-            <button className="topIconBtn" type="button" onClick={() => setActiveTab("profile")}>Профиль</button>
-            <button className="topIconBtn" type="button" onClick={() => setActiveTab("settings")}>Настройки</button>
-            <button className="topIconBtn topIconBtnDanger" type="button" onClick={onLogout}>
-              Выйти
-            </button>
-            {me ? (
-              <span className="userChip">
-                <span className="userAvatar">
-                  <UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />
-                </span>
-                <span>{me.fullName}</span>
-              </span>
-            ) : null}
+            {isAdminHeaderLayout && me ? (
+              <UserAccountMenu
+                fullName={me.fullName}
+                avatar={<UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />}
+                onProfile={() => setActiveTab("profile")}
+                onSettings={() => setActiveTab("settings")}
+                onLogout={onLogout}
+              />
+            ) : (
+              <>
+                <button className="topIconBtn" type="button" onClick={() => setActiveTab("profile")}>
+                  Профиль
+                </button>
+                <button className="topIconBtn" type="button" onClick={() => setActiveTab("settings")}>
+                  Настройки
+                </button>
+                <button className="topIconBtn topIconBtnDanger" type="button" onClick={onLogout}>
+                  Выйти
+                </button>
+                {me ? (
+                  <span className="userChip">
+                    <span className="userAvatar">
+                      <UserAvatarChip fullName={me.fullName} avatarUrl={me.avatarUrl} imageClassName="userAvatarImage" />
+                    </span>
+                    <span>{me.fullName}</span>
+                  </span>
+                ) : null}
+              </>
+            )}
           </div>
         </header>
         {activeTab === "stocks" && (
@@ -10789,6 +10811,16 @@ function App() {
             icon="⚙"
             title="Управление доступами"
             subtitle="Пользователи · роли · объекты и проекты"
+            context={
+              <WorkspaceContextBar
+                activeObjectId={activeObjectId}
+                canViewAllObjects={canViewAllObjects}
+                objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
+                section={objectSectionFilter}
+                onSelectObject={(id) => void selectTopObject(id)}
+                onSelectSection={(next) => setSection(next)}
+              />
+            }
             stats={[
               { label: "Пользователей", value: users.length },
               { label: "Объектов", value: warehouses.length }

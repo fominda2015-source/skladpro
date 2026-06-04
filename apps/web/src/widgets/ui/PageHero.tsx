@@ -14,10 +14,11 @@ type Props = {
   subtitle?: ReactNode;
   stats?: StatItem[];
   actions?: ReactNode;
+  context?: ReactNode;
   variant?: "default" | "compact";
 };
 
-export function PageHero({ icon, title, subtitle, stats, actions, variant = "default" }: Props) {
+export function PageHero({ icon, title, subtitle, stats, actions, context, variant = "default" }: Props) {
   return (
     <section className={`pageHero ${variant}`}>
       <div className="pageHeroMain">
@@ -30,6 +31,7 @@ export function PageHero({ icon, title, subtitle, stats, actions, variant = "def
         </div>
         {actions ? <div className="pageHeroActions">{actions}</div> : null}
       </div>
+      {context ? <div className="pageHeroContext">{context}</div> : null}
       {stats && stats.length ? (
         <div className="pageHeroStats">
           {stats.map((s, i) => {

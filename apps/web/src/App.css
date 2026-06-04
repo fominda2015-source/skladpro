@@ -466,6 +466,156 @@ button:hover {
   object-fit: cover;
 }
 
+.userAccountMenu {
+  position: relative;
+  margin-left: auto;
+}
+
+.userAccountMenuTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid #dbe1ec;
+  background: #fff;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 600;
+  width: auto;
+}
+
+.userAccountMenuTrigger:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.userAccountMenuAvatar {
+  width: 32px;
+  height: 32px;
+}
+
+.userAccountMenuName {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userAccountMenuChevron {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.userAccountMenuPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  z-index: 30;
+}
+
+.userAccountMenuHead {
+  margin: 4px 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.userAccountMenuItem {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.userAccountMenuItem:hover {
+  background: #f1f5f9;
+}
+
+.userAccountMenuItemDanger {
+  color: #b91c1c;
+}
+
+.userAccountMenuItemDanger:hover {
+  background: #fef2f2;
+}
+
+.pageHeroContext {
+  width: 100%;
+}
+
+.workspaceContextBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 20px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.workspaceContextLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.workspaceContextObject {
+  flex: 1 1 280px;
+  min-width: min(100%, 240px);
+  margin: 0;
+}
+
+.workspaceContextObjectSelect {
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 700;
+  border-color: #93c5fd;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.workspaceContextObjectStatic .workspaceContextObjectValue {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #dbe1ec;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.workspaceContextSection {
+  flex: 0 0 auto;
+}
+
+.workspaceContextSectionToggle {
+  height: 44px;
+}
+
 .toolbar input {
   flex: 1;
   min-width: 220px;
@@ -2592,6 +2742,12 @@ html[data-mobile="1"] .chatPage--thread .chatThread--placeholder {
     padding: 8px;
   }
   .topToolbar .userChip {
+    display: none;
+  }
+  .userAccountMenuName {
+    display: none;
+  }
+  .userAccountMenuChevron {
     display: none;
   }
   .toolbar input {
