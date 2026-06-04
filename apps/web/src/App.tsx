@@ -765,8 +765,6 @@ function App() {
   const [newPositionName, setNewPositionName] = useState("");
   const [newUserPositionId, setNewUserPositionId] = useState("");
   const [selectedPositionId, setSelectedPositionId] = useState("");
-  const [newUserPermissions, setNewUserPermissions] = useState<string[]>([]);
-  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRoleName, setSelectedRoleName] = useState("VIEWER");
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
@@ -1153,56 +1151,17 @@ function App() {
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
+  const isAdmin = me?.role === "ADMIN";
   const hasPermission = (permission: string) =>
     Boolean(
-      me?.permissions?.includes("*") ||
+      isAdmin ||
+        me?.permissions?.includes("*") ||
         me?.permissions?.includes(permission) ||
         (permission === "limits.edit" && Boolean(me?.permissions?.includes("limits.write"))) ||
         (permission === "limits.write" && Boolean(me?.permissions?.includes("limits.edit"))) ||
         (permission === "announcements.edit" && Boolean(me?.permissions?.includes("announcements.write"))) ||
         (permission === "announcements.delete" && Boolean(me?.permissions?.includes("announcements.write")))
     );
-  const sidebarAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
-    { id: "stocks", label: "Главная", permissions: ["dashboard.read"] },
-    { id: "warehouse", label: "Склад", permissions: ["stocks.read"] },
-    { id: "operations", label: "Приходы", permissions: ["operations.read"] },
-    { id: "issues", label: "Выдачи", permissions: ["issues.read"] },
-    { id: "approvals", label: "Заявки на согласование", permissions: ["issues.approve"] },
-    { id: "waybills", label: "Перемещения", permissions: ["waybills.read"] },
-    { id: "documents", label: "Документы", permissions: ["documents.read"] },
-    { id: "acts", label: "Акты", permissions: [] },
-    { id: "limits", label: "Лимиты", permissions: ["limits.read"] },
-    { id: "materialReport", label: "Материальный отчёт", permissions: ["materialReport.read"] },
-    { id: "catalog", label: "Справочники", permissions: ["warehouses.read", "materials.read"] },
-    { id: "tools", label: "Инструменты", permissions: ["tools.read"] },
-    { id: "qr", label: "QR", permissions: ["tools.read"] },
-    { id: "integrations", label: "Интеграции", permissions: ["integrations.read", "notifications.read"] },
-    { id: "notifications", label: "Уведомления", permissions: ["notifications.read"] },
-    { id: "audit", label: "Логи", permissions: ["audit.read"] },
-    { id: "admin", label: "Доступы", permissions: ["admin.users.manage"] }
-  ];
-  const actionAccessOptions: Array<{ id: string; label: string; permissions: string[] }> = [
-    { id: "materialCards", label: "Редактирование карточек материалов", permissions: ["materials.write"] },
-    { id: "warehousesManage", label: "Создание и изменение складов", permissions: ["warehouses.write"] },
-    { id: "operationsWrite", label: "Проведение приходов и операций", permissions: ["operations.write"] },
-    { id: "issuesWrite", label: "Создание и выдача заявок", permissions: ["issues.write"] },
-    { id: "issuesApprove", label: "Согласование заявок", permissions: ["issues.approve"] },
-    { id: "waybillsWrite", label: "Перемещения (ТН)", permissions: ["waybills.write"] },
-    { id: "documentsWrite", label: "Редактирование документов", permissions: ["documents.write"] },
-    { id: "documentsUpload", label: "Загрузка документов", permissions: ["documents.upload"] },
-    { id: "limitsEdit", label: "Редактирование лимитов", permissions: ["limits.edit", "limits.write"] },
-    { id: "materialReportWrite", label: "Списания в материальном отчёте", permissions: ["materialReport.write"] },
-    { id: "toolsWrite", label: "Управление инструментами", permissions: ["tools.write"] },
-    { id: "integrationsWrite", label: "Настройка интеграций", permissions: ["integrations.write"] },
-    { id: "notificationsWrite", label: "Отправка уведомлений", permissions: ["notifications.write"] },
-    { id: "notificationsRules", label: "Правила уведомлений", permissions: ["notifications.rules.manage"] },
-    { id: "feedbackManage", label: "Модерация обратной связи", permissions: ["feedback.manage"] },
-    { id: "announcementsCreate", label: "Публикация объявлений", permissions: ["announcements.write"] },
-    { id: "announcementsEdit", label: "Редактирование объявлений", permissions: ["announcements.edit"] },
-    { id: "announcementsDelete", label: "Удаление объявлений", permissions: ["announcements.delete"] },
-    { id: "auditRevert", label: "Откат операций в журнале", permissions: ["audit.revert"] },
-    { id: "adminUsers", label: "Управление пользователями и доступами", permissions: ["admin.users.manage"] }
-  ];
   const roleLabel = (role: string) =>
     ({
       ADMIN: "Системный администратор",
@@ -1738,7 +1697,7 @@ function App() {
   const currentSection = tabSectionMap[activeTab] ?? "Раздел";
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
-  const canManageUsers = useMemo(() => hasPermission("admin.users.manage"), [me]);
+  const canManageUsers = useMemo(() => isAdmin, [me?.role]);
   const canWriteCatalog = useMemo(
     () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
     [me]
@@ -1779,10 +1738,7 @@ function App() {
     () => hasPermission("audit.read"),
     [me]
   );
-  const canRevertAudit = useMemo(
-    () => Boolean(me?.role === "ADMIN" || me?.permissions?.includes("audit.revert")),
-    [me]
-  );
+  const canRevertAudit = useMemo(() => isAdmin, [me?.role]);
   const canDashboard = useMemo(
     () =>
       Boolean(
@@ -2763,7 +2719,6 @@ function App() {
       setSelectedUserId(usersData[0].id);
       setSelectedRoleName(usersData[0].role);
       setSelectedStatus(usersData[0].status);
-      setSelectedPermissions(usersData[0].customPermissions || usersData[0].permissions || []);
       const pos = positionsData.find((p) => p.name === usersData[0].position);
       setSelectedPositionId(pos?.id || "");
     }
@@ -4981,7 +4936,6 @@ function App() {
       setSelectedProjectScopes(u.projectScopeIds ?? []);
       setSelectedRoleName(u.role);
       setSelectedStatus(u.status);
-      setSelectedPermissions(u.customPermissions || u.permissions || []);
       const pos = positions.find((p) => p.name === u.position);
       setSelectedPositionId(pos?.id || "");
     }
@@ -6416,7 +6370,7 @@ function App() {
             markNotificationsRead={markNotificationsRead}
             openNotificationLinkedEntity={openNotificationLinkedEntity}
             openDocumentsForEntity={openDocumentsForEntity}
-            canManageRules={Boolean(me?.role === "ADMIN" || hasPermission("admin.users.manage") || hasPermission("notifications.rules.manage"))}
+            canManageRules={isAdmin}
             users={users.length ? users : chatUsers.map((u) => ({ id: u.id, fullName: u.fullName, email: u.id }))}
             fetchWithSession={fetchWithSession}
             apiUrl={API_URL}
@@ -9748,51 +9702,10 @@ function App() {
               Сохранить scope
             </button>
           </div>
-          <div className="card" style={{ marginTop: 10 }}>
-            <h4>Вкладки и модули</h4>
-            <div className="plainList">
-              {sidebarAccessOptions.map((opt) => (
-                <label key={`adm-drawer-perm-${opt.id}`} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
-                      } else {
-                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
-                      }
-                    }}
-                  />{" "}
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="card" style={{ marginTop: 10 }}>
-            <h4>Доступы на действия</h4>
-            <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-              Отдельные права: редактирование карточек материалов, управление складами и т.п.
-            </p>
-            <div className="plainList">
-              {actionAccessOptions.map((opt) => (
-                <label key={`adm-drawer-action-${opt.id}`} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={opt.permissions.some((p) => selectedPermissions.includes(p))}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
-                      } else {
-                        setSelectedPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
-                      }
-                    }}
-                  />{" "}
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
+          <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>
+            Права на вкладки и действия задаются <strong>ролью</strong> (Кладовщик, Прораб и т.д.). Индивидуальные
+            галочки отключены.
+          </p>
           <div className="toolbar">
             <button
               type="button"
@@ -9808,7 +9721,6 @@ function App() {
                   body: JSON.stringify({
                     roleName: selectedRoleName,
                     status: selectedStatus,
-                    permissions: selectedPermissions,
                     positionId: selectedPositionId || null
                   })
                 });
@@ -11382,48 +11294,9 @@ function App() {
               </div>
             </div>
           </div>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Доступ к вкладкам и модулям (индивидуально)</h3>
-            <div className="plainList">
-              {sidebarAccessOptions.map((opt) => (
-                <label key={`new-perm-${opt.id}`} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={opt.permissions.some((p) => newUserPermissions.includes(p))}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setNewUserPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
-                      } else {
-                        setNewUserPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
-                      }
-                    }}
-                  />{" "}
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Доступы на действия</h3>
-            <div className="plainList">
-              {actionAccessOptions.map((opt) => (
-                <label key={`new-action-${opt.id}`} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={opt.permissions.some((p) => newUserPermissions.includes(p))}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setNewUserPermissions((prev) => Array.from(new Set([...prev, ...opt.permissions])));
-                      } else {
-                        setNewUserPermissions((prev) => prev.filter((p) => !opt.permissions.includes(p)));
-                      }
-                    }}
-                  />{" "}
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
+          <p className="muted" style={{ fontSize: 13, margin: "12px 0 0" }}>
+            Права нового пользователя определяются выбранной <strong>ролью</strong>.
+          </p>
           <div className="toolbar">
             <button
               type="button"
@@ -11443,7 +11316,6 @@ function App() {
                     password: newUserPassword,
                     warehouseIds: newUserWarehouseScopes,
                     projectIds: newUserProjectScopes,
-                    permissions: newUserPermissions,
                     positionId: newUserPositionId || undefined,
                     positionName: newPositionName.trim() || undefined
                   })
@@ -11457,7 +11329,6 @@ function App() {
                 setNewUserFullName("");
                 setNewUserWarehouseScopes([]);
                 setNewUserProjectScopes([]);
-                setNewUserPermissions([]);
                 setNewPositionName("");
                 setNewUserPositionId("");
                 await loadAdminData();

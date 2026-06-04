@@ -6,7 +6,7 @@ import { createDemoData, deleteDemoData, getDemoDataStatus } from "../lib/demoDa
 import { prisma } from "../lib/prisma.js";
 import { normalizePermissions } from "../lib/permissions.js";
 import { getEffectivePermissions } from "../lib/access.js";
-import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { requireAdminRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { UserStatus } from "@prisma/client";
 
 const updateUserAccessSchema = z.object({
@@ -62,7 +62,7 @@ const bindObjectSectionUsersSchema = z.object({
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
-adminRouter.use(requirePermission("admin.users.manage"));
+adminRouter.use(requireAdminRole);
 
 adminRouter.get("/users", async (_req, res) => {
   const users = await prisma.user.findMany({
@@ -239,7 +239,6 @@ adminRouter.post("/users", async (req, res) => {
         fullName: parsed.data.fullName.trim(),
         roleId: role.id,
         passwordHash,
-        customPermissions: parsed.data.permissions,
         positionId
       },
       include: { role: true, position: true }
@@ -290,7 +289,7 @@ adminRouter.patch("/users/:id/access", async (req, res) => {
     data: {
       ...(roleId ? { roleId } : {}),
       ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {}),
-      ...(parsed.data.permissions ? { customPermissions: parsed.data.permissions } : {}),
+      customPermissions: [],
       ...(Object.prototype.hasOwnProperty.call(parsed.data, "positionId")
         ? { positionId: parsed.data.positionId ?? null }
         : {})

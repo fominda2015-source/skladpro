@@ -1,7 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
+import { getEffectivePermissions } from "../lib/access.js";
 import { hasPermission } from "../lib/permissions.js";
+import { prisma } from "../lib/prisma.js";
 import type { JwtPayload } from "../types.js";
 
 export type AuthedRequest = Request & { user?: JwtPayload };
@@ -21,15 +23,41 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   }
 }
 
+export async function loadUserPermissions(userId: string): Promise<string[]> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: { select: { permissions: true } } }
+  });
+  if (!user) return [];
+  return getEffectivePermissions(user.role.permissions);
+}
+
 export function requirePermission(permission: string) {
-  return (req: AuthedRequest, res: Response, next: NextFunction) => {
+  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const permissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
-    if (!hasPermission(permissions, permission)) {
-      return res.status(403).json({ error: "Forbidden" });
+    try {
+      const permissions = await loadUserPermissions(req.user.userId);
+      req.user.permissions = permissions;
+      if (!hasPermission(permissions, permission)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      return next();
+    } catch (e) {
+      console.error("requirePermission failed:", e);
+      return res.status(500).json({ error: "Ошибка проверки доступа" });
     }
-    return next();
   };
+}
+
+/** Только роль ADMIN (вкладка «Доступы», управление пользователями). */
+export function requireAdminRole(req: AuthedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ error: "Только для администратора" });
+  }
+  return next();
 }

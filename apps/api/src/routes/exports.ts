@@ -2,7 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 import xlsx from "xlsx";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { hasPermission } from "../lib/permissions.js";
+import { loadUserPermissions, requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   getRequestDataScope,
   resolveReadScope,
@@ -205,11 +206,18 @@ const sectionPermissions: Record<string, string[]> = {
 
 function requireSectionPerm(section: string) {
   const perms = sectionPermissions[section] || [];
-  return (req: AuthedRequest, res: import("express").Response, next: import("express").NextFunction) => {
-    if (req.user?.role === "ADMIN") return next();
-    const owned = Array.isArray(req.user?.permissions) ? req.user!.permissions : [];
-    if (perms.some((p) => owned.includes(p))) return next();
-    return res.status(403).json({ error: "Недостаточно прав на экспорт раздела" });
+  return async (req: AuthedRequest, res: import("express").Response, next: import("express").NextFunction) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (req.user.role === "ADMIN") return next();
+    try {
+      const owned = await loadUserPermissions(req.user.userId);
+      req.user.permissions = owned;
+      if (perms.some((p) => hasPermission(owned, p))) return next();
+      return res.status(403).json({ error: "Недостаточно прав на экспорт раздела" });
+    } catch (e) {
+      console.error("requireSectionPerm failed:", e);
+      return res.status(500).json({ error: "Ошибка проверки доступа" });
+    }
   };
 }
 

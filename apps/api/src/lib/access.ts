@@ -1,7 +1,7 @@
 import { normalizePermissions } from "./permissions.js";
 
-export function getEffectivePermissions(rolePermissions: unknown, customPermissions: unknown): string[] {
-  const custom = normalizePermissions(customPermissions);
-  if (custom.length) return custom;
+/** Права только из роли. Индивидуальные customPermissions отключены (давали 403). */
+export function getEffectivePermissions(rolePermissions: unknown, _customPermissions?: unknown): string[] {
+  void _customPermissions;
   return normalizePermissions(rolePermissions);
 }
