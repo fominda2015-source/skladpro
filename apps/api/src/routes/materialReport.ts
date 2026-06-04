@@ -8,7 +8,12 @@ import { IssueRequestDomain, IssueRequestStatus, MaterialKind } from "@prisma/cl
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { config } from "../config.js";
-import { assertObjectSectionInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
+import {
+  assertObjectSectionInScope,
+  assertWarehouseInScope,
+  getRequestDataScope,
+  resolveReadScope
+} from "../lib/dataScope.js";
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtySchema } from "../lib/quantity.js";
@@ -118,13 +123,116 @@ function issueResponsibleLabel(issue: {
 
 type BalanceLine = { materialId: string; name: string; unit: string; quantity: number };
 
+const WAREHOUSE_STOCK_ISSUE_ID = "__warehouse_stock__";
+
+type IssueGroupMeta = {
+  issueId: string;
+  issueNumber: string;
+  issuedAt: string;
+  warehouseId: string;
+  section: "SS" | "EOM";
+};
+
 type BalanceMaps = {
   qtyByKey: Map<string, number>;
   holderLabels: Map<string, string>;
   materialMeta: Map<string, { name: string; unit: string }>;
   warehouseStockHolderKey: string;
   holderIssueMeta: Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>;
+  /** holderKey → issueId → lines (выдано по заявкам) */
+  holderIssueLines: Map<string, Map<string, { meta: IssueGroupMeta; lines: Map<string, BalanceLine> }>>;
 };
+
+function emptyBalanceMaps(warehouseStockHolderKey: string): BalanceMaps {
+  return {
+    qtyByKey: new Map(),
+    holderLabels: new Map(),
+    materialMeta: new Map(),
+    warehouseStockHolderKey,
+    holderIssueMeta: new Map(),
+    holderIssueLines: new Map()
+  };
+}
+
+function mergeBalanceMaps(target: BalanceMaps, source: BalanceMaps) {
+  for (const [k, v] of source.holderLabels) target.holderLabels.set(k, v);
+  for (const [k, v] of source.materialMeta) target.materialMeta.set(k, v);
+  for (const [k, v] of source.qtyByKey) {
+    target.qtyByKey.set(k, (target.qtyByKey.get(k) || 0) + v);
+  }
+  for (const [holderKey, meta] of source.holderIssueMeta) {
+    const prev = target.holderIssueMeta.get(holderKey) ?? { issueNumbers: [], lastIssueAt: null };
+    for (const n of meta.issueNumbers) {
+      if (!prev.issueNumbers.includes(n)) prev.issueNumbers.push(n);
+    }
+    if (meta.lastIssueAt && (!prev.lastIssueAt || meta.lastIssueAt > prev.lastIssueAt)) {
+      prev.lastIssueAt = meta.lastIssueAt;
+    }
+    target.holderIssueMeta.set(holderKey, prev);
+  }
+  for (const [holderKey, byIssue] of source.holderIssueLines) {
+    const tgtByIssue = target.holderIssueLines.get(holderKey) ?? new Map();
+    for (const [issueId, grp] of byIssue) {
+      const existing = tgtByIssue.get(issueId);
+      if (!existing) {
+        tgtByIssue.set(issueId, {
+          meta: { ...grp.meta },
+          lines: new Map(grp.lines)
+        });
+        continue;
+      }
+      for (const [matId, line] of grp.lines) {
+        const prev = existing.lines.get(matId);
+        if (prev) prev.quantity += line.quantity;
+        else existing.lines.set(matId, { ...line });
+      }
+    }
+    target.holderIssueLines.set(holderKey, tgtByIssue);
+  }
+}
+
+async function resolveMaterialReportTargets(
+  scope: Awaited<ReturnType<typeof resolveReadScope>>,
+  warehouseId: string,
+  sectionFilter: "SS" | "EOM" | "ALL"
+): Promise<Array<{ warehouseId: string; section: "SS" | "EOM" }>> {
+  const warehouseIds = warehouseId
+    ? [warehouseId]
+    : scope.unrestricted
+      ? (await prisma.warehouse.findMany({ select: { id: true } })).map((w) => w.id)
+      : [...(scope.warehouseIds || [])];
+  const sections: Array<"SS" | "EOM"> = sectionFilter === "ALL" ? ["SS", "EOM"] : [sectionFilter];
+  const pairs: Array<{ warehouseId: string; section: "SS" | "EOM" }> = [];
+  for (const wid of warehouseIds) {
+    for (const section of sections) {
+      try {
+        assertObjectSectionInScope(scope, wid, section);
+        pairs.push({ warehouseId: wid, section });
+      } catch {
+        // skip forbidden warehouse/section pairs
+      }
+    }
+  }
+  return pairs;
+}
+
+async function buildAggregatedMaterialReportBalances(
+  scope: Awaited<ReturnType<typeof resolveReadScope>>,
+  warehouseId: string,
+  sectionFilter: "SS" | "EOM" | "ALL"
+): Promise<BalanceMaps> {
+  const targets = await resolveMaterialReportTargets(scope, warehouseId, sectionFilter);
+  if (!targets.length) {
+    return emptyBalanceMaps(STOREKEEPER_HOLDER_KEY);
+  }
+  let merged: BalanceMaps | null = null;
+  for (const t of targets) {
+    const maps = await buildMaterialReportBalances(t.warehouseId, t.section);
+    if (!merged) merged = maps;
+    else mergeBalanceMaps(merged, maps);
+  }
+  return merged ?? emptyBalanceMaps(STOREKEEPER_HOLDER_KEY);
+}
 
 async function buildMaterialReportBalances(
   warehouseId: string,
@@ -139,6 +247,31 @@ async function buildMaterialReportBalances(
   const holderLabels = new Map<string, string>([[whHolderKey, whHolderName]]);
   const materialMeta = new Map<string, { name: string; unit: string }>();
   const holderIssueMeta = new Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>();
+  const holderIssueLines = new Map<
+    string,
+    Map<string, { meta: IssueGroupMeta; lines: Map<string, BalanceLine> }>
+  >();
+
+  const addIssueLine = (
+    holderKey: string,
+    meta: IssueGroupMeta,
+    materialId: string,
+    name: string,
+    unit: string,
+    delta: number
+  ) => {
+    if (delta <= 0) return;
+    const byIssue = holderIssueLines.get(holderKey) ?? new Map();
+    let grp = byIssue.get(meta.issueId);
+    if (!grp) {
+      grp = { meta: { ...meta }, lines: new Map() };
+      byIssue.set(meta.issueId, grp);
+    }
+    const prev = grp.lines.get(materialId);
+    if (prev) prev.quantity += delta;
+    else grp.lines.set(materialId, { materialId, name, unit, quantity: delta });
+    holderIssueLines.set(holderKey, byIssue);
+  };
 
   const trackIssue = (holderKey: string, issueNumber: string, issuedAt: Date) => {
     const prev = holderIssueMeta.get(holderKey) ?? { issueNumbers: [], lastIssueAt: null };
@@ -172,11 +305,27 @@ async function buildMaterialReportBalances(
     }
   });
 
+  const stockIssueMeta: IssueGroupMeta = {
+    issueId: WAREHOUSE_STOCK_ISSUE_ID,
+    issueNumber: "Остаток на складе",
+    issuedAt: new Date(0).toISOString(),
+    warehouseId,
+    section: sectionEnum
+  };
+
   for (const row of stocks) {
     const qty = Number(row.quantity) || 0;
     if (qty < 1e-9) continue;
     rememberMaterial(row.material.id, row.material.name, row.material.unit);
     addQty(whHolderKey, whHolderName, row.materialId, qty);
+    addIssueLine(
+      whHolderKey,
+      stockIssueMeta,
+      row.materialId,
+      row.material.name,
+      row.material.unit,
+      qty
+    );
   }
 
   const issues = await prisma.issueRequest.findMany({
@@ -188,6 +337,7 @@ async function buildMaterialReportBalances(
       items: { some: {} }
     },
     select: {
+      id: true,
       number: true,
       updatedAt: true,
       responsibleName: true,
@@ -233,11 +383,26 @@ async function buildMaterialReportBalances(
       holderName = userLabel.get(uid) || uid;
     }
 
+    const issueMeta: IssueGroupMeta = {
+      issueId: iss.id,
+      issueNumber: iss.number,
+      issuedAt: iss.updatedAt.toISOString(),
+      warehouseId,
+      section: sectionEnum
+    };
     for (const it of iss.items) {
       const qty = Number(it.quantity) || 0;
       if (qty <= 0) continue;
       rememberMaterial(it.material.id, it.material.name, it.material.unit);
       addQty(holderKey, holderName, it.materialId, qty);
+      addIssueLine(
+        holderKey,
+        issueMeta,
+        it.materialId,
+        it.material.name,
+        it.material.unit,
+        qty
+      );
     }
     trackIssue(holderKey, iss.number, iss.updatedAt);
   }
@@ -256,11 +421,19 @@ async function buildMaterialReportBalances(
     qtyByKey.set(key, Math.max(0, cur - sub));
   }
 
-  return { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey: whHolderKey, holderIssueMeta };
+  return {
+    qtyByKey,
+    holderLabels,
+    materialMeta,
+    warehouseStockHolderKey: whHolderKey,
+    holderIssueMeta,
+    holderIssueLines
+  };
 }
 
 function balancesToPayload(maps: BalanceMaps) {
-  const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey, holderIssueMeta } = maps;
+  const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey, holderIssueMeta, holderIssueLines } =
+    maps;
   type Line = BalanceLine;
   const holders = new Map<string, Line[]>();
 
@@ -280,6 +453,24 @@ function balancesToPayload(maps: BalanceMaps) {
 
   const payload = [...holders.entries()].map(([holderKey, lines]) => {
     const meta = holderIssueMeta.get(holderKey);
+    const issueMap = holderIssueLines.get(holderKey);
+    const issues = issueMap
+      ? [...issueMap.values()]
+          .map((grp) => ({
+            issueId: grp.meta.issueId,
+            issueNumber: grp.meta.issueNumber,
+            issuedAt: grp.meta.issuedAt,
+            warehouseId: grp.meta.warehouseId,
+            section: grp.meta.section,
+            lines: [...grp.lines.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"))
+          }))
+          .filter((g) => g.lines.length > 0)
+          .sort((a, b) => {
+            if (a.issueId === WAREHOUSE_STOCK_ISSUE_ID) return -1;
+            if (b.issueId === WAREHOUSE_STOCK_ISSUE_ID) return 1;
+            return new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime();
+          })
+      : [];
     return {
       holderKey,
       holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
@@ -287,6 +478,7 @@ function balancesToPayload(maps: BalanceMaps) {
       isWarehouseBalance: holderKey === warehouseStockHolderKey,
       issueNumbers: meta?.issueNumbers ?? [],
       lastIssueAt: meta?.lastIssueAt ?? null,
+      issues,
       lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
     };
   });
@@ -304,31 +496,37 @@ export const materialReportRouter = Router();
 materialReportRouter.use(requireAuth);
 
 materialReportRouter.get("/balances", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {
-  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : "";
-  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "";
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "ALL";
+  if (sectionRaw && sectionRaw !== "SS" && sectionRaw !== "EOM" && sectionRaw !== "ALL") {
+    return res.status(400).json({ error: "section: SS, EOM или ALL" });
+  }
+  const sectionFilter: "SS" | "EOM" | "ALL" =
+    sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "ALL";
 
-  if (!warehouseId || !section) {
-    return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
+  const scope = await resolveReadScope(req, warehouseId ? { warehouseId } : undefined);
+  if (warehouseId) {
+    try {
+      assertWarehouseInScope(scope, warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
   }
 
-  const scope = await resolveReadScope(req, { warehouseId });
-  try {
-    assertObjectSectionInScope(scope, warehouseId, section);
-  } catch (e) {
-    const err = e as Error & { status?: number };
-    if (err.status === 403) return res.status(403).json({ error: err.message });
-    throw e;
-  }
-
-  const maps = await buildMaterialReportBalances(warehouseId, section);
+  const maps = await buildAggregatedMaterialReportBalances(scope, warehouseId, sectionFilter);
   return res.json(balancesToPayload(maps));
 });
 
 materialReportRouter.get("/writeoffs/history", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {
-  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : "";
-  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "";
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "ALL";
+  if (sectionRaw && sectionRaw !== "SS" && sectionRaw !== "EOM" && sectionRaw !== "ALL") {
+    return res.status(400).json({ error: "section: SS, EOM или ALL" });
+  }
+  const sectionFilter: "SS" | "EOM" | "ALL" =
+    sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "ALL";
   const holderKey = typeof req.query.holderKey === "string" ? req.query.holderKey.trim() : "";
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   const fromRaw = typeof req.query.from === "string" ? req.query.from : "";
@@ -337,17 +535,20 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
   const takeRaw = Number(req.query.take);
   const take = Number.isFinite(takeRaw) ? Math.min(500, Math.max(1, takeRaw)) : 200;
 
-  if (!warehouseId || !section) {
-    return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
+  const scope = await resolveReadScope(req, warehouseId ? { warehouseId } : undefined);
+  if (warehouseId) {
+    try {
+      assertWarehouseInScope(scope, warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
   }
 
-  const scope = await resolveReadScope(req, { warehouseId });
-  try {
-    assertObjectSectionInScope(scope, warehouseId, section);
-  } catch (e) {
-    const err = e as Error & { status?: number };
-    if (err.status === 403) return res.status(403).json({ error: err.message });
-    throw e;
+  const targets = await resolveMaterialReportTargets(scope, warehouseId, sectionFilter);
+  if (!targets.length) {
+    return res.json([]);
   }
 
   const createdAt: { gte?: Date; lte?: Date } = {};
@@ -365,8 +566,10 @@ materialReportRouter.get("/writeoffs/history", requirePermission("materialReport
 
   const rows = await prisma.materialHolderWriteoff.findMany({
     where: {
-      warehouseId,
-      section,
+      OR: targets.map((t) => ({
+        warehouseId: t.warehouseId,
+        section: t.section
+      })),
       ...(holderKey ? { holderKey } : {}),
       ...(Object.keys(createdAt).length ? { createdAt } : {}),
       ...(q

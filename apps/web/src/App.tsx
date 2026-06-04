@@ -1680,7 +1680,11 @@ function App() {
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => isAdmin, [me?.role]);
   const showWorkspaceContext = Boolean(
-    me && activeTab !== "profile" && activeTab !== "settings" && activeTab !== "password"
+    me &&
+      activeTab !== "profile" &&
+      activeTab !== "settings" &&
+      activeTab !== "password" &&
+      activeTab !== "materialReport"
   );
   const canWriteCatalog = useMemo(
     () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
@@ -8788,10 +8792,15 @@ function App() {
           token={token}
           apiUrl={API_URL}
           fetchWithSession={fetchWithSession}
-          warehouseId={activeObjectId}
-          section={objectSectionFilter}
+          warehouses={objectFilterWarehouses}
           canWriteoff={canMaterialWriteoff}
           safeName={safeName}
+          roleLabel={roleLabel}
+          onOpenChat={(userId) => {
+            setActiveTab("chat");
+            void openChatPeer(userId);
+          }}
+          onOpenUserProfile={(userId) => void openChatUserProfile(userId)}
           exportAction={
             <PeriodExportButton
               section="materialReport"
@@ -10225,6 +10234,16 @@ function App() {
           roleLabel={roleLabel}
           safeName={safeName}
           onClose={closeChatUserProfile}
+          onWriteMessage={
+            chatProfileData
+              ? () => {
+                  const userId = chatProfileData.id;
+                  closeChatUserProfile();
+                  setActiveTab("chat");
+                  void openChatPeer(userId);
+                }
+              : undefined
+          }
         />
       ) : null}
 

@@ -19,9 +19,18 @@ type Props = {
   roleLabel: (role: string) => string;
   safeName: (name: string) => string;
   onClose: () => void;
+  onWriteMessage?: () => void;
 };
 
-export function ChatUserProfileModal({ open, loading, profile, roleLabel, safeName, onClose }: Props) {
+export function ChatUserProfileModal({
+  open,
+  loading,
+  profile,
+  roleLabel,
+  safeName,
+  onClose,
+  onWriteMessage
+}: Props) {
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
@@ -96,6 +105,13 @@ export function ChatUserProfileModal({ open, loading, profile, roleLabel, safeNa
                 <dd>{warehouseNames}</dd>
               </div>
             </dl>
+            {onWriteMessage ? (
+              <div className="chatUserProfileActions">
+                <button type="button" className="primaryBtn" onClick={onWriteMessage}>
+                  Написать
+                </button>
+              </div>
+            ) : null}
           </>
         )}
       </div>

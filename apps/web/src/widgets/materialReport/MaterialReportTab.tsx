@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useViewportContext } from "../layout/ViewportRoot";
+import { TabObjectFilter } from "../layout/TabObjectFilter";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "../chat/UserAvatar";
 import { MaterialReportWriteoffModal, type WriteoffLine } from "./MaterialReportWriteoffModal";
 import { formatMaterialQty } from "../../shared/quantity";
+
+export type MaterialReportIssueGroup = {
+  issueId: string;
+  issueNumber: string;
+  issuedAt: string;
+  warehouseId: string;
+  section: "SS" | "EOM";
+  lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
+};
 
 export type MaterialReportHolder = {
   holderKey: string;
@@ -13,6 +23,7 @@ export type MaterialReportHolder = {
   isWarehouseBalance?: boolean;
   issueNumbers?: string[];
   lastIssueAt?: string | null;
+  issues: MaterialReportIssueGroup[];
   lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
 };
 
@@ -31,18 +42,28 @@ export type MaterialWriteoffHistoryRow = {
   documentFileName?: string | null;
 };
 
+type MatReportUser = {
+  id: string;
+  fullName: string;
+  avatarUrl?: string | null;
+  position?: string | null;
+  role?: string;
+};
+
 type SubTab = "balances" | "history";
+type SectionFilter = "ALL" | "SS" | "EOM";
 
 type Props = {
   token: string | null;
   apiUrl: string;
   fetchWithSession: typeof fetch;
-  warehouseId: string;
-  section: "SS" | "EOM";
+  warehouses: Array<{ id: string; name: string }>;
   canWriteoff: boolean;
   safeName: (s: string) => string;
-  objectFilter?: ReactNode;
+  roleLabel: (role: string) => string;
   exportAction?: ReactNode;
+  onOpenChat?: (userId: string) => void;
+  onOpenUserProfile?: (userId: string) => void;
 };
 
 function lineKey(holderKey: string, materialId: string) {
@@ -62,39 +83,65 @@ function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ru-RU");
 }
 
+function userHolderKey(userId: string) {
+  return `user:${userId}`;
+}
+
 export function MaterialReportTab({
   token,
   apiUrl,
   fetchWithSession,
-  warehouseId,
-  section,
+  warehouses,
   canWriteoff,
   safeName,
-  objectFilter,
-  exportAction
+  roleLabel,
+  exportAction,
+  onOpenChat,
+  onOpenUserProfile
 }: Props) {
   const { isMobile } = useViewportContext();
   const [subTab, setSubTab] = useState<SubTab>("balances");
+  const [warehouseFilter, setWarehouseFilter] = useState("");
+  const [sectionFilter, setSectionFilter] = useState<SectionFilter>("ALL");
+  const [allUsers, setAllUsers] = useState<MatReportUser[]>([]);
   const [holders, setHolders] = useState<MaterialReportHolder[]>([]);
   const [history, setHistory] = useState<MaterialWriteoffHistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [selectedHolderKey, setSelectedHolderKey] = useState("");
+  const [selectedKey, setSelectedKey] = useState("");
   const [holderSearch, setHolderSearch] = useState("");
   const [materialSearch, setMaterialSearch] = useState("");
   const [issueSearch, setIssueSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [kindFilter, setKindFilter] = useState<"" | "warehouse" | "responsible">("");
   const [historySearch, setHistorySearch] = useState("");
+  const [expandedIssues, setExpandedIssues] = useState<Record<string, boolean>>({});
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [writeoffOpen, setWriteoffOpen] = useState(false);
 
+  const warehouseNameById = useMemo(
+    () => new Map(warehouses.map((w) => [w.id, w.name])),
+    [warehouses]
+  );
+
+  const loadUsers = useCallback(async () => {
+    if (!token) return;
+    const res = await fetchWithSession(`${apiUrl}/api/chat/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) setAllUsers((await res.json()) as MatReportUser[]);
+  }, [token, apiUrl, fetchWithSession]);
+
+  const reportQuery = useCallback(() => {
+    const params = new URLSearchParams({ section: sectionFilter });
+    if (warehouseFilter) params.set("warehouseId", warehouseFilter);
+    return params;
+  }, [warehouseFilter, sectionFilter]);
+
   const loadBalances = useCallback(async () => {
-    if (!token || !warehouseId) return;
-    const params = new URLSearchParams({ warehouseId, section });
-    const res = await fetchWithSession(`${apiUrl}/api/material-report/balances?${params}`, {
+    if (!token) return;
+    const res = await fetchWithSession(`${apiUrl}/api/material-report/balances?${reportQuery()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
@@ -102,15 +149,16 @@ export function MaterialReportTab({
       throw new Error(typeof err.error === "string" ? err.error : `Ошибка ${res.status}`);
     }
     setHolders((await res.json()) as MaterialReportHolder[]);
-  }, [token, apiUrl, fetchWithSession, warehouseId, section]);
+  }, [token, apiUrl, fetchWithSession, reportQuery]);
 
   const loadHistory = useCallback(async () => {
-    if (!token || !warehouseId) return;
-    const params = new URLSearchParams({ warehouseId, section, take: "500" });
+    if (!token) return;
+    const params = reportQuery();
+    params.set("take", "500");
     if (historySearch.trim()) params.set("q", historySearch.trim());
     if (dateFrom) params.set("from", dateFrom);
     if (dateTo) params.set("to", dateTo);
-    if (selectedHolderKey && subTab === "history") params.set("holderKey", selectedHolderKey);
+    if (selectedKey && subTab === "history") params.set("holderKey", selectedKey);
     const res = await fetchWithSession(`${apiUrl}/api/material-report/writeoffs/history?${params}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -119,10 +167,10 @@ export function MaterialReportTab({
       throw new Error(typeof err.error === "string" ? err.error : `Ошибка ${res.status}`);
     }
     setHistory((await res.json()) as MaterialWriteoffHistoryRow[]);
-  }, [token, apiUrl, fetchWithSession, warehouseId, section, historySearch, dateFrom, dateTo, selectedHolderKey, subTab]);
+  }, [token, apiUrl, fetchWithSession, reportQuery, historySearch, dateFrom, dateTo, selectedKey, subTab]);
 
   const reload = useCallback(async () => {
-    if (!token || !warehouseId) return;
+    if (!token) return;
     setLoading(true);
     setMessage("");
     try {
@@ -135,7 +183,11 @@ export function MaterialReportTab({
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, loadBalances, loadHistory]);
+  }, [token, loadBalances, loadHistory]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   useEffect(() => {
     void reload();
@@ -145,41 +197,74 @@ export function MaterialReportTab({
     if (subTab === "history") void loadHistory();
   }, [subTab, loadHistory]);
 
-  const filteredHolders = useMemo(() => {
+  const holdersByKey = useMemo(() => new Map(holders.map((h) => [h.holderKey, h])), [holders]);
+
+  const extraHolders = useMemo(() => {
+    const userKeys = new Set(allUsers.map((u) => userHolderKey(u.id)));
+    return holders.filter((h) => !userKeys.has(h.holderKey));
+  }, [holders, allUsers]);
+
+  const sidebarUsers = useMemo(() => {
     const q = holderSearch.trim().toLowerCase();
+    return allUsers.filter((u) => !q || u.fullName.toLowerCase().includes(q));
+  }, [allUsers, holderSearch]);
+
+  const sidebarExtras = useMemo(() => {
+    const q = holderSearch.trim().toLowerCase();
+    return extraHolders.filter((h) => !q || h.holderName.toLowerCase().includes(q));
+  }, [extraHolders, holderSearch]);
+
+  const sidebarHasAny = sidebarUsers.length > 0 || sidebarExtras.length > 0;
+
+  useEffect(() => {
+    if (!sidebarHasAny) {
+      setSelectedKey("");
+      return;
+    }
+    const keys = [
+      ...sidebarUsers.map((u) => userHolderKey(u.id)),
+      ...sidebarExtras.map((h) => h.holderKey)
+    ];
+    if (!selectedKey || !keys.includes(selectedKey)) {
+      setSelectedKey(keys[0]!);
+    }
+  }, [sidebarUsers, sidebarExtras, sidebarHasAny, selectedKey]);
+
+  const selectedHolder = useMemo(
+    () => (selectedKey ? holdersByKey.get(selectedKey) ?? null : null),
+    [selectedKey, holdersByKey]
+  );
+
+  const selectedUser = useMemo(() => {
+    if (!selectedKey.startsWith("user:")) return null;
+    const id = selectedKey.slice(5);
+    return allUsers.find((u) => u.id === id) ?? null;
+  }, [selectedKey, allUsers]);
+
+  const threadTitle = selectedUser?.fullName ?? selectedHolder?.holderName ?? "";
+  const threadSubtitle = selectedUser
+    ? selectedUser.position?.trim() || roleLabel(selectedUser.role || "") || "Сотрудник"
+    : selectedHolder?.isWarehouseBalance
+      ? "остаток на складе"
+      : selectedHolder
+        ? "подотчёт"
+        : "";
+
+  const filteredIssues = useMemo(() => {
+    if (!selectedHolder?.issues?.length) return [];
     const issueQ = issueSearch.trim().toLowerCase();
     const fromTs = dateFrom ? new Date(dateFrom).getTime() : null;
     const toTs = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : null;
-
-    return holders.filter((h) => {
-      if (kindFilter === "warehouse" && !h.isWarehouseBalance) return false;
-      if (kindFilter === "responsible" && h.isWarehouseBalance) return false;
-      if (q && !h.holderName.toLowerCase().includes(q)) return false;
-      if (issueQ && !(h.issueNumbers || []).some((n) => n.toLowerCase().includes(issueQ))) return false;
+    return selectedHolder.issues.filter((iss) => {
+      if (issueQ && !iss.issueNumber.toLowerCase().includes(issueQ)) return false;
       if (fromTs || toTs) {
-        const at = h.lastIssueAt ? new Date(h.lastIssueAt).getTime() : null;
-        if (!at) return h.isWarehouseBalance;
+        const at = new Date(iss.issuedAt).getTime();
         if (fromTs && at < fromTs) return false;
         if (toTs && at > toTs) return false;
       }
-      return h.lines.length > 0;
+      return iss.lines.length > 0;
     });
-  }, [holders, holderSearch, issueSearch, dateFrom, dateTo, kindFilter]);
-
-  useEffect(() => {
-    if (!filteredHolders.length) {
-      setSelectedHolderKey("");
-      return;
-    }
-    if (!filteredHolders.some((h) => h.holderKey === selectedHolderKey)) {
-      setSelectedHolderKey(filteredHolders[0]!.holderKey);
-    }
-  }, [filteredHolders, selectedHolderKey]);
-
-  const selectedHolder = useMemo(
-    () => filteredHolders.find((h) => h.holderKey === selectedHolderKey) ?? null,
-    [filteredHolders, selectedHolderKey]
-  );
+  }, [selectedHolder, issueSearch, dateFrom, dateTo]);
 
   const visibleLines = useMemo(() => {
     if (!selectedHolder) return [];
@@ -206,13 +291,8 @@ export function MaterialReportTab({
       .sort((a, b) => a.holderName.localeCompare(b.holderName, "ru"));
   }, [history]);
 
-  const historySidebar = useMemo(() => {
-    const q = holderSearch.trim().toLowerCase();
-    return historyByHolder.filter((g) => !q || g.holderName.toLowerCase().includes(q));
-  }, [historyByHolder, holderSearch]);
-
   const checkedLines = useMemo(() => {
-    if (!selectedHolder || subTab !== "balances") return [] as WriteoffLine[];
+    if (!selectedHolder || subTab !== "balances" || !warehouseFilter) return [] as WriteoffLine[];
     return visibleLines
       .filter((ln) => checked[lineKey(selectedHolder.holderKey, ln.materialId)])
       .map((ln) => ({
@@ -222,34 +302,81 @@ export function MaterialReportTab({
         unit: ln.unit,
         maxQty: Number(ln.quantity) || 0
       }));
-  }, [selectedHolder, visibleLines, checked, subTab]);
+  }, [selectedHolder, visibleLines, checked, subTab, warehouseFilter]);
 
-  const showThread = Boolean(selectedHolderKey && (subTab === "balances" ? selectedHolder : true));
+  const writeoffSection: "SS" | "EOM" =
+    sectionFilter === "ALL" ? "SS" : sectionFilter;
+
+  const showThread = Boolean(selectedKey);
   const showList = !isMobile || !showThread;
-
   const posCount = holders.reduce((n, h) => n + h.lines.length, 0);
+  const selectedUserId = selectedUser?.id;
+
+  function holderPreview(h: MaterialReportHolder) {
+    if (h.lines.length === 1) {
+      return `${safeName(h.lines[0]!.name)} · ${formatQty(Number(h.lines[0]!.quantity))}`;
+    }
+    return `${h.lines.length} поз. · ${formatQty(h.lines.reduce((n, x) => n + Number(x.quantity), 0))}`;
+  }
+
+  function userBalancePreview(userId: string) {
+    const h = holdersByKey.get(userHolderKey(userId));
+    if (!h?.lines.length) return "нет подотчёта";
+    return holderPreview(h);
+  }
 
   return (
     <div className={`materialReportPage chatPage ${isMobile && showThread ? "chatPage--thread" : ""}`}>
-      {objectFilter ? <div className="materialReportObjectFilter">{objectFilter}</div> : null}
       <PageHero
         variant="compact"
         icon="▪"
         title="Материальный отчёт"
-        subtitle={`Подотчёт · раздел ${section === "SS" ? "СС" : "ЭОМ"}`}
+        subtitle="По всем объектам · подотчёт и списания"
         stats={[
-          { label: "Ответственных", value: holders.length, tone: "neutral" },
+          { label: "Сотрудников", value: allUsers.length, tone: "neutral" },
+          { label: "С подотчётом", value: holders.filter((h) => h.lines.length > 0).length, tone: "ok" },
           { label: "Позиций", value: posCount, tone: posCount > 0 ? "ok" : "neutral" }
         ]}
         actions={
           <>
-            <button type="button" className="ghostBtn" disabled={!warehouseId || loading} onClick={() => void reload()}>
+            <button type="button" className="ghostBtn" disabled={loading} onClick={() => void reload()}>
               ↻ Обновить
             </button>
             {exportAction}
           </>
         }
       />
+
+      <div className="materialReportFiltersBar">
+        <TabObjectFilter
+          value={warehouseFilter}
+          onChange={setWarehouseFilter}
+          warehouses={warehouses}
+        />
+        <div className="materialReportSectionToggle" role="group" aria-label="Раздел СС или ЭОМ">
+          <button
+            type="button"
+            className={sectionFilter === "ALL" ? "active" : ""}
+            onClick={() => setSectionFilter("ALL")}
+          >
+            Все разделы
+          </button>
+          <button
+            type="button"
+            className={sectionFilter === "SS" ? "active" : ""}
+            onClick={() => setSectionFilter("SS")}
+          >
+            СС
+          </button>
+          <button
+            type="button"
+            className={sectionFilter === "EOM" ? "active" : ""}
+            onClick={() => setSectionFilter("EOM")}
+          >
+            ЭОМ
+          </button>
+        </div>
+      </div>
 
       <nav className="materialReportSubNav" aria-label="Разделы материального отчёта">
         <button type="button" className={subTab === "balances" ? "active" : ""} onClick={() => setSubTab("balances")}>
@@ -264,21 +391,19 @@ export function MaterialReportTab({
         <ResultBanner text={message} tone={/ошиб|403|502|недостат/i.test(message) ? "error" : "neutral"} />
       ) : null}
 
-      {!warehouseId ? (
-        <p className="muted">Выберите объект в верхней панели.</p>
-      ) : loading && !holders.length ? (
+      {loading && !holders.length && !allUsers.length ? (
         <LoadingState text="Загрузка материального отчёта…" />
       ) : (
         <div className="chatLayout materialReportLayout">
           {showList ? (
-            <aside className="chatSidebar materialReportSidebar" aria-label="Ответственные">
+            <aside className="chatSidebar materialReportSidebar" aria-label="Сотрудники">
               <div className="chatSidebarSearch">
                 <input
                   type="search"
                   value={holderSearch}
                   onChange={(e) => setHolderSearch(e.target.value)}
                   placeholder="Поиск по ФИО…"
-                  aria-label="Поиск ответственного"
+                  aria-label="Поиск сотрудника"
                 />
               </div>
               {subTab === "balances" ? (
@@ -300,11 +425,6 @@ export function MaterialReportTab({
                       <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
                     </label>
                   </div>
-                  <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)} aria-label="Тип">
-                    <option value="">Все</option>
-                    <option value="warehouse">Склад (кладовщик)</option>
-                    <option value="responsible">Ответственные</option>
-                  </select>
                 </div>
               ) : (
                 <div className="materialReportSidebarFilters">
@@ -333,30 +453,75 @@ export function MaterialReportTab({
 
               <div className="chatSidebarSection chatSidebarSectionGrow">
                 <span className="chatSidebarSectionTitle">
-                  {subTab === "balances" ? "Ответственные" : "Списания по людям"}
+                  {subTab === "balances" ? "Все сотрудники" : "Списания по людям"}
                 </span>
-                {!filteredHolders.length && subTab === "balances" ? (
+                {!sidebarHasAny ? (
                   <p className="chatSidebarEmpty muted">Никого не найдено</p>
                 ) : null}
                 <ul className="chatContactList">
-                  {subTab === "balances"
-                    ? filteredHolders.map((h) => {
-                        const active = h.holderKey === selectedHolderKey;
-                        const preview =
-                          h.lines.length === 1
-                            ? `${safeName(h.lines[0]!.name)} · ${formatQty(Number(h.lines[0]!.quantity))}`
-                            : `${h.lines.length} поз. · ${formatQty(h.lines.reduce((n, x) => n + Number(x.quantity), 0))} всего`;
+                  {sidebarUsers.map((u) => {
+                        const key = userHolderKey(u.id);
+                        const active = key === selectedKey;
+                        const h = holdersByKey.get(key);
+                        return (
+                          <li key={u.id}>
+                            <div
+                              className={`chatContact ${active ? "active" : ""}`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSelectedKey(key)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setSelectedKey(key);
+                                }
+                              }}
+                            >
+                              <UserAvatar
+                                fullName={u.fullName}
+                                avatarUrl={u.avatarUrl}
+                                onClick={
+                                  onOpenUserProfile
+                                    ? (e) => {
+                                        e.stopPropagation();
+                                        onOpenUserProfile(u.id);
+                                      }
+                                    : undefined
+                                }
+                              />
+                              <span className="chatContactBody">
+                                <span className="chatContactTop">
+                                  <strong>{safeName(u.fullName)}</strong>
+                                  <time>{formatDate(h?.lastIssueAt)}</time>
+                                </span>
+                                <span className="chatContactPreview muted">
+                                  {subTab === "history"
+                                    ? (() => {
+                                        const g = historyByHolder.find((x) => x.key === key);
+                                        return g
+                                          ? `${g.rows.length} списан. · ${formatQty(g.totalQty)}`
+                                          : "нет списаний";
+                                      })()
+                                    : userBalancePreview(u.id)}
+                                </span>
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                  {sidebarExtras.map((h) => {
+                        const active = h.holderKey === selectedKey;
                         return (
                           <li key={h.holderKey}>
                             <div
                               className={`chatContact ${active ? "active" : ""}`}
                               role="button"
                               tabIndex={0}
-                              onClick={() => setSelectedHolderKey(h.holderKey)}
+                              onClick={() => setSelectedKey(h.holderKey)}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                   e.preventDefault();
-                                  setSelectedHolderKey(h.holderKey);
+                                  setSelectedKey(h.holderKey);
                                 }
                               }}
                             >
@@ -366,39 +531,20 @@ export function MaterialReportTab({
                                   <strong>{safeName(h.holderName)}</strong>
                                   <time>{formatDate(h.lastIssueAt)}</time>
                                 </span>
-                                <span className="chatContactPreview">
-                                  {h.isWarehouseBalance ? "склад · " : ""}
-                                  {preview}
-                                </span>
-                              </span>
-                            </div>
-                          </li>
-                        );
-                      })
-                    : historySidebar.map((g) => {
-                        const active = g.key === selectedHolderKey;
-                        return (
-                          <li key={g.key}>
-                            <div
-                              className={`chatContact ${active ? "active" : ""}`}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => setSelectedHolderKey(g.key)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  setSelectedHolderKey(g.key);
-                                }
-                              }}
-                            >
-                              <UserAvatar fullName={g.holderName} />
-                              <span className="chatContactBody">
-                                <span className="chatContactTop">
-                                  <strong>{safeName(g.holderName)}</strong>
-                                  <time>{g.rows[0] ? formatDate(g.rows[0].createdAt) : "—"}</time>
-                                </span>
                                 <span className="chatContactPreview muted">
-                                  {g.rows.length} списан. · {formatQty(g.totalQty)} всего
+                                  {subTab === "history"
+                                    ? (() => {
+                                        const g = historyByHolder.find((x) => x.key === h.holderKey);
+                                        return g
+                                          ? `${g.rows.length} списан. · ${formatQty(g.totalQty)}`
+                                          : "нет списаний";
+                                      })()
+                                    : (
+                                        <>
+                                          {h.isWarehouseBalance ? "склад · " : ""}
+                                          {holderPreview(h)}
+                                        </>
+                                      )}
                                 </span>
                               </span>
                             </div>
@@ -412,25 +558,37 @@ export function MaterialReportTab({
 
           <section className={`chatThread materialReportThread ${showThread ? "" : "chatThread--placeholder"}`}>
             {subTab === "balances" ? (
-              showThread && selectedHolder ? (
+              showThread ? (
                 <>
-                  <header className="chatThreadHead">
+                  <header className="chatThreadHead materialReportThreadHead">
                     {isMobile ? (
-                      <button type="button" className="ghostBtn chatBackBtn" onClick={() => setSelectedHolderKey("")}>
+                      <button type="button" className="ghostBtn chatBackBtn" onClick={() => setSelectedKey("")}>
                         ←
                       </button>
                     ) : null}
-                    <UserAvatar fullName={selectedHolder.holderName} size="md" />
+                    <UserAvatar
+                      fullName={threadTitle}
+                      avatarUrl={selectedUser?.avatarUrl}
+                      size="lg"
+                      onClick={
+                        selectedUserId && onOpenUserProfile
+                          ? () => onOpenUserProfile(selectedUserId)
+                          : undefined
+                      }
+                    />
                     <div className="chatThreadHeadText">
-                      <strong>{safeName(selectedHolder.holderName)}</strong>
-                      <span className="muted">
-                        {selectedHolder.isWarehouseBalance ? "остаток на складе" : "материалы на руках"} ·{" "}
-                        {selectedHolder.lines.length} поз.
-                        {(selectedHolder.issueNumbers?.length ?? 0) > 0
-                          ? ` · выдачи: ${selectedHolder.issueNumbers!.slice(0, 3).join(", ")}`
-                          : ""}
-                      </span>
+                      <strong>{safeName(threadTitle)}</strong>
+                      <span className="muted">{threadSubtitle}</span>
                     </div>
+                    {selectedUserId && onOpenChat ? (
+                      <button
+                        type="button"
+                        className="primaryBtn materialReportWriteBtn"
+                        onClick={() => onOpenChat(selectedUserId)}
+                      >
+                        Написать
+                      </button>
+                    ) : null}
                   </header>
 
                   <div className="materialReportThreadToolbar">
@@ -445,7 +603,8 @@ export function MaterialReportTab({
                       <button
                         type="button"
                         className="primaryBtn"
-                        disabled={checkedLines.length === 0}
+                        disabled={checkedLines.length === 0 || !warehouseFilter}
+                        title={!warehouseFilter ? "Выберите объект для списания" : undefined}
                         onClick={() => setWriteoffOpen(true)}
                       >
                         Списать ({checkedLines.length})
@@ -453,55 +612,120 @@ export function MaterialReportTab({
                     ) : null}
                   </div>
 
+                  {!warehouseFilter && canWriteoff ? (
+                    <p className="muted materialReportWriteoffHint">
+                      Для списания выберите конкретный объект в фильтре выше.
+                    </p>
+                  ) : null}
+
                   <div className="chatThreadMessages materialReportMessages">
-                    {!visibleLines.length ? (
-                      <EmptyState title="Нет позиций" hint="Измените фильтры или выберите другого ответственного." />
+                    {!filteredIssues.length && !visibleLines.length ? (
+                      <EmptyState
+                        title="Нет подотчёта"
+                        hint="У выбранного сотрудника нет выданных материалов по текущим фильтрам."
+                      />
                     ) : (
-                      visibleLines.map((ln) => {
-                        const key = lineKey(selectedHolder.holderKey, ln.materialId);
-                        const isChecked = Boolean(checked[key]);
-                        return (
-                          <div
-                            key={key}
-                            className={`chatBubble theirs materialReportBubble ${isChecked ? "selected" : ""}`}
-                          >
-                            {canWriteoff ? (
-                              <label className="materialReportBubbleCheck">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={(e) =>
-                                    setChecked((prev) => ({ ...prev, [key]: e.target.checked }))
+                      <>
+                        <p className="materialReportIssuesLegend muted">По выдачам</p>
+                        <div className="plainList materialReportIssueList">
+                          {filteredIssues.map((iss) => {
+                            const open = expandedIssues[iss.issueId] ?? true;
+                            const whName = warehouseNameById.get(iss.warehouseId);
+                            return (
+                              <div key={iss.issueId} className="materialReportIssueGroup">
+                                <button
+                                  type="button"
+                                  className="materialReportIssueHead"
+                                  onClick={() =>
+                                    setExpandedIssues((prev) => ({ ...prev, [iss.issueId]: !open }))
                                   }
-                                />
-                              </label>
-                            ) : null}
-                            <div className="materialReportBubbleBody">
-                              <p className="chatBubbleText">{safeName(ln.name)}</p>
-                              <span className="chatBubbleTime materialReportBubbleQty">
-                                {formatQty(Number(ln.quantity))} {ln.unit}
-                              </span>
-                            </div>
+                                >
+                                  <span className="materialReportHistoryChevron">{open ? "▾" : "▸"}</span>
+                                  <strong>
+                                    {iss.issueNumber}
+                                    {whName ? ` · ${safeName(whName)}` : ""}
+                                  </strong>
+                                  <span className="muted">
+                                    {formatDate(iss.issuedAt)}
+                                    {sectionFilter === "ALL" ? ` · ${iss.section}` : ""}
+                                  </span>
+                                </button>
+                                {open ? (
+                                  <div className="materialReportIssueLines">
+                                    {iss.lines.map((ln) => (
+                                      <div key={`${iss.issueId}-${ln.materialId}`} className="chatBubble theirs materialReportBubble">
+                                        <div className="materialReportBubbleBody">
+                                          <p className="chatBubbleText">{safeName(ln.name)}</p>
+                                          <span className="chatBubbleTime materialReportBubbleQty">
+                                            {formatQty(Number(ln.quantity))} {ln.unit}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {visibleLines.length > 0 ? (
+                          <div className="materialReportNetBlock">
+                            <h4 className="materialReportNetTitle">Остаток к списанию</h4>
+                            {visibleLines.map((ln) => {
+                              if (!selectedHolder) return null;
+                              const key = lineKey(selectedHolder.holderKey, ln.materialId);
+                              const isChecked = Boolean(checked[key]);
+                              return (
+                                <div
+                                  key={key}
+                                  className={`chatBubble theirs materialReportBubble ${isChecked ? "selected" : ""}`}
+                                >
+                                  {canWriteoff && warehouseFilter ? (
+                                    <label className="materialReportBubbleCheck">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) =>
+                                          setChecked((prev) => ({ ...prev, [key]: e.target.checked }))
+                                        }
+                                      />
+                                    </label>
+                                  ) : null}
+                                  <div className="materialReportBubbleBody">
+                                    <p className="chatBubbleText">{safeName(ln.name)}</p>
+                                    <span className="chatBubbleTime materialReportBubbleQty">
+                                      {formatQty(Number(ln.quantity))} {ln.unit}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })
+                        ) : null}
+                      </>
                     )}
                   </div>
                 </>
               ) : (
-                <div className="chatThreadEmpty muted">Выберите ответственного слева</div>
+                <div className="chatThreadEmpty muted">Выберите сотрудника слева</div>
               )
             ) : showThread ? (
               <>
-                <header className="chatThreadHead">
+                <header className="chatThreadHead materialReportThreadHead">
                   {isMobile ? (
-                    <button type="button" className="ghostBtn chatBackBtn" onClick={() => setSelectedHolderKey("")}>
+                    <button type="button" className="ghostBtn chatBackBtn" onClick={() => setSelectedKey("")}>
                       ←
                     </button>
                   ) : null}
+                  <UserAvatar
+                    fullName={threadTitle}
+                    avatarUrl={selectedUser?.avatarUrl}
+                    size="lg"
+                  />
                   <div className="chatThreadHeadText">
-                    <strong>История списаний</strong>
-                    <span className="muted">{history.length} записей · группировка как в лимитах</span>
+                    <strong>{safeName(threadTitle) || "История списаний"}</strong>
+                    <span className="muted">{history.length} записей</span>
                   </div>
                 </header>
 
@@ -510,11 +734,11 @@ export function MaterialReportTab({
                     <EmptyState title="Списаний нет" hint="За выбранный период записей не найдено." />
                   ) : (
                     <div className="plainList limitTree">
-                      {(selectedHolderKey
-                        ? historyByHolder.filter((g) => g.key === selectedHolderKey)
+                      {(selectedKey
+                        ? historyByHolder.filter((g) => g.key === selectedKey)
                         : historyByHolder
                       ).map((group) => {
-                        const open = expandedHistory[group.key] ?? selectedHolderKey === group.key;
+                        const open = expandedHistory[group.key] ?? selectedKey === group.key;
                         return (
                           <div key={group.key} className="limitTreeNode materialReportHistoryGroup">
                             <button
@@ -562,19 +786,19 @@ export function MaterialReportTab({
                 </div>
               </>
             ) : (
-              <div className="chatThreadEmpty muted">Выберите ответственного слева</div>
+              <div className="chatThreadEmpty muted">Выберите сотрудника слева</div>
             )}
           </section>
         </div>
       )}
 
-      {writeoffOpen && checkedLines.length > 0 ? (
+      {writeoffOpen && checkedLines.length > 0 && warehouseFilter ? (
         <MaterialReportWriteoffModal
           lines={checkedLines}
           token={token}
           apiUrl={apiUrl}
-          warehouseId={warehouseId}
-          section={section}
+          warehouseId={warehouseFilter}
+          section={writeoffSection}
           fetchWithSession={fetchWithSession}
           onClose={() => setWriteoffOpen(false)}
           onDone={async () => {

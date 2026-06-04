@@ -2514,6 +2514,16 @@ tr.low {
   letter-spacing: 0.04em;
   color: #64748b;
 }
+.chatUserProfileActions {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 4px;
+}
+.chatUserProfileActions .primaryBtn {
+  width: auto;
+  min-width: 140px;
+}
 .chatUserProfileMeta dd {
   margin: 0;
   font-size: 14px;
@@ -8032,6 +8042,116 @@ button.whMenuItem:hover,
 .materialReportObjectFilter .tabObjectFilter {
   margin-bottom: 0 !important;
   padding: 8px 12px !important;
+}
+.materialReportFiltersBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.materialReportFiltersBar .tabObjectFilter {
+  flex: 1 1 280px;
+  margin-bottom: 0 !important;
+}
+.materialReportSectionToggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.materialReportSectionToggle button {
+  height: 34px;
+  width: auto;
+  padding: 0 14px;
+  border: 1px solid #d8dde7;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+.materialReportSectionToggle button.active {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  color: #3730a3;
+}
+.materialReportThreadHead {
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+.materialReportThreadHead .chatThreadHeadText {
+  flex: 1;
+  min-width: 120px;
+}
+.materialReportWriteBtn {
+  width: auto;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.materialReportWriteoffHint {
+  margin: 0;
+  padding: 0 14px 8px;
+  font-size: 13px;
+}
+.materialReportIssuesLegend {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.materialReportIssueList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.materialReportIssueGroup {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+.materialReportIssueHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.materialReportIssueHead strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.materialReportIssueLines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.materialReportNetBlock {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+.materialReportNetTitle {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
 }
 .materialReportSubNav {
   display: flex;
