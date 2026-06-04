@@ -917,6 +917,10 @@ function App() {
   const [receiptLimitSourceFilter, setReceiptLimitSourceFilter] = useState<ReceiptLimitSourceFilter>("");
   const receiptRequestsLoadSeq = useRef(0);
   const sectionReloadSeq = useRef(0);
+
+  function isStaleWorkspaceReload(seq?: number): boolean {
+    return seq != null && seq !== sectionReloadSeq.current;
+  }
   const filteredReceiptRequests = useMemo(
     () => filterReceiptRequestsByLimitSource(receiptRequests, receiptLimitSourceFilter),
     [receiptRequests, receiptLimitSourceFilter]
@@ -1861,7 +1865,7 @@ function App() {
     }
   }
 
-  async function loadStocks(search = "", sectionOverride?: "SS" | "EOM") {
+  async function loadStocks(search = "", sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
     if (!token) {
       return;
     }
@@ -1879,12 +1883,17 @@ function App() {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
+      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
       const data = (await res.json()) as StockRow[];
       setStocks(data);
     } catch (err) {
-      setStocksError(`Не удалось загрузить остатки: ${String(err)}`);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setStocksError(`Не удалось загрузить остатки: ${String(err)}`);
+      }
     } finally {
-      setLoadingStocks(false);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setLoadingStocks(false);
+      }
     }
   }
 
@@ -2043,22 +2052,22 @@ function App() {
     if (!token || mustPickObject || !activeObjectId) return;
     const seq = ++sectionReloadSeq.current;
     const tasks: Array<Promise<void>> = [
-      loadStocks(q, section),
-      loadIssues(section),
-      loadOperations(section),
-      loadApprovalQueue(section)
+      loadStocks(q, section, seq),
+      loadIssues(section, seq),
+      loadOperations(section, seq),
+      loadApprovalQueue(section, seq)
     ];
     const receiptWh =
       activeObjectId === ALL_OBJECTS_ID
         ? tabWarehouseFilters[tab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
         : activeObjectId;
     if (receiptWh) {
-      tasks.push(loadReceiptRequests(section, receiptWh));
+      tasks.push(loadReceiptRequests(section, receiptWh, seq));
     } else {
       setReceiptRequests([]);
     }
     if (limitsWarehouseId || activeObjectId !== ALL_OBJECTS_ID) {
-      tasks.push(loadLimitTemplates(section));
+      tasks.push(loadLimitTemplates(section, seq));
     }
     await Promise.all(tasks.map((p) => p.catch(() => undefined)));
     if (seq !== sectionReloadSeq.current) return;
@@ -2075,6 +2084,8 @@ function App() {
 
   function setSection(next: "SS" | "EOM") {
     if (next === objectSectionFilter) return;
+    sectionReloadSeq.current += 1;
+    receiptRequestsLoadSeq.current += 1;
     setObjectSectionFilter(next);
     clearWorkspaceLists();
     if (!token) return;
@@ -2865,7 +2876,7 @@ function App() {
     }
   }
 
-  async function loadLimitTemplates(sectionOverride?: "SS" | "EOM") {
+  async function loadLimitTemplates(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
     if (!token || !limitsWarehouseId) return;
     setLimitTemplatesLoading(true);
     const params = new URLSearchParams({
@@ -2884,6 +2895,7 @@ function App() {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
+      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
       if (!templatesRes.ok) {
         throw new Error(`HTTP ${templatesRes.status}`);
       }
@@ -2906,12 +2918,16 @@ function App() {
       }
       setLimitSupplyByMaterialId(nextSupply);
     } catch (e) {
-      setLimitTemplates([]);
-      setLimitIssuedTotals({});
-      setLimitSupplyByMaterialId({});
-      setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setLimitTemplates([]);
+        setLimitIssuedTotals({});
+        setLimitSupplyByMaterialId({});
+        setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
+      }
     } finally {
-      setLimitTemplatesLoading(false);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setLimitTemplatesLoading(false);
+      }
     }
   }
 
@@ -3105,7 +3121,11 @@ function App() {
     await loadLimitTemplates();
   }
 
-  async function loadReceiptRequests(sectionOverride?: "SS" | "EOM", warehouseIdOverride?: string) {
+  async function loadReceiptRequests(
+    sectionOverride?: "SS" | "EOM",
+    warehouseIdOverride?: string,
+    workspaceReloadSeq?: number
+  ) {
     if (!token) return;
     const warehouseId =
       warehouseIdOverride ??
@@ -3116,7 +3136,7 @@ function App() {
       setReceiptRequests([]);
       return;
     }
-    const seq = ++receiptRequestsLoadSeq.current;
+    const seq = workspaceReloadSeq == null ? ++receiptRequestsLoadSeq.current : workspaceReloadSeq;
     const params = new URLSearchParams({
       warehouseId,
       section: sectionOverride ?? objectSectionFilter,
@@ -3127,7 +3147,11 @@ function App() {
       cache: "no-store"
     });
     if (!res.ok) return;
-    if (seq !== receiptRequestsLoadSeq.current) return;
+    if (workspaceReloadSeq != null) {
+      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
+    } else if (seq !== receiptRequestsLoadSeq.current) {
+      return;
+    }
     const rows = (await res.json()) as ReceiptRequestRow[];
     setReceiptRequests((prev) => {
       const prevById = new Map(prev.map((r) => [r.id, r]));
@@ -3632,7 +3656,7 @@ function App() {
     }
   }
 
-  async function loadIssues(sectionOverride?: "SS" | "EOM") {
+  async function loadIssues(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
     if (!token) return;
     setIssuesError("");
     setIssuesLoading(true);
@@ -3655,6 +3679,7 @@ function App() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
       const payload = (await res.json()) as PagedResponse<IssueRequest> | IssueRequest[];
       const items = Array.isArray(payload) ? payload : payload.items;
       setIssues(items);
@@ -3663,9 +3688,13 @@ function App() {
         setSelectedIssueId(items[0].id);
       }
     } catch (e) {
-      setIssuesError(`Не удалось загрузить заявки: ${String(e)}`);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setIssuesError(`Не удалось загрузить заявки: ${String(e)}`);
+      }
     } finally {
-      setIssuesLoading(false);
+      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
+        setIssuesLoading(false);
+      }
     }
   }
 
@@ -4238,7 +4267,7 @@ function App() {
     }
   }
 
-  async function loadApprovalQueue(sectionOverride?: "SS" | "EOM") {
+  async function loadApprovalQueue(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
     if (!token) return;
     const params = new URLSearchParams();
     params.set("status", "ON_APPROVAL");
@@ -4248,17 +4277,19 @@ function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
+    if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
     const payload = (await res.json()) as PagedResponse<IssueRequest> | IssueRequest[];
     setApprovalQueue(Array.isArray(payload) ? payload : payload.items);
   }
 
-  async function loadOperations(sectionOverride?: "SS" | "EOM") {
+  async function loadOperations(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
     if (!token) return;
     const section = sectionOverride ?? objectSectionFilter;
     const res = await fetchWithSession(`${API_URL}/api/operations?section=${encodeURIComponent(section)}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) return;
+    if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
     setOperations((await res.json()) as OperationRow[]);
   }
 
@@ -5156,12 +5187,13 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "issues") {
+      const seq = sectionReloadSeq.current;
       void loadCatalogData().catch(() => undefined);
       void loadProjects().catch(() => undefined);
-      void loadIssues();
-      void loadStocks(q);
-      void loadLimitTemplates().catch(() => undefined);
-      void loadReceiptRequests();
+      void loadIssues(objectSectionFilter, seq);
+      void loadStocks(q, objectSectionFilter, seq);
+      void loadLimitTemplates(objectSectionFilter, seq);
+      void loadReceiptRequests(objectSectionFilter, undefined, seq);
     }
   }, [
     token,
@@ -5173,9 +5205,7 @@ function App() {
     issueIssuesDomain,
     issuesSort,
     issuesPage,
-    issuesPageSize,
-    objectSectionFilter,
-    activeObjectId
+    issuesPageSize
   ]);
 
   useEffect(() => {
@@ -6132,8 +6162,6 @@ function App() {
             updFactsByMaterialId={acceptedBySourceByTargetId}
             movementsLoading={stockMovementsLoading}
             movementsError={stockMovementsError}
-            canAdjustStockQuantity={canWriteOperations}
-            onAdjustStockQuantity={(row, quantity) => adjustWarehouseStockQuantity(row.id, quantity)}
           />
           <WarehouseZonesTable
             rows={warehouseVisibleRows.map((r) => ({
@@ -12352,14 +12380,20 @@ function App() {
         ? createPortal(
             <MaterialCardModal
               materialId={materialEditModal.materialId}
+              warehouseId={materialEditModal.warehouseId}
+              section={objectSectionFilter}
               apiUrl={API_URL}
               token={token}
               fetchWithSession={fetchWithSession}
               canWrite={canWriteMaterialCards}
+              canAdjustStock={canWriteOperations}
+              onAdjustStockQuantity={adjustWarehouseStockQuantity}
               onClose={() => setMaterialEditModal(null)}
               onSaved={() => {
                 void loadCatalogData().catch(() => undefined);
                 void loadStocks(q);
+                void loadStockMovements();
+                void loadOperations();
               }}
             />,
             document.body
