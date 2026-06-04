@@ -45,6 +45,8 @@ export type HomeLimitSlice = {
   hasTemplate: boolean;
   plannedQty: number;
   issuedQty: number;
+  arrivedQty: number;
+  onOrderQty: number;
   percent: number;
   overCount: number;
 };
@@ -198,12 +200,15 @@ function ChartCardHead({
 
 function ObjectDrillTable({
   columns,
-  rows
+  rows,
+  onRowClick
 }: {
   columns: string[];
   rows: Array<{ key: string; cells: ReactNode[] }>;
+  onRowClick?: (warehouseId: string) => void;
 }) {
   if (!rows.length) return <p className="muted homeChartEmpty">Нет данных по объектам.</p>;
+  const clickable = Boolean(onRowClick);
   return (
     <ResponsiveTableShell>
     <div className="erpTableWrap homeDrillTable">
@@ -217,9 +222,15 @@ function ObjectDrillTable({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key}>
+            <tr
+              key={r.key}
+              className={clickable ? "homeDrillRow--clickable" : undefined}
+              onClick={clickable ? () => onRowClick?.(r.key) : undefined}
+            >
               {r.cells.map((cell, i) => (
-                <td key={i}>{cell}</td>
+                <td key={i} className={i === 0 && clickable ? "homeDrillObjectCell" : undefined}>
+                  {i === 0 && clickable ? <span className="homeDrillObjectName">{cell}</span> : cell}
+                </td>
               ))}
             </tr>
           ))}
@@ -228,8 +239,14 @@ function ObjectDrillTable({
     </div>
     <div className="mobileCards">
       {rows.map((r) => (
-        <MobileCard key={`m-${r.key}`}>
-          <h4>{r.cells[0]}</h4>
+        <MobileCard
+          key={`m-${r.key}`}
+          className={clickable ? "homeDrillMobileCard--clickable" : undefined}
+          onClick={clickable ? () => onRowClick?.(r.key) : undefined}
+        >
+          <h4>
+            <span className="homeDrillObjectName">{r.cells[0]}</span>
+          </h4>
           {r.cells.slice(1).map((cell, i) => (
             <MobileCardField key={i} label={columns[i + 1] || ""}>
               {cell}
@@ -280,12 +297,14 @@ function shortName(name: string, max = 14) {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-function objectCell(name: string, warehouseId: string, onOpen: (warehouseId: string) => void) {
-  return (
-    <button type="button" className="homeDrillObjectLink" onClick={() => onOpen(warehouseId)}>
-      {name}
-    </button>
-  );
+function limitDrillCells(slice: HomeLimitSlice): ReactNode[] {
+  if (!slice.hasTemplate) return ["отсутствует", "отсутствует", "отсутствует", "отсутствует"];
+  return [
+    `${slice.percent}%`,
+    fmtQty(slice.arrivedQty),
+    fmtQty(slice.onOrderQty),
+    slice.overCount > 0 ? slice.overCount : "отсутствует"
+  ];
 }
 
 function chartTooltipQty(value: unknown): [string, string] {
@@ -775,10 +794,22 @@ export function HomeOverview({
       const miniRows = (() => {
         if (drill.kind === "stat") {
           if (drill.key === "limitsSs") {
-            return [{ key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] }];
+            const s = o.limitsSs;
+            return [
+              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
+              { key: "arr", cells: ["Приход", s.hasTemplate ? fmtQty(s.arrivedQty) : "отсутствует"] },
+              { key: "ord", cells: ["В закупке", s.hasTemplate ? fmtQty(s.onOrderQty) : "отсутствует"] },
+              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
+            ];
           }
           if (drill.key === "limitsEom") {
-            return [{ key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }];
+            const s = o.limitsEom;
+            return [
+              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
+              { key: "arr", cells: ["Приход", s.hasTemplate ? fmtQty(s.arrivedQty) : "отсутствует"] },
+              { key: "ord", cells: ["В закупке", s.hasTemplate ? fmtQty(s.onOrderQty) : "отсутствует"] },
+              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
+            ];
           }
           if (drill.key === "stock") return [{ key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] }];
           if (drill.key === "camp") {
@@ -909,14 +940,11 @@ export function HomeOverview({
       if (drill.key === "limitsSs") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Выполнение", "Перерасход"]}
+            columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [
-                objectCell(o.name, o.warehouseId, openObjectMini),
-                o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует",
-                o.limitsSs.overCount > 0 ? o.limitsSs.overCount : "отсутствует"
-              ]
+              cells: [o.name, ...limitDrillCells(o.limitsSs)]
             }))}
           />
         );
@@ -924,14 +952,11 @@ export function HomeOverview({
       if (drill.key === "limitsEom") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Выполнение", "Перерасход"]}
+            columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [
-                objectCell(o.name, o.warehouseId, openObjectMini),
-                o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует",
-                o.limitsEom.overCount > 0 ? o.limitsEom.overCount : "отсутствует"
-              ]
+              cells: [o.name, ...limitDrillCells(o.limitsEom)]
             }))}
           />
         );
@@ -940,9 +965,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "ТМЦ на складе"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines)]
+              cells: [o.name, fmtQty(o.stockLines)]
             }))}
           />
         );
@@ -951,10 +977,11 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "Городок", "СС", "ЭОМ"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [
-                objectCell(o.name, o.warehouseId, openObjectMini),
+                o.name,
                 o.camp?.total ?? o.campSs + o.campEom,
                 o.campSs,
                 o.campEom
@@ -967,9 +994,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "Всего", "На складе", "Выдано", "В ремонте"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
+              cells: [o.name, o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
             }))}
           />
         );
@@ -978,9 +1006,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "На складе"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock]
+              cells: [o.name, o.tools.inStock]
             }))}
           />
         );
@@ -989,9 +1018,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "Выдано"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.issued]
+              cells: [o.name, o.tools.issued]
             }))}
           />
         );
@@ -1000,9 +1030,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "В ремонте"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inRepair]
+              cells: [o.name, o.tools.inRepair]
             }))}
           />
         );
@@ -1011,9 +1042,10 @@ export function HomeOverview({
         return (
           <ObjectDrillTable
             columns={["Объект", "Приёмки в работе"]}
+            onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.receiptOpen]
+              cells: [o.name, o.receiptOpen]
             }))}
           />
         );
@@ -1035,9 +1067,10 @@ export function HomeOverview({
           >
             <ObjectDrillTable
               columns={["Объект", "ТМЦ на складе", "Приёмки"]}
+              onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [objectCell(o.name, o.warehouseId, openObjectMini), fmtQty(o.stockLines), o.receiptOpen]
+                cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
               }))}
             />
           </HomeDrillByObjects>
@@ -1048,10 +1081,11 @@ export function HomeOverview({
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "Лимиты СС", "Лимиты ЭОМ", "Перерасход"]}
+              onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [
-                  objectCell(o.name, o.warehouseId, openObjectMini),
+                  o.name,
                   pctCell(o.limitsSs.hasTemplate, o.limitsSs.percent, o.limitsSs.overCount),
                   pctCell(o.limitsEom.hasTemplate, o.limitsEom.percent, o.limitsEom.overCount),
                   o.limitsSs.overCount + o.limitsEom.overCount || "отсутствует"
@@ -1066,9 +1100,10 @@ export function HomeOverview({
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
+              onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
             />
           </HomeDrillByObjects>
@@ -1083,9 +1118,10 @@ export function HomeOverview({
           >
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
+              onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [objectCell(o.name, o.warehouseId, openObjectMini), o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
+                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
             />
           </HomeDrillByObjects>
@@ -1096,10 +1132,11 @@ export function HomeOverview({
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "Городок", "СС", "ЭОМ"]}
+              onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [
-                  objectCell(o.name, o.warehouseId, openObjectMini),
+                  o.name,
                   o.camp?.total ?? o.campSs + o.campEom,
                   o.campSs,
                   o.campEom

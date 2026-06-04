@@ -1,4 +1,11 @@
-import { LimitNodeType, ReceiptRequestStatus, ToolStatus, type CampItemCategory, type Prisma } from "@prisma/client";
+import {
+  LimitNodeType,
+  OperationType,
+  ReceiptRequestStatus,
+  ToolStatus,
+  type CampItemCategory,
+  type Prisma
+} from "@prisma/client";
 import { CAMP_CATEGORY_DEFS } from "./campCatalog.js";
 import {
   objectLimitTemplateWhereFromScope,
@@ -30,6 +37,8 @@ export type HomeLimitSlice = {
   hasTemplate: boolean;
   plannedQty: number;
   issuedQty: number;
+  arrivedQty: number;
+  onOrderQty: number;
   percent: number;
   overCount: number;
 };
@@ -166,27 +175,65 @@ function buildCampCategories(
   })).filter((c) => c.count > 0);
 }
 
+function movementArrivedForSection(
+  scope: DataScope,
+  warehouseIds: string[],
+  section: "SS" | "EOM"
+): Prisma.StockMovementWhereInput {
+  const scoped = movementScopeWhere(scope);
+  const parts: Prisma.StockMovementWhereInput[] = [
+    { direction: "IN" },
+    { warehouseId: { in: warehouseIds } },
+    {
+      operation: {
+        is: {
+          type: OperationType.INCOME,
+          section,
+          warehouseId: { in: warehouseIds }
+        }
+      }
+    }
+  ];
+  if (Object.keys(scoped).length) parts.push(scoped);
+  return parts.length > 1 ? { AND: parts } : parts[0];
+}
+
 function computeLimitSlice(
   whId: string,
+  section: "SS" | "EOM",
   tmpl: { nodes: Array<{ materialId: string | null; plannedQty: unknown }> } | undefined,
-  issuedByWhMat: Map<string, number>
+  issuedByWhMat: Map<string, number>,
+  stockByWhSecMat: Map<string, number>,
+  arrivedByWhMat: Map<string, number>,
+  acceptedByWhSecMat: Map<string, number>,
+  onOrderByWhSecMat: Map<string, number>
 ): HomeLimitSlice {
   const materialNodes = tmpl?.nodes || [];
   const plannedQty = materialNodes.reduce((s, n) => s + Number(n.plannedQty || 0), 0);
   let issuedQty = 0;
+  let arrivedQty = 0;
+  let onOrderQty = 0;
   let overCount = 0;
   for (const n of materialNodes) {
     if (!n.materialId) continue;
-    const issued = issuedByWhMat.get(`${whId}:${n.materialId}`) || 0;
+    const mid = n.materialId;
+    const issued = issuedByWhMat.get(`${whId}:${mid}`) || 0;
     issuedQty += issued;
     const planned = Number(n.plannedQty || 0);
     if (planned > 0 && issued > planned) overCount += 1;
+    const stock = stockByWhSecMat.get(`${whId}:${section}:${mid}`) || 0;
+    const movement = arrivedByWhMat.get(`${whId}:${mid}`) || 0;
+    const accepted = acceptedByWhSecMat.get(`${whId}:${section}:${mid}`) || 0;
+    arrivedQty += Math.max(stock, movement, accepted);
+    onOrderQty += onOrderByWhSecMat.get(`${whId}:${section}:${mid}`) || 0;
   }
   const percent = plannedQty > 0 ? Math.min(100, Math.round((issuedQty / plannedQty) * 100)) : 0;
   return {
     hasTemplate: Boolean(tmpl),
     plannedQty,
     issuedQty,
+    arrivedQty,
+    onOrderQty,
     percent,
     overCount
   };
@@ -195,6 +242,8 @@ function computeLimitSlice(
 function aggregateLimitSlices(objects: HomeObjectOverview[], pick: (o: HomeObjectOverview) => HomeLimitSlice): HomeLimitSlice {
   let plannedQty = 0;
   let issuedQty = 0;
+  let arrivedQty = 0;
+  let onOrderQty = 0;
   let overCount = 0;
   let hasAnyTemplate = false;
   for (const o of objects) {
@@ -202,17 +251,19 @@ function aggregateLimitSlices(objects: HomeObjectOverview[], pick: (o: HomeObjec
     if (s.hasTemplate) hasAnyTemplate = true;
     plannedQty += s.plannedQty;
     issuedQty += s.issuedQty;
+    arrivedQty += s.arrivedQty;
+    onOrderQty += s.onOrderQty;
     overCount += s.overCount;
   }
   const percent = plannedQty > 0 ? Math.min(100, Math.round((issuedQty / plannedQty) * 100)) : 0;
-  return { hasTemplate: hasAnyTemplate, plannedQty, issuedQty, percent, overCount };
+  return { hasTemplate: hasAnyTemplate, plannedQty, issuedQty, arrivedQty, onOrderQty, percent, overCount };
 }
 
 const emptySummary = (): HomeOverviewSummary => ({
   objectCount: 0,
   campTotal: 0,
-  limitsSs: { hasTemplate: false, plannedQty: 0, issuedQty: 0, percent: 0, overCount: 0 },
-  limitsEom: { hasTemplate: false, plannedQty: 0, issuedQty: 0, percent: 0, overCount: 0 },
+  limitsSs: { hasTemplate: false, plannedQty: 0, issuedQty: 0, arrivedQty: 0, onOrderQty: 0, percent: 0, overCount: 0 },
+  limitsEom: { hasTemplate: false, plannedQty: 0, issuedQty: 0, arrivedQty: 0, onOrderQty: 0, percent: 0, overCount: 0 },
   limitsOverLines: 0,
   objectsWithoutTemplate: 0,
   toolsTotal: 0,
@@ -278,7 +329,11 @@ export async function buildHomeOverview(
     movementRows,
     categories,
     stockGroups,
-    receiptGroups
+    receiptGroups,
+    stockDetailRows,
+    arrivedSsRows,
+    arrivedEomRows,
+    receiptItemRows
   ] = await Promise.all([
     prisma.objectLimitTemplate.findMany({
       where: { ...tmplBase, section: "SS" },
@@ -351,6 +406,35 @@ export async function buildHomeOverview(
         status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
       },
       _count: { id: true }
+    }),
+    prisma.stock.findMany({
+      where: stockWhere,
+      select: { warehouseId: true, section: true, materialId: true, quantity: true }
+    }),
+    prisma.stockMovement.groupBy({
+      by: ["warehouseId", "materialId"],
+      where: movementArrivedForSection(scope, warehouseIds, "SS"),
+      _sum: { quantity: true }
+    }),
+    prisma.stockMovement.groupBy({
+      by: ["warehouseId", "materialId"],
+      where: movementArrivedForSection(scope, warehouseIds, "EOM"),
+      _sum: { quantity: true }
+    }),
+    prisma.receiptRequestItem.findMany({
+      where: {
+        receiptRequest: {
+          warehouseId: { in: warehouseIds },
+          section: { in: ["SS", "EOM"] }
+        }
+      },
+      select: {
+        quantity: true,
+        acceptedQty: true,
+        mappedMaterialId: true,
+        limitNode: { select: { materialId: true } },
+        receiptRequest: { select: { warehouseId: true, section: true, status: true } }
+      }
     })
   ]);
 
@@ -373,6 +457,36 @@ export async function buildHomeOverview(
   };
   const issuedSsMap = issuedMap(issuedSs);
   const issuedEomMap = issuedMap(issuedEom);
+
+  const stockByWhSecMat = new Map<string, number>();
+  for (const s of stockDetailRows) {
+    stockByWhSecMat.set(`${s.warehouseId}:${s.section}:${s.materialId}`, Number(s.quantity) || 0);
+  }
+
+  const buildArrivedByWhMat = (rows: typeof arrivedSsRows) => {
+    const m = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.warehouseId) continue;
+      m.set(`${row.warehouseId}:${row.materialId}`, Number(row._sum.quantity || 0));
+    }
+    return m;
+  };
+  const arrivedSsByWhMat = buildArrivedByWhMat(arrivedSsRows);
+  const arrivedEomByWhMat = buildArrivedByWhMat(arrivedEomRows);
+
+  const acceptedByWhSecMat = new Map<string, number>();
+  const onOrderByWhSecMat = new Map<string, number>();
+  for (const it of receiptItemRows) {
+    const rr = it.receiptRequest;
+    const mid = it.mappedMaterialId || it.limitNode?.materialId;
+    if (!mid || !rr.warehouseId) continue;
+    const key = `${rr.warehouseId}:${rr.section}:${mid}`;
+    acceptedByWhSecMat.set(key, (acceptedByWhSecMat.get(key) || 0) + Number(it.acceptedQty || 0));
+    if (rr.status === ReceiptRequestStatus.NEW || rr.status === ReceiptRequestStatus.IN_PROGRESS) {
+      const rem = Math.max(0, Number(it.quantity) - Number(it.acceptedQty || 0));
+      if (rem > 0) onOrderByWhSecMat.set(key, (onOrderByWhSecMat.get(key) || 0) + rem);
+    }
+  }
 
   const campByWhSec = new Map<string, number>();
   for (const g of campGroups) {
@@ -417,8 +531,26 @@ export async function buildHomeOverview(
       campEom,
       stockLines: stockByWh.get(wh.id) ?? 0,
       receiptOpen: receiptByWh.get(wh.id) ?? 0,
-      limitsSs: computeLimitSlice(wh.id, latestTmplSs.get(wh.id), issuedSsMap),
-      limitsEom: computeLimitSlice(wh.id, latestTmplEom.get(wh.id), issuedEomMap),
+      limitsSs: computeLimitSlice(
+        wh.id,
+        "SS",
+        latestTmplSs.get(wh.id),
+        issuedSsMap,
+        stockByWhSecMat,
+        arrivedSsByWhMat,
+        acceptedByWhSecMat,
+        onOrderByWhSecMat
+      ),
+      limitsEom: computeLimitSlice(
+        wh.id,
+        "EOM",
+        latestTmplEom.get(wh.id),
+        issuedEomMap,
+        stockByWhSecMat,
+        arrivedEomByWhMat,
+        acceptedByWhSecMat,
+        onOrderByWhSecMat
+      ),
       camp: {
         total: campSs + campEom,
         categories: buildCampCategories(campCatByWh.get(wh.id) || {})

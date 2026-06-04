@@ -5703,6 +5703,26 @@ button.homeInsightPill:hover:not(:disabled) {
   gap: 8px;
   margin-bottom: 8px;
 }
+.homeDrillRow--clickable {
+  cursor: pointer;
+}
+.homeDrillRow--clickable:hover .homeDrillObjectName {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.homeDrillObjectName {
+  font-weight: 600;
+  color: #0f172a;
+}
+.homeDrillMobileCard--clickable {
+  cursor: pointer;
+}
+.homeDrillMobileCard--clickable:hover .homeDrillObjectName {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .homeDrillObjectLink {
   border: none;
   background: none;
