@@ -297,12 +297,17 @@ function shortName(name: string, max = 14) {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
+function limitQtyPercent(qty: number, plannedQty: number): string {
+  if (!(plannedQty > 0)) return "отсутствует";
+  return `${Math.min(100, Math.round((qty / plannedQty) * 100))}%`;
+}
+
 function limitDrillCells(slice: HomeLimitSlice): ReactNode[] {
   if (!slice.hasTemplate) return ["отсутствует", "отсутствует", "отсутствует", "отсутствует"];
   return [
     `${slice.percent}%`,
-    fmtQty(slice.arrivedQty),
-    fmtQty(slice.onOrderQty),
+    limitQtyPercent(slice.arrivedQty, slice.plannedQty),
+    limitQtyPercent(slice.onOrderQty, slice.plannedQty),
     slice.overCount > 0 ? slice.overCount : "отсутствует"
   ];
 }
@@ -797,8 +802,8 @@ export function HomeOverview({
             const s = o.limitsSs;
             return [
               { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
-              { key: "arr", cells: ["Приход", s.hasTemplate ? fmtQty(s.arrivedQty) : "отсутствует"] },
-              { key: "ord", cells: ["В закупке", s.hasTemplate ? fmtQty(s.onOrderQty) : "отсутствует"] },
+              { key: "arr", cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"] },
+              { key: "ord", cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"] },
               { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
             ];
           }
@@ -806,8 +811,8 @@ export function HomeOverview({
             const s = o.limitsEom;
             return [
               { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
-              { key: "arr", cells: ["Приход", s.hasTemplate ? fmtQty(s.arrivedQty) : "отсутствует"] },
-              { key: "ord", cells: ["В закупке", s.hasTemplate ? fmtQty(s.onOrderQty) : "отсутствует"] },
+              { key: "arr", cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"] },
+              { key: "ord", cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"] },
               { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
             ];
           }
