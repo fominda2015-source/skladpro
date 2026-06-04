@@ -6754,8 +6754,20 @@ function App() {
                                 {itemsDone.map((it) => {
                                   const total = parseMaterialQty(it.quantity);
                                   const accepted = parseMaterialQty(it.acceptedQty);
-                                  const displayName = it.mappedMaterial?.name || it.sourceName;
-                                  const displayUnit = it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
+                                  const updName = (it.factLabel || "").trim();
+                                  const legacyUpd =
+                                    !updName &&
+                                    it.mappedMaterial?.name &&
+                                    it.mappedMaterial.name.trim() !== it.sourceName.trim()
+                                      ? it.mappedMaterial.name.trim()
+                                      : "";
+                                  const displayUpd = updName || legacyUpd || "—";
+                                  const displayUnit =
+                                    (it.factUnit || "").trim() ||
+                                    it.mappedMaterial?.unit ||
+                                    it.sourceUnit ||
+                                    "шт";
                                   return (
                                     <tr key={`done-${it.id}`} className="receiptRow--accepted">
                                       <td>
@@ -6772,7 +6784,9 @@ function App() {
                                         </strong>{" "}
                                         <span className="muted">{it.sourceUnit || "шт"}</span>
                                       </td>
-                                      <td>{displayName}</td>
+                                      <td title={displayUpd !== "—" ? displayUpd : canonName}>
+                                        {displayUpd}
+                                      </td>
                                       <td>{displayUnit}</td>
                                       <td className="muted">—</td>
                                       <td>
