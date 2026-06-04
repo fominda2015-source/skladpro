@@ -40,10 +40,10 @@ export function WorkspaceContextBar(props: Props) {
       aria-label="Контекст объекта и раздела"
     >
       {!hideObjectSelect ? (
-        <label className="workspaceContextObject">
+        <label className="workspaceContextObject workspaceContextObject--accent">
           <span className="workspaceContextLabel">Активный объект</span>
           <select
-            className="workspaceContextObjectSelect"
+            className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
             value={activeObjectId}
             onChange={(e) => onSelectObject(e.target.value)}
             aria-label="Выбор объекта"
@@ -57,16 +57,16 @@ export function WorkspaceContextBar(props: Props) {
           </select>
         </label>
       ) : (
-        <div className="workspaceContextObject workspaceContextObjectStatic">
+        <div className="workspaceContextObject workspaceContextObjectStatic workspaceContextObject--accent">
           <span className="workspaceContextLabel">Объекты</span>
-          <span className="workspaceContextObjectValue">Все объекты</span>
+          <span className="workspaceContextObjectValue workspaceContextObjectValue--accent">Все объекты</span>
         </div>
       )}
       {tabFilter ? (
-        <label className="workspaceContextObject workspaceContextTabFilter">
+        <label className="workspaceContextObject workspaceContextTabFilter workspaceContextObject--accent-secondary">
           <span className="workspaceContextLabel">Объект на вкладке</span>
           <select
-            className="workspaceContextObjectSelect"
+            className="workspaceContextObjectSelect workspaceContextObjectSelect--accent-secondary"
             value={tabFilter.value}
             onChange={(e) => tabFilter.onChange(e.target.value)}
             aria-label="Фильтр по объекту на вкладке"

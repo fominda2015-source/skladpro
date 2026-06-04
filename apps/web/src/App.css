@@ -538,9 +538,13 @@ button:hover {
 
 .workspaceContextSection--accent {
   padding: 2px 10px 2px 4px;
-  margin-left: auto;
+  margin-left: 0;
   border-radius: 10px;
   background: linear-gradient(90deg, rgba(239, 246, 255, 0.95) 0%, rgba(239, 246, 255, 0.35) 72%, transparent 100%);
+}
+
+.workspaceContextBar--inline .workspaceContextSection--accent {
+  margin-left: auto;
 }
 
 .workspaceContextSection--accent .workspaceContextLabel {
@@ -800,11 +804,168 @@ button:hover {
   box-shadow: none;
 }
 
-.workspaceContextBar--inline .workspaceContextObjectSelect {
+.workspaceContextObject--accent {
+  padding: 2px 10px 2px 4px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(238, 242, 255, 0.98) 0%, rgba(238, 242, 255, 0.25) 80%, transparent 100%);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspaceContextObject--accent .workspaceContextLabel {
+  color: #4338ca;
+  font-weight: 800;
+}
+
+.workspaceContextObject--accent-secondary {
+  padding: 2px 8px 2px 4px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(245, 243, 255, 0.95) 0%, transparent 85%);
+}
+
+.workspaceContextObject--accent-secondary .workspaceContextLabel {
+  color: #5b21b6;
+  font-weight: 800;
+}
+
+.workspaceContextObjectSelect--accent {
+  height: 38px;
+  min-height: 38px;
+  min-width: 180px;
+  max-width: min(300px, 48vw);
+  padding: 0 36px 0 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #312e81;
+  border: 2px solid #6366f1;
+  border-radius: 10px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(180deg, #ffffff 0%, #eef2ff 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%234338ca' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position:
+    0 0,
+    right 12px center;
+  background-size:
+    100% 100%,
+    14px 14px;
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.14),
+    0 4px 14px rgba(99, 102, 241, 0.22);
+  appearance: none;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.workspaceContextObjectSelect--accent:hover {
+  border-color: #4f46e5;
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.2),
+    0 6px 16px rgba(99, 102, 241, 0.28);
+}
+
+.workspaceContextObjectSelect--accent:focus {
+  outline: none;
+  border-color: #4338ca;
+  box-shadow:
+    0 0 0 4px rgba(99, 102, 241, 0.28),
+    0 6px 18px rgba(79, 70, 229, 0.32);
+}
+
+.workspaceContextObjectSelect--accent-secondary {
+  height: 36px;
+  min-height: 36px;
+  min-width: 160px;
+  max-width: min(260px, 40vw);
+  padding: 0 32px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4c1d95;
+  border: 2px solid #8b5cf6;
+  border-radius: 10px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%235b21b6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position:
+    0 0,
+    right 10px center;
+  background-size:
+    100% 100%,
+    12px 12px;
+  box-shadow:
+    0 0 0 2px rgba(139, 92, 246, 0.12),
+    0 3px 10px rgba(139, 92, 246, 0.18);
+  appearance: none;
+  cursor: pointer;
+}
+
+.workspaceContextObjectValue--accent {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #312e81;
+  border: 2px solid #6366f1;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff 0%, #eef2ff 100%);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.14),
+    0 4px 14px rgba(99, 102, 241, 0.2);
+}
+
+.objectFieldAccent {
+  gap: 8px;
+  font-weight: 700;
+  color: #4338ca;
+}
+
+.form .objectFieldAccent .workspaceContextObjectSelect--accent {
+  width: 100%;
+  max-width: 100%;
+}
+
+.warehouseMode .workspaceContextObject--accent {
+  background: linear-gradient(90deg, rgba(255, 247, 237, 0.98) 0%, rgba(255, 247, 237, 0.2) 80%, transparent 100%);
+}
+
+.warehouseMode .workspaceContextObject--accent .workspaceContextLabel {
+  color: #c2410c;
+}
+
+.warehouseMode .workspaceContextObjectSelect--accent {
+  color: #7c2d12;
+  border-color: #f97316;
+  background-image:
+    linear-gradient(180deg, #ffffff 0%, #ffedd5 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23c2410c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  box-shadow:
+    0 0 0 3px rgba(249, 115, 22, 0.14),
+    0 4px 14px rgba(234, 88, 12, 0.2);
+}
+
+.warehouseMode .workspaceContextObjectValue--accent {
+  color: #7c2d12;
+  border-color: #f97316;
+  background: linear-gradient(180deg, #fff 0%, #ffedd5 100%);
+}
+
+.workspaceContextBar--inline .workspaceContextObjectSelect:not(.workspaceContextObjectSelect--accent):not(
+    .workspaceContextObjectSelect--accent-secondary
+  ) {
   width: auto;
   min-width: 140px;
   max-width: min(240px, 36vw);
   flex: 0 1 auto;
+}
+
+.workspaceContextBar--inline .workspaceContextObjectSelect--accent {
+  flex: 1 1 auto;
 }
 
 .workspaceContextObjectStatic {

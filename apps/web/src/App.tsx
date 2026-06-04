@@ -5440,9 +5440,13 @@ function App() {
           <h2>Выберите объект</h2>
           <p className="muted">После выбора вы войдете в контур объекта. Сменить можно в верхней панели.</p>
           <div className="form">
-            <label>
+            <label className="objectFieldAccent">
               Объект
-              <select value={activeObjectId} onChange={(e) => setActiveObjectId(e.target.value)}>
+              <select
+                className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
+                value={activeObjectId}
+                onChange={(e) => setActiveObjectId(e.target.value)}
+              >
                 <option value="">— выберите —</option>
                 {canViewAllObjects ? (
                   <option value={ALL_OBJECTS_ID}>Все объекты</option>
@@ -11371,9 +11375,10 @@ function App() {
             </span>
           </div>
           <div className="form">
-            <label>
+            <label className="objectFieldAccent">
               Объект
               <select
+                className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
                 value={activeObjectId}
                 onChange={(e) => {
                   const warehouseId = e.target.value;
