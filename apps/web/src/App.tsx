@@ -579,6 +579,8 @@ type ReceiptRequestItem = {
   limitCatalogNameO?: string | null;
   externalComment?: string | null;
   limitNameRenamed?: boolean;
+  factLabel?: string | null;
+  factUnit?: string | null;
   mappedMaterial?: { id: string; name: string; unit: string } | null;
 };
 type ReceiptRequestRow = {
@@ -1425,15 +1427,18 @@ function App() {
         if (!it.mappedMaterialId) continue;
         const accepted = parseMaterialQty(it.acceptedQty);
         if (!Number.isFinite(accepted) || accepted <= 0) continue;
-        const key = `${it.sourceName}|${it.sourceUnit || ""}`;
+        const factName = (it.factLabel || "").trim();
+        const displayName = factName || it.sourceName;
+        const displayUnit = (it.factUnit || "").trim() || it.sourceUnit || "";
+        const key = `${displayName}|${displayUnit}`;
         const bucket = map.get(it.mappedMaterialId) || new Map();
         const prev = bucket.get(key);
         if (prev) {
           prev.quantity += accepted;
         } else {
           bucket.set(key, {
-            sourceName: it.sourceName,
-            sourceUnit: it.sourceUnit || "",
+            sourceName: displayName,
+            sourceUnit: displayUnit,
             quantity: accepted
           });
         }
@@ -3242,7 +3247,8 @@ function App() {
     const mappings: Array<{
       itemId: string;
       materialId?: string;
-      newMaterialName?: string;
+      factLabel?: string;
+      factLabelUnit?: string;
       newMaterialUnit?: string;
       acceptedQty: number;
       limitNodeId?: string | null;
@@ -3259,12 +3265,16 @@ function App() {
       if (qty <= 0) continue;
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
-      const finalName = explicitName || it.sourceName;
+      const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
+      const factLabel =
+        explicitName && explicitName !== canonName ? explicitName : undefined;
       const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
       const priceNum = priceRaw === "" ? null : Number(priceRaw);
       mappings.push({
         itemId: it.id,
-        newMaterialName: finalName,
+        materialId: it.mappedMaterialId || undefined,
+        factLabel,
+        factLabelUnit: factLabel ? explicitUnit || it.sourceUnit || "шт" : undefined,
         newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
         acceptedQty: qty,
         limitNodeId: draft?.limitNodeId || it.limitNodeId || null,
@@ -6802,10 +6812,11 @@ function App() {
                                     unitPrice: it.unitPrice != null ? String(it.unitPrice) : "",
                                     storagePlace: it.storagePlace ?? ""
                                   };
-                                  const defaultName =
-                                    draft.newName || it.mappedMaterial?.name || it.sourceName;
+                                  const defaultName = draft.newName ?? "";
                                   const defaultUnit =
                                     draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  const nomenclatureHint =
+                                    it.mappedMaterial?.name || it.sourceName;
                                   const defaultCategory = draft.category ?? it.category ?? "";
                                   const defaultPrice =
                                     draft.unitPrice ??
@@ -6912,6 +6923,7 @@ function App() {
                                         <input
                                           list={datalistId}
                                           value={defaultName}
+                                          title={`Номенклатура (лимит): ${nomenclatureHint}`}
                                           placeholder="Как в УПД…"
                                           disabled={finished}
                                           onChange={(e) => saveDraft({ newName: e.target.value })}

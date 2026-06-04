@@ -249,7 +249,8 @@ export async function resolveReceiptAcceptLimitNode(
     namePartC: item.sourceName,
     limitCatalogNameN: item.limitCatalogNameN,
     limitCatalogNameO: item.limitCatalogNameO,
-    renameLimitToO: item.limitNameRenamed,
+    // При приёмке не переименовываем узел лимита по УПД — только привязка к существующей строке.
+    renameLimitToO: false,
     limitDisplayName: meta.limitDisplayName,
     nameAlertNote: meta.nameAlertNote
   });

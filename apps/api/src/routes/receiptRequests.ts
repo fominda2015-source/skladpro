@@ -62,8 +62,12 @@ const receiptItemCategorySchema = z.enum([
 
 const acceptItemSchema = z.object({
   itemId: z.string().min(1),
-  // либо ссылка на существующий материал, либо новое название (УПД)
+  /** Карточка-«коробка» (номенклатура / лимит); не путать с factLabel. */
   materialId: z.string().optional(),
+  /** Наименование по УПД — только для выдачи и справочника соответствий. */
+  factLabel: z.string().max(500).optional(),
+  factLabelUnit: z.string().max(50).optional(),
+  /** Устар.: только создание новой карточки без привязки к лимиту; не подставлять УПД. */
   newMaterialName: z.string().max(500).optional(),
   newMaterialUnit: z.string().max(50).optional(),
   acceptedQty: materialQtySchema,
@@ -138,6 +142,82 @@ async function findOrCreateMaterial(
   if (existing) return existing.id;
   const created = await tx.material.create({ data: { name, unit } });
   return created.id;
+}
+
+type ReceiptAcceptTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function upsertWarehouseMaterialMapping(
+  tx: ReceiptAcceptTx,
+  opts: {
+    warehouseId: string;
+    section: "SS" | "EOM";
+    sourceName: string;
+    sourceUnit: string;
+    targetMaterialId: string;
+    createdById: string;
+  }
+) {
+  const sourceName = opts.sourceName.trim();
+  if (!sourceName) return;
+  const sourceUnit = opts.sourceUnit.trim() || "шт";
+  await tx.materialMappingLibrary.upsert({
+    where: {
+      warehouseId_section_sourceName_sourceUnit: {
+        warehouseId: opts.warehouseId,
+        section: opts.section,
+        sourceName,
+        sourceUnit
+      }
+    },
+    create: {
+      warehouseId: opts.warehouseId,
+      section: opts.section,
+      sourceName,
+      sourceUnit,
+      targetMaterialId: opts.targetMaterialId,
+      createdById: opts.createdById
+    },
+    update: { targetMaterialId: opts.targetMaterialId }
+  });
+}
+
+/** Карточка материала = номенклатура из заявки/лимита, не наименование по УПД. */
+async function resolveReceiptTargetMaterialId(
+  tx: ReceiptAcceptTx,
+  item: { sourceName: string; sourceUnit: string; mappedMaterialId: string | null; limitNodeId: string | null },
+  mapping: { materialId?: string; newMaterialName?: string }
+): Promise<string | undefined> {
+  if (mapping.materialId) return mapping.materialId;
+  if (item.mappedMaterialId) return item.mappedMaterialId;
+  if (item.limitNodeId) {
+    const node = await tx.objectLimitNode.findUnique({
+      where: { id: item.limitNodeId },
+      select: { materialId: true }
+    });
+    if (node?.materialId) return node.materialId;
+  }
+  const cardName = item.sourceName.trim();
+  if (cardName) {
+    return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт");
+  }
+  const legacyName = mapping.newMaterialName?.trim();
+  if (legacyName) {
+    return findOrCreateMaterial(tx, legacyName, item.sourceUnit || "шт");
+  }
+  return undefined;
+}
+
+function receiptAcceptFactLabel(
+  mapping: { factLabel?: string; newMaterialName?: string },
+  item: { sourceName: string },
+  cardName: string
+): string | null {
+  const raw = (mapping.factLabel ?? "").trim() || (mapping.newMaterialName ?? "").trim();
+  if (!raw) return null;
+  const canon = cardName.trim();
+  const limitName = item.sourceName.trim();
+  if (raw === canon || raw === limitName) return null;
+  return raw;
 }
 
 const receiptRequestInclude = {
@@ -762,9 +842,15 @@ receiptRequestsRouter.post(
     for (const m of parsed.data.itemMappings) {
       const it = itemsById.get(m.itemId);
       if (!it) return res.status(400).json({ error: `Позиция ${m.itemId} не найдена в заявке` });
-      if (!m.materialId && !m.newMaterialName?.trim()) {
+      const canResolveCard =
+        Boolean(m.materialId) ||
+        Boolean(it.mappedMaterialId) ||
+        Boolean(it.limitNodeId) ||
+        Boolean(it.sourceName.trim()) ||
+        Boolean(m.newMaterialName?.trim());
+      if (!canResolveCard) {
         return res.status(400).json({
-          error: `Для «${it.sourceName}» нужно выбрать материал или ввести новое название`
+          error: `Для «${it.sourceName}» не удалось определить номенклатуру карточки`
         });
       }
       const remaining = receiptItemRemaining(it);
@@ -775,10 +861,10 @@ receiptRequestsRouter.post(
       }
       const isOver = m.acceptedQty > remaining;
       if (isOver && !parsed.data.allowOverage) {
-        let materialId = m.materialId;
-        if (!materialId && m.newMaterialName?.trim()) {
+        let materialId = m.materialId || it.mappedMaterialId || undefined;
+        if (!materialId) {
           const found = await prisma.material.findFirst({
-            where: { name: m.newMaterialName.trim(), unit: m.newMaterialUnit?.trim() || it.sourceUnit || "шт" }
+            where: { name: it.sourceName.trim(), unit: it.sourceUnit || "шт" }
           });
           materialId = found?.id;
         }
@@ -799,10 +885,10 @@ receiptRequestsRouter.post(
         });
       }
       if (isOver && parsed.data.allowOverage) {
-        let materialId = m.materialId;
-        if (!materialId && m.newMaterialName?.trim()) {
+        let materialId = m.materialId || it.mappedMaterialId || undefined;
+        if (!materialId) {
           const found = await prisma.material.findFirst({
-            where: { name: m.newMaterialName.trim(), unit: m.newMaterialUnit?.trim() || it.sourceUnit || "шт" }
+            where: { name: it.sourceName.trim(), unit: it.sourceUnit || "шт" }
           });
           materialId = found?.id;
         }
@@ -856,17 +942,15 @@ receiptRequestsRouter.post(
       }> = [];
       for (const m of parsed.data.itemMappings) {
         const it = itemsById.get(m.itemId)!;
-        const unitHint = m.newMaterialUnit?.trim() || it.sourceUnit || "шт";
+        const unitHint = m.newMaterialUnit?.trim() || m.factLabelUnit?.trim() || it.sourceUnit || "шт";
         const itemCategory = m.category ?? it.category ?? null;
         const campCategory = receiptCategoryToCampCategory(itemCategory);
         const remainingBefore = receiptItemRemaining(it);
         const acceptedQty = parsed.data.allowOverage ? m.acceptedQty : Math.min(m.acceptedQty, remainingBefore);
         if (acceptedQty <= 0) continue;
-        let materialId: string | undefined = m.materialId;
+        let materialId: string | undefined;
         if (!campCategory) {
-          if (!materialId && m.newMaterialName?.trim()) {
-            materialId = await findOrCreateMaterial(tx, m.newMaterialName.trim(), unitHint);
-          }
+          materialId = await resolveReceiptTargetMaterialId(tx, it, m);
           if (!materialId) {
             throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
           }
@@ -912,11 +996,28 @@ receiptRequestsRouter.post(
         const campCategory = r.campCategory ?? receiptCategoryToCampCategory(itemCategory);
 
         let limitNodeId = r.limitNodeId ?? r.item.limitNodeId ?? null;
+        let cardName = r.item.sourceName;
+        if (!campCategory && r.materialId) {
+          const matRow = await tx.material.findUnique({
+            where: { id: r.materialId },
+            select: { name: true }
+          });
+          if (matRow?.name) cardName = matRow.name;
+        }
+        const factLabel =
+          mapping && !campCategory && r.materialId
+            ? receiptAcceptFactLabel(mapping, r.item, cardName)
+            : null;
+        const factUnit =
+          factLabel != null
+            ? (mapping?.factLabelUnit?.trim() || mapping?.newMaterialUnit?.trim() || r.sourceUnit || "шт")
+            : null;
+
         if (!campCategory && row.objectLimitTemplateId && r.materialId) {
           limitNodeId = await resolveReceiptAcceptLimitNode(tx, row.objectLimitTemplateId, r.item, {
             explicitLimitNodeId: mapping?.limitNodeId ?? null,
             materialId: r.materialId,
-            materialName: mapping?.newMaterialName?.trim() || r.item.sourceName,
+            materialName: cardName,
             acceptedQty: r.acceptedQty
           });
           r.limitNodeId = limitNodeId;
@@ -928,6 +1029,7 @@ receiptRequestsRouter.post(
             mappedMaterialId: campCategory ? null : r.materialId,
             acceptedQty: { increment: r.acceptedQty },
             ...(limitNodeId ? { limitNodeId } : {}),
+            ...(factLabel ? { factLabel, factUnit: factUnit || r.sourceUnit } : {}),
             ...(mapping?.category !== undefined ? { category: mapping.category } : {}),
             ...(mapping?.unitPrice !== undefined ? { unitPrice: mapping.unitPrice } : {}),
             ...(mapping?.storagePlace !== undefined ? { storagePlace: mapping.storagePlace } : {})
@@ -1005,25 +1107,24 @@ receiptRequestsRouter.post(
             createdById: req.user!.userId
           }
         });
-        await tx.materialMappingLibrary.upsert({
-          where: {
-            warehouseId_section_sourceName_sourceUnit: {
-              warehouseId: row.warehouseId,
-              section: row.section,
-              sourceName: r.item.sourceName,
-              sourceUnit: r.item.sourceUnit || ""
-            }
-          },
-          create: {
+        await upsertWarehouseMaterialMapping(tx, {
+          warehouseId: row.warehouseId,
+          section: row.section,
+          sourceName: r.item.sourceName,
+          sourceUnit: r.item.sourceUnit || "",
+          targetMaterialId: r.materialId,
+          createdById: req.user!.userId
+        });
+        if (factLabel) {
+          await upsertWarehouseMaterialMapping(tx, {
             warehouseId: row.warehouseId,
             section: row.section,
-            sourceName: r.item.sourceName,
-            sourceUnit: r.item.sourceUnit || "",
+            sourceName: factLabel,
+            sourceUnit: factUnit || r.sourceUnit || "шт",
             targetMaterialId: r.materialId,
             createdById: req.user!.userId
-          },
-          update: { targetMaterialId: r.materialId }
-        });
+          });
+        }
       }
 
       // Сохраним опциональные сканы УПД/ТН и прикрепим каждый и к заявке, и к операции.

@@ -987,6 +987,9 @@ model ReceiptRequestItem {
   limitCatalogNameO String?
   externalComment  String?
   limitNameRenamed Boolean        @default(false)
+  /// Фактическое наименование по УПД (выдача/склад); не меняет номенклатуру карточки и лимит.
+  factLabel        String?
+  factUnit         String?
   receiptRequest   ReceiptRequest @relation(fields: [receiptRequestId], references: [id], onDelete: Cascade)
   mappedMaterial   Material?      @relation(fields: [mappedMaterialId], references: [id], onDelete: SetNull)
   limitNode        ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
