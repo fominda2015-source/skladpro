@@ -1669,33 +1669,7 @@ function App() {
     admin: "Управление доступами",
     password: "Смена пароля"
   };
-  const tabSectionMap: Record<string, string> = {
-    stocks: "Операции",
-    warehouse: "Операции",
-    operations: "Операции",
-    issues: "Операции",
-    approvals: "Операции",
-    waybills: "Операции",
-    documents: "Контроль",
-    acts: "Контроль",
-    limits: "Контроль",
-    materialReport: "Контроль",
-    chat: "Контроль",
-    feedback: "Контроль",
-    reports: "Контроль",
-    audit: "Контроль",
-    catalog: "Сервис",
-    tools: "Сервис",
-    qr: "Сервис",
-    integrations: "Сервис",
-    notifications: "Контроль",
-    admin: "Администрирование",
-    profile: "Аккаунт",
-    settings: "Аккаунт",
-    password: "Аккаунт"
-  };
   const currentTitle = tabTitleMap[activeTab] ?? "СкладПро";
-  const currentSection = tabSectionMap[activeTab] ?? "Раздел";
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
   const canManageUsers = useMemo(() => isAdmin, [me?.role]);
@@ -2040,18 +2014,17 @@ function App() {
         : undefined;
 
     return (
-      <section className="workspaceContextGlobal" aria-label="Контекст работы">
-        <WorkspaceContextBar
-          activeObjectId={activeObjectId}
-          canViewAllObjects={canViewAllObjects}
-          objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
-          section={objectSectionFilter}
-          onSelectObject={(id) => void selectTopObject(id)}
-          onSelectSection={(next) => setSection(next)}
-          hideObjectSelect={activeTab === "stocks"}
-          tabFilter={tabFilter}
-        />
-      </section>
+      <WorkspaceContextBar
+        activeObjectId={activeObjectId}
+        canViewAllObjects={canViewAllObjects}
+        objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
+        section={objectSectionFilter}
+        onSelectObject={(id) => void selectTopObject(id)}
+        onSelectSection={(next) => setSection(next)}
+        hideObjectSelect={activeTab === "stocks"}
+        tabFilter={tabFilter}
+        layout="inline"
+      />
     );
   }
 
@@ -5744,24 +5717,42 @@ function App() {
         />
       )}
       <section className={`canvas${activeTab === "chat" ? " canvas--chat" : ""}`}>
-        <header className="pageHeader">
-          <button
-            type="button"
-            className="mobileMenuBtn"
-            onClick={() => setMobileNavOpen((v) => !v)}
-            aria-label="Открыть меню"
-          >
-            ☰
-          </button>
-          <div className="pageTitleBlock">
-            <h1>{currentTitle}</h1>
-            <p className="crumbs">{currentSection} / {currentTitle}</p>
-            {me && <p className="muted">{me.fullName} ({roleLabel(me.role)}{me.position ? ` · ${me.position}` : ""})</p>}
-          </div>
-          <div className="toolbar topToolbar">
-            <input placeholder="Глобальный поиск (материал/инструмент/код)" value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} />
-            <button onClick={() => { setQ(globalSearch); setToolSearch(globalSearch); setActiveTab("warehouse"); }}>Найти</button>
-            {canReadTools && <button onClick={() => setActiveTab("qr")}>QR</button>}
+        <header className={`appChrome${showWorkspaceContext ? " appChrome--withContext" : ""}`}>
+          <div className="appChromeRow">
+            <button
+              type="button"
+              className="mobileMenuBtn"
+              onClick={() => setMobileNavOpen((v) => !v)}
+              aria-label="Открыть меню"
+            >
+              ☰
+            </button>
+            <p className="appChromeTabTitle">{currentTitle}</p>
+            <div className="appChromeSearch">
+              <input
+                className="globalSearchInput"
+                placeholder="Поиск…"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                aria-label="Глобальный поиск"
+              />
+              <button
+                type="button"
+                className="appChromeSearchBtn"
+                onClick={() => {
+                  setQ(globalSearch);
+                  setToolSearch(globalSearch);
+                  setActiveTab("warehouse");
+                }}
+              >
+                Найти
+              </button>
+              {canReadTools ? (
+                <button type="button" className="appChromeSearchBtn appChromeSearchBtnSecondary" onClick={() => setActiveTab("qr")}>
+                  QR
+                </button>
+              ) : null}
+            </div>
             {me ? (
               <UserAccountMenu
                 fullName={me.fullName}
@@ -5769,11 +5760,12 @@ function App() {
                 onProfile={() => setActiveTab("profile")}
                 onSettings={() => setActiveTab("settings")}
                 onLogout={onLogout}
+                showName={false}
               />
             ) : null}
           </div>
+          {showWorkspaceContext ? <div className="appChromeContext">{renderWorkspaceContextPanel()}</div> : null}
         </header>
-        {showWorkspaceContext ? renderWorkspaceContextPanel() : null}
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}

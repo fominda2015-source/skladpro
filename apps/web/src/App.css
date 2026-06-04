@@ -234,10 +234,10 @@
 
 .card {
   border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 12px;
   background: #fff;
-  box-shadow: 0 6px 20px rgba(12, 24, 52, 0.05);
+  box-shadow: 0 2px 10px rgba(12, 24, 52, 0.04);
   transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
@@ -247,19 +247,98 @@
   transform: translateY(-1px);
 }
 
-.pageHeader {
+.pageHeader,
+.appChrome {
+  margin-bottom: 6px;
+}
+
+.appChrome {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px 10px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+.appChrome:hover {
+  transform: none;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+.appChromeRow {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  background: #f3f6fa;
-  border-bottom: 1px solid #e6eaf2;
-  padding: 6px 2px 8px;
-  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.appChromeTabTitle {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appChromeSearch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.globalSearchInput {
+  width: 220px;
+  max-width: min(220px, 42vw);
+  height: 34px;
+  flex: 0 1 220px;
+  min-width: 120px;
+}
+
+.appChromeSearchBtn {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.appChromeSearchBtnSecondary {
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #dbe1ec;
+}
+
+.appChromeSearchBtnSecondary:hover {
+  background: #f1f5f9;
+}
+
+.appChromeContext {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.appChrome .userAccountMenu {
+  margin-left: 0;
+  flex: 0 0 auto;
+}
+
+.appChrome .userAccountMenuTrigger {
+  height: 34px;
 }
 
 @media (min-width: 901px) {
-  .pageHeader {
+  .appChrome {
     position: sticky;
     top: 0;
     z-index: 10;
@@ -354,9 +433,10 @@ button:hover {
 
 .toolbar {
   display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: 6px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .topToolbar {
@@ -369,16 +449,17 @@ button:hover {
   box-shadow: 0 2px 10px rgba(12, 24, 52, 0.04);
 }
 
-.topToolbar input {
-  flex: 1 1 180px;
-  min-width: 120px;
-  max-width: 420px;
+.topToolbar input,
+.topToolbar .globalSearchInput {
+  flex: 0 1 220px;
+  width: 220px;
+  max-width: min(220px, 100%);
 }
 
 .topToolbar button {
   flex: 0 0 auto;
   white-space: nowrap;
-  padding: 0 14px;
+  padding: 0 12px;
 }
 
 .sectionToggle {
@@ -576,64 +657,22 @@ button:hover {
   width: 100%;
 }
 
-.workspaceContextGlobal {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 8px 12px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
-  margin-bottom: 6px;
-}
-
-.workspaceContextGlobal:hover {
-  transform: none;
-  border-color: #e2e8f0;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
-}
-
-.workspaceContextGlobal .workspaceContextBar {
+.workspaceContextBar--inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 0;
   border: none;
   background: transparent;
-  padding: 0;
-  box-shadow: none;
 }
 
-.workspaceContextTabFilter {
-  position: relative;
-}
-
-.workspaceContextTabHint {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.canvas--chat > .workspaceContextGlobal {
-  flex-shrink: 0;
-  padding: 8px 12px;
-  margin-bottom: 6px;
-}
-
-.canvas--chat > .workspaceContextGlobal .workspaceContextBar {
-  gap: 10px 14px;
-  padding: 8px 10px;
-}
-
-.canvas--chat > .workspaceContextGlobal .workspaceContextObjectSelect,
-.canvas--chat > .workspaceContextGlobal .workspaceContextSectionToggle {
-  min-height: 36px;
-}
-
-.workspaceContextBar {
+.workspaceContextBar:not(.workspaceContextBar--inline) {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 8px 16px;
+  gap: 8px 12px;
   padding: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
 }
 
 .workspaceContextLabel {
@@ -647,32 +686,55 @@ button:hover {
 }
 
 .workspaceContextObject {
-  flex: 1 1 200px;
-  max-width: min(100%, 380px);
-  min-width: 0;
   margin: 0;
+  min-width: 0;
+}
+
+.workspaceContextBar--inline .workspaceContextObject {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  max-width: none;
+}
+
+.workspaceContextBar--inline .workspaceContextLabel {
+  margin: 0;
+  white-space: nowrap;
 }
 
 .workspaceContextObjectSelect {
-  height: 36px;
-  min-height: 36px;
-  font-size: 14px;
+  height: 32px;
+  min-height: 32px;
+  font-size: 13px;
   font-weight: 600;
-  border-color: #93c5fd;
+  border-color: #cbd5e1;
   background: #fff;
   box-shadow: none;
 }
 
-.workspaceContextObjectStatic .workspaceContextObjectValue {
-  display: flex;
+.workspaceContextBar--inline .workspaceContextObjectSelect {
+  width: auto;
+  min-width: 140px;
+  max-width: min(240px, 36vw);
+  flex: 0 1 auto;
+}
+
+.workspaceContextObjectStatic {
+  display: inline-flex;
   align-items: center;
-  height: 36px;
-  min-height: 36px;
-  padding: 0 12px;
+  gap: 8px;
+}
+
+.workspaceContextObjectStatic .workspaceContextObjectValue {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid #dbe1ec;
-  border-radius: 10px;
-  background: #fff;
-  font-size: 14px;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 13px;
   font-weight: 600;
   color: #0f172a;
 }
@@ -681,8 +743,19 @@ button:hover {
   flex: 0 0 auto;
 }
 
+.workspaceContextBar--inline .workspaceContextSection {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .workspaceContextSectionToggle {
-  height: 36px;
+  height: 32px;
+}
+
+.workspaceContextBar--inline .sectionToggleBtn {
+  height: 32px;
+  padding: 0 12px;
 }
 
 .toolbar input[type="file"],
@@ -1609,8 +1682,19 @@ tr.low {
 }
 
 /* Вкладка чата — без дублирующей шапки (поиск/заголовок страницы) */
-.canvas--chat > .pageHeader {
+.canvas--chat > .appChrome .appChromeRow {
   display: none;
+}
+
+.canvas--chat > .appChrome {
+  padding: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.canvas--chat > .appChrome .appChromeContext {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .canvas--chat .chatPage {
@@ -2821,6 +2905,22 @@ html[data-mobile="1"] .chatPage--thread .chatThread--placeholder {
     padding: 12px;
   }
   .app {
+    max-width: 100%;
+  }
+  .appChromeRow {
+    gap: 6px;
+  }
+  .appChromeTabTitle {
+    max-width: 100%;
+  }
+  .appChromeSearch {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+  .globalSearchInput {
+    flex: 1 1 140px;
+    width: auto;
     max-width: 100%;
   }
   .pageHeader {
@@ -4131,7 +4231,7 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 
 .pageHeroTitle {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1.25;
   font-weight: 700;
   color: #0f172a;
@@ -4141,13 +4241,53 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 .pageHero {
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 8px 12px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  border-radius: 10px;
+  padding: 6px 10px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 6px;
+}
+
+.pageHero.pageHero--toolbar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.pageHero--toolbar .pageHeroTitleBlock {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.pageHero--toolbar .pageHeroStats {
+  flex: 0 0 auto;
+  order: 2;
+}
+
+.pageHero--toolbar .pageHeroActions {
+  flex: 0 0 auto;
+  order: 3;
+  margin-left: auto;
+}
+
+.pageHero--toolbar .pageHeroContext {
+  flex: 1 1 100%;
+  order: 4;
+}
+
+.pageHero--toolbar .pageHeroSub {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .pageHero--toolbar .pageHeroActions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .pageHero:hover {
@@ -4157,25 +4297,18 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
 }
 
 .pageHero.compact {
-  padding: 8px 12px;
+  padding: 6px 10px;
 }
-.pageHeroMain {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+
 .pageHeroTitleBlock {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
 }
 .pageHeroIcon {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
   background: linear-gradient(135deg, #1d4ed8 0%, #4f46e5 100%);
   color: #fff;
@@ -4538,10 +4671,26 @@ button.queueItem.homeQueueClick:not(:disabled):hover {
   flex-direction: column;
   gap: 12px;
 }
+.homeOverview .pageHero.pageHero--toolbar {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.homeOverview .pageHero--toolbar .pageHeroSub {
+  display: block;
+}
+
 .homeOverview .pageHeroStats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
+  width: 100%;
+  order: 4;
+}
+
+.homeOverview .pageHero--toolbar .pageHeroActions {
+  margin-left: 0;
+  width: 100%;
 }
 
 .homeOverview .pageHeroStatLabel::after {

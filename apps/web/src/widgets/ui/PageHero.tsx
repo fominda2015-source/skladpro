@@ -20,18 +20,14 @@ type Props = {
 
 export function PageHero({ icon, title, subtitle, stats, actions, context, variant = "default" }: Props) {
   return (
-    <section className={`pageHero ${variant}`}>
-      <div className="pageHeroMain">
-        <div className="pageHeroTitleBlock">
-          {icon ? <span className="pageHeroIcon" aria-hidden>{icon}</span> : null}
-          <div className="pageHeroTitleText">
-            <h2 className="pageHeroTitle">{title}</h2>
-            {subtitle ? <p className="pageHeroSub muted">{subtitle}</p> : null}
-          </div>
+    <section className={`pageHero pageHero--toolbar ${variant}`}>
+      <div className="pageHeroTitleBlock">
+        {icon ? <span className="pageHeroIcon" aria-hidden>{icon}</span> : null}
+        <div className="pageHeroTitleText">
+          <h2 className="pageHeroTitle">{title}</h2>
+          {subtitle ? <p className="pageHeroSub muted">{subtitle}</p> : null}
         </div>
-        {actions ? <div className="pageHeroActions">{actions}</div> : null}
       </div>
-      {context ? <div className="pageHeroContext">{context}</div> : null}
       {stats && stats.length ? (
         <div className="pageHeroStats">
           {stats.map((s, i) => {
@@ -53,6 +49,8 @@ export function PageHero({ icon, title, subtitle, stats, actions, context, varia
           })}
         </div>
       ) : null}
+      {actions ? <div className="pageHeroActions">{actions}</div> : null}
+      {context ? <div className="pageHeroContext">{context}</div> : null}
     </section>
   );
 }

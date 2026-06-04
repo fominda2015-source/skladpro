@@ -18,6 +18,7 @@ type Props = {
   onSelectSection: (section: "SS" | "EOM") => void;
   hideObjectSelect?: boolean;
   tabFilter?: TabFilterProps;
+  layout?: "stacked" | "inline";
 };
 
 export function WorkspaceContextBar(props: Props) {
@@ -29,11 +30,15 @@ export function WorkspaceContextBar(props: Props) {
     onSelectObject,
     onSelectSection,
     hideObjectSelect = false,
-    tabFilter
+    tabFilter,
+    layout = "inline"
   } = props;
 
   return (
-    <div className="workspaceContextBar" aria-label="Контекст объекта и раздела">
+    <div
+      className={`workspaceContextBar${layout === "inline" ? " workspaceContextBar--inline" : ""}`}
+      aria-label="Контекст объекта и раздела"
+    >
       {!hideObjectSelect ? (
         <label className="workspaceContextObject">
           <span className="workspaceContextLabel">Активный объект</span>
@@ -73,9 +78,6 @@ export function WorkspaceContextBar(props: Props) {
               </option>
             ))}
           </select>
-          {tabFilter.sectionLabel ? (
-            <span className="workspaceContextTabHint muted">{tabFilter.sectionLabel}</span>
-          ) : null}
         </label>
       ) : null}
       <div className="workspaceContextSection">
