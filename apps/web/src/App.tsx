@@ -53,8 +53,10 @@ import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
+import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFields";
 import {
   buildToolDisplayName,
+  isElectricToolCategoryId,
   loadToolCreateDefaults,
   pickDefaultCategories,
   saveToolCreateDefaults
@@ -372,6 +374,8 @@ type ToolItem = {
   toolType?: string | null;
   categoryId?: string | null;
   category?: { id: string; name: string; icon?: string | null; slug?: string | null } | null;
+  kitComplete?: boolean;
+  kitMissingNote?: string | null;
   createdAt: string;
 };
 type ToolWarehouseSummaryRow = {
@@ -1034,11 +1038,13 @@ function App() {
   const [toolCategoryDraft, setToolCategoryDraft] = useState<string>("");
   const [toolBrand, setToolBrand] = useState("");
   const [toolToolType, setToolToolType] = useState("");
+  const [toolKitComplete, setToolKitComplete] = useState(true);
+  const [toolKitMissingNote, setToolKitMissingNote] = useState("");
   const [toolCategoryFilter, setToolCategoryFilter] = useState("");
   const [toolReceiptNote, setToolReceiptNote] = useState("");
   const [toolSearch, setToolSearch] = useState("");
   const [toolStatusFilter, setToolStatusFilter] = useState<"" | ToolStatus>("");
-  type ToolCategoryRow = { id: string; name: string; icon?: string | null; order: number };
+  type ToolCategoryRow = { id: string; name: string; icon?: string | null; slug?: string | null; order: number };
   const [toolCategories, setToolCategories] = useState<ToolCategoryRow[]>([]);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
@@ -1658,7 +1664,7 @@ function App() {
     acts: "Акты",
     waybills: "Транспортные накладные",
     qr: "QR-сканирование",
-    tools: "Инструменты",
+    tools: "Инструменты/СИЗ",
     integrations: "Интеграции и уведомления",
     notifications: "Уведомления",
     chat: "Личные сообщения",
@@ -2157,7 +2163,9 @@ function App() {
           warehouseId: patch.warehouseId || null,
           section: patch.section,
           responsible: patch.responsible.trim() || null,
-          note: patch.note.trim() || null
+          note: patch.note.trim() || null,
+          kitComplete: patch.kitComplete,
+          kitMissingNote: patch.kitComplete ? null : patch.kitMissingNote.trim() || null
         })
       });
       if (!res.ok) {
@@ -4135,6 +4143,8 @@ function App() {
     setToolName(buildToolDisplayName(saved.brand, saved.toolType));
     setToolSerialNumber("");
     setToolResponsible("");
+    setToolKitComplete(true);
+    setToolKitMissingNote("");
     setToolInventoryNumber(`INV-${Date.now()}`);
     if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) setToolWarehouseId(activeObjectId);
     setToolManualModalOpen(true);
@@ -9819,7 +9829,7 @@ function App() {
           <div className="toolsWorkspaceMain">
           <PageHero
             icon="⚒"
-            title="Инструменты"
+            title="Инструменты/СИЗ"
             subtitle={`Раздел ${objectSectionFilter} · ${toolsTotal} ед.`}
             stats={[
               { label: "Всего", value: toolsTotal },
@@ -9840,7 +9850,7 @@ function App() {
                 token={token}
                 apiUrl={API_URL}
                 fetchWithSession={fetchWithSession}
-                title="Инструменты в Excel"
+                title="Инструменты/СИЗ в Excel"
                 warehouseId={exportWarehouseId || undefined}
                 sectionFilter={objectSectionFilter}
               />
@@ -10010,6 +10020,17 @@ function App() {
                     Ответственный при создании
                     <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
                   </label>
+                  {isElectricToolCategoryId(toolCategoryDraft, toolCategories) ? (
+                    <ToolKitCompletenessFields
+                      kitComplete={toolKitComplete}
+                      kitMissingNote={toolKitMissingNote}
+                      onKitCompleteChange={(v) => {
+                        setToolKitComplete(v);
+                        if (v) setToolKitMissingNote("");
+                      }}
+                      onKitMissingNoteChange={setToolKitMissingNote}
+                    />
+                  ) : null}
                 </div>
                 <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
                   <button type="button" className="ghostBtn" onClick={() => setToolManualModalOpen(false)}>
@@ -10022,7 +10043,10 @@ function App() {
                       !toolBrand.trim() ||
                       !toolToolType.trim() ||
                       !toolName.trim() ||
-                      !toolInventoryNumber.trim()
+                      !toolInventoryNumber.trim() ||
+                      (isElectricToolCategoryId(toolCategoryDraft, toolCategories) &&
+                        !toolKitComplete &&
+                        !toolKitMissingNote.trim())
                     }
                     onClick={async () => {
                       if (!token || !toolCategoryDraft || !toolName.trim() || !toolInventoryNumber.trim()) return;
@@ -10045,7 +10069,13 @@ function App() {
                           warehouseId: toolWarehouseId || undefined,
                           section: objectSectionFilter,
                           responsible: toolResponsible.trim() || undefined,
-                          categoryId: toolCategoryDraft
+                          categoryId: toolCategoryDraft,
+                          ...(isElectricToolCategoryId(toolCategoryDraft, toolCategories)
+                            ? {
+                                kitComplete: toolKitComplete,
+                                kitMissingNote: toolKitComplete ? null : toolKitMissingNote.trim()
+                              }
+                            : {})
                         })
                       });
                       if (!res.ok) {

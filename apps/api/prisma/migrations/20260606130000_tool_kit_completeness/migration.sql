@@ -1,0 +1,2 @@
+ALTER TABLE "Tool" ADD COLUMN "kitComplete" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Tool" ADD COLUMN "kitMissingNote" TEXT;

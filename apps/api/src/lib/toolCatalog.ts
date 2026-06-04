@@ -26,6 +26,48 @@ export function isElectricToolCategorySlug(slug: string | null | undefined) {
   );
 }
 
+const ELECTRIC_CATEGORY_NAMES = new Set([
+  ELECTRIC_TOOL_CATEGORY.toLowerCase(),
+  ELECTRIC_CORDLESS_CATEGORY.toLowerCase(),
+  ELECTRIC_CORDED_CATEGORY.toLowerCase()
+]);
+
+export function isElectricToolCategoryName(name: string | null | undefined) {
+  return ELECTRIC_CATEGORY_NAMES.has(String(name || "").trim().toLowerCase());
+}
+
+export async function isElectricToolCategoryId(categoryId: string | null | undefined) {
+  if (!categoryId) return false;
+  const cat = await prisma.toolCategory.findUnique({
+    where: { id: categoryId },
+    include: { parent: true }
+  });
+  if (!cat) return false;
+  if (isElectricToolCategorySlug(cat.slug)) return true;
+  if (cat.parent && isElectricToolCategorySlug(cat.parent.slug)) return true;
+  if (isElectricToolCategoryName(cat.name)) return true;
+  return cat.parent ? isElectricToolCategoryName(cat.parent.name) : false;
+}
+
+export function normalizeToolKitFields(
+  isElectric: boolean,
+  kitComplete?: boolean,
+  kitMissingNote?: string | null
+): { kitComplete: boolean; kitMissingNote: string | null } | { error: string } {
+  if (!isElectric) {
+    return { kitComplete: true, kitMissingNote: null };
+  }
+  const complete = kitComplete !== false;
+  const note = String(kitMissingNote || "").trim();
+  if (complete) {
+    return { kitComplete: true, kitMissingNote: null };
+  }
+  if (!note) {
+    return { error: "Укажите, чего не хватает в комплекте" };
+  }
+  return { kitComplete: false, kitMissingNote: note };
+}
+
 export function receiptCategoryToToolSection(
   cat: ReceiptItemCategory | null | undefined
 ): ToolCatalogSection | null {

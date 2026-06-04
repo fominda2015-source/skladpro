@@ -18,8 +18,10 @@ import { prisma } from "../lib/prisma.js";
 import { materialQtySchema } from "../lib/quantity.js";
 import {
   ensureDefaultToolCategories,
+  isElectricToolCategoryId,
   isElectricToolCategorySlug,
   isManualToolCategoryName,
+  normalizeToolKitFields,
   MANUAL_TOOL_CATEGORY,
   ELECTRIC_TOOL_CATEGORY,
   TOOL_CATEGORY_SLUGS
@@ -39,7 +41,9 @@ const createToolSchema = z.object({
   note: z.string().optional(),
   brand: z.string().optional(),
   toolType: z.string().optional(),
-  categoryId: z.string().nullable().optional()
+  categoryId: z.string().nullable().optional(),
+  kitComplete: z.boolean().optional(),
+  kitMissingNote: z.string().max(2000).nullable().optional()
 });
 
 const updateToolSchema = z.object({
@@ -53,7 +57,9 @@ const updateToolSchema = z.object({
   brand: z.string().nullable().optional(),
   toolType: z.string().nullable().optional(),
   status: z.nativeEnum(ToolStatus).optional(),
-  categoryId: z.string().nullable().optional()
+  categoryId: z.string().nullable().optional(),
+  kitComplete: z.boolean().optional(),
+  kitMissingNote: z.string().max(2000).nullable().optional()
 });
 
 const toolCategorySchema = z.object({
@@ -383,13 +389,23 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedReques
       assertWarehouseInScope(scope, parsed.data.warehouseId);
     }
     assertProjectInScope(scope, parsed.data.projectId);
+    const isElectric = await isElectricToolCategoryId(parsed.data.categoryId);
+    const kit = normalizeToolKitFields(isElectric, parsed.data.kitComplete, parsed.data.kitMissingNote);
+    if ("error" in kit) {
+      return res.status(400).json({ error: kit.error });
+    }
+    const { kitComplete, kitMissingNote, ...toolBody } = parsed.data;
+    void kitComplete;
+    void kitMissingNote;
     const qrCode = buildQrCode(parsed.data.inventoryNumber);
     const created = await prisma.tool.create({
       data: {
-        ...parsed.data,
+        ...toolBody,
+        kitComplete: kit.kitComplete,
+        kitMissingNote: kit.kitMissingNote,
         qrCode
       },
-      include: { events: true }
+      include: { events: true, category: true }
     });
     await prisma.toolEvent.create({
       data: {
@@ -436,9 +452,30 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
     if (!existing) {
       return res.status(404).json({ error: "Tool not found" });
     }
+    const categoryId =
+      parsed.data.categoryId !== undefined ? parsed.data.categoryId : existing.categoryId;
+    const isElectric = await isElectricToolCategoryId(categoryId);
+    const kitInput =
+      parsed.data.kitComplete !== undefined || parsed.data.kitMissingNote !== undefined
+        ? {
+            kitComplete: parsed.data.kitComplete ?? existing.kitComplete,
+            kitMissingNote: parsed.data.kitMissingNote ?? existing.kitMissingNote
+          }
+        : { kitComplete: existing.kitComplete, kitMissingNote: existing.kitMissingNote };
+    const kit = normalizeToolKitFields(isElectric, kitInput.kitComplete, kitInput.kitMissingNote);
+    if ("error" in kit) {
+      return res.status(400).json({ error: kit.error });
+    }
+    const { kitComplete, kitMissingNote, ...patchBody } = parsed.data;
+    void kitComplete;
+    void kitMissingNote;
     const updated = await prisma.tool.update({
       where: { id: String(req.params.id) },
-      data: parsed.data,
+      data: {
+        ...patchBody,
+        kitComplete: kit.kitComplete,
+        kitMissingNote: kit.kitMissingNote
+      },
       include: { warehouse: true, project: true, category: true }
     });
     await recordAudit({

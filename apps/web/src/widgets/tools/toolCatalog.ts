@@ -76,7 +76,7 @@ export const ELECTRIC_SUB_HUB_CARDS: HubCardDef[] = [
 export function toolsNavTitle(path: ToolsNavId[]): string {
   const last = path[path.length - 1] ?? "hub";
   const all = [...TOOLS_HUB_CARDS, ...TOOL_SUB_HUB_CARDS, ...ELECTRIC_SUB_HUB_CARDS];
-  return all.find((c) => c.id === last)?.label ?? "Инструменты";
+  return all.find((c) => c.id === last)?.label ?? "Инструменты/СИЗ";
 }
 
 export function navToCategorySlug(nav: ToolsNavId): string | null {

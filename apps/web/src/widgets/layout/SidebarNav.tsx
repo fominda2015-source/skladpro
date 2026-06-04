@@ -94,7 +94,7 @@ export function SidebarNav(props: Props) {
       ) : null}
       <SidebarNavItem tab="camp" activeTab={activeTab} icon="▣" label="Городок" onSelect={onSelectTab} />
       {canReadTools ? (
-        <SidebarNavItem tab="tools" activeTab={activeTab} icon="⚒" label="Инструмент" onSelect={onSelectTab} />
+        <SidebarNavItem tab="tools" activeTab={activeTab} icon="⚒" label="Инструменты/СИЗ" onSelect={onSelectTab} />
       ) : null}
       <SidebarNavItem tab="acts" activeTab={activeTab} icon="▣" label="Акты" onSelect={onSelectTab} />
 

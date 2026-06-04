@@ -1422,6 +1422,143 @@ button:hover {
 .toolsCatalogBreadcrumb {
   align-items: center;
 }
+
+.toolsCatalogNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+.toolsCatalogNavBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid #94a3b8;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  width: auto;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+.toolsCatalogNavBack:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.toolsCatalogNavBackIcon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.toolsCatalogNavTrail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.toolsCatalogNavGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.toolsCatalogNavSep {
+  color: #94a3b8;
+  font-weight: 600;
+  user-select: none;
+}
+.toolsCatalogNavSeg {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  width: auto;
+}
+.toolsCatalogNavSeg:hover {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+.toolsCatalogNavSeg--current {
+  background: #4f46e5;
+  border-color: #4338ca;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
+  pointer-events: none;
+  cursor: default;
+}
+
+.toolKitFieldset {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.toolKitFieldset legend {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 0 4px;
+}
+.toolKitOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.toolKitOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.toolKitOption--active {
+  border-color: #4f46e5;
+  background: #eef2ff;
+}
+.toolKitOption input {
+  margin: 0;
+}
+.toolKitMissingLabel {
+  display: block;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.toolKitMissingInput {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid #d8dde7;
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+.toolKitStatusLine--warn {
+  color: #b45309;
+  font-weight: 600;
+}
 @media (max-width: 960px) {
   .toolsWorkspace--drawer {
     grid-template-columns: 1fr;

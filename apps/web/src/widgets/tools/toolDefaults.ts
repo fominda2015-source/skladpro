@@ -1,5 +1,15 @@
+import { isElectricToolCategorySlug } from "./toolCatalog";
+
 export const MANUAL_TOOL_CATEGORY = "Ручной";
 export const ELECTRIC_TOOL_CATEGORY = "Электрический";
+export const ELECTRIC_CORDLESS_CATEGORY = "Аккумуляторный";
+export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
+
+const ELECTRIC_CATEGORY_NAMES = new Set([
+  ELECTRIC_TOOL_CATEGORY.toLowerCase(),
+  ELECTRIC_CORDLESS_CATEGORY.toLowerCase(),
+  ELECTRIC_CORDED_CATEGORY.toLowerCase()
+]);
 
 const STORAGE_KEY = "skladpro:toolCreateDefaults";
 
@@ -34,6 +44,26 @@ export function saveToolCreateDefaults(data: ToolCreateDefaults) {
 
 export function isManualToolCategory(name?: string | null) {
   return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
+}
+
+export function isElectricToolCategory(cat?: { name?: string | null; slug?: string | null } | null) {
+  if (!cat) return false;
+  if (isElectricToolCategorySlug(cat.slug)) return true;
+  return ELECTRIC_CATEGORY_NAMES.has(String(cat.name || "").trim().toLowerCase());
+}
+
+export function isElectricToolCategoryId(
+  categoryId: string,
+  categories: Array<{ id: string; name: string; slug?: string | null }>
+) {
+  const cat = categories.find((c) => c.id === categoryId);
+  return isElectricToolCategory(cat);
+}
+
+export function formatKitCompleteness(tool: { kitComplete?: boolean; kitMissingNote?: string | null }) {
+  if (tool.kitComplete !== false) return "Комплект";
+  const note = String(tool.kitMissingNote || "").trim();
+  return note ? `Некомплект: ${note}` : "Некомплект";
 }
 
 export function pickDefaultCategories<T extends { id: string; name: string }>(categories: T[]) {

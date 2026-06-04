@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ToolsCatalogNav } from "./ToolsCatalogNav";
 import { ToolsHubNav } from "./ToolsHubNav";
 import { ToolCatalogMaterialsTable } from "./ToolCatalogMaterialsTable";
 import {
@@ -125,29 +126,7 @@ export function ToolsCatalogWorkspace({
 
   return (
     <div className="toolsCatalogWorkspace">
-      <nav className="toolsCatalogBreadcrumb toolbar" style={{ flexWrap: "wrap", marginBottom: 12 }}>
-        <button type="button" className="ghostBtn" onClick={() => onNavPathChange(["hub"])}>
-          Инструменты
-        </button>
-        {navPath.slice(1).map((seg, idx) => (
-          <span key={`${seg}-${idx}`} className="muted">
-            {" "}
-            /{" "}
-            <button
-              type="button"
-              className="ghostBtn"
-              onClick={() => onNavPathChange(navPath.slice(0, idx + 2))}
-            >
-              {toolsNavTitle([seg])}
-            </button>
-          </span>
-        ))}
-        {navPath.length > 1 && (
-          <button type="button" className="ghostBtn" style={{ marginLeft: "auto" }} onClick={goBack}>
-            ← Назад
-          </button>
-        )}
-      </nav>
+      <ToolsCatalogNav navPath={navPath} onNavPathChange={onNavPathChange} onBack={goBack} />
 
       {hubCards && (
         <>

@@ -1,6 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
-import { buildToolDisplayName, isManualToolCategory, pickDefaultCategories } from "./toolDefaults";
+import { ToolKitCompletenessFields } from "./ToolKitCompletenessFields";
+import {
+  buildToolDisplayName,
+  formatKitCompleteness,
+  isElectricToolCategory,
+  isElectricToolCategoryId,
+  isManualToolCategory,
+  pickDefaultCategories
+} from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
 export type ToolDrawerRecord = {
@@ -19,9 +27,11 @@ export type ToolDrawerRecord = {
   warehouse?: { name: string } | null;
   responsible?: string | null;
   note?: string | null;
+  kitComplete?: boolean;
+  kitMissingNote?: string | null;
 };
 
-export type ToolCategoryOption = { id: string; name: string; icon?: string | null };
+export type ToolCategoryOption = { id: string; name: string; icon?: string | null; slug?: string | null };
 export type ToolWarehouseOption = { id: string; name: string };
 
 export type ToolEditPatch = {
@@ -34,6 +44,8 @@ export type ToolEditPatch = {
   section: "SS" | "EOM";
   responsible: string;
   note: string;
+  kitComplete: boolean;
+  kitMissingNote: string;
 };
 
 export type ToolEventRow = {
@@ -78,7 +90,9 @@ function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
     warehouseId: tool.warehouseId || "",
     section: tool.section === "EOM" ? "EOM" : "SS",
     responsible: tool.responsible || "",
-    note: tool.note || ""
+    note: tool.note || "",
+    kitComplete: tool.kitComplete !== false,
+    kitMissingNote: tool.kitMissingNote || ""
   };
 }
 
@@ -122,8 +136,12 @@ export function ToolDetailDrawer({
   if (!tool && !loading) return null;
 
   const categoryOptions = pickDefaultCategories(categories);
+  const draftElectric = draft ? isElectricToolCategoryId(draft.categoryId, categories) : false;
+  const kitValid = !draftElectric || draft?.kitComplete !== false || Boolean(draft?.kitMissingNote.trim());
   const canSave =
-    Boolean(draft?.categoryId && draft.name.trim() && draft.brand.trim() && draft.toolType.trim()) && !saving;
+    Boolean(draft?.categoryId && draft.name.trim() && draft.brand.trim() && draft.toolType.trim()) &&
+    kitValid &&
+    !saving;
 
   return (
     <aside className="detailDrawer detailDrawerTool detailDrawerSticky">
@@ -245,6 +263,27 @@ export function ToolDetailDrawer({
                 onChange={(e) => setDraft((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
               />
             </label>
+            {draftElectric ? (
+              <ToolKitCompletenessFields
+                kitComplete={draft.kitComplete}
+                kitMissingNote={draft.kitMissingNote}
+                onKitCompleteChange={(kitComplete) =>
+                  setDraft((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          kitComplete,
+                          kitMissingNote: kitComplete ? "" : prev.kitMissingNote
+                        }
+                      : prev
+                  )
+                }
+                onKitMissingNoteChange={(kitMissingNote) =>
+                  setDraft((prev) => (prev ? { ...prev, kitMissingNote } : prev))
+                }
+                disabled={saving}
+              />
+            ) : null}
           </div>
           <div className="erpCellActions" style={{ marginTop: 10 }}>
             <button
@@ -296,6 +335,14 @@ export function ToolDetailDrawer({
           {tool.note ? (
             <p className="muted" style={{ fontSize: 13 }}>
               Примечание: {tool.note}
+            </p>
+          ) : null}
+          {isElectricToolCategory(tool.category) ? (
+            <p
+              className={`toolKitStatusLine${tool.kitComplete === false ? " toolKitStatusLine--warn" : ""}`}
+              style={{ fontSize: 13 }}
+            >
+              {formatKitCompleteness(tool)}
             </p>
           ) : null}
           <div className="erpCellActions" style={{ marginTop: 10 }}>
