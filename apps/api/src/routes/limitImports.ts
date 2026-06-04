@@ -16,6 +16,7 @@ import {
   lookupIssuedQtyToPreserve,
   pathKeyFromFlatImport
 } from "../lib/limitImportDiff.js";
+import { rebindLinkedReceiptRequestsToTemplate } from "../lib/limitTemplateRebind.js";
 import { findLimitMaterialNodesInSection } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -410,13 +411,24 @@ limitImportsRouter.post(
         parentByLevel.set(n.level, row.id);
       }
 
+      const nextNodes = await tx.objectLimitNode.findMany({ where: { templateId: tpl.id } });
       const diff =
         previousTpl && previousTpl.nodes.length
-          ? computeLimitImportDiff(previousTpl.nodes, await tx.objectLimitNode.findMany({ where: { templateId: tpl.id } }))
+          ? computeLimitImportDiff(previousTpl.nodes, nextNodes)
           : null;
       if (diff) diff.preservedIssuedLines = preservedIssuedLines;
 
-      return { tpl, diff };
+      const rebind =
+        previousTpl && previousTpl.nodes.length
+          ? await rebindLinkedReceiptRequestsToTemplate(tx, {
+              warehouseId: parsed.data.warehouseId,
+              section: parsed.data.section,
+              newTemplateId: tpl.id,
+              nextNodes
+            })
+          : { requests: 0, itemsRemapped: 0 };
+
+      return { tpl, diff, rebind };
     });
     return res.status(201).json({
       id: created.tpl.id,
@@ -428,7 +440,8 @@ limitImportsRouter.post(
             qtyChanged: created.diff.qtyChanged,
             preservedIssuedLines: created.diff.preservedIssuedLines
           }
-        : null
+        : null,
+      rebind: created.rebind
     });
   }
 );

@@ -2867,14 +2867,23 @@ function App() {
         qtyChanged: number;
         preservedIssuedLines: number;
       } | null;
+      rebind?: { requests: number; itemsRemapped: number };
     };
     if (body.diff) {
       const d = body.diff;
+      const rb = body.rebind;
+      const rebindNote =
+        rb && rb.requests > 0
+          ? ` Перепривязано приходных заявок к новому лимиту: ${rb.requests}${rb.itemsRemapped > 0 ? ` (позиций: ${rb.itemsRemapped})` : ""}.`
+          : "";
       setLimitsMessage(
-        `Лимиты загружены. Новых позиций: ${d.added}, удалено: ${d.removed}, изменено кол-во: ${d.qtyChanged}, сохранено выдач по заполнению: ${d.preservedIssuedLines}.`
+        `Лимиты загружены. Новых позиций: ${d.added}, удалено: ${d.removed}, изменено кол-во: ${d.qtyChanged}, сохранено выдач по заполнению: ${d.preservedIssuedLines}.${rebindNote}`
       );
     } else {
       setLimitsMessage("Лимиты загружены из Excel (первый импорт для раздела)");
+    }
+    if (body.rebind?.requests) {
+      await loadReceiptRequests().catch(() => undefined);
     }
     setLimitImportFile(null);
     setExpandedLimitNodes({});
@@ -3100,7 +3109,6 @@ function App() {
     setReceiptRequestFile(null);
     setLimitPromptTemplateId("");
     setLimitPromptRequest(created);
-    setExpandedReceiptIds((prev) => ({ ...prev, [created.id]: true }));
     await loadReceiptRequests();
   }
 
@@ -5207,6 +5215,7 @@ function App() {
 
   useEffect(() => {
     if (token && activeTab === "approvals") {
+      setExpandedReceiptIds({});
       void loadApprovalQueue();
       void loadReceiptRequests();
     }
@@ -8944,6 +8953,11 @@ function App() {
           />
           <ApprovalsReceiptRequestsTable
             rows={receiptRequests}
+            expandedIds={expandedReceiptIds}
+            onToggleExpand={(id) =>
+              setExpandedReceiptIds((prev) => ({ ...prev, [id]: !prev[id] }))
+            }
+            safeName={safeName}
             canWrite={canWriteOperations}
             onOpenTable={(row) => {
               const full = receiptRequests.find((r) => r.id === row.id);
