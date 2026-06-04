@@ -4,6 +4,16 @@ export const MANUAL_TOOL_CATEGORY = "Ручной";
 export const ELECTRIC_TOOL_CATEGORY = "Электрический";
 export const ELECTRIC_CORDLESS_CATEGORY = "Аккумуляторный";
 export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
+export const OTHER_TOOL_CATEGORY = "Прочее";
+
+export type ToolCategoryLike = {
+  id: string;
+  name: string;
+  icon?: string | null;
+  slug?: string | null;
+  order?: number;
+  parentId?: string | null;
+};
 
 const ELECTRIC_CATEGORY_NAMES = new Set([
   ELECTRIC_TOOL_CATEGORY.toLowerCase(),
@@ -71,4 +81,47 @@ export function pickDefaultCategories<T extends { id: string; name: string }>(ca
   return categories
     .filter((c) => order.some((n) => n.toLowerCase() === c.name.trim().toLowerCase()))
     .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+}
+
+/** Все категории для редактирования карточки (дерево: родитель → дети). */
+export function formatEditableToolCategoryOptions(
+  categories: ToolCategoryLike[],
+  currentCategoryId?: string | null
+): Array<{ id: string; label: string }> {
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const sorted = [...categories].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, "ru")
+  );
+  const childrenByParent = new Map<string | null, ToolCategoryLike[]>();
+  for (const c of sorted) {
+    const pid = c.parentId ?? null;
+    const list = childrenByParent.get(pid) || [];
+    list.push(c);
+    childrenByParent.set(pid, list);
+  }
+  const out: Array<{ id: string; label: string }> = [];
+  const walk = (parentId: string | null, depth: number) => {
+    for (const c of childrenByParent.get(parentId) || []) {
+      const indent = depth > 0 ? `${"  ".repeat(depth)}` : "";
+      out.push({
+        id: c.id,
+        label: `${indent}${c.icon ? `${c.icon} ` : ""}${c.name}`
+      });
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  for (const c of sorted) {
+    if (out.some((o) => o.id === c.id)) continue;
+    if (c.parentId && byId.has(c.parentId)) continue;
+    out.push({ id: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.name}` });
+  }
+  if (currentCategoryId && !out.some((o) => o.id === currentCategoryId)) {
+    const cur = byId.get(currentCategoryId);
+    out.unshift({
+      id: currentCategoryId,
+      label: cur ? `${cur.icon ? `${cur.icon} ` : ""}${cur.name}` : currentCategoryId
+    });
+  }
+  return out;
 }

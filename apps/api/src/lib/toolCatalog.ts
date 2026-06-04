@@ -5,13 +5,15 @@ export const TOOL_CATEGORY_SLUGS = {
   MANUAL: "tool-manual",
   ELECTRIC: "tool-electric",
   ELECTRIC_CORDLESS: "tool-electric-cordless",
-  ELECTRIC_CORDED: "tool-electric-corded"
+  ELECTRIC_CORDED: "tool-electric-corded",
+  OTHER: "tool-other"
 } as const;
 
 export const MANUAL_TOOL_CATEGORY = "Ручной";
 export const ELECTRIC_TOOL_CATEGORY = "Электрический";
 export const ELECTRIC_CORDLESS_CATEGORY = "Аккумуляторный";
 export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
+export const OTHER_TOOL_CATEGORY = "Прочее";
 
 export function isManualToolCategoryName(name: string | null | undefined) {
   return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
@@ -120,7 +122,8 @@ export async function ensureDefaultToolCategories() {
       icon: "🔌",
       order: 4,
       parentSlug: TOOL_CATEGORY_SLUGS.ELECTRIC
-    }
+    },
+    { name: OTHER_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.OTHER, icon: "📁", order: 5 }
   ];
   const idBySlug = new Map<string, string>();
   for (const row of rows.filter((r) => !r.parentSlug)) {

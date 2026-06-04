@@ -58,6 +58,7 @@ import {
   buildToolDisplayName,
   isElectricToolCategoryId,
   loadToolCreateDefaults,
+  formatEditableToolCategoryOptions,
   pickDefaultCategories,
   saveToolCreateDefaults
 } from "./widgets/tools/toolDefaults";
@@ -1074,7 +1075,14 @@ function App() {
   const [toolReceiptNote, setToolReceiptNote] = useState("");
   const [toolSearch, setToolSearch] = useState("");
   const [toolStatusFilter, setToolStatusFilter] = useState<"" | ToolStatus>("");
-  type ToolCategoryRow = { id: string; name: string; icon?: string | null; slug?: string | null; order: number };
+  type ToolCategoryRow = {
+    id: string;
+    name: string;
+    icon?: string | null;
+    slug?: string | null;
+    order: number;
+    parentId?: string | null;
+  };
   const [toolCategories, setToolCategories] = useState<ToolCategoryRow[]>([]);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [toolQrPreview, setToolQrPreview] = useState<{ toolId: string; dataUrl: string; qrCode: string } | null>(null);
@@ -4587,10 +4595,9 @@ function App() {
                 aria-label="Категория"
               >
                 <option value="">Все категории</option>
-                {pickDefaultCategories(toolCategories).map((c) => (
+                {formatEditableToolCategoryOptions(toolCategories).map((c) => (
                   <option key={`tcf-${c.id}`} value={c.id}>
-                    {c.icon ? `${c.icon} ` : ""}
-                    {c.name}
+                    {c.label}
                   </option>
                 ))}
               </select>
@@ -10269,9 +10276,9 @@ function App() {
                         }
                       }}
                     >
-                      {pickDefaultCategories(toolCategories).map((c) => (
+                      {formatEditableToolCategoryOptions(toolCategories, toolCategoryDraft).map((c) => (
                         <option key={`tcat-opt-${c.id}`} value={c.id}>
-                          {c.icon ? `${c.icon} ` : ""}{c.name}
+                          {c.label}
                         </option>
                       ))}
                     </select>

@@ -36,7 +36,8 @@ export const TOOL_CATEGORY_SLUGS = {
   MANUAL: "tool-manual",
   ELECTRIC: "tool-electric",
   ELECTRIC_CORDLESS: "tool-electric-cordless",
-  ELECTRIC_CORDED: "tool-electric-corded"
+  ELECTRIC_CORDED: "tool-electric-corded",
+  OTHER: "tool-other"
 } as const;
 
 export function isElectricToolCategorySlug(slug: string | null | undefined) {

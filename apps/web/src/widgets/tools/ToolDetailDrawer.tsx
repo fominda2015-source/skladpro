@@ -7,7 +7,7 @@ import {
   isElectricToolCategory,
   isElectricToolCategoryId,
   isManualToolCategory,
-  pickDefaultCategories
+  formatEditableToolCategoryOptions
 } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
@@ -31,7 +31,14 @@ export type ToolDrawerRecord = {
   kitMissingNote?: string | null;
 };
 
-export type ToolCategoryOption = { id: string; name: string; icon?: string | null; slug?: string | null };
+export type ToolCategoryOption = {
+  id: string;
+  name: string;
+  icon?: string | null;
+  slug?: string | null;
+  order?: number;
+  parentId?: string | null;
+};
 export type ToolWarehouseOption = { id: string; name: string };
 
 export type ToolEditPatch = {
@@ -135,7 +142,7 @@ export function ToolDetailDrawer({
 
   if (!tool && !loading) return null;
 
-  const categoryOptions = pickDefaultCategories(categories);
+  const categoryOptions = formatEditableToolCategoryOptions(categories, draft?.categoryId || tool?.categoryId);
   const draftElectric = draft ? isElectricToolCategoryId(draft.categoryId, categories) : false;
   const kitValid = !draftElectric || draft?.kitComplete !== false || Boolean(draft?.kitMissingNote.trim());
   const canSave =
@@ -163,12 +170,25 @@ export function ToolDetailDrawer({
               Категория
               <select
                 value={draft.categoryId}
-                onChange={(e) => setDraft((prev) => (prev ? { ...prev, categoryId: e.target.value } : prev))}
+                onChange={(e) => {
+                  const categoryId = e.target.value;
+                  const electric = isElectricToolCategoryId(categoryId, categories);
+                  setDraft((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          categoryId,
+                          ...(electric
+                            ? {}
+                            : { kitComplete: true, kitMissingNote: "" })
+                        }
+                      : prev
+                  );
+                }}
               >
                 {categoryOptions.map((c) => (
                   <option key={`ted-${c.id}`} value={c.id}>
-                    {c.icon ? `${c.icon} ` : ""}
-                    {c.name}
+                    {c.label}
                   </option>
                 ))}
               </select>
