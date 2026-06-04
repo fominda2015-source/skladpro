@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { parseMaterialQty, sanitizeMaterialQtyInput } from "../../shared/quantity";
 import { WhFloatingMenu, WhMenuAction } from "./WhFloatingMenu";
 
 export type WarehouseStockRow = {
@@ -79,6 +80,8 @@ export type WarehouseStockViewProps = {
   updFactsByMaterialId: Map<string, Map<string, UpdFactEntry>>;
   movementsLoading?: boolean;
   movementsError?: string;
+  canAdjustStockQuantity?: boolean;
+  onAdjustStockQuantity?: (row: WarehouseStockRow, quantity: number) => Promise<boolean>;
 };
 
 function fmtQty(n: number, maxFrac = 0): string {
@@ -143,10 +146,14 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     movementsByKey,
     updFactsByMaterialId,
     movementsLoading,
-    movementsError
+    movementsError,
+    canAdjustStockQuantity = false,
+    onAdjustStockQuantity
   } = props;
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [qtyEditByRowId, setQtyEditByRowId] = useState<Record<string, string>>({});
+  const [qtySavingRowId, setQtySavingRowId] = useState("");
   const [headerMenuRect, setHeaderMenuRect] = useState<DOMRect | null>(null);
   const [rowMenu, setRowMenu] = useState<{ rowId: string; rect: DOMRect } | null>(null);
 
@@ -347,6 +354,11 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                 const updFactsCount = updFactsByMaterialId.get(row.materialId)?.size || 0;
                 const movements = movementsByKey.get(`${row.warehouseId}::${row.materialId}`) || [];
                 const colSpan = 6 + (showReserve ? 1 : 0);
+                const qtyEditValue =
+                  qtyEditByRowId[row.id] ?? String(parseMaterialQty(row.quantity));
+                const qtySaving = qtySavingRowId === row.id;
+                const qtyEditDirty =
+                  parseMaterialQty(qtyEditValue) !== parseMaterialQty(row.quantity);
 
                 return (
                   <Fragment key={row.id}>
@@ -413,8 +425,62 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                           {fmtQty(Number(row.available))} {row.materialUnit}
                         </span>
                       </td>
-                      <td className="whColNum whHideSm muted">
-                        {fmtQty(Number(row.quantity))}
+                      <td className="whColNum whHideSm muted" onClick={(e) => e.stopPropagation()}>
+                        {canAdjustStockQuantity && onAdjustStockQuantity ? (
+                          <input
+                            className="whQtyInline"
+                            type="text"
+                            inputMode="numeric"
+                            title="Остаток на складе — Enter для сохранения"
+                            value={qtyEditValue}
+                            disabled={qtySaving}
+                            onChange={(e) =>
+                              setQtyEditByRowId((prev) => ({
+                                ...prev,
+                                [row.id]: sanitizeMaterialQtyInput(e.target.value)
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter") return;
+                              e.preventDefault();
+                              void (async () => {
+                                const next = parseMaterialQty(qtyEditValue);
+                                if (!qtyEditDirty) return;
+                                setQtySavingRowId(row.id);
+                                const ok = await onAdjustStockQuantity(row, next);
+                                setQtySavingRowId("");
+                                if (ok) {
+                                  setQtyEditByRowId((prev) => {
+                                    const nextMap = { ...prev };
+                                    delete nextMap[row.id];
+                                    return nextMap;
+                                  });
+                                }
+                              })();
+                            }}
+                            onBlur={() => {
+                              if (!qtyEditDirty || qtySaving) return;
+                              void (async () => {
+                                setQtySavingRowId(row.id);
+                                const ok = await onAdjustStockQuantity(
+                                  row,
+                                  parseMaterialQty(qtyEditValue)
+                                );
+                                setQtySavingRowId("");
+                                if (ok) {
+                                  setQtyEditByRowId((prev) => {
+                                    const nextMap = { ...prev };
+                                    delete nextMap[row.id];
+                                    return nextMap;
+                                  });
+                                }
+                              })();
+                            }}
+                          />
+                        ) : (
+                          fmtQty(Number(row.quantity))
+                        )}{" "}
+                        {row.materialUnit}
                       </td>
                       {showReserve ? (
                         <td className="whColNum whHideSm muted">
@@ -490,6 +556,19 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                     }}
                                   />
                                 ) : null}
+                                {canAdjustStockQuantity && onAdjustStockQuantity ? (
+                                  <WhMenuAction
+                                    label="Изменить остаток"
+                                    onActivate={() => {
+                                      setRowMenu(null);
+                                      onToggleExpand(row.id);
+                                      setQtyEditByRowId((prev) => ({
+                                        ...prev,
+                                        [row.id]: String(parseMaterialQty(row.quantity))
+                                      }));
+                                    }}
+                                  />
+                                ) : null}
                                 {isAdmin ? (
                                   <WhMenuAction
                                     label="Удалить из каталога"
@@ -536,6 +615,55 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                 Свернуть
                               </button>
                             </div>
+                            {canAdjustStockQuantity && onAdjustStockQuantity ? (
+                              <div className="whQtyAdjust">
+                                <label>
+                                  Остаток на складе ({row.materialUnit})
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={qtyEditValue}
+                                    disabled={qtySaving}
+                                    onChange={(e) =>
+                                      setQtyEditByRowId((prev) => ({
+                                        ...prev,
+                                        [row.id]: sanitizeMaterialQtyInput(e.target.value)
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="secondaryBtn"
+                                  disabled={qtySaving || !qtyEditDirty}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void (async () => {
+                                      setQtySavingRowId(row.id);
+                                      const ok = await onAdjustStockQuantity(
+                                        row,
+                                        parseMaterialQty(qtyEditValue)
+                                      );
+                                      setQtySavingRowId("");
+                                      if (ok) {
+                                        setQtyEditByRowId((prev) => {
+                                          const nextMap = { ...prev };
+                                          delete nextMap[row.id];
+                                          return nextMap;
+                                        });
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  {qtySaving ? "Сохранение…" : "Сохранить остаток"}
+                                </button>
+                                {Number(row.reserved) > 0 ? (
+                                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                                    Резерв: {fmtQty(Number(row.reserved))} — остаток не может быть меньше.
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
                             <div className="whDetailMetaGrid">
                               <span>
                                 <strong>Доступно:</strong> {fmtQty(Number(row.available))} {row.materialUnit}

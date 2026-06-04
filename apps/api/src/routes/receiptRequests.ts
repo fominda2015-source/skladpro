@@ -104,9 +104,7 @@ const acceptSchema = z.object({
   /** Разрешить принять больше, чем осталось по заявке (критическое уведомление + лимиты). */
   allowOverage: z.boolean().optional(),
   /** Превышение плана лимита в подразделе позиции (перерасход или «размазать»). */
-  allowLimitOverage: z.boolean().optional(),
-  /** Только учёт по заявке — без операции прихода и остатков на складе (только ADMIN). */
-  skipWarehouseStock: z.boolean().optional()
+  allowLimitOverage: z.boolean().optional()
 });
 
 const limitLinkSchema = z.object({
@@ -935,10 +933,6 @@ receiptRequestsRouter.post(
     if (row.status === "RECEIVED" || row.status === "CANCELLED") {
       return res.status(400).json({ error: "Заявка уже завершена" });
     }
-    if (parsed.data.skipWarehouseStock && req.user?.role !== "ADMIN") {
-      return res.status(403).json({ error: "Принять без склада может только администратор" });
-    }
-
     // Валидация позиций
     const itemsById = new Map(row.items.map((it) => [it.id, it]));
     for (const m of parsed.data.itemMappings) {
@@ -1119,9 +1113,7 @@ receiptRequestsRouter.post(
         throw new Error("Нет позиций для приёмки — возможно, выбранные строки уже приняты полностью");
       }
 
-      const stockResolved = parsed.data.skipWarehouseStock
-        ? []
-        : resolved.filter((r) => !r.campCategory && r.materialId);
+      const stockResolved = resolved.filter((r) => !r.campCategory && r.materialId);
       const operation =
         stockResolved.length > 0
           ? await tx.operation.create({
@@ -1229,7 +1221,7 @@ receiptRequestsRouter.post(
             data: { toolCatalogSection: toolSection }
           });
         }
-        if (!operation || parsed.data.skipWarehouseStock) continue;
+        if (!operation) continue;
         await tx.stock.upsert({
           where: {
             warehouseId_materialId_section_condition: {

@@ -267,3 +267,91 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
 
   return res.json(onlyLow ? mapped.filter((x) => x.isLow) : mapped);
 });
+
+const adjustStockQuantitySchema = z.object({
+  quantity: materialQtyCoerceSchema,
+  note: z.string().trim().max(500).optional()
+});
+
+stocksRouter.patch("/:id/quantity", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
+  const parsed = adjustStockQuantitySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+
+  const id = String(req.params.id);
+  const row = await prisma.stock.findUnique({
+    where: { id },
+    include: { material: { select: { name: true, unit: true } }, warehouse: { select: { name: true } } }
+  });
+  if (!row) return res.status(404).json({ error: "Stock line not found" });
+
+  try {
+    const scope = await getRequestDataScope(req);
+    assertObjectSectionInScope(scope, row.warehouseId, row.section);
+
+    const prevQty = qtyFromDb(row.quantity);
+    const reserved = qtyFromDb(row.reserved);
+    const nextQty = parsed.data.quantity;
+    if (nextQty < reserved) {
+      return res.status(400).json({
+        error: `Остаток не может быть меньше резерва (${reserved})`
+      });
+    }
+    const delta = nextQty - prevQty;
+    if (Math.abs(delta) < 1e-9) {
+      return res.json({
+        ok: true,
+        id: row.id,
+        quantity: nextQty,
+        reserved,
+        available: nextQty - reserved
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.stock.update({
+        where: { id: row.id },
+        data: { quantity: nextQty }
+      });
+      await tx.stockMovement.create({
+        data: {
+          warehouseId: row.warehouseId,
+          materialId: row.materialId,
+          quantity: Math.abs(delta),
+          direction: delta > 0 ? StockMovementDirection.IN : StockMovementDirection.OUT,
+          sourceDocumentType: "STOCK_ADJUSTMENT",
+          sourceDocumentId: row.id,
+          note:
+            parsed.data.note?.trim() ||
+            `Корректировка остатка: ${prevQty} → ${nextQty} ${row.material.unit}`,
+          createdById: req.user!.userId
+        }
+      });
+    });
+
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "STOCK_QUANTITY_ADJUST",
+      entityType: "Stock",
+      entityId: row.id,
+      summary: `Остаток: ${row.material.name} (${row.warehouse.name}), ${prevQty} → ${nextQty} ${row.material.unit}`,
+      before: { quantity: prevQty, reserved },
+      after: { quantity: nextQty, reserved, note: parsed.data.note ?? null }
+    });
+
+    return res.json({
+      ok: true,
+      id: row.id,
+      quantity: nextQty,
+      reserved,
+      available: nextQty - reserved
+    });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    return res.status(500).json({ error: "Failed to adjust stock quantity" });
+  }
+});
