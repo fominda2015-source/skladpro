@@ -641,7 +641,12 @@ function mergeReceiptItemAccepted(
   const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
   const nextAcc = parseMaterialQty(next.acceptedQty);
   const deltaAcc = delta?.acceptedQty ?? 0;
-  const acc = Math.max(nextAcc, deltaAcc > 0 ? prevAcc + deltaAcc : prevAcc);
+  const batchIfDelta = deltaAcc > 0 ? prevAcc + deltaAcc : prevAcc;
+  // Ответ accept уже содержит накопительный acceptedQty — не дублируем дельту этой приёмки.
+  const acc =
+    deltaAcc > 0 && nextAcc >= batchIfDelta
+      ? Math.max(prevAcc, nextAcc)
+      : Math.max(prevAcc, nextAcc, batchIfDelta);
   if (acc <= 0) return next;
   return { ...next, acceptedQty: acc };
 }
@@ -664,13 +669,16 @@ function mergeReceiptRequestRow(
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
-  if (row.status === "CANCELLED" || row.status === "RECEIVED") {
+  if (row.status === "CANCELLED") {
     return row;
   }
   const hasOpenItems = row.items.some(isReceiptItemOpen);
   const anyAccepted = row.items.some((it) => parseMaterialQty(it.acceptedQty) > 0);
   if (!hasOpenItems) {
     return { ...row, status: "RECEIVED" };
+  }
+  if (row.status === "RECEIVED") {
+    return { ...row, status: anyAccepted ? "IN_PROGRESS" : "NEW" };
   }
   if (anyAccepted && row.status === "NEW") {
     return { ...row, status: "IN_PROGRESS" };
@@ -679,8 +687,24 @@ function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
 }
 
 function isOpenReceiptRequest(row: ReceiptRequestRow): boolean {
-  if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
-  return row.items.some(isReceiptItemOpen);
+  if (row.status === "CANCELLED") return false;
+  if (row.items.some(isReceiptItemOpen)) return true;
+  return row.status !== "RECEIVED";
+}
+
+type ReceiptLimitSourceFilter = "" | "from_limit" | "not_from_limit";
+
+function isReceiptRequestFromLimit(row: ReceiptRequestRow): boolean {
+  return Boolean(row.fromLimit || row.objectLimitTemplateId);
+}
+
+function filterReceiptRequestsByLimitSource(
+  rows: ReceiptRequestRow[],
+  filter: ReceiptLimitSourceFilter
+): ReceiptRequestRow[] {
+  if (!filter) return rows;
+  if (filter === "from_limit") return rows.filter(isReceiptRequestFromLimit);
+  return rows.filter((r) => !isReceiptRequestFromLimit(r));
 }
 
 function App() {
@@ -886,18 +910,36 @@ function App() {
     null
   );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  const [receiptLimitSourceFilter, setReceiptLimitSourceFilter] = useState<ReceiptLimitSourceFilter>("");
   const receiptRequestsLoadSeq = useRef(0);
+  const filteredReceiptRequests = useMemo(
+    () => filterReceiptRequestsByLimitSource(receiptRequests, receiptLimitSourceFilter),
+    [receiptRequests, receiptLimitSourceFilter]
+  );
   const openReceiptRequests = useMemo(
-    () => receiptRequests.filter(isOpenReceiptRequest),
-    [receiptRequests]
+    () => filteredReceiptRequests.filter(isOpenReceiptRequest),
+    [filteredReceiptRequests]
   );
 
   const limitReceiptMetricsByNodeId = useMemo(() => {
     if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
       return { arrivedByLimitNodeId: {} as Record<string, number>, onOrderByLimitNodeId: {} as Record<string, number> };
     }
-    return buildLimitReceiptMetricsFromReceipts(receiptRequests, activeObjectId, objectSectionFilter);
-  }, [receiptRequests, activeObjectId, objectSectionFilter]);
+    const limitMaterialNodes = limitTemplates.flatMap((tpl) =>
+      tpl.warehouseId === activeObjectId && tpl.section === objectSectionFilter
+        ? tpl.nodes
+            .filter((n) => n.nodeType === "MATERIAL")
+            .map((n) => ({ id: n.id, materialId: n.materialId ?? null }))
+        : []
+    );
+    return buildLimitReceiptMetricsFromReceipts(
+      receiptRequests,
+      stocks,
+      limitMaterialNodes,
+      activeObjectId,
+      objectSectionFilter
+    );
+  }, [receiptRequests, stocks, limitTemplates, activeObjectId, objectSectionFilter]);
   // Модалка «Заявка из лимита?» после загрузки Excel.
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
@@ -3325,9 +3367,33 @@ function App() {
         itemId: m.itemId,
         acceptedQty: m.acceptedQty
       }));
-      const normalized = applyReceiptRequestUpdate(acceptBody.receiptRequest ?? row, {
-        acceptanceDelta
-      });
+      const serverRow = acceptBody.receiptRequest ?? null;
+      let normalized: ReceiptRequestRow;
+      if (serverRow) {
+        normalized = applyReceiptRequestUpdate(serverRow);
+      } else {
+        normalized = applyReceiptRequestUpdate(row, { acceptanceDelta });
+        try {
+          const params = new URLSearchParams({
+            warehouseId: row.warehouseId,
+            section: row.section,
+            _: String(Date.now())
+          });
+          const refreshRes = await fetchWithSession(
+            `${API_URL}/api/receipt-requests?${params.toString()}`,
+            { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
+          );
+          if (refreshRes.ok) {
+            const rows = (await refreshRes.json()) as ReceiptRequestRow[];
+            const refreshed = rows.find((x) => x.id === row.id);
+            if (refreshed) {
+              normalized = applyReceiptRequestUpdate(refreshed);
+            }
+          }
+        } catch {
+          // оставляем результат merge по дельте
+        }
+      }
       const openLeft = normalized.items.filter(isReceiptItemOpen).length;
       if (openLeft > 0) {
         setOpsMessage(
@@ -3373,7 +3439,6 @@ function App() {
       await loadOperations();
       if (row.objectLimitTemplateId || row.fromLimit) {
         await loadLimitTemplates().catch(() => undefined);
-        await loadReceiptRequests().catch(() => undefined);
       }
       await loadNotifications();
       if (canReadTools) {
@@ -6426,11 +6491,15 @@ function App() {
                   {
                     label: "Активных заявок",
                     value: openReceiptRequests.length,
-                    tone: receiptRequests.some((r) => r.status === "IN_PROGRESS") ? "warn" : "neutral"
+                    tone: filteredReceiptRequests.some((r) => r.status === "IN_PROGRESS") ? "warn" : "neutral",
+                    title:
+                      receiptLimitSourceFilter && receiptRequests.length !== filteredReceiptRequests.length
+                        ? `Всего на объекте: ${receiptRequests.filter(isOpenReceiptRequest).length}`
+                        : undefined
                   },
                   {
                     label: "Принято полностью",
-                    value: receiptRequests.filter((r) => r.status === "RECEIVED").length,
+                    value: filteredReceiptRequests.filter((r) => r.status === "RECEIVED").length,
                     tone: "ok"
                   }
                 ]}
@@ -6447,6 +6516,23 @@ function App() {
                 }
               />
 
+              <FilterStrip>
+                <label>
+                  Заявки
+                  <select
+                    value={receiptLimitSourceFilter}
+                    onChange={(e) =>
+                      setReceiptLimitSourceFilter((e.target.value || "") as ReceiptLimitSourceFilter)
+                    }
+                    aria-label="Фильтр приходных заявок по лимиту"
+                  >
+                    <option value="">Все</option>
+                    <option value="from_limit">Из лимита</option>
+                    <option value="not_from_limit">Не из лимита</option>
+                  </select>
+                </label>
+              </FilterStrip>
+
               {opsMessage && (
                 <ResultBanner
                   text={opsMessage}
@@ -6456,11 +6542,19 @@ function App() {
 
           {!openReceiptRequests.length && (
             <EmptyState
-              title={receiptRequests.length ? "Все заявки приняты" : "Заявок ещё нет"}
+              title={
+                receiptLimitSourceFilter && filteredReceiptRequests.length === 0
+                  ? "Нет заявок по фильтру"
+                  : receiptRequests.length
+                    ? "Все заявки приняты"
+                    : "Заявок ещё нет"
+              }
               hint={
-                receiptRequests.length
-                  ? "Новые заявки появятся после загрузки Excel во вкладке «Заявки»."
-                  : "Загрузи Excel-заявку во вкладке «Заявки» — позиции появятся здесь для приёма."
+                receiptLimitSourceFilter && filteredReceiptRequests.length === 0
+                  ? "Смените фильтр «Заявки» или загрузите новую заявку во вкладке «Заявки»."
+                  : receiptRequests.length
+                    ? "Новые заявки появятся после загрузки Excel во вкладке «Заявки»."
+                    : "Загрузи Excel-заявку во вкладке «Заявки» — позиции появятся здесь для приёма."
               }
             />
           )}
@@ -8857,7 +8951,11 @@ function App() {
               },
               {
                 label: "Приходные заявки",
-                value: receiptRequests.length
+                value: filteredReceiptRequests.length,
+                title:
+                  receiptLimitSourceFilter && receiptRequests.length !== filteredReceiptRequests.length
+                    ? `Всего на объекте: ${receiptRequests.length}`
+                    : undefined
               }
             ]}
           />
@@ -8962,8 +9060,27 @@ function App() {
             onApprove={(id) => void executeIssueAction(id, "approve", { fromApprovals: true })}
             onReject={(id) => void executeIssueAction(id, "reject", { fromApprovals: true })}
           />
+          <FilterStrip>
+            <label>
+              Заявки
+              <select
+                value={receiptLimitSourceFilter}
+                onChange={(e) => setReceiptLimitSourceFilter((e.target.value || "") as ReceiptLimitSourceFilter)}
+                aria-label="Фильтр приходных заявок по лимиту"
+              >
+                <option value="">Все</option>
+                <option value="from_limit">Из лимита</option>
+                <option value="not_from_limit">Не из лимита</option>
+              </select>
+            </label>
+          </FilterStrip>
           <ApprovalsReceiptRequestsTable
-            rows={receiptRequests}
+            rows={filteredReceiptRequests}
+            emptyHint={
+              receiptLimitSourceFilter
+                ? "Нет приходных заявок по выбранному фильтру."
+                : "Приходных заявок пока нет."
+            }
             expandedIds={expandedReceiptIds}
             onToggleExpand={(id) =>
               setExpandedReceiptIds((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -11729,38 +11846,6 @@ function App() {
         />
       ) : null}
 
-      {receiptOverageModal ? (
-        <ReceiptOverageModal
-          kind={receiptOverageModal.kind}
-          sourceName={receiptOverageModal.sourceName}
-          orderedQty={receiptOverageModal.orderedQty}
-          acceptedQty={receiptOverageModal.acceptedQty}
-          plannedQty={receiptOverageModal.plannedQty}
-          receivedOnNode={receiptOverageModal.receivedOnNode}
-          primaryPath={receiptOverageModal.primaryPath}
-          excessQty={receiptOverageModal.excessQty}
-          suggestions={receiptOverageModal.suggestions}
-          onCancel={() => setReceiptOverageModal(null)}
-          onConfirm={(spreadLimitNodeId, flags) => {
-            const { row, itemId, mappings, extraFiles } = receiptOverageModal;
-            const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
-            const nextMappings = mappings.map((m) =>
-              m.itemId === itemId
-                ? {
-                    ...m,
-                    ...(spreadLimitNodeId ? { spreadLimitNodeId } : {})
-                  }
-                : m
-            );
-            setReceiptOverageModal(null);
-            void postReceiptAcceptance(freshRow, nextMappings, extraFiles, {
-              allowOverage: flags.allowOverage === true,
-              allowLimitOverage: flags.allowLimitOverage === true
-            });
-          }}
-        />
-      ) : null}
-
       {manualStockModalOpen && canWriteOperations && (
         <div
           role="dialog"
@@ -12053,6 +12138,45 @@ function App() {
       ) : null}
 
       <PendingAcceptanceModal />
+
+      {receiptOverageModal ? (
+        <ReceiptOverageModal
+          kind={receiptOverageModal.kind}
+          sourceName={receiptOverageModal.sourceName}
+          orderedQty={receiptOverageModal.orderedQty}
+          acceptedQty={receiptOverageModal.acceptedQty}
+          plannedQty={receiptOverageModal.plannedQty}
+          receivedOnNode={receiptOverageModal.receivedOnNode}
+          primaryPath={receiptOverageModal.primaryPath}
+          excessQty={receiptOverageModal.excessQty}
+          suggestions={receiptOverageModal.suggestions}
+          onCancel={() => setReceiptOverageModal(null)}
+          onConfirm={(spreadLimitNodeId, flags) => {
+            const { row, itemId, mappings, extraFiles } = receiptOverageModal;
+            const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
+            const nextMappings = mappings.map((m) =>
+              m.itemId === itemId
+                ? {
+                    ...m,
+                    ...(spreadLimitNodeId ? { spreadLimitNodeId } : {})
+                  }
+                : m
+            );
+            setReceiptOverageModal(null);
+            void (async () => {
+              const ok = await postReceiptAcceptance(freshRow, nextMappings, extraFiles, {
+                allowOverage: flags.allowOverage === true,
+                allowLimitOverage: flags.allowLimitOverage === true
+              });
+              if (ok) {
+                setPendingAcceptanceRequestId(null);
+                setPendingAcceptanceFiles([]);
+              }
+            })();
+          }}
+        />
+      ) : null}
+
       {isAuthed && me ? (
         <MobileBottomNav
           items={[

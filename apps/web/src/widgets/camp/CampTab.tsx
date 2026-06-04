@@ -574,6 +574,10 @@ export function CampTab({
                   </div>
                   <div className="campCardBody">
                     <div className="campCardTitle">{c.name}</div>
+                    {(() => {
+                      const brief = (c.description || c.location || "").trim();
+                      return brief ? <div className="campCardDesc">{brief}</div> : null;
+                    })()}
                     <div className="muted campCardMeta">
                       {campCategoryLabel(c.category)}
                       {c.inventoryNumber ? ` · ${c.inventoryNumber}` : ""}

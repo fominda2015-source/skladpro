@@ -165,6 +165,7 @@ type ReceiptProps = {
   onOpenReceipt: (id: string) => void;
   onAddInvoice?: (row: ApprovalReceiptRow) => void;
   canWrite?: boolean;
+  emptyHint?: string;
 };
 
 export function ApprovalsReceiptRequestsTable({
@@ -175,7 +176,8 @@ export function ApprovalsReceiptRequestsTable({
   onOpenTable,
   onOpenReceipt,
   onAddInvoice,
-  canWrite = true
+  canWrite = true,
+  emptyHint = "Приходных заявок пока нет."
 }: ReceiptProps) {
   return (
     <section className="homePanel" style={{ marginTop: 12 }}>
@@ -186,7 +188,7 @@ export function ApprovalsReceiptRequestsTable({
         </span>
       </div>
       {rows.length === 0 ? (
-        <p className="muted">Приходных заявок пока нет.</p>
+        <p className="muted">{emptyHint}</p>
       ) : (
         <ResponsiveTableShell>
           <div className="erpTableWrap">

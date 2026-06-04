@@ -52,7 +52,12 @@ export function ReceiptOverageModal({
   const isLimit = kind === "limit_plan";
 
   return (
-    <div className="modalOverlay" role="dialog" aria-modal="true" onClick={onCancel}>
+    <div
+      className="modalOverlay receiptOverageOverlay"
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+    >
       <div className="modalCard" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0, color: "#b91c1c" }}>
           {isLimit ? "Превышение лимита в подразделе" : "Приход больше заявки"}

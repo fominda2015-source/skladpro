@@ -333,7 +333,7 @@ function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
     acceptedQty: receiptAcceptedQty(it.acceptedQty),
     unitPrice: toQtyNumber(it.unitPrice)
   }));
-  if (row.status === "CANCELLED" || row.status === "RECEIVED") {
+  if (row.status === "CANCELLED") {
     return { ...row, status: row.status, items };
   }
   const hasOpenItems = items.some((it) => receiptItemIsOpen(it));
@@ -341,6 +341,8 @@ function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
   let status: ReceiptRequestWithRelations["status"] = row.status;
   if (!hasOpenItems) {
     status = "RECEIVED";
+  } else if (status === "RECEIVED") {
+    status = anyAccepted ? "IN_PROGRESS" : "NEW";
   } else if (status === "NEW" && anyAccepted) {
     status = "IN_PROGRESS";
   }
@@ -384,7 +386,7 @@ async function reconcileReceiptRequestStatus(receiptId: string, tx: ReceiptTx | 
     where: { id: receiptId },
     include: { items: true }
   });
-  if (!row || row.status === "CANCELLED" || row.status === "RECEIVED") return row;
+  if (!row || row.status === "CANCELLED") return row;
   const next = receiptCompletionStatus(row, row.items);
   if (next.status === row.status) return row;
   if (next.status === "RECEIVED") {
