@@ -910,6 +910,7 @@ function App() {
     null
   );
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
+  const [receiptSkipWarehouseStock, setReceiptSkipWarehouseStock] = useState(false);
   const [receiptLimitSourceFilter, setReceiptLimitSourceFilter] = useState<ReceiptLimitSourceFilter>("");
   const receiptRequestsLoadSeq = useRef(0);
   const sectionReloadSeq = useRef(0);
@@ -3373,9 +3374,11 @@ function App() {
     opts?: {
       allowOverage?: boolean;
       allowLimitOverage?: boolean;
+      skipWarehouseStock?: boolean;
     }
   ): Promise<boolean> {
     if (!token) return false;
+    const skipStock = opts?.skipWarehouseStock === true;
     const form = new FormData();
     form.append(
       "payload",
@@ -3383,7 +3386,8 @@ function App() {
         itemMappings: mappings,
         documentNumber: acceptanceDocNumbers[row.id] || undefined,
         allowOverage: opts?.allowOverage === true,
-        allowLimitOverage: opts?.allowLimitOverage === true
+        allowLimitOverage: opts?.allowLimitOverage === true,
+        skipWarehouseStock: skipStock
       })
     );
     const filesToSend: File[] = [];
@@ -3456,7 +3460,7 @@ function App() {
         return false;
       }
       setOpsMessage(
-        `Приёмка по заявке ${row.number} проведена${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
+        `Приёмка по заявке ${row.number} проведена${skipStock ? " (без прихода на склад)" : ""}${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
       let acceptBody: { receiptRequest?: ReceiptRequestRow | null } = {};
       try {
@@ -3551,7 +3555,8 @@ function App() {
 
   async function submitReceiptAcceptance(
     row: ReceiptRequestRow,
-    extraFiles: File[] = []
+    extraFiles: File[] = [],
+    opts?: { skipWarehouseStock?: boolean }
   ): Promise<boolean> {
     const freshRow = receiptRequests.find((r) => r.id === row.id) ?? row;
     const mappings = buildReceiptAcceptanceMappings(freshRow);
@@ -3593,7 +3598,9 @@ function App() {
         }
       }
     }
-    return postReceiptAcceptance(freshRow, mappings, extraFiles);
+    return postReceiptAcceptance(freshRow, mappings, extraFiles, {
+      skipWarehouseStock: opts?.skipWarehouseStock ?? (isAdmin && receiptSkipWarehouseStock)
+    });
   }
 
   async function adjustWarehouseStockQuantity(
@@ -5761,7 +5768,8 @@ function App() {
           <p className="muted">
             Заявка <strong>{row.number}</strong>. Сейчас принимаем {pickedItems.length}{" "}
             {pickedItems.length === 1 ? "позицию" : "позиций"}. По одной заявке может быть несколько приёмок —
-            документы прикрепятся именно к этой заявке (и к создаваемому приходу).
+            документы прикрепятся к этой заявке
+            {isAdmin && receiptSkipWarehouseStock ? "" : " (и к создаваемому приходу на склад)"}.
           </p>
           <ul className="plainList" style={{ maxHeight: 160, overflowY: "auto", marginBottom: 12 }}>
             {pickedItems.map((it) => (
@@ -5773,6 +5781,16 @@ function App() {
               </li>
             ))}
           </ul>
+          {isAdmin ? (
+            <label className="whCheck" style={{ display: "block", marginBottom: 10 }}>
+              <input
+                type="checkbox"
+                checked={receiptSkipWarehouseStock}
+                onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
+              />
+              Без прихода на склад (только учёт по заявке, для исправления статуса)
+            </label>
+          ) : null}
           <label>
             Сканы документов (УПД, ТН, фото, можно несколько)
             <input
@@ -7239,6 +7257,16 @@ function App() {
                           </div>
 
                           <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                            {isAdmin ? (
+                              <label className="whCheck" style={{ marginRight: 8 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={receiptSkipWarehouseStock}
+                                  onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
+                                />
+                                Без прихода на склад
+                              </label>
+                            ) : null}
                             <button
                               type="button"
                               className="ghostBtn"
@@ -12296,7 +12324,8 @@ function App() {
             void (async () => {
               const ok = await postReceiptAcceptance(freshRow, nextMappings, extraFiles, {
                 allowOverage: flags.allowOverage === true,
-                allowLimitOverage: flags.allowLimitOverage === true
+                allowLimitOverage: flags.allowLimitOverage === true,
+                skipWarehouseStock: isAdmin && receiptSkipWarehouseStock
               });
               if (ok) {
                 setPendingAcceptanceRequestId(null);
