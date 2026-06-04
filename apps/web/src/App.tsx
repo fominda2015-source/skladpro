@@ -1888,9 +1888,7 @@ function App() {
         setStocksError(`Не удалось загрузить остатки: ${String(err)}`);
       }
     } finally {
-      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
-        setLoadingStocks(false);
-      }
+      setLoadingStocks(false);
     }
   }
 
@@ -2034,20 +2032,13 @@ function App() {
     await updateAuthContext({ warehouseId, section: objectSectionFilter });
   }
 
-  function clearWorkspaceLists() {
-    setStocks([]);
-    setReceiptRequests([]);
-    setIssues([]);
-    setOperations([]);
-    setApprovalQueue([]);
-    setLimitTemplates([]);
-    setLimitIssuedTotals({});
-    setLimitSupplyByMaterialId({});
-  }
-
-  async function reloadWorkspaceData(section: "SS" | "EOM", tab: typeof activeTab) {
+  async function reloadWorkspaceData(
+    section: "SS" | "EOM",
+    tab: typeof activeTab,
+    reloadSeq?: number
+  ) {
     if (!token || mustPickObject || !activeObjectId) return;
-    const seq = ++sectionReloadSeq.current;
+    const seq = reloadSeq ?? ++sectionReloadSeq.current;
     const tasks: Array<Promise<void>> = [
       loadStocks(q, section, seq),
       loadIssues(section, seq),
@@ -2065,6 +2056,10 @@ function App() {
     }
     if (limitsWarehouseId || activeObjectId !== ALL_OBJECTS_ID) {
       tasks.push(loadLimitTemplates(section, seq));
+    } else {
+      setLimitTemplates([]);
+      setLimitIssuedTotals({});
+      setLimitSupplyByMaterialId({});
     }
     await Promise.all(tasks.map((p) => p.catch(() => undefined)));
     if (seq !== sectionReloadSeq.current) return;
@@ -2079,19 +2074,27 @@ function App() {
     }
   }
 
-  function setSection(next: "SS" | "EOM") {
+  async function applyWorkspaceSection(next: "SS" | "EOM") {
     if (next === objectSectionFilter) return;
-    sectionReloadSeq.current += 1;
+    const reloadSeq = ++sectionReloadSeq.current;
     receiptRequestsLoadSeq.current += 1;
     setObjectSectionFilter(next);
-    clearWorkspaceLists();
     if (!token) return;
-    if (activeObjectId === ALL_OBJECTS_ID) {
-      void clearAuthContextWarehouse(next);
-      return;
+    try {
+      if (activeObjectId === ALL_OBJECTS_ID) {
+        await clearAuthContextWarehouse(next);
+      } else if (activeObjectId) {
+        await updateAuthContext({ warehouseId: activeObjectId, section: next });
+      }
+      if (reloadSeq !== sectionReloadSeq.current) return;
+      await reloadWorkspaceData(next, activeTab, reloadSeq);
+    } catch {
+      // сеть / контекст — не очищаем уже загруженные списки
     }
-    if (!activeObjectId) return;
-    void updateAuthContext({ warehouseId: activeObjectId, section: next });
+  }
+
+  function setSection(next: "SS" | "EOM") {
+    void applyWorkspaceSection(next);
   }
 
   function renderWorkspaceContextPanel() {
@@ -2922,9 +2925,7 @@ function App() {
         setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
       }
     } finally {
-      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
-        setLimitTemplatesLoading(false);
-      }
+      setLimitTemplatesLoading(false);
     }
   }
 
@@ -3679,9 +3680,7 @@ function App() {
         setIssuesError(`Не удалось загрузить заявки: ${String(e)}`);
       }
     } finally {
-      if (!isStaleWorkspaceReload(workspaceReloadSeq)) {
-        setIssuesLoading(false);
-      }
+      setIssuesLoading(false);
     }
   }
 
@@ -4980,11 +4979,11 @@ function App() {
     void loadConversations();
   }, [token]);
 
-  // Перезагрузка данных при смене объекта, раздела СС/ЭОМ или фильтра объекта на вкладке.
+  // Перезагрузка при смене объекта / вкладки / фильтра склада. Раздел СС/ЭОМ — через applyWorkspaceSection.
   useEffect(() => {
     if (!token || mustPickObject || !activeObjectId) return;
     void reloadWorkspaceData(objectSectionFilter, activeTab);
-  }, [token, mustPickObject, activeObjectId, objectSectionFilter, tabWarehouseFilters, activeTab]);
+  }, [token, mustPickObject, activeObjectId, tabWarehouseFilters, activeTab]);
 
   useEffect(() => {
     if (!token || !canDashboard || activeTab !== "stocks") {
@@ -5689,14 +5688,14 @@ function App() {
                 <button
                   type="button"
                   className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                  onClick={() => setObjectSectionFilter("SS")}
+                  onClick={() => setSection("SS")}
                 >
                   СС
                 </button>
                 <button
                   type="button"
                   className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                  onClick={() => setObjectSectionFilter("EOM")}
+                  onClick={() => setSection("EOM")}
                 >
                   ЭОМ
                 </button>
@@ -5977,8 +5976,7 @@ function App() {
             onRefresh={() => void loadHomeOverview()}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {
-              setObjectSectionFilter(section);
-              openHomeObjectTab(id, "limits");
+              void applyWorkspaceSection(section).then(() => openHomeObjectTab(id, "limits"));
             }}
             onOpenTools={(id) => openHomeObjectTab(id, "tools")}
             onOpenWarehouse={(id) => {
