@@ -80,8 +80,18 @@ docker compose logs -f api
 - `http://193.176.78.148/api/health/db`
 - `http://193.176.78.148/` — веб-интерфейс
 
-Если браузер показывает `ERR_CONNECTION_CLOSED` — вы открыли **https://** без сертификата.
-Используйте `http://IP` или настройте HTTPS (см. `deploy/nginx/default-https.conf`).
+Если браузер показывает `ERR_CONNECTION_CLOSED` на **https://sklodpro.ru** при наличии сертификата —
+на сервере всё ещё HTTP-конфиг. Включите HTTPS:
+
+```bash
+cd /opt/skladpro
+git pull
+chmod +x deploy/nginx/enable-https.sh
+./deploy/nginx/enable-https.sh
+ufw allow 443/tcp
+```
+
+Сайт: **https://sklodpro.ru** · по IP до SSL: **http://IP**
 
 ## 7) Что сделано по БД в проекте
 
