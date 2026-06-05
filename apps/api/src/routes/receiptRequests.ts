@@ -35,6 +35,7 @@ import {
   isReceiptFullyAccepted,
   isReceiptItemOpen as receiptItemIsOpen,
   plannedQtyForItemClose,
+  addReceiptAcceptedQty,
   receiptAcceptedQty,
   receiptCompletionStatus,
   receiptItemRemaining,
@@ -1193,11 +1194,12 @@ receiptRequestsRouter.post(
           await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
         }
 
+        const nextAcceptedQty = addReceiptAcceptedQty(r.item.acceptedQty, r.acceptedQty);
         await tx.receiptRequestItem.update({
           where: { id: r.item.id },
           data: {
             mappedMaterialId: campCategory ? null : r.materialId,
-            acceptedQty: { increment: r.acceptedQty },
+            acceptedQty: nextAcceptedQty,
             ...(limitNodeId ? { limitNodeId } : {}),
             ...(factLabel ? { factLabel, factUnit: factUnit || r.sourceUnit } : {}),
             ...(mapping?.category !== undefined ? { category: mapping.category } : {}),

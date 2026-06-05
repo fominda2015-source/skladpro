@@ -10,6 +10,13 @@ export function receiptAcceptedQty(value: unknown): number {
   return qtyFromDb(value);
 }
 
+/** Сумма принятого: increment в Prisma на NULL в PostgreSQL даёт NULL — задаём явно. */
+export function addReceiptAcceptedQty(current: unknown, addQty: number): number {
+  const base = receiptAcceptedQty(current);
+  const add = Number.isFinite(addQty) ? Math.max(0, Math.round(addQty)) : 0;
+  return base + add;
+}
+
 /** Сколько ещё можно принять по позиции. */
 export function receiptItemRemaining(item: { quantity: unknown; acceptedQty?: unknown | null }): number {
   const remaining = receiptPlannedQty(item.quantity) - receiptAcceptedQty(item.acceptedQty);
