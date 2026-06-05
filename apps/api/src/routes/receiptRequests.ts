@@ -25,7 +25,12 @@ import {
   spreadLimitNodePicks
 } from "../lib/receiptOverageLimits.js";
 import { prisma } from "../lib/prisma.js";
-import { materialQtySchema, toQtyNumber } from "../lib/quantity.js";
+import {
+  materialQtyAcceptedCoerceSchema,
+  materialQtyCoerceSchema,
+  materialQtySchema,
+  toQtyNumber
+} from "../lib/quantity.js";
 import {
   isReceiptFullyAccepted,
   isReceiptItemOpen as receiptItemIsOpen,
@@ -94,6 +99,16 @@ const patchReceiptItemSchema = z.object({
   unitPrice: z.number().nonnegative().nullable().optional(),
   storagePlace: z.string().max(200).nullable().optional()
 });
+
+const adminReceiptItemQtySchema = z
+  .object({
+    acceptedQty: materialQtyAcceptedCoerceSchema.optional(),
+    quantity: materialQtyCoerceSchema.optional(),
+    reason: z.string().min(1).max(500)
+  })
+  .refine((d) => d.acceptedQty !== undefined || d.quantity !== undefined, {
+    message: "Укажите принятое или плановое количество"
+  });
 
 const closeReceiptSchema = z.object({ reason: z.string().min(1).max(2000) });
 
@@ -1678,6 +1693,74 @@ receiptRequestsRouter.patch(
       include: { mappedMaterial: { select: { id: true, name: true, unit: true } } }
     });
     return res.json(updated);
+  }
+);
+
+receiptRequestsRouter.patch(
+  "/:id/items/:itemId/admin-qty",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    if (req.user?.role !== "ADMIN") {
+      return res.status(403).json({ error: "ADMIN_ONLY", message: "Только администратор может править принято/план" });
+    }
+    const receiptId = String(req.params.id);
+    const itemId = String(req.params.itemId);
+    const parsed = adminReceiptItemQtySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const row = await prisma.receiptRequest.findUnique({
+      where: { id: receiptId },
+      include: { items: { where: { id: itemId } } }
+    });
+    if (!row || !row.items[0]) {
+      return res.status(404).json({ error: "Receipt item not found" });
+    }
+    if (row.status === "CANCELLED") {
+      return res.status(409).json({ error: "Заявка отменена" });
+    }
+    const scope = await getRequestDataScope(req);
+    try {
+      assertWarehouseInScope(scope, row.warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+    const item = row.items[0];
+    const nextQty =
+      parsed.data.quantity !== undefined ? parsed.data.quantity : receiptPlannedQty(item.quantity);
+    const nextAccepted =
+      parsed.data.acceptedQty !== undefined ? parsed.data.acceptedQty : receiptAcceptedQty(item.acceptedQty);
+    if (nextAccepted > nextQty) {
+      return res.status(400).json({
+        error: "ACCEPTED_EXCEEDS_PLAN",
+        message: `Принято (${nextAccepted}) не может превышать план (${nextQty})`
+      });
+    }
+    const before = {
+      quantity: receiptPlannedQty(item.quantity),
+      acceptedQty: receiptAcceptedQty(item.acceptedQty)
+    };
+    await prisma.receiptRequestItem.update({
+      where: { id: itemId },
+      data: {
+        ...(parsed.data.quantity !== undefined ? { quantity: nextQty } : {}),
+        ...(parsed.data.acceptedQty !== undefined ? { acceptedQty: nextAccepted } : {})
+      }
+    });
+    await reconcileReceiptRequestStatus(receiptId);
+    const receiptRequest = await loadSerializedReceiptRequest(receiptId);
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "RECEIPT_ITEM_QTY_ADMIN_EDIT",
+      entityType: "ReceiptRequestItem",
+      entityId: itemId,
+      summary: `Админ: правка принято/план по «${item.sourceName}» в заявке ${row.number}. ${parsed.data.reason}`,
+      before,
+      after: { quantity: nextQty, acceptedQty: nextAccepted, reason: parsed.data.reason }
+    });
+    return res.json({ ok: true, receiptRequest });
   }
 );
 

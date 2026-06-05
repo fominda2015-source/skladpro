@@ -83,7 +83,6 @@ import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import {
   clearReceiptWorkspaceSession,
-  normalizeReceiptRequestItem,
   normalizeReceiptRequestRow,
   purgeLegacyReceiptAcceptedHints,
   readReceiptAcceptDrafts,
@@ -647,34 +646,6 @@ function splitReceiptItems(items: ReceiptRequestItem[]) {
   };
 }
 
-function mergeReceiptItemAccepted(
-  prev: ReceiptRequestItem | undefined,
-  next: ReceiptRequestItem
-): ReceiptRequestItem {
-  const normalized = normalizeReceiptRequestItem(next);
-  const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
-  const nextAcc = parseMaterialQty(normalized.acceptedQty);
-  // Только max(prev, api): без накопления delta — иначе acceptedQty утраивается при каждой перезагрузке.
-  const acc = Math.max(prevAcc, nextAcc);
-  if (acc <= 0) return normalized;
-  return { ...normalized, acceptedQty: acc };
-}
-
-function mergeReceiptRequestRow(
-  prev: ReceiptRequestRow | undefined,
-  next: ReceiptRequestRow
-): ReceiptRequestRow {
-  const prevById = new Map((prev?.items ?? []).map((it) => [it.id, it]));
-  const mergedItems = normalizeReceiptRequestRow(next).items.map((it) =>
-    mergeReceiptItemAccepted(prevById.get(it.id), it)
-  );
-  const seen = new Set(mergedItems.map((it) => it.id));
-  for (const it of prev?.items ?? []) {
-    if (!seen.has(it.id)) mergedItems.push(it);
-  }
-  return normalizeReceiptRequest({ ...normalizeReceiptRequestRow(next), items: mergedItems });
-}
-
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
   if (row.status === "CANCELLED") {
     return row;
@@ -962,6 +933,10 @@ function App() {
   const [acceptanceDocNumbers, setAcceptanceDocNumbers] = useState<Record<string, string>>({});
   const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
   const [expandedReceiptIds, setExpandedReceiptIds] = useState<Record<string, boolean>>({});
+  const [receiptAdminQtyDrafts, setReceiptAdminQtyDrafts] = useState<
+    Record<string, Record<string, { acceptedQty: string; quantity: string }>>
+  >({});
+  const [receiptQtySaving, setReceiptQtySaving] = useState<Record<string, boolean>>({});
   // Модалка «приложить документы» перед самым приёмом.
   const [pendingAcceptanceRequestId, setPendingAcceptanceRequestId] = useState<string | null>(null);
   const [pendingAcceptanceFiles, setPendingAcceptanceFiles] = useState<File[]>([]);
@@ -3156,21 +3131,16 @@ function App() {
     if (!res.ok) return null;
     if (isStaleWorkspaceReload(workspaceReloadSeq)) return null;
     if (listSeq !== receiptRequestsLoadSeq.current) return null;
-    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) => normalizeReceiptRequestRow(r));
-    let merged!: ReceiptRequestRow[];
-    setReceiptRequests((prev) => {
-      const prevById = new Map(prev.map((r) => [r.id, r]));
-      merged = rows.map((r) => mergeReceiptRequestRow(prevById.get(r.id), r));
-      return merged;
-    });
-    return merged;
+    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) =>
+      normalizeReceiptRequest(normalizeReceiptRequestRow(r))
+    );
+    setReceiptRequests(rows);
+    return rows;
   }
 
   function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
-    let normalized!: ReceiptRequestRow;
+    const normalized = normalizeReceiptRequest(normalizeReceiptRequestRow(updated));
     setReceiptRequests((prev) => {
-      const prevRow = prev.find((r) => r.id === updated.id);
-      normalized = mergeReceiptRequestRow(prevRow, normalizeReceiptRequestRow(updated));
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
       const next = [...prev];
@@ -3178,6 +3148,82 @@ function App() {
       return next;
     });
     return normalized;
+  }
+
+  function getReceiptAdminQtyDraft(receiptId: string, it: ReceiptRequestItem) {
+    const cached = receiptAdminQtyDrafts[receiptId]?.[it.id];
+    if (cached) return cached;
+    return {
+      acceptedQty: String(parseMaterialQty(it.acceptedQty)),
+      quantity: String(parseMaterialQty(it.quantity))
+    };
+  }
+
+  async function saveReceiptAdminItemQty(row: ReceiptRequestRow, itemId: string): Promise<boolean> {
+    if (!token || !isAdmin) return false;
+    const draft = getReceiptAdminQtyDraft(row.id, row.items.find((x) => x.id === itemId)!);
+    const acceptedQty = parseMaterialQty(draft.acceptedQty);
+    const quantity = parseMaterialQty(draft.quantity);
+    if (quantity <= 0) {
+      setOpsMessage("Плановое количество должно быть больше 0");
+      return false;
+    }
+    if (acceptedQty > quantity) {
+      setOpsMessage("Принятое не может превышать план");
+      return false;
+    }
+    const reasonRaw = window.prompt("Причина правки принято/план (обязательно):");
+    if (reasonRaw === null) return false;
+    const reason = reasonRaw.trim();
+    if (!reason) {
+      setOpsMessage("Укажите причину правки");
+      return false;
+    }
+    const saveKey = `${row.id}:${itemId}`;
+    setReceiptQtySaving((prev) => ({ ...prev, [saveKey]: true }));
+    try {
+      const res = await fetchWithSession(
+        `${API_URL}/api/receipt-requests/${encodeURIComponent(row.id)}/items/${encodeURIComponent(itemId)}/admin-qty`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ acceptedQty, quantity, reason })
+        }
+      );
+      if (!res.ok) {
+        let msg = "";
+        try {
+          const body = (await res.json()) as { message?: string; error?: string };
+          msg = body.message || body.error || "";
+        } catch {
+          // ignore
+        }
+        setOpsMessage(msg || "Не удалось сохранить количества");
+        return false;
+      }
+      const body = (await res.json()) as { receiptRequest?: ReceiptRequestRow | null };
+      if (body.receiptRequest) {
+        applyReceiptRequestUpdate(body.receiptRequest);
+      } else {
+        await loadReceiptRequests(row.section, row.warehouseId);
+      }
+      setReceiptAdminQtyDrafts((prev) => {
+        const next = { ...prev };
+        const rowDrafts = { ...(next[row.id] || {}) };
+        delete rowDrafts[itemId];
+        if (Object.keys(rowDrafts).length) next[row.id] = rowDrafts;
+        else delete next[row.id];
+        return next;
+      });
+      setOpsMessage("Количества по позиции обновлены");
+      return true;
+    } finally {
+      setReceiptQtySaving((prev) => {
+        const next = { ...prev };
+        delete next[saveKey];
+        return next;
+      });
+    }
   }
 
   async function uploadReceiptRequest() {
@@ -3480,11 +3526,10 @@ function App() {
       if (serverRow) {
         normalized = applyReceiptRequestUpdate(serverRow);
       } else {
-        normalized = applyReceiptRequestUpdate(row);
+        const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
+        normalized = syncedRows?.find((r) => r.id === row.id) ?? applyReceiptRequestUpdate(row);
       }
-      const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
       clearReceiptWorkspaceSession(row.warehouseId, row.section, row.id);
-      normalized = syncedRows?.find((r) => r.id === row.id) ?? normalized;
       const openLeft = normalized.items.filter(isReceiptItemOpen).length;
       if (openLeft > 0) {
         setOpsMessage(
@@ -6912,6 +6957,79 @@ function App() {
                         });
                       };
 
+                      const renderQtyPlanCell = (it: ReceiptRequestItem) => {
+                        const total = parseMaterialQty(it.quantity);
+                        const accepted = parseMaterialQty(it.acceptedQty);
+                        const unit = it.sourceUnit || "шт";
+                        const saveKey = `${row.id}:${it.id}`;
+                        const saving = Boolean(receiptQtySaving[saveKey]);
+                        if (!isAdmin || finished) {
+                          return (
+                            <>
+                              <strong>
+                                {formatMaterialQty(accepted)} / {formatMaterialQty(total)}
+                              </strong>{" "}
+                              <span className="muted">{unit}</span>
+                            </>
+                          );
+                        }
+                        const draft = getReceiptAdminQtyDraft(row.id, it);
+                        const patchAdminDraft = (patch: Partial<typeof draft>) =>
+                          setReceiptAdminQtyDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: {
+                              ...(prev[row.id] || {}),
+                              [it.id]: {
+                                acceptedQty:
+                                  patch.acceptedQty ??
+                                  prev[row.id]?.[it.id]?.acceptedQty ??
+                                  draft.acceptedQty,
+                                quantity:
+                                  patch.quantity ?? prev[row.id]?.[it.id]?.quantity ?? draft.quantity
+                              }
+                            }
+                          }));
+                        return (
+                          <div
+                            className="receiptQtyAdminEdit"
+                            style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}
+                            title="Только админ: правка принято/план в заявке (склад не меняется)"
+                          >
+                            <input
+                              type="number"
+                              min={0}
+                              step={MATERIAL_QTY_STEP}
+                              style={{ width: 72 }}
+                              value={draft.acceptedQty}
+                              onChange={(e) =>
+                                patchAdminDraft({ acceptedQty: e.target.value.replace(/[^\d]/g, "") })
+                              }
+                            />
+                            <span className="muted">/</span>
+                            <input
+                              type="number"
+                              min={MATERIAL_QTY_MIN}
+                              step={MATERIAL_QTY_STEP}
+                              style={{ width: 72 }}
+                              value={draft.quantity}
+                              onChange={(e) =>
+                                patchAdminDraft({ quantity: e.target.value.replace(/[^\d]/g, "") })
+                              }
+                            />
+                            <span className="muted">{unit}</span>
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              style={{ padding: "2px 8px", fontSize: 12 }}
+                              disabled={saving}
+                              onClick={() => void saveReceiptAdminItemQty(row, it.id)}
+                            >
+                              {saving ? "…" : "OK"}
+                            </button>
+                          </div>
+                        );
+                      };
+
                       return (
                         <>
                           <div className="form" style={{ marginTop: 10 }}>
@@ -6986,8 +7104,6 @@ function App() {
                                   </tr>
                                 ) : null}
                                 {itemsDone.map((it) => {
-                                  const total = parseMaterialQty(it.quantity);
-                                  const accepted = parseMaterialQty(it.acceptedQty);
                                   const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
                                   const updName = (it.factLabel || "").trim();
                                   const legacyUpd =
@@ -7012,12 +7128,7 @@ function App() {
                                       <td style={{ maxWidth: 280 }} title={it.sourceName}>
                                         {it.sourceName}
                                       </td>
-                                      <td>
-                                        <strong>
-                                          {formatMaterialQty(accepted)} / {formatMaterialQty(total)}
-                                        </strong>{" "}
-                                        <span className="muted">{it.sourceUnit || "шт"}</span>
-                                      </td>
+                                      <td>{renderQtyPlanCell(it)}</td>
                                       <td title={displayUpd !== "—" ? displayUpd : canonName}>
                                         {displayUpd}
                                       </td>
@@ -7048,7 +7159,6 @@ function App() {
                                   </tr>
                                 ) : null}
                                 {itemsOpen.map((it) => {
-                                  const total = parseMaterialQty(it.quantity);
                                   const accepted = parseMaterialQty(it.acceptedQty);
                                   const remaining = receiptItemRemainingQty(it);
                                   const hasPartialAccept = accepted > 0;
@@ -7158,10 +7268,7 @@ function App() {
                                           </span>
                                         ) : null}
                                       </td>
-                                      <td>
-                                        {formatMaterialQty(accepted)} / {formatMaterialQty(total)}{" "}
-                                        <span className="muted">{it.sourceUnit || "шт"}</span>
-                                      </td>
+                                      <td>{renderQtyPlanCell(it)}</td>
                                       <td>
                                         <input
                                           list={datalistId}
@@ -7294,14 +7401,19 @@ function App() {
 
                           <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap" }}>
                             {isAdmin ? (
-                              <label className="whCheck" style={{ marginRight: 8 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={receiptSkipWarehouseStock}
-                                  onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
-                                />
-                                Без прихода на склад
-                              </label>
+                              <>
+                                <label className="whCheck" style={{ marginRight: 8 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={receiptSkipWarehouseStock}
+                                    onChange={(e) => setReceiptSkipWarehouseStock(e.target.checked)}
+                                  />
+                                  Без прихода на склад
+                                </label>
+                                <span className="muted" style={{ fontSize: 12, marginRight: 8 }}>
+                                  Колонка «Принято / план»: правка только в заявке (остатки склада не меняются)
+                                </span>
+                              </>
                             ) : null}
                             <button
                               type="button"

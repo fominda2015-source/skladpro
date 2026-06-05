@@ -35,3 +35,10 @@ export const materialQtyCoerceSchema = z.coerce
   .max(1_000_000_000)
   .transform((n) => Math.round(n))
   .refine((n) => n > 0, "Количество должно быть больше 0");
+
+/** Принятое количество: целое ≥ 0 (в т.ч. сброс частичной приёмки). */
+export const materialQtyAcceptedCoerceSchema = z.coerce
+  .number()
+  .min(0, "Принятое количество не может быть отрицательным")
+  .max(1_000_000_000)
+  .transform((n) => Math.round(n));
