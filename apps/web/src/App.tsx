@@ -82,17 +82,13 @@ import { UserAccountMenu } from "./widgets/layout/UserAccountMenu";
 import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import {
-  applyAcceptedHintsToRows,
-  buildAcceptedHintsFromRows,
   clearReceiptWorkspaceSession,
-  normalizeReceiptRequestItem,
   normalizeReceiptRequestRow,
+  purgeLegacyReceiptAcceptedHints,
   readReceiptAcceptDrafts,
-  readReceiptAcceptedHints,
   readReceiptExpandedIds,
   type ReceiptAcceptDraft,
   writeReceiptAcceptDrafts,
-  writeReceiptAcceptedHints,
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
@@ -648,40 +644,6 @@ function splitReceiptItems(items: ReceiptRequestItem[]) {
     itemsOpen: sorted.filter(isReceiptItemOpen),
     itemsDone: sorted.filter((it) => !isReceiptItemOpen(it))
   };
-}
-
-type ReceiptAcceptanceDelta = { itemId: string; acceptedQty: number };
-
-function mergeReceiptItemAccepted(
-  prev: ReceiptRequestItem | undefined,
-  next: ReceiptRequestItem,
-  delta?: ReceiptAcceptanceDelta
-): ReceiptRequestItem {
-  const normalized = normalizeReceiptRequestItem(next);
-  const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
-  const nextAcc = parseMaterialQty(normalized.acceptedQty);
-  const addAcc = delta?.acceptedQty ? parseMaterialQty(delta.acceptedQty) : 0;
-  // Никогда не уменьшаем принятое: защита от устаревших ответов списка заявок.
-  const acc = Math.max(prevAcc, nextAcc, prevAcc + addAcc);
-  if (acc <= 0) return normalized;
-  return { ...normalized, acceptedQty: acc };
-}
-
-function mergeReceiptRequestRow(
-  prev: ReceiptRequestRow | undefined,
-  next: ReceiptRequestRow,
-  acceptanceDelta?: ReceiptAcceptanceDelta[]
-): ReceiptRequestRow {
-  const prevById = new Map((prev?.items ?? []).map((it) => [it.id, it]));
-  const deltaById = new Map((acceptanceDelta ?? []).map((d) => [d.itemId, d]));
-  const mergedItems = normalizeReceiptRequestRow(next).items.map((it) =>
-    mergeReceiptItemAccepted(prevById.get(it.id), it, deltaById.get(it.id))
-  );
-  const seen = new Set(mergedItems.map((it) => it.id));
-  for (const it of prev?.items ?? []) {
-    if (!seen.has(it.id)) mergedItems.push(it);
-  }
-  return normalizeReceiptRequest({ ...normalizeReceiptRequestRow(next), items: mergedItems });
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
@@ -3140,8 +3102,7 @@ function App() {
   async function loadReceiptRequests(
     sectionOverride?: "SS" | "EOM",
     warehouseIdOverride?: string,
-    workspaceReloadSeq?: number,
-    acceptanceHints?: { requestId: string; delta: ReceiptAcceptanceDelta[] }
+    workspaceReloadSeq?: number
   ): Promise<ReceiptRequestRow[] | null> {
     if (!token) return null;
     const warehouseId =
@@ -3166,41 +3127,16 @@ function App() {
     if (!res.ok) return null;
     if (isStaleWorkspaceReload(workspaceReloadSeq)) return null;
     if (listSeq !== receiptRequestsLoadSeq.current) return null;
-    const section = sectionOverride ?? objectSectionFilter;
-    const acceptedHints = readReceiptAcceptedHints(warehouseId, section);
-    const rows = applyAcceptedHintsToRows(
-      ((await res.json()) as ReceiptRequestRow[]).map((r) => normalizeReceiptRequestRow(r)),
-      acceptedHints
+    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) =>
+      normalizeReceiptRequest(normalizeReceiptRequestRow(r))
     );
-    let merged!: ReceiptRequestRow[];
-    setReceiptRequests((prev) => {
-      const prevById = new Map(prev.map((r) => [r.id, r]));
-      const hintDelta =
-        acceptanceHints?.requestId && acceptanceHints.delta.length
-          ? new Map(acceptanceHints.delta.map((d) => [d.itemId, d]))
-          : null;
-      merged = rows.map((r) => {
-        const deltaList =
-          acceptanceHints?.requestId === r.id && hintDelta
-            ? r.items
-                .map((it) => hintDelta.get(it.id))
-                .filter((d): d is ReceiptAcceptanceDelta => Boolean(d))
-            : undefined;
-        return mergeReceiptRequestRow(prevById.get(r.id), r, deltaList);
-      });
-      return merged;
-    });
-    return merged;
+    setReceiptRequests(rows);
+    return rows;
   }
 
-  function applyReceiptRequestUpdate(
-    updated: ReceiptRequestRow,
-    opts?: { acceptanceDelta?: ReceiptAcceptanceDelta[] }
-  ) {
-    let normalized!: ReceiptRequestRow;
+  function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
+    const normalized = normalizeReceiptRequest(normalizeReceiptRequestRow(updated));
     setReceiptRequests((prev) => {
-      const prevRow = prev.find((r) => r.id === updated.id);
-      normalized = mergeReceiptRequestRow(prevRow, normalizeReceiptRequestRow(updated), opts?.acceptanceDelta);
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
       const next = [...prev];
@@ -3505,25 +3441,16 @@ function App() {
       } catch {
         acceptBody = {};
       }
-      const acceptanceDelta: ReceiptAcceptanceDelta[] = mappings.map((m) => ({
-        itemId: m.itemId,
-        acceptedQty: m.acceptedQty
-      }));
       const serverRow = acceptBody.receiptRequest ?? null;
       let normalized: ReceiptRequestRow;
       if (serverRow) {
-        normalized = applyReceiptRequestUpdate(serverRow, { acceptanceDelta });
+        normalized = applyReceiptRequestUpdate(serverRow);
       } else {
-        normalized = applyReceiptRequestUpdate(row, { acceptanceDelta });
+        normalized = applyReceiptRequestUpdate(row);
       }
-      const syncedRows = await loadReceiptRequests(row.section, row.warehouseId, undefined, {
-        requestId: row.id,
-        delta: acceptanceDelta
-      });
+      const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
       clearReceiptWorkspaceSession(row.warehouseId, row.section, row.id);
-      normalized =
-        syncedRows?.find((r) => r.id === row.id) ??
-        applyReceiptRequestUpdate(serverRow ?? row, { acceptanceDelta });
+      normalized = syncedRows?.find((r) => r.id === row.id) ?? normalized;
       const openLeft = normalized.items.filter(isReceiptItemOpen).length;
       if (openLeft > 0) {
         setOpsMessage(
@@ -3863,6 +3790,7 @@ function App() {
   // Удаление заявки на приход. Логика та же: prompt-причина и force для админа.
   async function deleteReceiptRequest(receiptId: string): Promise<boolean> {
     if (!token) return false;
+    const receiptRow = receiptRequests.find((r) => r.id === receiptId);
     const reasonRaw = window.prompt("Укажите причину удаления заявки на приход:");
     if (reasonRaw === null) return false;
     const reason = reasonRaw.trim();
@@ -3900,6 +3828,19 @@ function App() {
       return false;
     }
     setOpsMessage("Заявка на приход удалена. Уведомление отправлено.");
+    if (receiptRow) {
+      clearReceiptWorkspaceSession(receiptRow.warehouseId, receiptRow.section, receiptId);
+    }
+    setAcceptanceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[receiptId];
+      return next;
+    });
+    setExpandedReceiptIds((prev) => {
+      const next = { ...prev };
+      delete next[receiptId];
+      return next;
+    });
     await loadReceiptRequests();
     return true;
   }
@@ -5033,6 +4974,7 @@ function App() {
     if (receiptSessionScopeRef.current === scope) return;
     receiptSessionScopeRef.current = scope;
     receiptSessionPersistReadyRef.current = false;
+    purgeLegacyReceiptAcceptedHints();
     setAcceptanceDrafts(readReceiptAcceptDrafts(activeObjectId, objectSectionFilter));
     setExpandedReceiptIds(readReceiptExpandedIds(activeObjectId, objectSectionFilter));
   }, [activeObjectId, objectSectionFilter]);
@@ -5045,24 +4987,7 @@ function App() {
     }
     writeReceiptAcceptDrafts(activeObjectId, objectSectionFilter, acceptanceDrafts);
     writeReceiptExpandedIds(activeObjectId, objectSectionFilter, expandedReceiptIds);
-    const receiptsMatchScope =
-      receiptRequests.length === 0 ||
-      receiptRequests.every((r) => r.section === objectSectionFilter);
-    if (receiptsMatchScope) {
-      const scopedReceipts = receiptRequests.filter((r) => r.section === objectSectionFilter);
-      writeReceiptAcceptedHints(
-        activeObjectId,
-        objectSectionFilter,
-        buildAcceptedHintsFromRows(scopedReceipts)
-      );
-    }
-  }, [
-    acceptanceDrafts,
-    expandedReceiptIds,
-    receiptRequests,
-    activeObjectId,
-    objectSectionFilter
-  ]);
+  }, [acceptanceDrafts, expandedReceiptIds, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (!token || !canDashboard || activeTab !== "stocks") {
