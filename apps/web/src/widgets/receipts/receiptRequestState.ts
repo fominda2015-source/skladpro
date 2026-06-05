@@ -241,7 +241,6 @@ export function clearReceiptWorkspaceSession(warehouseId: string, section: strin
     writeReceiptExpandedIds(warehouseId, section, expanded);
     return;
   }
-  const hints = readReceiptAcceptedHints(warehouseId, section);
   writeReceiptAcceptDrafts(warehouseId, section, {});
   writeReceiptExpandedIds(warehouseId, section, {});
   replaceReceiptAcceptedHintsScope(warehouseId, section, {});
