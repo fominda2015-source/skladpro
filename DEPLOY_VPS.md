@@ -29,6 +29,8 @@ Firewall:
 ```bash
 ufw allow OpenSSH
 ufw allow 80/tcp
+# После настройки HTTPS (certbot + default-https.conf):
+# ufw allow 443/tcp
 ufw --force enable
 ufw status
 ```
@@ -73,9 +75,13 @@ docker compose ps
 docker compose logs -f api
 ```
 
-Проверка:
+Проверка (только **http://**, не https — до выпуска SSL-сертификата):
 - `http://193.176.78.148/api/health`
 - `http://193.176.78.148/api/health/db`
+- `http://193.176.78.148/` — веб-интерфейс
+
+Если браузер показывает `ERR_CONNECTION_CLOSED` — вы открыли **https://** без сертификата.
+Используйте `http://IP` или настройте HTTPS (см. `deploy/nginx/default-https.conf`).
 
 ## 7) Что сделано по БД в проекте
 
