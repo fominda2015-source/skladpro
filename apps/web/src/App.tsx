@@ -83,6 +83,7 @@ import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import {
   clearReceiptWorkspaceSession,
+  normalizeReceiptRequestItem,
   normalizeReceiptRequestRow,
   purgeLegacyReceiptAcceptedHints,
   readReceiptAcceptDrafts,
@@ -644,6 +645,34 @@ function splitReceiptItems(items: ReceiptRequestItem[]) {
     itemsOpen: sorted.filter(isReceiptItemOpen),
     itemsDone: sorted.filter((it) => !isReceiptItemOpen(it))
   };
+}
+
+function mergeReceiptItemAccepted(
+  prev: ReceiptRequestItem | undefined,
+  next: ReceiptRequestItem
+): ReceiptRequestItem {
+  const normalized = normalizeReceiptRequestItem(next);
+  const prevAcc = prev ? parseMaterialQty(prev.acceptedQty) : 0;
+  const nextAcc = parseMaterialQty(normalized.acceptedQty);
+  // Только max(prev, api): без накопления delta — иначе acceptedQty утраивается при каждой перезагрузке.
+  const acc = Math.max(prevAcc, nextAcc);
+  if (acc <= 0) return normalized;
+  return { ...normalized, acceptedQty: acc };
+}
+
+function mergeReceiptRequestRow(
+  prev: ReceiptRequestRow | undefined,
+  next: ReceiptRequestRow
+): ReceiptRequestRow {
+  const prevById = new Map((prev?.items ?? []).map((it) => [it.id, it]));
+  const mergedItems = normalizeReceiptRequestRow(next).items.map((it) =>
+    mergeReceiptItemAccepted(prevById.get(it.id), it)
+  );
+  const seen = new Set(mergedItems.map((it) => it.id));
+  for (const it of prev?.items ?? []) {
+    if (!seen.has(it.id)) mergedItems.push(it);
+  }
+  return normalizeReceiptRequest({ ...normalizeReceiptRequestRow(next), items: mergedItems });
 }
 
 function normalizeReceiptRequest(row: ReceiptRequestRow): ReceiptRequestRow {
@@ -3127,16 +3156,21 @@ function App() {
     if (!res.ok) return null;
     if (isStaleWorkspaceReload(workspaceReloadSeq)) return null;
     if (listSeq !== receiptRequestsLoadSeq.current) return null;
-    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) =>
-      normalizeReceiptRequest(normalizeReceiptRequestRow(r))
-    );
-    setReceiptRequests(rows);
-    return rows;
+    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) => normalizeReceiptRequestRow(r));
+    let merged!: ReceiptRequestRow[];
+    setReceiptRequests((prev) => {
+      const prevById = new Map(prev.map((r) => [r.id, r]));
+      merged = rows.map((r) => mergeReceiptRequestRow(prevById.get(r.id), r));
+      return merged;
+    });
+    return merged;
   }
 
   function applyReceiptRequestUpdate(updated: ReceiptRequestRow) {
-    const normalized = normalizeReceiptRequest(normalizeReceiptRequestRow(updated));
+    let normalized!: ReceiptRequestRow;
     setReceiptRequests((prev) => {
+      const prevRow = prev.find((r) => r.id === updated.id);
+      normalized = mergeReceiptRequestRow(prevRow, normalizeReceiptRequestRow(updated));
       const idx = prev.findIndex((r) => r.id === normalized.id);
       if (idx === -1) return [normalized, ...prev];
       const next = [...prev];

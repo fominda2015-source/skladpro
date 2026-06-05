@@ -7,9 +7,7 @@ export function receiptPlannedQty(value: unknown): number {
 
 /** Уже принято по позиции (целое, 0 если пусто). */
 export function receiptAcceptedQty(value: unknown): number {
-  if (value == null || value === "") return 0;
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+  return qtyFromDb(value);
 }
 
 /** Сколько ещё можно принять по позиции. */

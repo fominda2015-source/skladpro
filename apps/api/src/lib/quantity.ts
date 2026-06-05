@@ -18,8 +18,9 @@ export function toQtyNumber(value: unknown): number | null {
 
 /** Читает количество из БД/Decimal и округляет до целого. */
 export function qtyFromDb(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.round(n) : 0;
+  if (value == null || value === "") return 0;
+  const n = Number(typeof value === "object" ? String(value) : value);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
 }
 
 export const materialQtySchema = z
