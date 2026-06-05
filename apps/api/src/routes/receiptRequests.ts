@@ -717,13 +717,10 @@ receiptRequestsRouter.patch(
 
       return tx.receiptRequest.findUniqueOrThrow({
         where: { id },
-        include: {
-          items: { include: { mappedMaterial: { select: { id: true, name: true, unit: true } } } },
-          limitTemplate: { select: { id: true, title: true } }
-        }
+        include: receiptRequestInclude
       });
     });
-    return res.json(updated);
+    return res.json(serializeReceiptRequest(updated));
   }
 );
 
@@ -885,9 +882,14 @@ receiptRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     take: 100
   });
   let list = rows;
-  const stale = rows.filter(
-    (row) => row.status !== "CANCELLED" && row.status !== "RECEIVED" && isReceiptFullyAccepted(row.items)
-  );
+  const stale = rows.filter((row) => {
+    if (row.status === "CANCELLED" || row.status === "RECEIVED") return false;
+    const items = row.items.map((it) => ({
+      quantity: receiptPlannedQty(it.quantity),
+      acceptedQty: receiptAcceptedQty(it.acceptedQty)
+    }));
+    return isReceiptFullyAccepted(items);
+  });
   if (stale.length) {
     await Promise.all(stale.map((row) => reconcileReceiptRequestStatus(row.id)));
     list = await prisma.receiptRequest.findMany({
