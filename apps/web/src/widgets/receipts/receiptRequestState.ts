@@ -1,4 +1,5 @@
 import { parseMaterialQty } from "../../shared/quantity";
+import type { ReceiptItemCategory } from "./receiptLabels";
 
 export type ReceiptRequestItemLike = {
   id: string;
@@ -39,7 +40,7 @@ export type ReceiptAcceptDraft = {
   newUnit: string;
   qty: string;
   limitNodeId?: string;
-  category?: string;
+  category?: ReceiptItemCategory | "";
   unitPrice?: string;
   storagePlace?: string;
 };

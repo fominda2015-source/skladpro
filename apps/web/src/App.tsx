@@ -87,6 +87,7 @@ import {
   normalizeReceiptRequestRow,
   readReceiptAcceptDrafts,
   readReceiptExpandedIds,
+  type ReceiptAcceptDraft,
   writeReceiptAcceptDrafts,
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
@@ -943,16 +944,9 @@ function App() {
   const [limitPromptRequest, setLimitPromptRequest] = useState<ReceiptRequestRow | null>(null);
   const [limitPromptTemplateId, setLimitPromptTemplateId] = useState<string>("");
   // Черновики приёмки: на заявку → на позицию → {newName, newUnit, qty}.
-  type AcceptanceDraftItem = {
-    newName: string;
-    newUnit: string;
-    qty: string;
-    limitNodeId?: string;
-    category?: ReceiptItemCategory | "";
-    unitPrice?: string;
-    storagePlace?: string;
-  };
-  const [acceptanceDrafts, setAcceptanceDrafts] = useState<Record<string, Record<string, AcceptanceDraftItem>>>({});
+  const [acceptanceDrafts, setAcceptanceDrafts] = useState<
+    Record<string, Record<string, ReceiptAcceptDraft>>
+  >({});
   // Подсказки по узлам шаблона лимита для каждой заявки/позиции (для «куда пихаем»).
   type LimitNodeSuggestion = {
     id: string;
