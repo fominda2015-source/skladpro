@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent } from "react";
 import {
@@ -82,13 +82,17 @@ import { UserAccountMenu } from "./widgets/layout/UserAccountMenu";
 import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import {
+  applyAcceptedHintsToRows,
+  buildAcceptedHintsFromRows,
   clearReceiptWorkspaceSession,
   normalizeReceiptRequestItem,
   normalizeReceiptRequestRow,
   readReceiptAcceptDrafts,
+  readReceiptAcceptedHints,
   readReceiptExpandedIds,
   type ReceiptAcceptDraft,
   writeReceiptAcceptDrafts,
+  writeReceiptAcceptedHints,
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
@@ -927,6 +931,7 @@ function App() {
   const receiptRequestsLoadSeq = useRef(0);
   const sectionReloadSeq = useRef(0);
   const receiptSessionScopeRef = useRef("");
+  const receiptSessionPersistReadyRef = useRef(false);
 
   function isStaleWorkspaceReload(seq?: number): boolean {
     return seq != null && seq !== sectionReloadSeq.current;
@@ -3161,7 +3166,12 @@ function App() {
     if (!res.ok) return null;
     if (isStaleWorkspaceReload(workspaceReloadSeq)) return null;
     if (listSeq !== receiptRequestsLoadSeq.current) return null;
-    const rows = ((await res.json()) as ReceiptRequestRow[]).map((r) => normalizeReceiptRequestRow(r));
+    const section = sectionOverride ?? objectSectionFilter;
+    const acceptedHints = readReceiptAcceptedHints(warehouseId, section);
+    const rows = applyAcceptedHintsToRows(
+      ((await res.json()) as ReceiptRequestRow[]).map((r) => normalizeReceiptRequestRow(r)),
+      acceptedHints
+    );
     let merged!: ReceiptRequestRow[];
     setReceiptRequests((prev) => {
       const prevById = new Map(prev.map((r) => [r.id, r]));
@@ -5011,27 +5021,48 @@ function App() {
   useEffect(() => {
     if (!token || mustPickObject || !activeObjectId) return;
     void reloadWorkspaceData(objectSectionFilter, activeTab);
-  }, [token, mustPickObject, activeObjectId, tabWarehouseFilters, activeTab]);
+  }, [token, mustPickObject, activeObjectId, objectSectionFilter, tabWarehouseFilters, activeTab]);
 
   // Восстановить черновики приёмки и раскрытые заявки после F5 (в рамках объекта/раздела).
-  useEffect(() => {
-    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
+  useLayoutEffect(() => {
+    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
+      receiptSessionPersistReadyRef.current = false;
+      return;
+    }
     const scope = `${activeObjectId}:${objectSectionFilter}`;
     if (receiptSessionScopeRef.current === scope) return;
     receiptSessionScopeRef.current = scope;
+    receiptSessionPersistReadyRef.current = false;
     setAcceptanceDrafts(readReceiptAcceptDrafts(activeObjectId, objectSectionFilter));
     setExpandedReceiptIds(readReceiptExpandedIds(activeObjectId, objectSectionFilter));
   }, [activeObjectId, objectSectionFilter]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
+    if (!receiptSessionPersistReadyRef.current) {
+      receiptSessionPersistReadyRef.current = true;
+      return;
+    }
     writeReceiptAcceptDrafts(activeObjectId, objectSectionFilter, acceptanceDrafts);
-  }, [acceptanceDrafts, activeObjectId, objectSectionFilter]);
-
-  useEffect(() => {
-    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
     writeReceiptExpandedIds(activeObjectId, objectSectionFilter, expandedReceiptIds);
-  }, [expandedReceiptIds, activeObjectId, objectSectionFilter]);
+    const receiptsMatchScope =
+      receiptRequests.length === 0 ||
+      receiptRequests.every((r) => r.section === objectSectionFilter);
+    if (receiptsMatchScope) {
+      const scopedReceipts = receiptRequests.filter((r) => r.section === objectSectionFilter);
+      writeReceiptAcceptedHints(
+        activeObjectId,
+        objectSectionFilter,
+        buildAcceptedHintsFromRows(scopedReceipts)
+      );
+    }
+  }, [
+    acceptanceDrafts,
+    expandedReceiptIds,
+    receiptRequests,
+    activeObjectId,
+    objectSectionFilter
+  ]);
 
   useEffect(() => {
     if (!token || !canDashboard || activeTab !== "stocks") {
