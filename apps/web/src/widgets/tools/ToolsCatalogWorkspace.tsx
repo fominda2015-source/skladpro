@@ -6,6 +6,7 @@ import {
   ELECTRIC_SUB_HUB_CARDS,
   TOOL_SUB_HUB_CARDS,
   TOOLS_HUB_CARDS,
+  buildToolsHubStats,
   type ToolCatalogMaterialRow,
   type ToolCatalogSummary,
   type ToolsNavId,
@@ -76,23 +77,7 @@ export function ToolsCatalogWorkspace({
       .finally(() => setMatLoading(false));
   }, [token, materialSection, warehouseId, sectionFilter, apiUrl, fetchWithSession]);
 
-  const hubStats = useMemo(
-    () =>
-      summary
-        ? {
-            tool: summary.toolManual,
-            "tool-manual": summary.toolManual,
-            "tool-electric": summary.toolElectric,
-            "tool-electric-cordless": summary.toolElectricCordless,
-            "tool-electric-corded": summary.toolElectricCorded,
-            ppe: summary.ppe,
-            "tool-consumable": summary.toolConsumable,
-            kip: summary.kip,
-            other: summary.other
-          }
-        : undefined,
-    [summary]
-  );
+  const hubStats = useMemo(() => (summary ? buildToolsHubStats(summary) : undefined), [summary]);
 
   function pushNav(id: ToolsNavId) {
     if (id === "hub") {

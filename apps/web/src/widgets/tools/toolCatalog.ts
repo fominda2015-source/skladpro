@@ -21,6 +21,40 @@ export type ToolCatalogSummary = {
   other: { count: number; qty: number };
 };
 
+export type ToolCountStats = {
+  count: number;
+  inStock: number;
+  issued: number;
+  inRepair: number;
+};
+
+export function mergeToolCountStats(...parts: ToolCountStats[]): ToolCountStats {
+  return parts.reduce(
+    (acc, p) => ({
+      count: acc.count + p.count,
+      inStock: acc.inStock + p.inStock,
+      issued: acc.issued + p.issued,
+      inRepair: acc.inRepair + p.inRepair
+    }),
+    { count: 0, inStock: 0, issued: 0, inRepair: 0 }
+  );
+}
+
+export function buildToolsHubStats(summary: ToolCatalogSummary): Record<string, ToolCountStats | { count: number; qty: number }> {
+  const toolAll = mergeToolCountStats(summary.toolManual, summary.toolElectric);
+  return {
+    tool: toolAll,
+    "tool-manual": summary.toolManual,
+    "tool-electric": summary.toolElectric,
+    "tool-electric-cordless": summary.toolElectricCordless,
+    "tool-electric-corded": summary.toolElectricCorded,
+    ppe: summary.ppe,
+    "tool-consumable": summary.toolConsumable,
+    kip: summary.kip,
+    other: summary.other
+  };
+}
+
 export type ToolCatalogMaterialRow = {
   materialId: string;
   name: string;
