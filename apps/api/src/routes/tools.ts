@@ -1,4 +1,5 @@
 import { StockCondition, StockMovementDirection, ToolStatus, type Prisma, type ToolCatalogSection } from "@prisma/client";
+import path from "node:path";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
@@ -85,6 +86,52 @@ const nextStatusByAction: Record<z.infer<typeof toolActionSchema>["action"], Too
 
 function buildQrCode(inventoryNumber: string) {
   return `TOOL:${inventoryNumber}`;
+}
+
+const PDF_LABEL_FONT = path.resolve(process.cwd(), "node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
+
+function drawToolLabelCell(
+  doc: PDFKit.PDFDocument,
+  tool: { inventoryNumber: string; name: string; qrCode: string },
+  x: number,
+  y: number,
+  cellWidth: number,
+  cellHeight: number,
+  qrPng: Buffer
+) {
+  const pad = 4;
+  const innerX = x + pad;
+  const innerY = y + pad;
+  const innerW = cellWidth - pad * 2;
+  const innerH = cellHeight - pad * 2;
+
+  doc.rect(x, y, cellWidth, cellHeight).lineWidth(0.5).strokeColor("#999").stroke();
+
+  doc.save();
+  doc.rect(innerX, innerY, innerW, innerH).clip();
+
+  const qrSize = Math.min(innerW * 0.36, innerH * 0.48, 50);
+  const textX = innerX + qrSize + 5;
+  const textW = Math.max(18, innerW - qrSize - 5);
+  const footerY = innerY + qrSize + 3;
+
+  doc.image(qrPng, innerX, innerY, { width: qrSize, height: qrSize });
+
+  doc.font(PDF_LABEL_FONT).fillColor("#111");
+  doc.fontSize(8).text(tool.inventoryNumber, textX, innerY, { width: textW, lineBreak: false, ellipsis: true });
+  doc.fontSize(7).text(tool.name, textX, innerY + 11, {
+    width: textW,
+    height: Math.max(12, footerY - innerY - 12),
+    ellipsis: true
+  });
+
+  doc.fontSize(6).fillColor("#555").text(tool.qrCode, innerX, footerY, {
+    width: innerW,
+    lineBreak: false,
+    ellipsis: true
+  });
+
+  doc.restore();
 }
 
 export const toolsRouter = Router();
@@ -1068,14 +1115,8 @@ toolsRouter.get("/labels/pdf", async (req: AuthedRequest, res) => {
     const x = 24 + col * (cellWidth + gap);
     const y = 24 + row * (cellHeight + gap);
 
-    doc.rect(x, y, cellWidth, cellHeight).lineWidth(0.5).strokeColor("#999").stroke();
-
-    const qrSize = Math.min(cellHeight - 22, cellWidth * 0.45);
-    const png = await QRCode.toBuffer(tool.qrCode, { margin: 1, width: 220 });
-    doc.image(png, x + 6, y + 6, { width: qrSize, height: qrSize });
-    doc.fontSize(8).fillColor("#111").text(tool.inventoryNumber, x + qrSize + 10, y + 8, { width: cellWidth - qrSize - 14 });
-    doc.fontSize(7).text(tool.name, x + qrSize + 10, y + 22, { width: cellWidth - qrSize - 14, height: 22 });
-    doc.fontSize(7).text(tool.qrCode, x + 6, y + qrSize + 10, { width: cellWidth - 12 });
+    const qrPng = await QRCode.toBuffer(tool.qrCode, { margin: 0, width: 280, errorCorrectionLevel: "M" });
+    drawToolLabelCell(doc, tool, x, y, cellWidth, cellHeight, qrPng);
   }
 
   doc.end();
