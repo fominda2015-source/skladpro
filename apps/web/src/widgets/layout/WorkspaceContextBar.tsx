@@ -18,6 +18,8 @@ type Props = {
   onSelectObject: (warehouseId: string) => void;
   onSelectSection: (section: "SS" | "EOM") => void;
   hideObjectSelect?: boolean;
+  hideObjectControls?: boolean;
+  hideSection?: boolean;
   tabFilter?: TabFilterProps;
   layout?: "stacked" | "inline";
   middleSlot?: ReactNode;
@@ -32,6 +34,8 @@ export function WorkspaceContextBar(props: Props) {
     onSelectObject,
     onSelectSection,
     hideObjectSelect = false,
+    hideObjectControls = false,
+    hideSection = false,
     tabFilter,
     layout = "inline",
     middleSlot
@@ -42,7 +46,7 @@ export function WorkspaceContextBar(props: Props) {
       className={`workspaceContextBar${layout === "inline" ? " workspaceContextBar--inline" : ""}`}
       aria-label="Контекст объекта и раздела"
     >
-      {!hideObjectSelect ? (
+      {!hideObjectControls && !hideObjectSelect ? (
         <label className="workspaceContextObject workspaceContextObject--accent">
           <span className="workspaceContextLabel">Активный объект</span>
           <select
@@ -59,12 +63,12 @@ export function WorkspaceContextBar(props: Props) {
             ))}
           </select>
         </label>
-      ) : (
+      ) : !hideObjectControls && hideObjectSelect ? (
         <div className="workspaceContextObject workspaceContextObjectStatic workspaceContextObject--accent">
           <span className="workspaceContextLabel">Объекты</span>
           <span className="workspaceContextObjectValue workspaceContextObjectValue--accent">Все объекты</span>
         </div>
-      )}
+      ) : null}
       {tabFilter ? (
         <label className="workspaceContextObject workspaceContextTabFilter workspaceContextObject--accent-secondary">
           <span className="workspaceContextLabel">Объект на вкладке</span>
@@ -84,6 +88,7 @@ export function WorkspaceContextBar(props: Props) {
         </label>
       ) : null}
       {middleSlot}
+      {!hideSection ? (
       <div className="workspaceContextSection workspaceContextSection--accent">
         <span className="workspaceContextLabel">Раздел</span>
         <div
@@ -106,6 +111,7 @@ export function WorkspaceContextBar(props: Props) {
           </button>
         </div>
       </div>
+      ) : null}
     </div>
   );
 }

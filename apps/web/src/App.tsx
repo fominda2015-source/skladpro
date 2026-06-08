@@ -2136,7 +2136,22 @@ function App() {
     );
   }
 
-  function renderWorkspaceContextPanel() {
+  function renderWorkspaceContextTop() {
+    return (
+      <WorkspaceContextBar
+        activeObjectId={activeObjectId}
+        canViewAllObjects={canViewAllObjects}
+        objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
+        section={objectSectionFilter}
+        onSelectObject={(id) => void selectTopObject(id)}
+        onSelectSection={(next) => setSection(next)}
+        hideObjectSelect={activeTab === "stocks"}
+        layout="inline"
+      />
+    );
+  }
+
+  function renderWorkspaceContextBottom() {
     const tabFilter =
       isAllObjectsView && activeTab !== "stocks"
         ? {
@@ -2155,7 +2170,8 @@ function App() {
         section={objectSectionFilter}
         onSelectObject={(id) => void selectTopObject(id)}
         onSelectSection={(next) => setSection(next)}
-        hideObjectSelect={activeTab === "stocks"}
+        hideObjectControls
+        hideSection
         tabFilter={tabFilter}
         layout="inline"
         middleSlot={renderAppChromeSearch()}
@@ -6059,6 +6075,9 @@ function App() {
               ☰
             </button>
             <p className="appChromeTabTitle">{currentTitle}</p>
+            {showWorkspaceContext ? (
+              <div className="appChromeContextTop">{renderWorkspaceContextTop()}</div>
+            ) : null}
             {!showWorkspaceContext ? renderAppChromeSearch() : null}
             {me ? (
               <UserAccountMenu
@@ -6071,7 +6090,9 @@ function App() {
               />
             ) : null}
           </div>
-          {showWorkspaceContext ? <div className="appChromeContext">{renderWorkspaceContextPanel()}</div> : null}
+          {showWorkspaceContext ? (
+            <div className="appChromeContext appChromeContextBottom">{renderWorkspaceContextBottom()}</div>
+          ) : null}
         </header>
         {activeTab === "stocks" && (
           <HomeOverview

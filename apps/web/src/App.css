@@ -360,21 +360,37 @@
   border-top: 1px solid #f1f5f9;
 }
 
+.appChromeContextTop {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.appChromeContextTop .workspaceContextBar--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .appChrome .userAccountMenu {
   margin-left: auto;
   flex: 0 0 auto;
 }
 
 .appChrome .userAccountMenuTrigger {
-  height: 42px;
+  height: 48px;
   padding: 4px;
   border-radius: 999px;
 }
 
 .appChrome .userAccountMenuAvatar {
-  width: 36px;
-  height: 36px;
-  font-size: 15px;
+  width: 42px;
+  height: 42px;
+  font-size: 17px;
+}
+
+.appChrome .userAccountMenuChevron {
+  display: none;
 }
 
 @media (min-width: 901px) {
@@ -2145,8 +2161,14 @@ tr.low {
 }
 
 /* Вкладка чата — без дублирующей шапки (поиск/заголовок страницы) */
-.canvas--chat > .appChrome .appChromeRow {
+.canvas--chat > .appChrome .appChromeTabTitle,
+.canvas--chat > .appChrome .appChromeContextBottom,
+.canvas--chat > .appChrome .mobileMenuBtn {
   display: none;
+}
+
+.canvas--chat > .appChrome .appChromeRow {
+  flex-wrap: nowrap;
 }
 
 .canvas--chat > .appChrome {
@@ -2154,7 +2176,8 @@ tr.low {
   margin-bottom: 4px;
 }
 
-.canvas--chat > .appChrome .appChromeContext {
+.canvas--chat > .appChrome .appChromeContext,
+.canvas--chat > .appChrome .appChromeContextBottom {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
