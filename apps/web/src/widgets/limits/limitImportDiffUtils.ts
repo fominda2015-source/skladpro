@@ -26,6 +26,13 @@ export type LimitImportDiffView = {
     plannedQty: number | null;
     issuedQty: number;
   }>;
+  qtyChangedItems: Array<{
+    nodeId: string;
+    label: string;
+    unit: string | null;
+    prevPlan: number | null;
+    newPlan: number | null;
+  }>;
   statusByNodeId: Map<string, LimitMaterialDiffStatus>;
   prevPlannedByNodeId: Map<string, number | null>;
 };
@@ -83,6 +90,7 @@ export function computeLimitImportDiffView(
   const statusByNodeId = new Map<string, LimitMaterialDiffStatus>();
   const prevPlannedByNodeId = new Map<string, number | null>();
   const removedItems: LimitImportDiffView["removedItems"] = [];
+  const qtyChangedItems: LimitImportDiffView["qtyChangedItems"] = [];
 
   for (const [pathKey, p] of prev) {
     if (!nextByPath.has(pathKey)) {
@@ -115,6 +123,13 @@ export function computeLimitImportDiffView(
     } else {
       statusByNodeId.set(n.id, "qty_changed");
       prevPlannedByNodeId.set(n.id, oldPlan);
+      qtyChangedItems.push({
+        nodeId: n.id,
+        label: pathKey.split("/").join(" → ") || String(n.materialName || n.title || ""),
+        unit: n.unit ?? null,
+        prevPlan: oldPlan,
+        newPlan
+      });
     }
   }
 
@@ -126,6 +141,7 @@ export function computeLimitImportDiffView(
     removed: removedItems.length,
     qtyChanged: [...statusByNodeId.values()].filter((s) => s === "qty_changed").length,
     removedItems,
+    qtyChangedItems,
     statusByNodeId,
     prevPlannedByNodeId
   };

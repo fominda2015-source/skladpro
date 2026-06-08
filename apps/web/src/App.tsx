@@ -47,8 +47,10 @@ import { CampTab } from "./widgets/camp/CampTab";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import {
   computeLimitImportDiffView,
-  limitTreeIndentPx
+  limitTreeIndentPx,
+  type LimitImportDiffView
 } from "./widgets/limits/limitImportDiffUtils";
+import { LimitImportHistoryButton, LimitImportHistoryModal } from "./widgets/limits/LimitImportHistoryModal";
 import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
@@ -912,6 +914,11 @@ function App() {
   const [limitNameAlertModal, setLimitNameAlertModal] = useState<null | { title: string; note: string }>(
     null
   );
+  const [limitImportHistoryModal, setLimitImportHistoryModal] = useState<null | {
+    currentTitle: string;
+    previousTitle: string;
+    importDiff: LimitImportDiffView;
+  }>(null);
   const [receiptRequests, setReceiptRequests] = useState<ReceiptRequestRow[]>([]);
   const [receiptSkipWarehouseStock, setReceiptSkipWarehouseStock] = useState(false);
   const [receiptLimitSourceFilter, setReceiptLimitSourceFilter] = useState<ReceiptLimitSourceFilter>("");
@@ -8309,7 +8316,7 @@ function App() {
           <PageHero
             icon="▧"
             title="Лимиты"
-            subtitle={`Раздел ${objectSectionFilter} · ${limitTemplates.length} шаблон(ов)`}
+            subtitle={`Раздел ${objectSectionFilter} · ${limitTemplates.length ? "1 активный" : "0"}${limitTemplates.length > 1 ? ` · ${limitTemplates.length - 1} в архиве` : ""}`}
             stats={[
               { label: "Шаблонов", value: limitTemplates.length },
               {
@@ -8421,9 +8428,8 @@ function App() {
             <EmptyState title="Лимиты не загружены" hint="Импортируйте Excel-файл, чтобы увидеть дерево разделов и материалов." />
           )}
 
-          {!limitTemplatesLoading && limitTemplates.length > 0 && (
-            <>
-          {limitTemplates.map((tpl) => (
+          {!limitTemplatesLoading && limitTemplates.length > 0 && (() => {
+          const limitTemplateCards = limitTemplates.map((tpl) => (
             <div key={`limit-tpl-${tpl.id}`} className="card limitTemplateCard" style={{ marginTop: 12 }}>
               {(() => {
                   const childrenByParent = new Map<string, LimitImportNode[]>();
@@ -8452,9 +8458,13 @@ function App() {
                     }
                     if (node.nodeType === "MATERIAL") {
                       const plan = Number(node.plannedQty || 0);
-                      const matNode = tpl.nodes.find((x) => x.id === nodeId);
-                      const arrived = limitReceiptMetricsByNodeId.arrivedByLimitNodeId[nodeId] ?? 0;
-                      const issued = Number(matNode?.issuedQty || 0);
+                      const arrived = limitNodeArrivedQty(
+                        nodeId,
+                        node.materialId,
+                        limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
+                        node.materialId ? limitSupplyByMaterialId[node.materialId] : null
+                      );
+                      const issued = Number(node.issuedQty || 0);
                       const a: NodeAgg = { plan, arrived, issued };
                       aggByNodeId.set(nodeId, a);
                       return a;
@@ -8761,8 +8771,9 @@ function App() {
                                   );
                                 })()}
                                 {agg && agg.plan > 0 ? (
-                                  <span className="muted" style={{ fontSize: 11 }}>
-                                    {metricFmt(agg.issued)} / {metricFmt(agg.plan)} · приход {groupArrivedPct}% · выдача {groupIssuedPct}%
+                                  <span className="muted limitGroupMetrics" style={{ fontSize: 11 }}>
+                                    приход {metricFmt(agg.arrived)} / {metricFmt(agg.plan)} ({groupArrivedPct}%) · выдача{" "}
+                                    {metricFmt(agg.issued)} / {metricFmt(agg.plan)} ({groupIssuedPct}%)
                                   </span>
                                 ) : null}
                               </>
@@ -9168,9 +9179,23 @@ function App() {
                                 </button>
                               </div>
                             );
-                          })() : (
+                          })(                          ) : (
                             <>
-                              <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
+                              <div className="limitTemplateTitleRow">
+                                <h3 style={{ marginBottom: 6 }}>{tpl.title}</h3>
+                                {importDiff ? (
+                                  <LimitImportHistoryButton
+                                    importDiff={importDiff}
+                                    onClick={() =>
+                                      setLimitImportHistoryModal({
+                                        currentTitle: tpl.title,
+                                        previousTitle: prevTpl?.title || "Предыдущая версия",
+                                        importDiff
+                                      })
+                                    }
+                                  />
+                                ) : null}
+                              </div>
                               <p className="muted">{tpl.section} · {new Date(tpl.createdAt).toLocaleString()}</p>
                             </>
                           )}
@@ -9192,7 +9217,8 @@ function App() {
                       </div>
                       <div style={{ width: "100%", margin: "8px 0 10px" }}>
                         <div className="muted" style={{ fontSize: 10, marginBottom: 2 }}>
-                          приход {overallArrivedPct}% · выдача {overallPct}%
+                          приход {formatMaterialQty(totalArrived)} / {formatMaterialQty(totalPlanned)} ({overallArrivedPct}%) ·
+                          выдача {formatMaterialQty(totalIssued)} / {formatMaterialQty(totalPlanned)} ({overallPct}%)
                         </div>
                         <div className="progressWrap" style={{ height: 6, marginBottom: 3 }}>
                           <div
@@ -9214,52 +9240,29 @@ function App() {
                           />
                         </div>
                       </div>
-                      {importDiff &&
-                      (importDiff.removed > 0 || importDiff.added > 0 || importDiff.qtyChanged > 0) ? (
-                        <div className="limitImportDiffLegend" role="status">
-                          <span className="limitDiffTag limitDiffTag--new">Новые: {importDiff.added}</span>
-                          <span className="limitDiffTag limitDiffTag--qty">
-                            Кол-во изменено: {importDiff.qtyChanged}
-                          </span>
-                          <span className="limitDiffTag limitDiffTag--removed">
-                            Удалено из файла: {importDiff.removed}
-                          </span>
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            Выдача и полосы заполнения переносятся с предыдущей версии лимита.
-                          </span>
-                        </div>
-                      ) : null}
                       <div className="plainList limitTree">
                         {roots.map((r) => renderNode(r, 0))}
                       </div>
-                      {importDiff && importDiff.removedItems.length > 0 ? (
-                        <div className="limitRemovedBlock">
-                          <h4 style={{ margin: "12px 0 8px", fontSize: 14 }}>Удалено в новом лимите</h4>
-                          <ul className="limitRemovedList">
-                            {importDiff.removedItems.map((item) => (
-                              <li key={item.pathKey} className="limitRemovedRow">
-                                <span className="limitRemovedLabel">{item.label}</span>
-                                <span className="muted">
-                                  {item.unit || "шт"}
-                                  {item.plannedQty != null
-                                    ? ` · план ${formatMaterialQty(item.plannedQty)}`
-                                    : ""}
-                                  {item.issuedQty > 0
-                                    ? ` · выдано ${formatMaterialQty(item.issuedQty)}`
-                                    : ""}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
                     </>
                   );
                 })()}
             </div>
-          ))}
+          ));
+          return (
+            <>
+              {limitTemplateCards[0]}
+              {limitTemplateCards.length > 1 ? (
+                <details className="limitArchiveSection card">
+                  <summary className="limitArchiveSummary">
+                    Архив · {limitTemplateCards.length - 1}{" "}
+                    {limitTemplateCards.length - 1 === 1 ? "версия" : "версии"}
+                  </summary>
+                  <div className="limitArchiveBody">{limitTemplateCards.slice(1)}</div>
+                </details>
+              ) : null}
             </>
-          )}
+          );
+        })()}
         </div>
       )}
 
@@ -12474,6 +12477,15 @@ function App() {
           </div>
         </div>
       )}
+
+      {limitImportHistoryModal ? (
+        <LimitImportHistoryModal
+          currentTitle={limitImportHistoryModal.currentTitle}
+          previousTitle={limitImportHistoryModal.previousTitle}
+          importDiff={limitImportHistoryModal.importDiff}
+          onClose={() => setLimitImportHistoryModal(null)}
+        />
+      ) : null}
 
       {limitNameAlertModal ? (
         <div

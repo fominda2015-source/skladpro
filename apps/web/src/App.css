@@ -2067,6 +2067,116 @@ tr.low {
   background: #fffbeb;
 }
 
+.limitArchiveSection {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-style: dashed;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.limitArchiveSummary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  color: #475569;
+  list-style: none;
+  user-select: none;
+}
+
+.limitArchiveSummary::-webkit-details-marker {
+  display: none;
+}
+
+.limitArchiveSummary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.limitArchiveSection[open] .limitArchiveSummary::before {
+  transform: rotate(90deg);
+}
+
+.limitArchiveBody {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.limitArchiveBody .limitTemplateCard {
+  margin-top: 0 !important;
+  opacity: 0.92;
+}
+
+.limitTemplateTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.limitTemplateTitleRow h3 {
+  margin: 0;
+}
+
+.limitHistoryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.limitHistoryBtnCount {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.limitHistoryModal {
+  max-width: 560px;
+  max-height: min(85vh, 720px);
+  overflow: auto;
+}
+
+.limitHistoryModalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.limitImportDiffLegend--modal {
+  margin: 0 0 10px;
+}
+
+.limitHistorySection {
+  margin-top: 14px;
+}
+
+.limitHistorySection h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.limitGroupMetrics {
+  white-space: nowrap;
+}
+
 .limitRemovedBlock {
   margin-top: 12px;
   padding: 12px;
@@ -3572,22 +3682,26 @@ html[data-mobile="1"] .chatPage--thread .chatThread--placeholder {
 }
 
 .limitStructBarLabel {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
   z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   height: 22px;
-  padding: 0 6px;
+  padding: 0 8px;
   font-size: 10.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #0f172a;
+  color: #334155;
   text-shadow:
-    0 0 3px rgba(255, 255, 255, 0.9),
-    0 0 6px rgba(255, 255, 255, 0.65);
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 0 6px rgba(255, 255, 255, 0.75);
   line-height: 1;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 @media (max-width: 560px) {
