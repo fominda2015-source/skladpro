@@ -1,14 +1,8 @@
 import { useState } from "react";
-import { buildExportApiUrl, downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { buildExportApiUrl, buildExportDownloadName, downloadExportXlsx, type ExportProgressState, type ExportSectionId } from "../../shared/exportXlsx";
 import { ExportProgressBar } from "./ExportProgressBar";
 
-export type ExportSectionId =
-  | "stocks"
-  | "limits"
-  | "materialReport"
-  | "tools"
-  | "issues"
-  | "receipts";
+export type { ExportSectionId } from "../../shared/exportXlsx";
 
 const EXPORT_TYPES: Array<{
   id: ExportSectionId;
@@ -80,12 +74,19 @@ export function ObjectExportsPanel(props: Props) {
         url.searchParams.set("warehouseId", warehouseId);
         url.searchParams.set("section", sectionFilter === "EOM" ? "EOM" : "SS");
       }
+      const whName = warehouses.find((w) => w.id === warehouseId)?.name;
+      const downloadName = buildExportDownloadName(section, {
+        from: period === "custom" ? from : undefined,
+        to: period === "custom" ? to : undefined,
+        warehouseName: whName
+      });
       const result = await downloadExportXlsx(
         fetchWithSession,
         url.toString(),
         token,
-        `${section}.xlsx`,
-        setProgress
+        downloadName,
+        setProgress,
+        downloadName
       );
       if (!result.ok) {
         setMessage(result.error);

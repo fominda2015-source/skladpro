@@ -41,7 +41,7 @@ import { requireAuth, requirePermission } from "./middleware/auth.js";
 const app = express();
 const port = config.port;
 
-app.use(config.corsOrigins ? cors({ origin: config.corsOrigins }) : cors());
+app.use(config.corsOrigins ? cors({ origin: config.corsOrigins, exposedHeaders: ["Content-Disposition", "Content-Length"] }) : cors({ exposedHeaders: ["Content-Disposition", "Content-Length"] }));
 app.use(express.json());
 const uploadsDirAbs = path.resolve(process.cwd(), config.uploadsDir);
 if (!fs.existsSync(uploadsDirAbs)) {

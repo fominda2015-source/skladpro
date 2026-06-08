@@ -49,6 +49,26 @@ function cellValue(v: unknown): string | number | boolean | Date | null {
   return String(v);
 }
 
+function asciiFileNameFallback(fileName: string): string {
+  const ascii = fileName
+    .replace(/[/\\?%*:|"<>]/g, "_")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 120);
+  return ascii.endsWith(".xlsx") ? ascii : `${ascii || "export"}.xlsx`;
+}
+
+/** RFC 5987: корректные кириллические имена файлов в браузерах и Windows. */
+export function contentDispositionAttachment(fileName: string): string {
+  const normalized = fileName.replace(/[/\\?%*:|"<>]/g, "_").trim() || "export.xlsx";
+  const ascii = asciiFileNameFallback(normalized);
+  const encoded = encodeURIComponent(normalized).replace(/[!'()*]/g, (ch) =>
+    `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 export async function buildStyledWorkbook(
   meta: { title: string; rows: ReportMetaRow[] },
   sheets: ReportSheetDef[]
@@ -130,14 +150,13 @@ export async function buildStyledWorkbook(
     }
   }
 
-  const buf = await wb.xlsx.writeBuffer();
+  const buf = await wb.xlsx.writeBuffer({ useSharedStrings: true });
   return Buffer.from(buf);
 }
 
 export function sendStyledXlsx(res: import("express").Response, buffer: Buffer, fileName: string) {
-  const safe = fileName.replace(/[^\w\u0400-\u04FF.\-]+/gi, "_").slice(0, 120) || "export.xlsx";
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
+  res.setHeader("Content-Disposition", contentDispositionAttachment(fileName));
   res.setHeader("Content-Length", String(buffer.length));
-  res.send(buffer);
+  res.end(buffer);
 }

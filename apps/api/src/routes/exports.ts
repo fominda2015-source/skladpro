@@ -246,8 +246,7 @@ async function sendReport(
   userEmail: string | undefined,
   warehouseLabel: string,
   sectionLabel: string,
-  sheets: ReportSheetDef[],
-  fileName: string
+  sheets: ReportSheetDef[]
 ) {
   const metaRows: ReportMetaRow[] = [
     { label: "Период", value: range.label },
@@ -258,8 +257,24 @@ async function sendReport(
     { label: "Сформировано", value: fmtDateTime(new Date()) },
     { label: "Пользователь", value: userEmail || "" }
   ];
+  const fileName = buildExportFileName(metaTitle, range, warehouseLabel);
   const buffer = await buildStyledWorkbook({ title: metaTitle, rows: metaRows }, sheets);
   sendStyledXlsx(res, buffer, fileName);
+}
+
+function buildExportFileName(metaTitle: string, range: Range, warehouseLabel: string): string {
+  const titlePart = metaTitle
+    .replace(/[—–]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[^\w\u0400-\u04FF.\- ]+/g, "")
+    .replace(/\s+/g, "_");
+  const whPart =
+    warehouseLabel && warehouseLabel !== "Все доступные"
+      ? warehouseLabel.replace(/\s+/g, "_").replace(/[^\w\u0400-\u04FF.\-_]+/g, "")
+      : "";
+  const parts = [titlePart, whPart, fmtDate(range.from), fmtDate(range.to)].filter(Boolean);
+  return `${parts.join("_")}.xlsx`;
 }
 
 const sectionPermissions: Record<string, string[]> = {
@@ -430,8 +445,7 @@ exportsRouter.get(
             note: m.note || ""
           }))
         }
-      ],
-      `stocks_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );
@@ -591,8 +605,7 @@ exportsRouter.get(
           ],
           rows: Array.from(issuedAgg.values()).map((v) => ({ ...v }))
         }
-      ],
-      `limits_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );
@@ -663,8 +676,7 @@ exportsRouter.get(
             comment: r.comment || ""
           }))
         }
-      ],
-      `material-report_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );
@@ -765,8 +777,7 @@ exportsRouter.get(
             comment: e.comment || ""
           }))
         }
-      ],
-      `tools_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );
@@ -898,8 +909,7 @@ exportsRouter.get(
           ],
           rows: lineRows
         }
-      ],
-      `issues_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );
@@ -1093,8 +1103,7 @@ exportsRouter.get(
           ],
           rows: opLines
         }
-      ],
-      `receipts_${fmtDate(range.from)}_${fmtDate(range.to)}.xlsx`
+      ]
     );
   })
 );

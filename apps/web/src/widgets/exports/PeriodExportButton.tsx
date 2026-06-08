@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { buildExportApiUrl, downloadExportXlsx, type ExportProgressState } from "../../shared/exportXlsx";
+import { buildExportApiUrl, buildExportDownloadName, downloadExportXlsx, type ExportProgressState, type ExportSectionId } from "../../shared/exportXlsx";
 import { ExportProgressBar } from "./ExportProgressBar";
 
-type Section = "stocks" | "limits" | "materialReport" | "tools" | "issues" | "receipts";
+type Section = ExportSectionId;
 
 type Period = "day" | "week" | "month" | "year" | "custom";
 
@@ -14,6 +14,7 @@ type Props = {
   title?: string;
   warehouseId?: string;
   sectionFilter?: "SS" | "EOM";
+  warehouseName?: string;
 };
 
 const PERIOD_LABELS: Array<{ id: Period; label: string }> = [
@@ -31,7 +32,8 @@ export function PeriodExportButton({
   fetchWithSession,
   title,
   warehouseId,
-  sectionFilter
+  sectionFilter,
+  warehouseName
 }: Props) {
   const [period, setPeriod] = useState<Period>("month");
   const [from, setFrom] = useState<string>("");
@@ -61,12 +63,20 @@ export function PeriodExportButton({
         url.searchParams.set("warehouseId", warehouseId);
         if (sectionFilter) url.searchParams.set("section", sectionFilter);
       }
+      const dateFrom = period === "custom" ? from : undefined;
+      const dateTo = period === "custom" ? to : undefined;
+      const downloadName = buildExportDownloadName(section, {
+        from: dateFrom,
+        to: dateTo,
+        warehouseName
+      });
       const result = await downloadExportXlsx(
         fetchWithSession,
         url.toString(),
         token,
-        `${section}.xlsx`,
-        setProgress
+        downloadName,
+        setProgress,
+        downloadName
       );
       if (!result.ok) setErr(result.error);
       setTimeout(() => setProgress(null), result.ok ? 2000 : 0);

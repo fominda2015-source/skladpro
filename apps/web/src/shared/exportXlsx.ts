@@ -29,23 +29,65 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+export type ExportSectionId =
+  | "stocks"
+  | "limits"
+  | "materialReport"
+  | "tools"
+  | "issues"
+  | "receipts";
+
+const EXPORT_TITLES: Record<ExportSectionId, string> = {
+  stocks: "Склад — остатки и движения",
+  limits: "Лимиты объектов",
+  materialReport: "Материальный отчёт",
+  tools: "Инструменты и СИЗ",
+  issues: "Заявки на выдачу",
+  receipts: "Поступления и приёмки"
+};
+
+/** Читаемое имя файла на клиенте — не зависит от кодировки заголовков HTTP. */
+export function buildExportDownloadName(
+  section: ExportSectionId,
+  opts?: { from?: string; to?: string; warehouseName?: string }
+): string {
+  const title = EXPORT_TITLES[section] || section;
+  const wh =
+    opts?.warehouseName && opts.warehouseName.trim()
+      ? `_${opts.warehouseName.trim().replace(/\s+/g, "_")}`
+      : "";
+  const period =
+    opts?.from && opts?.to ? `_${opts.from}_${opts.to}` : `_${new Date().toISOString().slice(0, 10)}`;
+  return `${title}${wh}${period}.xlsx`.replace(/[/\\?*:|"<>]/g, "_");
+}
+
+function looksLikeMojibake(name: string): boolean {
+  return /[ÐÑÐ°Ð±Ð²Ð³Ð´Ðµ]/.test(name) || /Ð/.test(name);
+}
+
 function parseFileName(disposition: string, fallbackName: string): string {
   let fileName = fallbackName;
-  const star = /filename\*=UTF-8''([^;\s]+)/i.exec(disposition);
+  const star = /filename\*=(?:UTF-8''|utf-8'')([^;\n]+)/i.exec(disposition);
   if (star?.[1]) {
     try {
-      fileName = decodeURIComponent(star[1]);
+      fileName = decodeURIComponent(star[1].trim());
+      return fileName;
     } catch {
-      fileName = star[1];
+      fileName = star[1].trim();
+      return fileName;
     }
-  } else {
-    const plain = /filename="([^"]+)"/i.exec(disposition) || /filename=([^;\s]+)/i.exec(disposition);
-    if (plain?.[1]) {
+  }
+  const plain = /filename="([^"]+)"/i.exec(disposition) || /filename=([^;\s]+)/i.exec(disposition);
+  if (plain?.[1]) {
+    const raw = plain[1].replace(/^"|"$/g, "");
+    if (/%[0-9A-Fa-f]{2}/.test(raw)) {
       try {
-        fileName = decodeURIComponent(plain[1].replace(/^"|"$/g, ""));
+        fileName = decodeURIComponent(raw);
       } catch {
-        fileName = plain[1].replace(/^"|"$/g, "");
+        fileName = raw;
       }
+    } else if (!looksLikeMojibake(raw)) {
+      fileName = raw;
     }
   }
   return fileName;
@@ -66,7 +108,8 @@ export async function downloadExportXlsx(
   url: string,
   token: string,
   fallbackName = "export.xlsx",
-  onProgress?: ExportProgressCallback
+  onProgress?: ExportProgressCallback,
+  preferredName?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const started = Date.now();
   let waitTimer: ReturnType<typeof setInterval> | undefined;
@@ -150,7 +193,10 @@ export async function downloadExportXlsx(
 
     const total = Number(r.headers.get("Content-Length")) || 0;
     const disposition = r.headers.get("Content-Disposition") || "";
-    const fileName = parseFileName(disposition, fallbackName);
+    const fromHeader = parseFileName(disposition, fallbackName);
+    const fileName =
+      preferredName ||
+      (fromHeader && !looksLikeMojibake(fromHeader) ? fromHeader : fallbackName);
 
     let blob: Blob;
 
