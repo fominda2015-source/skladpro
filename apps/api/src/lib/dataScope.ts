@@ -103,7 +103,10 @@ export function stockMovementWhereFromScope(scope: DataScope): Prisma.StockMovem
     return {
       OR: scope.sectionScopes.map((s) => ({
         warehouseId: s.warehouseId,
-        section: s.section
+        OR: [
+          { operation: { is: { section: s.section, warehouseId: s.warehouseId } } },
+          { issueRequest: { is: { section: s.section, warehouseId: s.warehouseId } } }
+        ]
       }))
     };
   }
