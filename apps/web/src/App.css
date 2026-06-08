@@ -2233,6 +2233,39 @@ tr.low {
   flex-wrap: wrap;
 }
 
+.limitGroupRow--homeDrill {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.limitGroupRowMain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.limitGroupRowBars {
+  margin-left: auto;
+  flex: 0 1 280px;
+  min-width: 160px;
+  max-width: 320px;
+}
+
+.homeDrillTabEmbed .limitGroupRow--homeDrill {
+  flex-wrap: wrap;
+}
+
+@media (min-width: 720px) {
+  .homeDrillTabEmbed .limitGroupRow--homeDrill {
+    flex-wrap: nowrap;
+  }
+}
+
 .limitMaterialRow {
   border: 1px solid #edf1f7;
   border-radius: 14px;

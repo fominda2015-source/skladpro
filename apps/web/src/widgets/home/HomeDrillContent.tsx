@@ -3,6 +3,7 @@ import { API_URL } from "../../app/constants";
 import { LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { LimitStructureBars } from "../limits/LimitStructureBars";
+import { limitNodeArrivedQty } from "../limits/limitReceiptMetrics";
 import { receiptStatusLabel, receiptStatusTone } from "../receipts/receiptLabels";
 import { formatMaterialQty } from "../../shared/quantity";
 import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
@@ -176,13 +177,14 @@ function HomeDrillLimitsPanel({
     <div className="homeDrillStack homeDrillTabEmbed limitsWorkspace">
       <div className="toolbar" style={{ justifyContent: "space-between" }}>
         <span className="muted">
-          Раздел {section === "SS" ? "СС" : "ЭОМ"} · {templates.length} шаблон(ов)
+          Раздел {section === "SS" ? "СС" : "ЭОМ"} · {templates.length ? "активный лимит" : "нет"}
+          {templates.length > 1 ? ` · ${templates.length - 1} в архиве` : ""}
         </span>
         <button type="button" className="ghostBtn" onClick={() => void load()}>
           ↻ Обновить
         </button>
       </div>
-      {templates.map((tpl) => {
+      {templates.slice(0, 1).map((tpl) => {
         const childrenByParent = new Map<string, LimitImportNode[]>();
         for (const n of tpl.nodes) {
           const key = n.parentId || "__root__";
@@ -193,13 +195,22 @@ function HomeDrillLimitsPanel({
         }
         const roots = (childrenByParent.get("__root__") || []).sort((a, b) => a.orderNo - b.orderNo);
 
+        const materialArrived = (node: LimitImportNode) =>
+          limitNodeArrivedQty(node.id, node.materialId, {}, node.materialId ? supplyByMaterial[node.materialId] : null);
+
+        const materialIssued = (node: LimitImportNode) => {
+          const fromNode = Number(node.issuedQty || 0);
+          if (!node.materialId) return fromNode;
+          return Math.max(fromNode, Number(issuedByMaterial[node.materialId] || 0));
+        };
+
         const renderNode = (node: LimitImportNode, depth: number): ReactNode => {
           const children = childrenByParent.get(node.id) || [];
           const isGroup = node.nodeType === "GROUP";
           const isExpanded = expanded[node.id] === true;
           const planned = Number(node.plannedQty || 0);
-          const issued = node.materialId ? Number(issuedByMaterial[node.materialId] || 0) : 0;
-          const arrived = node.materialId ? Number(supplyByMaterial[node.materialId]?.arrivedQty || 0) : 0;
+          const issued = materialIssued(node);
+          const arrived = materialArrived(node);
           const isOver = planned > 0 && issued > planned;
           const directMaterials = children.filter((c) => c.nodeType === "MATERIAL");
           const childGroups = children.filter((c) => c.nodeType === "GROUP");
@@ -213,12 +224,9 @@ function HomeDrillLimitsPanel({
                 const n = tpl.nodes.find((x) => x.id === id);
                 if (!n) return;
                 if (n.nodeType === "MATERIAL") {
-                  const p = Number(n.plannedQty || 0);
-                  plan += p;
-                  if (n.materialId) {
-                    arr += Number(supplyByMaterial[n.materialId]?.arrivedQty || 0);
-                    iss += Number(issuedByMaterial[n.materialId] || 0);
-                  }
+                  plan += Number(n.plannedQty || 0);
+                  arr += materialArrived(n);
+                  iss += materialIssued(n);
                   return;
                 }
                 for (const ch of childrenByParent.get(id) || []) walk(ch.id);
@@ -226,10 +234,14 @@ function HomeDrillLimitsPanel({
               walk(node.id);
               return { plan, arrived: arr, issued: iss };
             })();
+            const groupArrivedPct =
+              agg.plan > 0 ? Math.min(100, Math.round((agg.arrived / agg.plan) * 100)) : 0;
+            const groupIssuedPct =
+              agg.plan > 0 ? Math.min(100, Math.round((agg.issued / agg.plan) * 100)) : 0;
 
             return (
               <div key={node.id} style={{ marginLeft: depth * 10, marginTop: depth ? 2 : 4 }}>
-                <div className="limitGroupRow" style={{ gap: 6, padding: "4px 0" }}>
+                <div className="limitGroupRow limitGroupRow--homeDrill">
                   <button
                     type="button"
                     className="ghostBtn"
@@ -239,18 +251,21 @@ function HomeDrillLimitsPanel({
                   >
                     {children.length ? (isExpanded ? "▾" : "▸") : "•"}
                   </button>
-                  <strong style={{ color: "#243656" }}>{safeName(node.title)}</strong>
+                  <div className="limitGroupRowMain">
+                    <strong style={{ color: "#243656" }}>{safeName(node.title)}</strong>
+                    {agg.plan > 0 ? (
+                      <span className="muted limitGroupMetrics" style={{ fontSize: 11 }}>
+                        приход {metricFmt(agg.arrived)} / {metricFmt(agg.plan)} ({groupArrivedPct}%) · выдача{" "}
+                        {metricFmt(agg.issued)} / {metricFmt(agg.plan)} ({groupIssuedPct}%)
+                      </span>
+                    ) : null}
+                  </div>
                   {agg.plan > 0 ? (
-                    <span className="muted" style={{ fontSize: 11 }}>
-                      {metricFmt(agg.issued)} / {metricFmt(agg.plan)}
-                    </span>
+                    <div className="limitGroupRowBars">
+                      <LimitStructureBars plan={agg.plan} issued={agg.issued} arrived={agg.arrived} compact />
+                    </div>
                   ) : null}
                 </div>
-                {isExpanded && agg.plan > 0 ? (
-                  <div style={{ margin: "4px 0 6px", paddingLeft: 36, maxWidth: 420 }}>
-                    <LimitStructureBars plan={agg.plan} issued={agg.issued} arrived={agg.arrived} compact />
-                  </div>
-                ) : null}
                 {isExpanded && directMaterials.length > 0 ? (
                   <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
                     <table className="limitMaterialsTable">
@@ -271,8 +286,8 @@ function HomeDrillLimitsPanel({
                         {directMaterials.map((m) => {
                           const plan = Number(m.plannedQty || 0);
                           const sm = m.materialId ? supplyByMaterial[m.materialId] : undefined;
-                          const arr = sm?.arrivedQty ?? 0;
-                          const iss = m.materialId ? Number(issuedByMaterial[m.materialId] || 0) : 0;
+                          const arr = materialArrived(m);
+                          const iss = materialIssued(m);
                           const onOrd = sm?.onOrderQty ?? 0;
                           const stk = sm?.stockQty ?? 0;
                           const remain = Math.max(0, plan - arr);
