@@ -2976,6 +2976,8 @@ tr.low {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 .chatEmojiPickerBtn {
   width: 100%;
