@@ -2106,6 +2106,36 @@ function App() {
     void applyWorkspaceSection(next);
   }
 
+  function renderAppChromeSearch() {
+    return (
+      <div className="appChromeSearch">
+        <input
+          className="globalSearchInput"
+          placeholder="Поиск…"
+          value={globalSearch}
+          onChange={(e) => setGlobalSearch(e.target.value)}
+          aria-label="Глобальный поиск"
+        />
+        <button
+          type="button"
+          className="appChromeSearchBtn"
+          onClick={() => {
+            setQ(globalSearch);
+            setToolSearch(globalSearch);
+            setActiveTab("warehouse");
+          }}
+        >
+          Найти
+        </button>
+        {canReadTools ? (
+          <button type="button" className="appChromeSearchBtn appChromeSearchBtnSecondary" onClick={() => setActiveTab("qr")}>
+            QR
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderWorkspaceContextPanel() {
     const tabFilter =
       isAllObjectsView && activeTab !== "stocks"
@@ -2128,6 +2158,7 @@ function App() {
         hideObjectSelect={activeTab === "stocks"}
         tabFilter={tabFilter}
         layout="inline"
+        middleSlot={renderAppChromeSearch()}
       />
     );
   }
@@ -6028,31 +6059,7 @@ function App() {
               ☰
             </button>
             <p className="appChromeTabTitle">{currentTitle}</p>
-            <div className="appChromeSearch">
-              <input
-                className="globalSearchInput"
-                placeholder="Поиск…"
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                aria-label="Глобальный поиск"
-              />
-              <button
-                type="button"
-                className="appChromeSearchBtn"
-                onClick={() => {
-                  setQ(globalSearch);
-                  setToolSearch(globalSearch);
-                  setActiveTab("warehouse");
-                }}
-              >
-                Найти
-              </button>
-              {canReadTools ? (
-                <button type="button" className="appChromeSearchBtn appChromeSearchBtnSecondary" onClick={() => setActiveTab("qr")}>
-                  QR
-                </button>
-              ) : null}
-            </div>
+            {!showWorkspaceContext ? renderAppChromeSearch() : null}
             {me ? (
               <UserAccountMenu
                 fullName={me.fullName}

@@ -324,7 +324,7 @@
   align-items: center;
   gap: 6px;
   flex: 0 1 auto;
-  margin-left: auto;
+  margin-left: 0;
   min-width: 0;
 }
 
@@ -361,12 +361,20 @@
 }
 
 .appChrome .userAccountMenu {
-  margin-left: 0;
+  margin-left: auto;
   flex: 0 0 auto;
 }
 
 .appChrome .userAccountMenuTrigger {
-  height: 34px;
+  height: 42px;
+  padding: 4px;
+  border-radius: 999px;
+}
+
+.appChrome .userAccountMenuAvatar {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
 }
 
 @media (min-width: 901px) {
@@ -576,7 +584,7 @@ button:hover {
 }
 
 .workspaceContextBar--inline .workspaceContextSection--accent {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .workspaceContextSection--accent .workspaceContextLabel {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
 
 type ObjectOption = { id: string; name: string };
@@ -19,6 +20,7 @@ type Props = {
   hideObjectSelect?: boolean;
   tabFilter?: TabFilterProps;
   layout?: "stacked" | "inline";
+  middleSlot?: ReactNode;
 };
 
 export function WorkspaceContextBar(props: Props) {
@@ -31,7 +33,8 @@ export function WorkspaceContextBar(props: Props) {
     onSelectSection,
     hideObjectSelect = false,
     tabFilter,
-    layout = "inline"
+    layout = "inline",
+    middleSlot
   } = props;
 
   return (
@@ -80,6 +83,7 @@ export function WorkspaceContextBar(props: Props) {
           </select>
         </label>
       ) : null}
+      {middleSlot}
       <div className="workspaceContextSection workspaceContextSection--accent">
         <span className="workspaceContextLabel">Раздел</span>
         <div
