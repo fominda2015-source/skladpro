@@ -43,7 +43,8 @@ import {
 } from "../lib/receiptQty.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
-import { findReceiptInvoiceDoc, syncReceiptItemToLimitTemplate } from "../lib/receiptLimitSync.js";
+import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
+import { buildMaterialUpdatesFromReceiptItem, parseReceiptStoragePlace } from "../lib/receiptMaterialApply.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 
@@ -70,6 +71,11 @@ const receiptItemCategorySchema = z.enum([
   "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
+  "CAMP_CONTAINER_CABIN",
+  "CAMP_FURNITURE",
+  "CAMP_OFFICE_EQUIPMENT",
+  "CAMP_APPLIANCES",
+  "CAMP_OTHER",
   "OTHER"
 ]);
 
@@ -513,6 +519,7 @@ receiptRequestsRouter.post(
     }
 
     try {
+      const hasLimitPath = items.some((i) => Boolean(i.limitSectionPath?.trim()));
       // Опциональная привязка к шаблону лимита (если уже передали при загрузке).
       let attachedTemplateId: string | undefined;
       if (parsed.data.objectLimitTemplateId) {
@@ -523,7 +530,16 @@ receiptRequestsRouter.post(
           attachedTemplateId = tpl.id;
         }
       }
-      const fromLimitFlag = parsed.data.fromLimit === "1" || parsed.data.fromLimit === "true" || Boolean(attachedTemplateId);
+      if (!attachedTemplateId && hasLimitPath) {
+        const activeTpl = await prisma.objectLimitTemplate.findFirst({
+          where: { warehouseId: parsed.data.warehouseId, section: parsed.data.section },
+          orderBy: { createdAt: "desc" },
+          select: { id: true }
+        });
+        if (activeTpl) attachedTemplateId = activeTpl.id;
+      }
+      const fromLimitFlag =
+        parsed.data.fromLimit === "1" || parsed.data.fromLimit === "true" || Boolean(attachedTemplateId);
 
       const created = await prisma.$transaction(async (tx) => {
         const receipt = await tx.receiptRequest.create({
@@ -1190,6 +1206,32 @@ receiptRequestsRouter.post(
             acceptedQty: r.acceptedQty
           });
           r.limitNodeId = limitNodeId;
+        } else if (!campCategory && !row.fromLimit && !row.objectLimitTemplateId && r.materialId) {
+          const activeTemplateId = await getActiveLimitTemplateId(tx, row.warehouseId, row.section);
+          if (activeTemplateId) {
+            const meta = analyzeCatalogNames(
+              r.item.sourceName,
+              r.item.namePartD || "",
+              r.item.namePartE || "",
+              r.item.limitCatalogNameN || "",
+              r.item.limitCatalogNameO || "",
+              r.item.externalComment || ""
+            );
+            const oobNodeId = await tryBindItemToOutOfBudgetSection(tx, activeTemplateId, {
+              limitSectionPath: r.item.limitSectionPath,
+              namePartC: r.item.sourceName,
+              limitCatalogNameN: r.item.limitCatalogNameN,
+              limitCatalogNameO: r.item.limitCatalogNameO,
+              renameLimitToO: false,
+              limitDisplayName: meta.limitDisplayName,
+              nameAlertNote: meta.nameAlertNote
+            });
+            if (oobNodeId) {
+              limitNodeId = oobNodeId;
+              r.limitNodeId = oobNodeId;
+              await attachMaterialToLimitNode(tx, oobNodeId, r.materialId);
+            }
+          }
         } else if (!campCategory && limitNodeId && r.materialId) {
           await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
         }
@@ -1240,13 +1282,22 @@ receiptRequestsRouter.post(
 
         if (!r.materialId) continue;
 
+        const unitPrice =
+          mapping?.unitPrice != null
+            ? mapping.unitPrice
+            : r.item.unitPrice != null
+              ? Number(r.item.unitPrice)
+              : null;
+        const storagePlaceRaw = mapping?.storagePlace ?? r.item.storagePlace ?? null;
         const toolSection = receiptCategoryToToolSection(itemCategory);
-        if (toolSection) {
+        const materialPatch = buildMaterialUpdatesFromReceiptItem(itemCategory, toolSection, unitPrice);
+        if (Object.keys(materialPatch).length > 0) {
           await tx.material.update({
             where: { id: r.materialId },
-            data: { toolCatalogSection: toolSection }
+            data: materialPatch
           });
         }
+        const { storageRoom, storageCell } = parseReceiptStoragePlace(storagePlaceRaw);
         if (!operation || parsed.data.skipWarehouseStock) continue;
         await tx.stock.upsert({
           where: {
@@ -1263,9 +1314,15 @@ receiptRequestsRouter.post(
             materialId: r.materialId,
             condition: StockCondition.NEW,
             quantity: r.acceptedQty,
-            reserved: 0
+            reserved: 0,
+            storageRoom,
+            storageCell
           },
-          update: { quantity: { increment: r.acceptedQty } }
+          update: {
+            quantity: { increment: r.acceptedQty },
+            ...(storageRoom ? { storageRoom } : {}),
+            ...(storageCell ? { storageCell } : {})
+          }
         });
         await tx.stockMovement.create({
           data: {

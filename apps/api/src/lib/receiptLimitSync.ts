@@ -62,6 +62,89 @@ export function findMaterialNodeByLimitPath(
   return inScope ?? null;
 }
 
+/** Раздел «товары вне бюджета» в шаблоне лимита (по названию группы). */
+export function isOutOfBudgetGroupTitle(title: string | null | undefined): boolean {
+  const k = normNameKey(String(title || ""));
+  return (k.includes("вне") && k.includes("бюджет")) || (k.includes("товар") && k.includes("вне"));
+}
+
+function collectDescendantIds(rootId: string, nodes: Array<{ id: string; parentId: string | null }>): Set<string> {
+  const out = new Set<string>([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const n of nodes) {
+      if (n.parentId && out.has(n.parentId) && !out.has(n.id)) {
+        out.add(n.id);
+        changed = true;
+      }
+    }
+  }
+  return out;
+}
+
+function materialNameMatches(node: TreeNode, nameKeys: string[]): boolean {
+  const mn = normNameKey(node.materialName || node.title);
+  return nameKeys.some(
+    (k) => k === mn || (k.length > 8 && mn.includes(k)) || (mn.length > 8 && k.includes(mn))
+  );
+}
+
+/** Поиск материала в поддереве «товары вне бюджета» по наименованию. */
+export function findOutOfBudgetMaterialNode(nodes: TreeNode[], nameKeys: string[]): TreeNode | null {
+  const keys = nameKeys.map(normNameKey).filter(Boolean);
+  if (!keys.length) return null;
+
+  const groups = nodes.filter((n) => n.nodeType === "GROUP" && isOutOfBudgetGroupTitle(n.title));
+  if (!groups.length) return null;
+
+  const materials = nodes.filter((n) => n.nodeType === "MATERIAL");
+  for (const group of groups) {
+    const scopeIds = collectDescendantIds(group.id, nodes);
+    const hit = materials.find((m) => m.parentId && scopeIds.has(m.parentId) && materialNameMatches(m, keys));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export async function getActiveLimitTemplateId(
+  tx: Tx,
+  warehouseId: string,
+  section: "SS" | "EOM"
+): Promise<string | null> {
+  const tpl = await tx.objectLimitTemplate.findFirst({
+    where: { warehouseId, section },
+    orderBy: { createdAt: "desc" },
+    select: { id: true }
+  });
+  return tpl?.id ?? null;
+}
+
+export async function tryBindItemToOutOfBudgetSection(
+  tx: Tx,
+  templateId: string,
+  item: ReceiptLimitSyncInput
+): Promise<string | null> {
+  const nodes = await tx.objectLimitNode.findMany({
+    where: { templateId },
+    select: {
+      id: true,
+      parentId: true,
+      nodeType: true,
+      title: true,
+      materialName: true
+    }
+  });
+  const searchNames = [
+    item.namePartC,
+    item.limitCatalogNameN || "",
+    item.limitCatalogNameO || "",
+    item.limitDisplayName
+  ];
+  const node = findOutOfBudgetMaterialNode(nodes, searchNames);
+  return node?.id ?? null;
+}
+
 export type ReceiptLimitSyncInput = {
   limitSectionPath: string | null;
   namePartC: string;

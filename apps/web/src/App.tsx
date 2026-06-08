@@ -3358,10 +3358,13 @@ function App() {
         : created.detectedOrderNumber && !created.externalOrderNumber
           ? ` · номер в файле: ${created.detectedOrderNumber}`
           : "";
-    setOpsMessage(`Заявка ${created.number} загружена (${created.items?.length || 0} поз.)${orderHint}`);
+    setOpsMessage(
+      created.fromLimit && created.objectLimitTemplateId
+        ? `Заявка ${created.number} загружена (${created.items?.length || 0} поз.) · привязана к активному лимиту${orderHint}`
+        : `Заявка ${created.number} загружена (${created.items?.length || 0} поз.)${orderHint}`
+    );
     setReceiptRequestFile(null);
     setLimitPromptTemplateId("");
-    setLimitPromptRequest(created);
     await loadReceiptRequests();
   }
 
@@ -6932,7 +6935,7 @@ function App() {
                         type="button"
                         className="ghostBtn"
                         onClick={() => {
-                          setLimitPromptTemplateId(row.objectLimitTemplateId || "");
+                          setLimitPromptTemplateId(row.objectLimitTemplateId || limitTemplates[0]?.id || "");
                           setLimitPromptRequest(row);
                         }}
                       >
@@ -12415,13 +12418,33 @@ function App() {
               </button>
             </div>
             <p className="muted">
-              Заявка <strong>{limitPromptRequest.number}</strong> загружена.
-              Можно привязать её к одному из шаблонов лимита этого объекта/раздела —
-              тогда при приёмке будут предлагаться названия материалов из лимита. Связь с лимитом можно изменить позже в
-              списке заявок.
+              Заявка <strong>{limitPromptRequest.number}</strong>.
+              {limitPromptRequest.fromLimit || limitPromptRequest.objectLimitTemplateId ? (
+                <>
+                  {" "}
+                  Заявка из лимита — привязка к <strong>активному</strong> шаблону лимита этого объекта.
+                </>
+              ) : (
+                <>
+                  {" "}
+                  Можно привязать к шаблону лимита или оставить «Не из лимита» — при приёмке система проверит раздел
+                  «товары вне бюджета» в активном лимите.
+                </>
+              )}
             </p>
-            {limitTemplates.length === 0 ? (
-              <p className="muted">На объекте нет шаблонов лимита — только вариант «Не из лимита» или закройте окно.</p>
+            {limitPromptRequest.fromLimit || limitPromptRequest.objectLimitTemplateId ? (
+              <p className="muted">
+                Шаблон:{" "}
+                <strong>
+                  {safeName(
+                    limitTemplates.find((t) => t.id === limitPromptRequest.objectLimitTemplateId)?.title ||
+                      limitTemplates[0]?.title ||
+                      "активный лимит"
+                  )}
+                </strong>
+              </p>
+            ) : limitTemplates.length === 0 ? (
+              <p className="muted">На объекте нет шаблонов лимита — только «Не из лимита».</p>
             ) : (
               <label>
                 Шаблон лимита
@@ -12433,6 +12456,7 @@ function App() {
                   {limitTemplates.map((t) => (
                     <option key={`limit-prompt-${t.id}`} value={t.id}>
                       {safeName(t.title)}
+                      {t.id === limitTemplates[0]?.id ? " (активный)" : ""}
                     </option>
                   ))}
                 </select>
@@ -12462,16 +12486,23 @@ function App() {
                 type="button"
                 onClick={() => {
                   void (async () => {
-                    const ok = await attachReceiptRequestToLimit(
-                      limitPromptRequest.id,
-                      limitPromptTemplateId || null
-                    );
+                    const templateId =
+                      limitPromptRequest.fromLimit || limitPromptRequest.objectLimitTemplateId
+                        ? limitPromptRequest.objectLimitTemplateId || limitTemplates[0]?.id || null
+                        : limitPromptTemplateId || null;
+                    const ok = await attachReceiptRequestToLimit(limitPromptRequest.id, templateId);
                     if (ok) setLimitPromptRequest(null);
                   })();
                 }}
-                disabled={!limitPromptTemplateId}
+                disabled={
+                  !(limitPromptRequest.fromLimit || limitPromptRequest.objectLimitTemplateId
+                    ? limitTemplates[0]?.id || limitPromptRequest.objectLimitTemplateId
+                    : limitPromptTemplateId)
+                }
               >
-                Привязать к лимиту
+                {limitPromptRequest.fromLimit || limitPromptRequest.objectLimitTemplateId
+                  ? "К активному лимиту"
+                  : "Привязать к лимиту"}
               </button>
             </div>
           </div>
