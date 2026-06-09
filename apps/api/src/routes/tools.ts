@@ -282,6 +282,7 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
       : tools;
   const groupMiscByName =
     categorySlugParam === TOOL_CATEGORY_SLUGS.OTHER ||
+    categorySlugParam === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.PPE ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.KIP ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
@@ -829,6 +830,7 @@ const catalogSectionSchema = z.enum([
   "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
+  "TOWERS_LADDERS",
   "OTHER"
 ]);
 
@@ -867,7 +869,7 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
       inRepair: subset.filter((t) => t.status === ToolStatus.IN_REPAIR).length
     };
   };
-  const materialSections: ToolCatalogSection[] = ["PPE", "TOOL_CONSUMABLE", "KIP", "OTHER"];
+  const materialSections: ToolCatalogSection[] = ["PPE", "TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"];
   const stocks = await prisma.stock.findMany({
     where: {
       ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
@@ -920,6 +922,16 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
       return {
         count: matCounts.KIP.count + t.count,
         qty: matCounts.KIP.qty,
+        inStock: t.inStock,
+        issued: t.issued,
+        inRepair: t.inRepair
+      };
+    })(),
+    towersLadders: (() => {
+      const t = countBySlug([TOOL_CATEGORY_SLUGS.TOWERS_LADDERS]);
+      return {
+        count: matCounts.TOWERS_LADDERS.count + t.count,
+        qty: matCounts.TOWERS_LADDERS.qty,
         inStock: t.inStock,
         issued: t.issued,
         inRepair: t.inRepair
@@ -1028,7 +1040,7 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
 });
 
 const catalogMaterialSectionPatchSchema = z.object({
-  toolCatalogSection: z.enum(["PPE", "TOOL_CONSUMABLE", "KIP", "OTHER"]).nullable()
+  toolCatalogSection: z.enum(["PPE", "TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"]).nullable()
 });
 
 toolsRouter.patch(
@@ -1056,6 +1068,7 @@ toolsRouter.patch(
       PPE: "СИЗ",
       TOOL_CONSUMABLE: "Расходники",
       KIP: "КИП",
+      TOWERS_LADDERS: "Туры и стремянки",
       OTHER: "Прочее"
     };
     const from = existing.toolCatalogSection

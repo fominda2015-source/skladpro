@@ -112,6 +112,7 @@ const receiptItemCategorySchema = z.enum([
   "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
+  "TOWERS_LADDERS",
   "CAMP_CONTAINER_CABIN",
   "CAMP_FURNITURE",
   "CAMP_OFFICE_EQUIPMENT",

@@ -7,6 +7,7 @@ export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
 export const PPE_TOOL_CATEGORY = "СИЗ";
 export const TOOL_CONSUMABLE_CATEGORY = "Расходники для инструмента";
 export const KIP_TOOL_CATEGORY = "КИП";
+export const TOWERS_LADDERS_TOOL_CATEGORY = "Туры и стремянки";
 export const OTHER_TOOL_CATEGORY = "Прочее";
 
 /** Не категории — подписи статусов; такие строки в справочнике не показываем. */
@@ -74,8 +75,11 @@ export function isManualToolCategory(name?: string | null) {
 export function isMiscToolCategory(cat?: { name?: string | null; slug?: string | null } | null) {
   if (!cat) return false;
   const slug = String(cat.slug || "").toLowerCase();
-  if (slug === TOOL_CATEGORY_SLUGS.OTHER) return true;
-  return String(cat.name || "").trim().toLowerCase() === OTHER_TOOL_CATEGORY.toLowerCase();
+  if (slug === TOOL_CATEGORY_SLUGS.OTHER || slug === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS) return true;
+  const name = String(cat.name || "").trim().toLowerCase();
+  return (
+    name === OTHER_TOOL_CATEGORY.toLowerCase() || name === TOWERS_LADDERS_TOOL_CATEGORY.toLowerCase()
+  );
 }
 
 export function isMiscToolCategoryId(categoryId: string, categories: ToolCategoryLike[]) {

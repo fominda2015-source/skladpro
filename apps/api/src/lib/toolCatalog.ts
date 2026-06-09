@@ -9,6 +9,7 @@ export const TOOL_CATEGORY_SLUGS = {
   PPE: "tool-ppe",
   TOOL_CONSUMABLE: "tool-consumable",
   KIP: "tool-kip",
+  TOWERS_LADDERS: "tool-towers-ladders",
   OTHER: "tool-other"
 } as const;
 
@@ -19,6 +20,7 @@ export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
 export const PPE_TOOL_CATEGORY = "СИЗ";
 export const TOOL_CONSUMABLE_CATEGORY = "Расходники для инструмента";
 export const KIP_TOOL_CATEGORY = "КИП";
+export const TOWERS_LADDERS_TOOL_CATEGORY = "Туры и стремянки";
 export const OTHER_TOOL_CATEGORY = "Прочее";
 
 export const ALL_TOOL_CATEGORY_SLUGS = new Set<string>(Object.values(TOOL_CATEGORY_SLUGS));
@@ -111,6 +113,7 @@ export function receiptCategoryToToolSection(
     PPE: "PPE",
     TOOL_CONSUMABLE: "TOOL_CONSUMABLE",
     KIP: "KIP",
+    TOWERS_LADDERS: "TOWERS_LADDERS",
     OTHER: "OTHER"
   };
   return map[cat] ?? null;
@@ -130,6 +133,8 @@ export function toolSectionToCategorySlugs(section: ToolCatalogSection): string[
       return [TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE];
     case "KIP":
       return [TOOL_CATEGORY_SLUGS.KIP];
+    case "TOWERS_LADDERS":
+      return [TOOL_CATEGORY_SLUGS.TOWERS_LADDERS];
     case "OTHER":
       return [TOOL_CATEGORY_SLUGS.OTHER];
     default:
@@ -169,7 +174,13 @@ export async function ensureDefaultToolCategories() {
       order: 6
     },
     { name: KIP_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.KIP, icon: "📊", order: 7 },
-    { name: OTHER_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.OTHER, icon: "📁", order: 8 }
+    {
+      name: TOWERS_LADDERS_TOOL_CATEGORY,
+      slug: TOOL_CATEGORY_SLUGS.TOWERS_LADDERS,
+      icon: "🪜",
+      order: 8
+    },
+    { name: OTHER_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.OTHER, icon: "📁", order: 9 }
   ];
   const idBySlug = new Map<string, string>();
   for (const row of rows.filter((r) => !r.parentSlug)) {

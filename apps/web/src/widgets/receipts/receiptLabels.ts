@@ -28,6 +28,7 @@ export type ReceiptItemCategory =
   | "PPE"
   | "TOOL_CONSUMABLE"
   | "KIP"
+  | "TOWERS_LADDERS"
   | "CAMP_CONTAINER_CABIN"
   | "CAMP_FURNITURE"
   | "CAMP_OFFICE_EQUIPMENT"
@@ -45,6 +46,7 @@ export const RECEIPT_ITEM_CATEGORIES: ReceiptItemCategory[] = [
   "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
+  "TOWERS_LADDERS",
   "CAMP_CONTAINER_CABIN",
   "CAMP_FURNITURE",
   "CAMP_OFFICE_EQUIPMENT",
@@ -65,6 +67,7 @@ export function receiptItemCategoryLabel(cat: ReceiptItemCategory | string | nul
       PPE: "СИЗ",
       TOOL_CONSUMABLE: "Расходники для инструмента",
       KIP: "КИП",
+      TOWERS_LADDERS: "Туры и стремянки",
       CAMP_CONTAINER_CABIN: "Городок · бытовки/контейнеры",
       CAMP_FURNITURE: "Городок · мебель",
       CAMP_OFFICE_EQUIPMENT: "Городок · оргтехника",

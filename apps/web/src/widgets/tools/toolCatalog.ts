@@ -8,6 +8,7 @@ export type ToolsNavId =
   | "ppe"
   | "tool-consumable"
   | "kip"
+  | "towers-ladders"
   | "other";
 
 export type ToolCatalogSummary = {
@@ -18,6 +19,7 @@ export type ToolCatalogSummary = {
   ppe: { count: number; qty: number };
   toolConsumable: { count: number; qty: number };
   kip: { count: number; qty: number };
+  towersLadders: { count: number; qty: number };
   other: { count: number; qty: number };
 };
 
@@ -51,6 +53,7 @@ export function buildToolsHubStats(summary: ToolCatalogSummary): Record<string, 
     ppe: summary.ppe,
     "tool-consumable": summary.toolConsumable,
     kip: summary.kip,
+    "towers-ladders": summary.towersLadders,
     other: summary.other
   };
 }
@@ -74,6 +77,7 @@ export const TOOL_CATEGORY_SLUGS = {
   PPE: "tool-ppe",
   TOOL_CONSUMABLE: "tool-consumable",
   KIP: "tool-kip",
+  TOWERS_LADDERS: "tool-towers-ladders",
   OTHER: "tool-other"
 } as const;
 
@@ -100,6 +104,7 @@ export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Средства индивидуальной защиты" },
   { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Пики, диски, оснастка" },
   { id: "kip", label: "КИП", icon: "📊", hint: "Контрольно-измерительные приборы" },
+  { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Вышки-туры, стремянки" },
   { id: "other", label: "Прочее", icon: "📁" }
 ];
 
@@ -108,6 +113,7 @@ export const CATALOG_MATERIAL_SECTIONS = [
   { value: "PPE" as const, label: "СИЗ" },
   { value: "TOOL_CONSUMABLE" as const, label: "Расходники" },
   { value: "KIP" as const, label: "КИП" },
+  { value: "TOWERS_LADDERS" as const, label: "Туры и стремянки" },
   { value: "OTHER" as const, label: "Прочее" }
 ];
 
@@ -142,6 +148,7 @@ export function navToCategorySlug(nav: ToolsNavId): string | null {
   if (nav === "ppe") return TOOL_CATEGORY_SLUGS.PPE;
   if (nav === "tool-consumable") return TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
   if (nav === "kip") return TOOL_CATEGORY_SLUGS.KIP;
+  if (nav === "towers-ladders") return TOOL_CATEGORY_SLUGS.TOWERS_LADDERS;
   if (nav === "other") return TOOL_CATEGORY_SLUGS.OTHER;
   return null;
 }
@@ -170,6 +177,7 @@ export function navToMaterialSection(nav: ToolsNavId): string | null {
   if (nav === "ppe") return "PPE";
   if (nav === "tool-consumable") return "TOOL_CONSUMABLE";
   if (nav === "kip") return "KIP";
+  if (nav === "towers-ladders") return "TOWERS_LADDERS";
   if (nav === "other") return "OTHER";
   return null;
 }
@@ -183,7 +191,7 @@ export function isToolListNav(nav: ToolsNavId): boolean {
 }
 
 export function usesToolNameGroupCards(nav: ToolsNavId): boolean {
-  return nav === "other";
+  return nav === "other" || nav === "towers-ladders";
 }
 
 export function receiptCategoryToToolsNav(cat: string | null | undefined): ToolsNavId | null {
@@ -195,6 +203,7 @@ export function receiptCategoryToToolsNav(cat: string | null | undefined): Tools
     PPE: "ppe",
     TOOL_CONSUMABLE: "tool-consumable",
     KIP: "kip",
+    TOWERS_LADDERS: "towers-ladders",
     OTHER: "other"
   };
   return map[c] ?? null;

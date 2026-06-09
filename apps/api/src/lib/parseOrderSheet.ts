@@ -54,6 +54,13 @@ function mapProductCategory(raw: string): ReceiptItemCategory | null {
   if (s.includes("электр") && s.includes("инструмент")) return "TOOL_ELECTRIC_CORDLESS";
   if (s.includes("ручн") && s.includes("инструмент")) return "TOOL_MANUAL";
   if (s.includes("инструмент") && !s.includes("расход")) return "TOOL_MANUAL";
+  if (
+    s.includes("тур") ||
+    s.includes("стрем") ||
+    s.includes("вышк") ||
+    (s.includes("лестн") && !s.includes("лестнич"))
+  )
+    return "TOWERS_LADDERS";
   if (s.includes("прочее") || s.includes("проч")) return "OTHER";
   if (s.includes("расход")) return "CONSUMABLE";
   if (s.includes("оборуд")) return "EQUIPMENT";
