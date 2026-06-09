@@ -40,6 +40,16 @@ export function handlePrismaError(error: unknown) {
     if (error.code === "P2025") {
       return { status: 404, body: { error: "Entity not found", code: "NOT_FOUND" } };
     }
+    if (error.code === "P2028") {
+      return {
+        status: 503,
+        body: {
+          error: "TRANSACTION_TIMEOUT",
+          message:
+            "Операция заняла слишком много времени. Попробуйте принять без документов или меньше позиций за раз."
+        }
+      };
+    }
   }
   if (error instanceof Error && !config.isProduction) {
     return { status: 500, body: { error: "Internal server error", message: error.message } };

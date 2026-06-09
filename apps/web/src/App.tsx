@@ -963,6 +963,7 @@ function App() {
   const [acceptanceScans, setAcceptanceScans] = useState<Record<string, File | null>>({});
   const [acceptanceDocNumbers, setAcceptanceDocNumbers] = useState<Record<string, string>>({});
   const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
+  const [acceptanceErrors, setAcceptanceErrors] = useState<Record<string, string>>({});
   const [expandedReceiptIds, setExpandedReceiptIds] = useState<Record<string, boolean>>({});
   const [receiptAdminQtyDrafts, setReceiptAdminQtyDrafts] = useState<
     Record<string, Record<string, { acceptedQty: string; quantity: string }>>
@@ -3532,13 +3533,31 @@ function App() {
     if (legacyScan) filesToSend.push(legacyScan);
     for (const f of extraFiles) filesToSend.push(f);
     for (const f of filesToSend) form.append("scan", f);
+
+    setAcceptanceErrors((prev) => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
     setAcceptanceSubmitting((prev) => ({ ...prev, [row.id]: true }));
+
+    const fail = (msg: string) => {
+      setAcceptanceErrors((prev) => ({ ...prev, [row.id]: msg }));
+      setOpsMessage(msg);
+      return false;
+    };
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
+
     try {
       const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${row.id}/accept`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
-        body: form
+        body: form,
+        signal: controller.signal
       });
+
       if (!res.ok) {
         let serverMsg = "";
         let body: Record<string, unknown> = {};
@@ -3598,16 +3617,13 @@ function App() {
             return false;
           }
         }
-        setOpsMessage(
+        return fail(
           serverMsg ||
             (typeof body.message === "string" ? body.message : "") ||
-            "Не удалось провести приёмку"
+            `Не удалось провести приёмку (ошибка ${res.status})`
         );
-        return false;
       }
-      setOpsMessage(
-        `Приёмка по заявке ${row.number} проведена${skipStock ? " (без прихода на склад)" : ""}${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
-      );
+
       let acceptBody: { receiptRequest?: ReceiptRequestRow | null } = {};
       try {
         acceptBody = (await res.json()) as { receiptRequest?: ReceiptRequestRow | null };
@@ -3618,24 +3634,13 @@ function App() {
       if (serverRow) {
         applyReceiptRequestUpdate(serverRow);
       }
-      const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
-      let normalized =
-        syncedRows?.find((r) => r.id === row.id) ??
-        (serverRow ? applyReceiptRequestUpdate(serverRow) : applyReceiptRequestUpdate(row));
-      clearReceiptWorkspaceSession(row.warehouseId, row.section, row.id);
-      const openLeft = normalized.items.filter(isReceiptItemOpen).length;
-      if (openLeft > 0) {
-        setOpsMessage(
-          `Принято позиций: ${mappings.length}. По заявке ${row.number} осталось открытых позиций: ${openLeft}`
-        );
-      }
-      if (!isOpenReceiptRequest(normalized)) {
-        setExpandedReceiptIds((prev) => {
-          const next = { ...prev };
-          delete next[row.id];
-          return next;
-        });
-      }
+
+      setPendingAcceptanceRequestId(null);
+      setPendingAcceptanceFiles([]);
+      setOpsMessage(
+        `Приёмка по заявке ${row.number} проведена${skipStock ? " (без прихода на склад)" : ""}${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
+      );
+
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
         const rowDrafts = { ...(next[row.id] || {}) };
@@ -3664,24 +3669,55 @@ function App() {
         delete next[row.id];
         return next;
       });
-      await loadStocks(q);
-      await loadOperations();
-      if (row.objectLimitTemplateId || row.fromLimit) {
-        await loadLimitTemplates().catch(() => undefined);
-      }
-      await loadNotifications();
-      if (canReadTools) {
-        const hasToolNav = mappings.some((m) => receiptCategoryToToolsNav(m.category ?? null));
-        if (hasToolNav) {
-          await loadTools().catch(() => undefined);
+      clearReceiptWorkspaceSession(row.warehouseId, row.section, row.id);
+
+      void (async () => {
+        const syncedRows = await loadReceiptRequests(row.section, row.warehouseId);
+        const normalized =
+          syncedRows?.find((r) => r.id === row.id) ??
+          (serverRow ? applyReceiptRequestUpdate(serverRow) : undefined);
+        if (normalized) {
+          const openLeft = normalized.items.filter(isReceiptItemOpen).length;
+          if (openLeft > 0) {
+            setOpsMessage(
+              `Принято позиций: ${mappings.length}. По заявке ${row.number} осталось открытых позиций: ${openLeft}`
+            );
+          }
+          if (!isOpenReceiptRequest(normalized)) {
+            setExpandedReceiptIds((prev) => {
+              const next = { ...prev };
+              delete next[row.id];
+              return next;
+            });
+          }
         }
-      }
+        await Promise.all([
+          loadStocks(q).catch(() => undefined),
+          loadOperations().catch(() => undefined),
+          row.objectLimitTemplateId || row.fromLimit
+            ? loadLimitTemplates().catch(() => undefined)
+            : Promise.resolve(),
+          loadNotifications().catch(() => undefined),
+          canReadTools && mappings.some((m) => receiptCategoryToToolsNav(m.category ?? null))
+            ? loadTools().catch(() => undefined)
+            : Promise.resolve()
+        ]);
+      })();
+
       return true;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setOpsMessage(msg.includes("Failed to fetch") || msg.includes("NetworkError") ? "Сеть недоступна — проверьте подключение" : msg || "Не удалось провести приёмку");
-      return false;
+      const err = e as Error;
+      if (err.name === "AbortError") {
+        return fail("Превышено время ожидания (2 мин). Попробуйте без документов или обратитесь к администратору.");
+      }
+      const msg = err.message || String(e);
+      return fail(
+        msg.includes("Failed to fetch") || msg.includes("NetworkError")
+          ? "Сеть недоступна — проверьте подключение"
+          : msg || "Не удалось провести приёмку"
+      );
     } finally {
+      window.clearTimeout(timeoutId);
       setAcceptanceSubmitting((prev) => {
         const next = { ...prev };
         delete next[row.id];
@@ -5913,15 +5949,7 @@ function App() {
       return Number.isFinite(q) && q > 0;
     });
     const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
-    const acceptErr =
-      opsMessage &&
-      (opsMessage.includes("Не удалось") ||
-        opsMessage.includes("Ошибка") ||
-        opsMessage.includes("Internal server") ||
-        opsMessage.includes("категория") ||
-        opsMessage.includes("Сеть"))
-        ? opsMessage
-        : "";
+    const acceptErr = acceptanceErrors[row.id] || "";
     return (
       <div
         role="dialog"

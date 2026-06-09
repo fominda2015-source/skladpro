@@ -53,11 +53,46 @@ import {
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+async function persistReceiptAcceptScans(
+  files: Express.Multer.File[],
+  opts: { receiptId: string; operationId: string | null; userId: string }
+) {
+  for (const f of files) {
+    if (!f.buffer || !f.size) continue;
+    const displayName = decodeUploadedOriginalName(f.originalname);
+    const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+    await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
+    const checksum = crypto.createHash("sha256").update(f.buffer).digest("hex");
+    const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
+    const base = {
+      groupId: crypto.randomUUID(),
+      version: 1,
+      type: "upd-scan",
+      fileName: displayName,
+      filePath,
+      mimeType: f.mimetype,
+      size: f.size,
+      checksumSha256: checksum,
+      createdBy: opts.userId
+    };
+    await prisma.documentFile.create({
+      data: { ...base, entityType: "receipt", entityId: opts.receiptId }
+    });
+    if (opts.operationId) {
+      await prisma.documentFile.create({
+        data: { ...base, groupId: crypto.randomUUID(), entityType: "operation", entityId: opts.operationId }
+      });
+    }
+  }
+}
+
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
 if (!fs.existsSync(uploadDirAbs)) {
   fs.mkdirSync(uploadDirAbs, { recursive: true });
 }
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
 const uploadRequestSchema = z.object({
   warehouseId: z.string().min(1),
@@ -1001,7 +1036,12 @@ receiptRequestsRouter.post(
       }
       const bindLimitNodeId = m.limitNodeId ?? it.limitNodeId ?? null;
 
-      if (row.objectLimitTemplateId && !parsed.data.allowLimitOverage) {
+      const mappingCategory = m.category ?? it.category ?? null;
+      if (
+        row.objectLimitTemplateId &&
+        !parsed.data.allowLimitOverage &&
+        !isToolInventoryReceiptCategory(mappingCategory)
+      ) {
         const allTree = await prisma.objectLimitNode.findMany({
           where: { templateId: row.objectLimitTemplateId },
           select: { id: true, parentId: true, title: true, indexLabel: true }
@@ -1145,8 +1185,9 @@ receiptRequestsRouter.post(
         const remainingBefore = receiptItemRemaining(it);
         const acceptedQty = parsed.data.allowOverage ? m.acceptedQty : Math.min(m.acceptedQty, remainingBefore);
         if (acceptedQty <= 0) continue;
+        const toolInventory = isToolInventoryReceiptCategory(itemCategory);
         let materialId: string | undefined;
-        if (!campCategory) {
+        if (!campCategory && !toolInventory) {
           materialId = await resolveReceiptTargetMaterialId(tx, it, m);
           if (!materialId) {
             throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
@@ -1200,10 +1241,11 @@ receiptRequestsRouter.post(
         const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
         const itemCategory = mapping?.category ?? r.item.category ?? null;
         const campCategory = r.campCategory ?? receiptCategoryToCampCategory(itemCategory);
+        const toolInventory = isToolInventoryReceiptCategory(itemCategory);
 
         let limitNodeId = r.limitNodeId ?? r.item.limitNodeId ?? null;
         let cardName = r.item.sourceName;
-        if (!campCategory && r.materialId) {
+        if (!campCategory && !toolInventory && r.materialId) {
           const matRow = await tx.material.findUnique({
             where: { id: r.materialId },
             select: { name: true }
@@ -1219,7 +1261,7 @@ receiptRequestsRouter.post(
             ? (mapping?.factLabelUnit?.trim() || mapping?.newMaterialUnit?.trim() || r.sourceUnit || "шт")
             : null;
 
-        if (!campCategory && row.objectLimitTemplateId && r.materialId) {
+        if (!campCategory && !toolInventory && row.objectLimitTemplateId && r.materialId) {
           limitNodeId = await resolveReceiptAcceptLimitNode(tx, row.objectLimitTemplateId, r.item, {
             explicitLimitNodeId: mapping?.limitNodeId ?? null,
             materialId: r.materialId,
@@ -1227,7 +1269,7 @@ receiptRequestsRouter.post(
             acceptedQty: r.acceptedQty
           });
           r.limitNodeId = limitNodeId;
-        } else if (!campCategory && !row.fromLimit && !row.objectLimitTemplateId && r.materialId) {
+        } else if (!campCategory && !toolInventory && !row.fromLimit && !row.objectLimitTemplateId && r.materialId) {
           const activeTemplateId = await getActiveLimitTemplateId(tx, row.warehouseId, row.section);
           if (activeTemplateId) {
             const meta = analyzeCatalogNames(
@@ -1253,7 +1295,7 @@ receiptRequestsRouter.post(
               await attachMaterialToLimitNode(tx, oobNodeId, r.materialId);
             }
           }
-        } else if (!campCategory && limitNodeId && r.materialId) {
+        } else if (!campCategory && !toolInventory && limitNodeId && r.materialId) {
           await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
         }
 
@@ -1261,7 +1303,7 @@ receiptRequestsRouter.post(
         await tx.receiptRequestItem.update({
           where: { id: r.item.id },
           data: {
-            mappedMaterialId: campCategory ? null : r.materialId,
+            mappedMaterialId: campCategory || toolInventory ? null : r.materialId,
             acceptedQty: nextAcceptedQty,
             ...(limitNodeId ? { limitNodeId } : {}),
             ...(factLabel ? { factLabel, factUnit: factUnit || r.sourceUnit } : {}),
@@ -1301,7 +1343,7 @@ receiptRequestsRouter.post(
           continue;
         }
 
-        if (!r.materialId) continue;
+        if (!r.materialId && !toolInventory) continue;
 
         const unitPrice =
           mapping?.unitPrice != null
@@ -1310,16 +1352,7 @@ receiptRequestsRouter.post(
               ? Number(r.item.unitPrice)
               : null;
         const storagePlaceRaw = mapping?.storagePlace ?? r.item.storagePlace ?? null;
-        const toolSection = receiptCategoryToToolSection(itemCategory);
-        const materialPatch = buildMaterialUpdatesFromReceiptItem(itemCategory, toolSection, unitPrice);
-        if (Object.keys(materialPatch).length > 0) {
-          await tx.material.update({
-            where: { id: r.materialId },
-            data: materialPatch
-          });
-        }
 
-        const toolInventory = isToolInventoryReceiptCategory(itemCategory);
         if (toolInventory) {
           const categoryId = await resolveToolCategoryIdFromReceipt(tx, itemCategory);
           if (!categoryId) {
@@ -1343,15 +1376,28 @@ receiptRequestsRouter.post(
             userId: req.user!.userId,
             storagePlace: storagePlaceRaw
           });
+          continue;
+        }
+
+        const materialId = r.materialId;
+        if (!materialId) continue;
+
+        const toolSection = receiptCategoryToToolSection(itemCategory);
+        const materialPatch = buildMaterialUpdatesFromReceiptItem(itemCategory, toolSection, unitPrice);
+        if (Object.keys(materialPatch).length > 0) {
+          await tx.material.update({
+            where: { id: materialId },
+            data: materialPatch
+          });
         }
 
         const { storageRoom, storageCell } = parseReceiptStoragePlace(storagePlaceRaw);
-        if (!operation || parsed.data.skipWarehouseStock || toolInventory) continue;
+        if (!operation || parsed.data.skipWarehouseStock) continue;
         await tx.stock.upsert({
           where: {
             warehouseId_materialId_section_condition: {
               warehouseId: row.warehouseId,
-              materialId: r.materialId,
+              materialId,
               section: row.section,
               condition: StockCondition.NEW
             }
@@ -1359,7 +1405,7 @@ receiptRequestsRouter.post(
           create: {
             warehouseId: row.warehouseId,
             section: row.section,
-            materialId: r.materialId,
+            materialId,
             condition: StockCondition.NEW,
             quantity: r.acceptedQty,
             reserved: 0,
@@ -1375,7 +1421,7 @@ receiptRequestsRouter.post(
         await tx.stockMovement.create({
           data: {
             warehouseId: row.warehouseId,
-            materialId: r.materialId,
+            materialId,
             quantity: r.acceptedQty,
             direction: StockMovementDirection.IN,
             sourceDocumentType: "OPERATION",
@@ -1389,7 +1435,7 @@ receiptRequestsRouter.post(
           section: row.section,
           sourceName: r.item.sourceName,
           sourceUnit: r.item.sourceUnit || "",
-          targetMaterialId: r.materialId,
+          targetMaterialId: materialId,
           createdById: req.user!.userId
         });
         if (factLabel) {
@@ -1398,12 +1444,12 @@ receiptRequestsRouter.post(
             section: row.section,
             sourceName: factLabel,
             sourceUnit: factUnit || r.sourceUnit || "шт",
-            targetMaterialId: r.materialId,
+            targetMaterialId: materialId,
             createdById: req.user!.userId
           });
         }
 
-        if (row.objectLimitTemplateId && r.materialId && r.limitNodeId && mapping) {
+        if (row.objectLimitTemplateId && materialId && r.limitNodeId && mapping) {
           const allTree = await tx.objectLimitNode.findMany({
             where: { templateId: row.objectLimitTemplateId },
             select: { id: true, parentId: true, title: true, indexLabel: true }
@@ -1440,7 +1486,7 @@ receiptRequestsRouter.post(
           if (limitOver && limitOver.excessQty > 0) {
             const spreadId = mapping.spreadLimitNodeId;
             if (spreadId) {
-              await attachMaterialToLimitNode(tx, spreadId, r.materialId);
+              await attachMaterialToLimitNode(tx, spreadId, materialId);
               const spreadNode = await tx.objectLimitNode.findUnique({
                 where: { id: spreadId },
                 select: { plannedQty: true }
@@ -1462,49 +1508,6 @@ receiptRequestsRouter.post(
               });
             }
           }
-        }
-      }
-
-      // Сохраним опциональные сканы УПД/ТН и прикрепим каждый и к заявке, и к операции.
-      for (const f of files) {
-        if (!f.buffer || !f.size) continue;
-        const displayName = decodeUploadedOriginalName(f.originalname);
-        const safe = displayName.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const storedFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
-        await fs.promises.writeFile(path.join(uploadDirAbs, storedFileName), f.buffer);
-        const checksum = crypto.createHash("sha256").update(f.buffer).digest("hex");
-        const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
-        await tx.documentFile.create({
-          data: {
-            groupId: crypto.randomUUID(),
-            version: 1,
-            entityType: "receipt",
-            entityId: row.id,
-            type: "upd-scan",
-            fileName: displayName,
-            filePath,
-            mimeType: f.mimetype,
-            size: f.size,
-            checksumSha256: checksum,
-            createdBy: req.user!.userId
-          }
-        });
-        if (operation) {
-          await tx.documentFile.create({
-            data: {
-              groupId: crypto.randomUUID(),
-              version: 1,
-              entityType: "operation",
-              entityId: operation.id,
-              type: "upd-scan",
-              fileName: displayName,
-              filePath,
-              mimeType: f.mimetype,
-              size: f.size,
-              checksumSha256: checksum,
-              createdBy: req.user!.userId
-            }
-          });
         }
       }
 
@@ -1613,7 +1616,15 @@ receiptRequestsRouter.post(
         })),
         overageActions
       };
-    });
+    }, { maxWait: 15_000, timeout: 120_000 });
+
+    if (files.length) {
+      await persistReceiptAcceptScans(files, {
+        receiptId: row.id,
+        operationId: op.operation?.id ?? null,
+        userId: req.user!.userId
+      });
+    }
 
     await recordAudit({
       userId: req.user!.userId,

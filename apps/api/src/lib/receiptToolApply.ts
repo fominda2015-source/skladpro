@@ -1,6 +1,6 @@
 import { ToolStatus, type ObjectSection, type Prisma, type ReceiptItemCategory } from "@prisma/client";
-import { recordAudit } from "./audit.js";
 import {
+  ensureDefaultToolCategories,
   receiptCategoryToToolSection,
   toolSectionToCategorySlugs
 } from "./toolCatalog.js";
@@ -32,6 +32,10 @@ export async function resolveToolCategoryIdFromReceipt(
   };
 
   let id = await findBySlugs();
+  if (!id) {
+    await ensureDefaultToolCategories();
+    id = await findBySlugs();
+  }
   return id;
 }
 
@@ -101,22 +105,6 @@ export async function createToolsFromReceiptAccept(
         status: ToolStatus.IN_STOCK,
         comment: note,
         actorId: opts.userId
-      }
-    });
-    await recordAudit({
-      tx,
-      userId: opts.userId,
-      action: "TOOL_CREATE",
-      entityType: "Tool",
-      entityId: created.id,
-      summary: `Принят по приходу ${opts.receiptNumber}: ${created.name} (инв. ${created.inventoryNumber})`,
-      after: {
-        id: created.id,
-        name: created.name,
-        inventoryNumber: created.inventoryNumber,
-        categoryId: created.categoryId,
-        warehouseId: created.warehouseId,
-        section: created.section
       }
     });
   }
