@@ -8,6 +8,7 @@ import multer from "multer";
 import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { recordAudit } from "../lib/audit.js";
 import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
@@ -1104,7 +1105,7 @@ receiptRequestsRouter.post(
     if (row.status === "RECEIVED" || row.status === "CANCELLED") {
       return res.status(400).json({ error: "Заявка уже завершена" });
     }
-    if (parsed.data.skipWarehouseStock && req.user?.role !== "ADMIN") {
+    if (parsed.data.skipWarehouseStock && !isAdminEquivalent(req.user?.role)) {
       return res.status(403).json({ error: "Принять без склада может только администратор" });
     }
 
@@ -1925,7 +1926,7 @@ receiptRequestsRouter.patch(
   "/:id/items/:itemId/admin-qty",
   requirePermission("operations.write"),
   async (req: AuthedRequest, res) => {
-    if (req.user?.role !== "ADMIN") {
+    if (!isAdminEquivalent(req.user?.role)) {
       return res.status(403).json({ error: "ADMIN_ONLY", message: "Только администратор может править принято/план" });
     }
     const receiptId = String(req.params.id);
@@ -2073,7 +2074,7 @@ receiptRequestsRouter.delete(
     }
     const reason = parsed.data.reason.trim();
     const wantsForce = Boolean(parsed.data.force);
-    const force = wantsForce && req.user?.role === "ADMIN";
+    const force = wantsForce && isAdminEquivalent(req.user?.role);
     const row = await prisma.receiptRequest.findUnique({
       where: { id },
       include: { items: true }

@@ -18,6 +18,7 @@ import multer from "multer";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
 import { config } from "../config.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
@@ -935,7 +936,7 @@ issueRequestsRouter.delete("/:id", requirePermission("issues.write"), async (req
   }
   const reason = parsed.data.reason.trim();
   const wantsForce = Boolean(parsed.data.force);
-  const force = wantsForce && req.user?.role === "ADMIN";
+  const force = wantsForce && isAdminEquivalent(req.user?.role);
   const scope = await getRequestDataScope(req);
   const row = await prisma.issueRequest.findFirst({
     where: mergeIssueWhere(scope, { id }),
@@ -1004,7 +1005,7 @@ issueRequestsRouter.delete("/:id", requirePermission("issues.write"), async (req
 });
 
 issueRequestsRouter.patch("/:id/admin-edit", requirePermission("issues.read"), async (req: AuthedRequest, res) => {
-  if (req.user?.role !== "ADMIN") {
+  if (!isAdminEquivalent(req.user?.role)) {
     return res.status(403).json({ error: "ADMIN_ONLY" });
   }
   const id = String(req.params.id);

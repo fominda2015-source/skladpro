@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Router } from "express";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { prisma } from "../lib/prisma.js";
 import { hasPermission } from "../lib/permissions.js";
 import { loadUserPermissions, requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -290,7 +291,7 @@ function requireSectionPerm(section: string) {
   const perms = sectionPermissions[section] || [];
   return async (req: AuthedRequest, res: import("express").Response, next: import("express").NextFunction) => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-    if (req.user.role === "ADMIN") return next();
+    if (isAdminEquivalent(req.user.role)) return next();
     try {
       const owned = await loadUserPermissions(req.user.userId);
       req.user.permissions = owned;

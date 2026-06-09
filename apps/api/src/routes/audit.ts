@@ -9,6 +9,7 @@ import {
   ToolStatus
 } from "@prisma/client";
 import { Router, type NextFunction, type Response } from "express";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { prisma } from "../lib/prisma.js";
 import { isReceiptFullyAccepted, receiptAcceptedQty } from "../lib/receiptQty.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
@@ -22,7 +23,7 @@ function requireAuditRevertPrivilege(req: AuthedRequest, res: Response, next: Ne
     return res.status(401).json({ error: "Unauthorized" });
   }
   const perms = Array.isArray(req.user.permissions) ? req.user.permissions : [];
-  if (req.user.role === "ADMIN" || perms.includes("audit.revert")) {
+  if (isAdminEquivalent(req.user.role) || perms.includes("audit.revert")) {
     return next();
   }
   return res.status(403).json({ error: "Forbidden" });
@@ -775,7 +776,7 @@ auditRouter.post(
     // `?force=1` — мягкая отмена: помечаем запись лога как отменённую без бизнес-эффекта.
     // Используется админом для логов, которые нельзя откатить автоматически, либо когда
     // бизнес-откат отказался (например, остаток уже использован). Доступно только ADMIN.
-    const isAdmin = req.user?.role === "ADMIN";
+    const isAdmin = isAdminEquivalent(req.user?.role);
     const force =
       isAdmin &&
       (String(req.query.force ?? "").toLowerCase() === "1" ||

@@ -97,8 +97,62 @@ export type HomeObjectRow = {
   };
 };
 
+function aggregateHomeTotals(list: HomeObjectRow[]) {
+  let camp = 0;
+  let tools = 0;
+  let overLines = 0;
+  let stockLines = 0;
+  let receiptOpen = 0;
+  let toolsInRepair = 0;
+  let withoutTemplate = 0;
+  let toolsInStock = 0;
+  let toolsIssued = 0;
+  const ss = { plannedQty: 0, issuedQty: 0, overCount: 0, hasTemplate: false, percent: 0 };
+  const eom = { ...ss };
+  for (const o of list) {
+    camp += o.campSs + o.campEom;
+    tools += o.tools.total;
+    overLines += o.limitsSs.overCount + o.limitsEom.overCount;
+    stockLines += o.stockLines;
+    receiptOpen += o.receiptOpen;
+    toolsInRepair += o.tools.inRepair;
+    toolsInStock += o.tools.inStock;
+    toolsIssued += o.tools.issued;
+    if (!o.limitsSs.hasTemplate && !o.limitsEom.hasTemplate) withoutTemplate += 1;
+    if (o.limitsSs.hasTemplate) {
+      ss.hasTemplate = true;
+      ss.plannedQty += o.limitsSs.plannedQty;
+      ss.issuedQty += o.limitsSs.issuedQty;
+      ss.overCount += o.limitsSs.overCount;
+    }
+    if (o.limitsEom.hasTemplate) {
+      eom.hasTemplate = true;
+      eom.plannedQty += o.limitsEom.plannedQty;
+      eom.issuedQty += o.limitsEom.issuedQty;
+      eom.overCount += o.limitsEom.overCount;
+    }
+  }
+  ss.percent = ss.plannedQty > 0 ? Math.min(100, Math.round((ss.issuedQty / ss.plannedQty) * 100)) : 0;
+  eom.percent = eom.plannedQty > 0 ? Math.min(100, Math.round((eom.issuedQty / eom.plannedQty) * 100)) : 0;
+  return {
+    camp,
+    tools,
+    ss,
+    eom,
+    overLines,
+    stockLines,
+    receiptOpen,
+    toolsInRepair,
+    withoutTemplate,
+    toolsInStock,
+    toolsIssued
+  };
+}
+
 type Props = {
   objects: HomeObjectRow[];
+  /** Если выбран один объект в шапке — карточки сводки считаем только по нему. */
+  statsWarehouseId?: string | null;
   summary?: HomeOverviewSummary | null;
   loading: boolean;
   error: string;
@@ -106,6 +160,8 @@ type Props = {
   expandedId: string | null;
   onExpand: (warehouseId: string | null) => void;
   onRefresh: () => void;
+  /** Закрыть вложенные панели (например карточку инструмента) при закрытии drill или «назад». */
+  onDrillDismiss?: () => void;
   onOpenCamp: (warehouseId: string) => void;
   onOpenLimits: (warehouseId: string, section: "SS" | "EOM") => void;
   onOpenTools: (warehouseId: string) => void;
@@ -318,6 +374,7 @@ function chartTooltipQty(value: unknown): [string, string] {
 
 export function HomeOverview({
   objects,
+  statsWarehouseId = null,
   summary,
   loading,
   error,
@@ -325,6 +382,7 @@ export function HomeOverview({
   expandedId,
   onExpand,
   onRefresh,
+  onDrillDismiss,
   onOpenCamp,
   onOpenLimits,
   onOpenTools,
@@ -383,74 +441,37 @@ export function HomeOverview({
     });
     setDrillHistoryIndex((i) => i + 1);
   };
-  const goBack = () => setDrillHistoryIndex((i) => Math.max(0, i - 1));
+  const dismissDrill = () => {
+    setDrill(null);
+    onDrillDismiss?.();
+  };
+  const goBack = () => {
+    onDrillDismiss?.();
+    setDrillHistoryIndex((i) => Math.max(0, i - 1));
+  };
   const goForward = () => setDrillHistoryIndex((i) => Math.min(drillHistory.length - 1, i + 1));
+  const statsObjects = useMemo(
+    () => (statsWarehouseId ? objects.filter((o) => o.warehouseId === statsWarehouseId) : objects),
+    [objects, statsWarehouseId]
+  );
   const totals = useMemo(() => {
-    if (summary) {
-      return {
-        camp: summary.campTotal,
-        tools: summary.toolsTotal,
-        ss: summary.limitsSs,
-        eom: summary.limitsEom,
-        overLines: summary.limitsOverLines,
-        stockLines: summary.stockLines,
-        receiptOpen: summary.receiptOpen,
-        toolsInRepair: summary.toolsInRepair,
-        withoutTemplate: summary.objectsWithoutTemplate,
-        toolsInStock: summary.toolsInStock,
-        toolsIssued: summary.toolsIssued
-      };
+    if (statsWarehouseId || !summary) {
+      return aggregateHomeTotals(statsObjects);
     }
-    let camp = 0;
-    let tools = 0;
-    let overLines = 0;
-    let stockLines = 0;
-    let receiptOpen = 0;
-    let toolsInRepair = 0;
-    let withoutTemplate = 0;
-    let toolsInStock = 0;
-    let toolsIssued = 0;
-    const ss = { plannedQty: 0, issuedQty: 0, overCount: 0, hasTemplate: false, percent: 0 };
-    const eom = { ...ss };
-    for (const o of objects) {
-      camp += o.campSs + o.campEom;
-      tools += o.tools.total;
-      overLines += o.limitsSs.overCount + o.limitsEom.overCount;
-      stockLines += o.stockLines;
-      receiptOpen += o.receiptOpen;
-      toolsInRepair += o.tools.inRepair;
-      toolsInStock += o.tools.inStock;
-      toolsIssued += o.tools.issued;
-      if (!o.limitsSs.hasTemplate && !o.limitsEom.hasTemplate) withoutTemplate += 1;
-      if (o.limitsSs.hasTemplate) {
-        ss.hasTemplate = true;
-        ss.plannedQty += o.limitsSs.plannedQty;
-        ss.issuedQty += o.limitsSs.issuedQty;
-        ss.overCount += o.limitsSs.overCount;
-      }
-      if (o.limitsEom.hasTemplate) {
-        eom.hasTemplate = true;
-        eom.plannedQty += o.limitsEom.plannedQty;
-        eom.issuedQty += o.limitsEom.issuedQty;
-        eom.overCount += o.limitsEom.overCount;
-      }
-    }
-    ss.percent = ss.plannedQty > 0 ? Math.min(100, Math.round((ss.issuedQty / ss.plannedQty) * 100)) : 0;
-    eom.percent = eom.plannedQty > 0 ? Math.min(100, Math.round((eom.issuedQty / eom.plannedQty) * 100)) : 0;
     return {
-      camp,
-      tools,
-      ss,
-      eom,
-      overLines,
-      stockLines,
-      receiptOpen,
-      toolsInRepair,
-      withoutTemplate,
-      toolsInStock,
-      toolsIssued
+      camp: summary.campTotal,
+      tools: summary.toolsTotal,
+      ss: summary.limitsSs,
+      eom: summary.limitsEom,
+      overLines: summary.limitsOverLines,
+      stockLines: summary.stockLines,
+      receiptOpen: summary.receiptOpen,
+      toolsInRepair: summary.toolsInRepair,
+      withoutTemplate: summary.objectsWithoutTemplate,
+      toolsInStock: summary.toolsInStock,
+      toolsIssued: summary.toolsIssued
     };
-  }, [objects, summary]);
+  }, [statsObjects, statsWarehouseId, summary]);
 
   const limitsChartRows = useMemo(
     () =>
@@ -1525,7 +1546,7 @@ export function HomeOverview({
                   : `${objectCount} объектов · выберите объект для детализации`
                 : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
           }
-          onClose={() => setDrill(null)}
+          onClose={dismissDrill}
           onBack={goBack}
           onForward={goForward}
           canBack={drillHistoryIndex > 0}

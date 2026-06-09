@@ -13,6 +13,8 @@ type Props = {
   toolListSlot: ReactNode;
   /** Не переключать вкладку при навигации по хабу (модалка на главной). */
   embedMode?: boolean;
+  canWrite?: boolean;
+  onCatalogMessage?: (msg: string, tone?: "success" | "error" | "neutral") => void;
 };
 
 export function ToolsInventoryBlock({
@@ -24,7 +26,9 @@ export function ToolsInventoryBlock({
   apiUrl,
   fetchWithSession,
   toolListSlot,
-  embedMode
+  embedMode,
+  canWrite,
+  onCatalogMessage
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -39,6 +43,8 @@ export function ToolsInventoryBlock({
         apiUrl={apiUrl}
         fetchWithSession={fetchWithSession}
         toolListSlot={toolListSlot}
+        canWrite={canWrite}
+        onCatalogMessage={onCatalogMessage}
       />
     </div>
   );

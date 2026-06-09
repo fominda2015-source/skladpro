@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { getRequestDataScope, warehouseWhereFromScope, assertWarehouseInScope } from "../lib/dataScope.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { prisma } from "../lib/prisma.js";
 import { recordAudit } from "../lib/audit.js";
 import { handlePrismaError } from "../lib/errors.js";
@@ -79,7 +80,7 @@ warehousesRouter.patch(
 async function requireWarehouseGrantAccess(req: AuthedRequest, res: import("express").Response, next: import("express").NextFunction) {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
   const perms = Array.isArray(req.user.permissions) ? req.user.permissions : [];
-  if (req.user.role === "ADMIN" || perms.includes("warehouses.write") || perms.includes("admin.users.manage")) {
+  if (isAdminEquivalent(req.user.role) || perms.includes("warehouses.write") || perms.includes("admin.users.manage")) {
     return next();
   }
   return res.status(403).json({ error: "Недостаточно прав" });

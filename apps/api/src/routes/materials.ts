@@ -2,12 +2,13 @@ import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { handlePrismaError } from "../lib/errors.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { MaterialKind } from "@prisma/client";
 
 function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-  if (req.user.role !== "ADMIN") {
+  if (!isAdminEquivalent(req.user.role)) {
     return res.status(403).json({ error: "Только администратор может выполнять эту операцию" });
   }
   return next();

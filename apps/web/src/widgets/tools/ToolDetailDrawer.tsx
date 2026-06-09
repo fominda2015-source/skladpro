@@ -79,6 +79,8 @@ type Props = {
   onClose: () => void;
   onSave: (patch: ToolEditPatch) => boolean | void | Promise<boolean | void>;
   onSaveKit: (kitComplete: boolean, kitMissingNote: string) => boolean | void | Promise<boolean | void>;
+  onDelete?: () => boolean | void | Promise<boolean | void>;
+  deleting?: boolean;
   onIssue: () => void;
   onReturn: () => void;
   onRepair: () => void;
@@ -87,6 +89,8 @@ type Props = {
   onShowQr: () => void;
   onRefreshEvents: () => void;
   qrPreview?: ReactNode;
+  /** sticky — в сетке вкладки «Инструменты»; overlay — поверх главной рядом с drill-модалкой */
+  layout?: "sticky" | "overlay";
 };
 
 function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
@@ -128,6 +132,8 @@ export function ToolDetailDrawer({
   onClose,
   onSave,
   onSaveKit,
+  onDelete,
+  deleting,
   onIssue,
   onReturn,
   onRepair,
@@ -135,7 +141,8 @@ export function ToolDetailDrawer({
   onWriteOff,
   onShowQr,
   onRefreshEvents,
-  qrPreview
+  qrPreview,
+  layout = "sticky"
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [kitEditing, setKitEditing] = useState(false);
@@ -169,8 +176,13 @@ export function ToolDetailDrawer({
     kitValid &&
     !saving;
 
+  const drawerClass =
+    layout === "overlay"
+      ? "detailDrawer detailDrawerTool detailDrawerHomeOverlay"
+      : "detailDrawer detailDrawerTool detailDrawerSticky";
+
   return (
-    <aside className="detailDrawer detailDrawerTool detailDrawerSticky">
+    <aside className={drawerClass}>
       <div className="detailDrawerHeader">
         <h3>{tool ? safeName(tool.name) : "Инструмент"}</h3>
         <button type="button" className="ghostBtn" onClick={onClose}>
@@ -472,6 +484,26 @@ export function ToolDetailDrawer({
               <p className="muted" style={{ fontSize: 12, margin: "8px 0 0", lineHeight: 1.45 }}>
                 Ручной инструмент списывается только по акту «Списание» на имя ответственного (раздел «Акты»).
               </p>
+            ) : null}
+            {canWrite && tool.status === "IN_STOCK" && onDelete ? (
+              <button
+                type="button"
+                className="ghostBtn"
+                style={{ color: "var(--danger, #b91c1c)" }}
+                disabled={deleting || saving || savingKit}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Удалить карточку «${safeName(tool.name)}» (инв. ${tool.inventoryNumber})? Действие необратимо.`
+                    )
+                  ) {
+                    return;
+                  }
+                  void onDelete();
+                }}
+              >
+                {deleting ? "Удаление…" : "Удалить карточку"}
+              </button>
             ) : null}
             <button type="button" className="ghostBtn" onClick={onShowQr}>
               QR

@@ -13,7 +13,8 @@ const updateUserAccessSchema = z.object({
   roleName: z.string().optional(),
   status: z.enum(["ACTIVE", "BLOCKED"]).optional(),
   permissions: z.array(z.string().min(1)).optional(),
-  positionId: z.string().nullable().optional()
+  positionId: z.string().nullable().optional(),
+  isMol: z.boolean().optional()
 });
 
 const createUserSchema = z.object({
@@ -25,7 +26,8 @@ const createUserSchema = z.object({
   projectIds: z.array(z.string().min(1)).default([]),
   permissions: z.array(z.string().min(1)).default([]),
   positionId: z.string().nullable().optional(),
-  positionName: z.string().min(2).optional()
+  positionName: z.string().min(2).optional(),
+  isMol: z.boolean().optional()
 });
 
 const updateRolePermissionsSchema = z.object({
@@ -89,6 +91,7 @@ adminRouter.get("/users", async (_req, res) => {
       warehouseScopeIds: u.warehouseScopes.map((s) => s.warehouseId),
       projectScopeIds: u.projectScopes.map((s) => s.projectId),
       sectionScopes: u.warehouseSectionScopes,
+      isMol: u.isMol,
       createdAt: u.createdAt
     }))
   );
@@ -239,7 +242,8 @@ adminRouter.post("/users", async (req, res) => {
         fullName: parsed.data.fullName.trim(),
         roleId: role.id,
         passwordHash,
-        positionId
+        positionId,
+        isMol: Boolean(parsed.data.isMol)
       },
       include: { role: true, position: true }
     });
@@ -292,7 +296,8 @@ adminRouter.patch("/users/:id/access", async (req, res) => {
       customPermissions: [],
       ...(Object.prototype.hasOwnProperty.call(parsed.data, "positionId")
         ? { positionId: parsed.data.positionId ?? null }
-        : {})
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "isMol") ? { isMol: parsed.data.isMol } : {})
     },
     include: { role: true, position: true }
   });
@@ -304,6 +309,7 @@ adminRouter.patch("/users/:id/access", async (req, res) => {
     status: updated.status,
     role: updated.role.name,
     position: updated.position?.name || null,
+    isMol: updated.isMol,
     permissions: getEffectivePermissions(updated.role.permissions, updated.customPermissions)
   });
 });

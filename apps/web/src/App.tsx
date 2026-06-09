@@ -26,6 +26,7 @@ import {
   resolvePublicFileUrl
 } from "./app/constants";
 import { displayDocumentFileName } from "./shared/fileName";
+import { isAdminEquivalent, OPEN_ACCESS_ALL } from "./shared/openAccess";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import {
@@ -267,6 +268,7 @@ type AdminUser = {
   warehouseScopeIds?: string[];
   projectScopeIds?: string[];
   sectionScopes?: Array<{ warehouseId: string; section: string }>;
+  isMol?: boolean;
 };
 type AdminRole = { id: string; name: string; permissions: string[] };
 type Position = { id: string; name: string };
@@ -794,6 +796,8 @@ function App() {
   const [newPositionName, setNewPositionName] = useState("");
   const [newUserPositionId, setNewUserPositionId] = useState("");
   const [selectedPositionId, setSelectedPositionId] = useState("");
+  const [selectedIsMol, setSelectedIsMol] = useState(false);
+  const [newUserIsMol, setNewUserIsMol] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRoleName, setSelectedRoleName] = useState("VIEWER");
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
@@ -1067,6 +1071,7 @@ function App() {
   const [toolListWarehouseId, setToolListWarehouseId] = useState("");
   const [toolManualModalOpen, setToolManualModalOpen] = useState(false);
   const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
+  const [toolDrawerHomeOverlay, setToolDrawerHomeOverlay] = useState(false);
   const [toolDetailRecord, setToolDetailRecord] = useState<ToolItem | null>(null);
   const [loginFieldsReadonly, setLoginFieldsReadonly] = useState(true);
   const [toolName, setToolName] = useState("");
@@ -1114,6 +1119,7 @@ function App() {
     name: string;
   } | null>(null);
   const [toolSaving, setToolSaving] = useState(false);
+  const [toolDeleting, setToolDeleting] = useState(false);
   const [waybills, setWaybills] = useState<Waybill[]>([]);
   const [waybillsMessage, setWaybillsMessage] = useState("");
   const [waybillsTone, setWaybillsTone] = useState<ResultTone>("neutral");
@@ -1204,16 +1210,18 @@ function App() {
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
-  const isAdmin = me?.role === "ADMIN";
+  const isAdmin = Boolean(me && isAdminEquivalent(me.role));
   const hasPermission = (permission: string) =>
     Boolean(
-      isAdmin ||
-        me?.permissions?.includes("*") ||
-        me?.permissions?.includes(permission) ||
-        (permission === "limits.edit" && Boolean(me?.permissions?.includes("limits.write"))) ||
-        (permission === "limits.write" && Boolean(me?.permissions?.includes("limits.edit"))) ||
-        (permission === "announcements.edit" && Boolean(me?.permissions?.includes("announcements.write"))) ||
-        (permission === "announcements.delete" && Boolean(me?.permissions?.includes("announcements.write")))
+      me &&
+        (OPEN_ACCESS_ALL ||
+          isAdmin ||
+          me.permissions?.includes("*") ||
+          me.permissions?.includes(permission) ||
+          (permission === "limits.edit" && Boolean(me.permissions?.includes("limits.write"))) ||
+          (permission === "limits.write" && Boolean(me.permissions?.includes("limits.edit"))) ||
+          (permission === "announcements.edit" && Boolean(me.permissions?.includes("announcements.write"))) ||
+          (permission === "announcements.delete" && Boolean(me.permissions?.includes("announcements.write"))))
     );
   const roleLabel = (role: string) =>
     ({
@@ -2062,6 +2070,9 @@ function App() {
       loadOperations(section, seq),
       loadApprovalQueue(section, seq)
     ];
+    if (tab === "stocks" && canDashboard) {
+      tasks.push(loadHomeOverview(section).then(() => undefined));
+    }
     const receiptWh =
       activeObjectId === ALL_OBJECTS_ID
         ? tabWarehouseFilters[tab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
@@ -2272,12 +2283,14 @@ function App() {
     setChatProfileData(null);
   }
 
-  async function loadHomeOverview() {
+  async function loadHomeOverview(sectionOverride?: "SS" | "EOM") {
     if (!token || !canDashboard) return;
     setHomeOverviewError("");
     setHomeOverviewLoading(true);
     try {
-      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview`, {
+      const params = new URLSearchParams();
+      params.set("section", sectionOverride ?? objectSectionFilter);
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2290,11 +2303,23 @@ function App() {
     }
   }
 
-  function openToolDrawer(toolId: string) {
+  function closeToolDrawer() {
+    setDrawerMode("");
+    setToolDetailModalId(null);
+    setToolDrawerHomeOverlay(false);
+  }
+
+  function openToolDrawer(toolId: string, opts?: { homeOverlay?: boolean }) {
     setToolDetailModalId(toolId);
     setSelectedToolForEvents(toolId);
-    setActiveTab("tools");
     setDrawerMode("tool");
+    if (opts?.homeOverlay) {
+      setToolDrawerHomeOverlay(true);
+      void loadToolCategories().catch(() => undefined);
+    } else {
+      setToolDrawerHomeOverlay(false);
+      setActiveTab("tools");
+    }
     void loadToolEvents(toolId);
   }
 
@@ -2383,6 +2408,35 @@ function App() {
       return true;
     } finally {
       setToolSaving(false);
+    }
+  }
+
+  async function deleteToolCard(toolId: string): Promise<boolean> {
+    if (!token) return false;
+    setToolDeleting(true);
+    setToolsMessage("");
+    setToolsTone("neutral");
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/tools/${toolId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok && res.status !== 204) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setToolsMessage(body.error || "Не удалось удалить карточку");
+        setToolsTone("error");
+        return false;
+      }
+      setToolDetailModalId(null);
+      setToolDetailRecord(null);
+      setDrawerMode("");
+      setToolsMessage("Карточка инструмента удалена");
+      setToolsTone("success");
+      await loadTools().catch(() => undefined);
+      await loadToolWarehouseSummary().catch(() => undefined);
+      return true;
+    } finally {
+      setToolDeleting(false);
     }
   }
 
@@ -4015,7 +4069,7 @@ function App() {
         body: JSON.stringify({ reason, force })
       });
     let r = await send(false);
-    if (r.status === 409 && me?.role === "ADMIN") {
+    if (r.status === 409 && isAdmin) {
       let hint = "Заявка уже проведена.";
       try {
         const b = await r.json();
@@ -4063,7 +4117,7 @@ function App() {
         body: JSON.stringify({ reason, force })
       });
     let r = await send(false);
-    if (r.status === 409 && me?.role === "ADMIN") {
+    if (r.status === 409 && isAdmin) {
       let hint = "По заявке уже была проведена приёмка.";
       try {
         const b = await r.json();
@@ -4801,8 +4855,9 @@ function App() {
     }
   }
 
-  function renderToolsListSlot(opts?: { embedWarehouseId?: string }) {
+  function renderToolsListSlot(opts?: { embedWarehouseId?: string; onOpenTool?: (id: string) => void }) {
     const embedWarehouseId = opts?.embedWarehouseId;
+    const openTool = opts?.onOpenTool ?? openToolDrawer;
     return (
       <>
         {toolsLoading && <LoadingState text="Загрузка инструментов..." />}
@@ -4935,7 +4990,7 @@ function App() {
                 if (checked) setSelectedToolIds((prev) => [...prev, id]);
                 else setSelectedToolIds((prev) => prev.filter((x) => x !== id));
               }}
-              onOpen={(id) => openToolDrawer(id)}
+              onOpen={(id) => openTool(id)}
               statusLabel={toolStatusLabel}
               statusTone={toolStatusTone}
               safeName={safeName}
@@ -4989,20 +5044,29 @@ function App() {
         fetchWithSession={fetchWithSession}
         toolListSlot={
           drillWarehouseId
-            ? renderToolsListSlot({ embedWarehouseId: drillWarehouseId })
+            ? renderToolsListSlot({
+                embedWarehouseId: drillWarehouseId,
+                onOpenTool: embed ? (id) => openToolDrawer(id, { homeOverlay: true }) : undefined
+              })
             : renderToolsListSlot()
         }
         embedMode={embed}
+        canWrite={hasPermission("tools.write")}
+        onCatalogMessage={(msg, tone) => {
+          setToolsMessage(msg);
+          setToolsTone(tone ?? "neutral");
+        }}
       />
     );
   }
 
-  function renderToolDetailDrawer() {
+  function renderToolDetailDrawer(layout: "sticky" | "overlay" = "sticky") {
     if (!toolDetailModalId) return null;
     const d = toolDetailRecord?.id === toolDetailModalId ? toolDetailRecord : null;
     const t = d || tools.find((x) => x.id === toolDetailModalId) || null;
     return (
       <ToolDetailDrawer
+        layout={layout}
         tool={t}
         loading={!t}
         events={selectedToolForEvents === toolDetailModalId ? toolEvents : []}
@@ -5014,15 +5078,18 @@ function App() {
         safeName={safeName}
         canWrite={hasPermission("tools.write")}
         saving={toolSaving}
-        onClose={() => {
-          setDrawerMode("");
-          setToolDetailModalId(null);
-        }}
+        onClose={closeToolDrawer}
         onSave={(patch) => (toolDetailModalId ? saveToolCard(toolDetailModalId, patch) : false)}
         onSaveKit={(kitComplete, kitMissingNote) =>
           toolDetailModalId ? saveToolKitCompleteness(toolDetailModalId, kitComplete, kitMissingNote) : false
         }
         savingKit={toolSaving}
+        deleting={toolDeleting}
+        onDelete={
+          toolDetailModalId && t?.status === "IN_STOCK"
+            ? () => deleteToolCard(toolDetailModalId)
+            : undefined
+        }
         onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
         onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
         onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
@@ -5257,7 +5324,7 @@ function App() {
       return;
     }
     void loadHomeOverview();
-  }, [token, canDashboard, activeTab]);
+  }, [token, canDashboard, activeTab, objectSectionFilter, activeObjectId]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -5428,6 +5495,7 @@ function App() {
       setSelectedStatus(u.status);
       const pos = positions.find((p) => p.name === u.position);
       setSelectedPositionId(pos?.id || "");
+      setSelectedIsMol(Boolean(u.isMol));
     }
   }, [users, selectedUserId, positions]);
 
@@ -5799,6 +5867,12 @@ function App() {
       void loadToolEvents(selectedToolForEvents);
     }
   }, [token, activeTab, selectedToolForEvents]);
+
+  useEffect(() => {
+    if (toolDrawerHomeOverlay && activeTab !== "stocks") {
+      closeToolDrawer();
+    }
+  }, [activeTab, toolDrawerHomeOverlay]);
 
   useEffect(() => {
     if (warehouses.length > 0 && !waybillFromWarehouseId) {
@@ -6211,6 +6285,7 @@ function App() {
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
+            statsWarehouseId={isAllObjectsView ? null : activeObjectId || null}
             summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}
@@ -6227,6 +6302,9 @@ function App() {
               />
             }
             onRefresh={() => void loadHomeOverview()}
+            onDrillDismiss={() => {
+              if (toolDrawerHomeOverlay) closeToolDrawer();
+            }}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {
               void applyWorkspaceSection(section).then(() => openHomeObjectTab(id, "limits"));
@@ -6377,7 +6455,7 @@ function App() {
             canWriteOperations={canWriteOperations}
             canOpenMaterialCard={canOpenMaterialCards}
             canEditMaterialCard={canWriteMaterialCards}
-            isAdmin={me?.role === "ADMIN"}
+            isAdmin={isAdmin}
             onAddMaterial={() => {
               setManualStockMessage("");
               if (!warehouses.length) {
@@ -6629,7 +6707,7 @@ function App() {
                           >
                             {busy ? "Отменяем…" : "Отменить"}
                           </button>
-                        ) : me?.role === "ADMIN" ? (
+                        ) : isAdmin ? (
                           // Для админа разрешаем «мягкую» отмену любых записей — бэкенд решит, можно ли откатить бизнес-логически.
                           <button
                             type="button"
@@ -8879,8 +8957,7 @@ function App() {
                                 })()}
                                 {agg && agg.plan > 0 ? (
                                   <span className="muted limitGroupMetrics" style={{ fontSize: 11 }}>
-                                    приход {metricFmt(agg.arrived)} / {metricFmt(agg.plan)} ({groupArrivedPct}%) · выдача{" "}
-                                    {metricFmt(agg.issued)} / {metricFmt(agg.plan)} ({groupIssuedPct}%)
+                                    приход {groupArrivedPct}% · выдача {groupIssuedPct}%
                                   </span>
                                 ) : null}
                               </>
@@ -8894,6 +8971,7 @@ function App() {
                               issued={agg.issued}
                               arrived={agg.arrived}
                               compact
+                              percentOnly
                             />
                           </div>
                         ) : null}
@@ -9090,10 +9168,10 @@ function App() {
 
                         {isGroup && isExpanded && directMaterials.length > 0 ? (
                           <div
+                            className="limitMaterialsTableWrap"
                             style={{
                               marginLeft: limitTreeIndentPx(depth + 1),
-                              marginBottom: 8,
-                              overflowX: "auto"
+                              marginBottom: 8
                             }}
                           >
                             <table className="limitMaterialsTable">
@@ -9324,8 +9402,7 @@ function App() {
                       </div>
                       <div style={{ width: "100%", margin: "8px 0 10px" }}>
                         <div className="muted" style={{ fontSize: 10, marginBottom: 2 }}>
-                          приход {formatMaterialQty(totalArrived)} / {formatMaterialQty(totalPlanned)} ({overallArrivedPct}%) ·
-                          выдача {formatMaterialQty(totalIssued)} / {formatMaterialQty(totalPlanned)} ({overallPct}%)
+                          приход {overallArrivedPct}% · выдача {overallPct}%
                         </div>
                         <div className="progressWrap" style={{ height: 6, marginBottom: 3 }}>
                           <div
@@ -10006,7 +10083,7 @@ function App() {
               >
                 Удалить
               </button>
-              {me?.role === "ADMIN" &&
+              {isAdmin &&
               selectedIssue.status !== "CANCELLED" &&
               selectedIssue.status !== "REJECTED" ? (
                 <button type="button" className="secondaryBtn" onClick={() => setAdminIssueEditOpen(true)}>
@@ -10072,7 +10149,7 @@ function App() {
         </aside>
       )}
 
-      {adminIssueEditOpen && selectedIssue && me?.role === "ADMIN" ? (
+      {adminIssueEditOpen && selectedIssue && isAdmin ? (
         <AdminIssueEditModal
           issue={selectedIssue}
           materials={materials}
@@ -10092,7 +10169,12 @@ function App() {
         />
       ) : null}
 
-      {drawerMode === "tool" && toolDetailModalId && activeTab !== "tools" && renderToolDetailDrawer()}
+      {drawerMode === "tool" && toolDetailModalId && activeTab !== "tools" && !toolDrawerHomeOverlay && renderToolDetailDrawer()}
+      {drawerMode === "tool" && toolDetailModalId && toolDrawerHomeOverlay && activeTab === "stocks" && (
+        <div className="homeToolDrawerLayer" aria-hidden={false}>
+          {renderToolDetailDrawer("overlay")}
+        </div>
+      )}
 
       {drawerMode === "waybill" && selectedWaybill && (
         <aside className="detailDrawer">
@@ -10177,6 +10259,14 @@ function App() {
                   </option>
                 ))}
               </select>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={selectedIsMol}
+                onChange={(e) => setSelectedIsMol(e.target.checked)}
+              />
+              МОЛ (материально ответственное лицо) — участвует в материальном отчёте
             </label>
           </div>
           <div className="grid2" style={{ marginTop: 12 }}>
@@ -10268,7 +10358,8 @@ function App() {
                   body: JSON.stringify({
                     roleName: selectedRoleName,
                     status: selectedStatus,
-                    positionId: selectedPositionId || null
+                    positionId: selectedPositionId || null,
+                    isMol: selectedIsMol
                   })
                 });
                 if (!res.ok) {
@@ -11824,6 +11915,14 @@ function App() {
               Новая должность (создать)
               <input value={newPositionName} onChange={(e) => setNewPositionName(e.target.value)} />
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={newUserIsMol}
+                onChange={(e) => setNewUserIsMol(e.target.checked)}
+              />
+              МОЛ (материально ответственное лицо)
+            </label>
           </div>
           <div className="grid2" style={{ marginTop: 16 }}>
             <div>
@@ -11892,7 +11991,8 @@ function App() {
                     warehouseIds: newUserWarehouseScopes,
                     projectIds: newUserProjectScopes,
                     positionId: newUserPositionId || undefined,
-                    positionName: newPositionName.trim() || undefined
+                    positionName: newPositionName.trim() || undefined,
+                    isMol: newUserIsMol
                   })
                 });
                 if (!res.ok) {
@@ -11906,6 +12006,7 @@ function App() {
                 setNewUserProjectScopes([]);
                 setNewPositionName("");
                 setNewUserPositionId("");
+                setNewUserIsMol(false);
                 await loadAdminData();
               }}
             >
@@ -11957,6 +12058,7 @@ function App() {
                       {u.sectionScopes && u.sectionScopes.length > 0 ? (
                         <span className="muted" style={{ fontSize: 12 }}>+ разделы</span>
                       ) : null}
+                      {u.isMol ? <span className="badge ok">МОЛ</span> : null}
                     </div>
                     <div className="toolbar" style={{ marginTop: "auto", paddingTop: 12 }}>
                       <button

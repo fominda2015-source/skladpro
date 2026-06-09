@@ -662,6 +662,49 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
   }
 });
 
+toolsRouter.delete("/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  try {
+    const scope = await getRequestDataScope(req);
+    const tool = await prisma.tool.findFirst({
+      where: { AND: [toolWhereFromScope(scope), { id }] },
+      select: { id: true, name: true, inventoryNumber: true, status: true }
+    });
+    if (!tool) {
+      return res.status(404).json({ error: "Tool not found" });
+    }
+    if (tool.status !== ToolStatus.IN_STOCK) {
+      return res.status(400).json({
+        error: "Удалить можно только инструмент со статусом «На складе». Сначала верните на склад или спишите."
+      });
+    }
+    const [issueLinks, openConsumables] = await Promise.all([
+      prisma.issueRequestToolItem.count({ where: { toolId: id } }),
+      prisma.toolConsumableIssue.count({ where: { toolId: id, status: "OPEN" } })
+    ]);
+    if (issueLinks > 0) {
+      return res.status(409).json({ error: "Инструмент указан в заявках на выдачу — удаление невозможно" });
+    }
+    if (openConsumables > 0) {
+      return res.status(409).json({
+        error: "По инструменту есть открытые выдачи расходников — сначала закройте их"
+      });
+    }
+    await prisma.tool.delete({ where: { id } });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_DELETE",
+      entityType: "Tool",
+      entityId: id,
+      summary: `Удалена карточка инструмента: ${tool.name} (инв. ${tool.inventoryNumber})`
+    });
+    return res.status(204).send();
+  } catch (error) {
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
 toolsRouter.post("/:id/action", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = toolActionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -928,6 +971,56 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
   }
   return res.json(Array.from(byKey.values()));
 });
+
+const catalogMaterialSectionPatchSchema = z.object({
+  toolCatalogSection: z.enum(["PPE", "TOOL_CONSUMABLE", "KIP", "OTHER"]).nullable()
+});
+
+toolsRouter.patch(
+  "/catalog/materials/:materialId/section",
+  requirePermission("tools.write"),
+  async (req: AuthedRequest, res) => {
+    const parsed = catalogMaterialSectionPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const materialId = String(req.params.materialId);
+    const existing = await prisma.material.findUnique({
+      where: { id: materialId },
+      select: { id: true, name: true, toolCatalogSection: true }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Материал не найден" });
+    }
+    const updated = await prisma.material.update({
+      where: { id: materialId },
+      data: { toolCatalogSection: parsed.data.toolCatalogSection },
+      select: { id: true, name: true, toolCatalogSection: true }
+    });
+    const sectionRu: Record<string, string> = {
+      PPE: "СИЗ",
+      TOOL_CONSUMABLE: "Расходники",
+      KIP: "КИП",
+      OTHER: "Прочее"
+    };
+    const from = existing.toolCatalogSection
+      ? sectionRu[existing.toolCatalogSection] || existing.toolCatalogSection
+      : "склад";
+    const to = updated.toolCatalogSection
+      ? sectionRu[updated.toolCatalogSection] || updated.toolCatalogSection
+      : "склад";
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "MATERIAL_CATALOG_SECTION",
+      entityType: "Material",
+      entityId: materialId,
+      summary: `Раздел каталога «${existing.name}»: ${from} → ${to}`,
+      before: { toolCatalogSection: existing.toolCatalogSection },
+      after: { toolCatalogSection: updated.toolCatalogSection }
+    });
+    return res.json(updated);
+  }
+);
 
 const consumableIssueSchema = z.object({
   toolId: z.string().min(1),

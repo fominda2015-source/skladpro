@@ -277,9 +277,16 @@ const emptySummary = (): HomeOverviewSummary => ({
   movementTrend30d: []
 });
 
+export type HomeOverviewBuildOptions = {
+  /** Текущий раздел в шапке — остатки считаем только по нему (как на вкладке «Склад»). */
+  section?: "SS" | "EOM";
+};
+
 export async function buildHomeOverview(
-  scope: DataScope
+  scope: DataScope,
+  options: HomeOverviewBuildOptions = {}
 ): Promise<{ objects: HomeObjectOverview[]; summary: HomeOverviewSummary }> {
+  const stockSections: Array<"SS" | "EOM"> = options.section ? [options.section] : ["SS", "EOM"];
   const whWhere = warehouseWhereFromScope(scope);
   const warehouses = await prisma.warehouse.findMany({
     where: { isActive: true, ...(Object.keys(whWhere).length ? whWhere : {}) },
@@ -305,7 +312,7 @@ export async function buildHomeOverview(
   const stockWhere: Prisma.StockWhereInput = {
     ...(Object.keys(stockScoped).length ? { AND: [stockScoped] } : {}),
     warehouseId: { in: warehouseIds },
-    section: { in: ["SS", "EOM"] }
+    section: stockSections.length === 1 ? stockSections[0] : { in: stockSections }
   };
 
   const campWhere: Prisma.CampItemWhereInput =
@@ -328,7 +335,6 @@ export async function buildHomeOverview(
     toolRows,
     movementRows,
     categories,
-    stockGroups,
     receiptGroups,
     stockDetailRows,
     arrivedSsRows,
@@ -393,11 +399,6 @@ export async function buildHomeOverview(
       select: { createdAt: true, direction: true, quantity: true }
     }),
     prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] }),
-    prisma.stock.groupBy({
-      by: ["warehouseId"],
-      where: stockWhere,
-      _count: { materialId: true }
-    }),
     prisma.receiptRequest.groupBy({
       by: ["warehouseId"],
       where: {
@@ -516,7 +517,12 @@ export async function buildHomeOverview(
     toolsByWh.set(t.warehouseId, list);
   }
 
-  const stockByWh = new Map(stockGroups.map((g) => [g.warehouseId, g._count.materialId]));
+  // Строки остатков по объекту — как на вкладке «Склад» (тот же section + те же записи Stock).
+  const stockLinesByWh = new Map<string, number>();
+  for (const s of stockDetailRows) {
+    if (!s.warehouseId) continue;
+    stockLinesByWh.set(s.warehouseId, (stockLinesByWh.get(s.warehouseId) || 0) + 1);
+  }
   const receiptByWh = new Map(receiptGroups.map((g) => [g.warehouseId, g._count.id]));
 
   const objects: HomeObjectOverview[] = warehouses.map((wh) => {
@@ -529,7 +535,7 @@ export async function buildHomeOverview(
       name: wh.name,
       campSs,
       campEom,
-      stockLines: stockByWh.get(wh.id) ?? 0,
+      stockLines: stockLinesByWh.get(wh.id) ?? 0,
       receiptOpen: receiptByWh.get(wh.id) ?? 0,
       limitsSs: computeLimitSlice(
         wh.id,

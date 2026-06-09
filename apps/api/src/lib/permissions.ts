@@ -1,3 +1,5 @@
+import { OPEN_ACCESS_ALL } from "./openAccess.js";
+
 export function normalizePermissions(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((x): x is string => typeof x === "string");
@@ -11,6 +13,7 @@ export function normalizePermissions(value: unknown): string[] {
 }
 
 export function hasPermission(permissions: string[], needed: string) {
+  if (OPEN_ACCESS_ALL) return true;
   if (permissions.includes("*")) return true;
   if (permissions.includes(needed)) return true;
   if (needed === "documents.upload" && permissions.includes("documents.write")) return true;

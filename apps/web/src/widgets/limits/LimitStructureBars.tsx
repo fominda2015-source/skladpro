@@ -6,6 +6,8 @@ type Props = {
   /** Приход по заявкам / операциям (колонка «Приход»). */
   arrived: number;
   compact?: boolean;
+  /** Заголовки групп — только % в полосках (без «120/463»). */
+  percentOnly?: boolean;
 };
 
 function fmtQty(n: number): string {
@@ -37,8 +39,12 @@ function LimitStructBar(props: {
   );
 }
 
+function barLabel(percentOnly: boolean, qty: number, base: number, pct: number): string {
+  return percentOnly ? `${fmtPct(pct)}%` : `${fmtQty(qty)}/${fmtQty(base)} ${fmtPct(pct)}%`;
+}
+
 /** Три полоски лимита: выдача → перерасход (если есть) → приход по заявке. */
-export function LimitStructureBars({ plan, issued, arrived, compact }: Props) {
+export function LimitStructureBars({ plan, issued, arrived, compact, percentOnly = false }: Props) {
   if (!(plan > 0)) {
     return <span className="muted">—</span>;
   }
@@ -56,7 +62,7 @@ export function LimitStructureBars({ plan, issued, arrived, compact }: Props) {
       <LimitStructBar
         tone={issuedDone ? "issued-done" : "issued"}
         fillPct={issuedFill}
-        label={`${fmtQty(issued)}/${fmtQty(base)} ${fmtPct(issuedPctRaw)}%`}
+        label={barLabel(percentOnly, issued, base, issuedPctRaw)}
         title={`Выдано: ${fmtQty(issued)} из ${fmtQty(base)} (${fmtPct(issuedPctRaw)}%)`}
         compact={compact}
       />
@@ -64,7 +70,7 @@ export function LimitStructureBars({ plan, issued, arrived, compact }: Props) {
         <LimitStructBar
           tone="over"
           fillPct={Math.min(100, overPct)}
-          label={`${fmtQty(over)}/${fmtQty(base)} ${fmtPct(overPct)}%`}
+          label={barLabel(percentOnly, over, base, overPct)}
           title={`Перерасход: ${fmtQty(over)} сверх плана (${fmtPct(overPct)}%)`}
           compact={compact}
         />
@@ -72,7 +78,7 @@ export function LimitStructureBars({ plan, issued, arrived, compact }: Props) {
       <LimitStructBar
         tone="arrived"
         fillPct={arrivedPct}
-        label={`${fmtQty(arrived)}/${fmtQty(base)} ${fmtPct((arrived / base) * 100)}%`}
+        label={barLabel(percentOnly, arrived, base, (arrived / base) * 100)}
         title={`Приехало по заявке: ${fmtQty(arrived)} из ${fmtQty(base)}`}
         compact={compact}
       />

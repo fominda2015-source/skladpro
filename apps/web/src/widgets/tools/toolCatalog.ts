@@ -103,6 +103,21 @@ export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "other", label: "Прочее", icon: "📁" }
 ];
 
+/** Разделы каталога для складских материалов (не учётных единиц Tool). */
+export const CATALOG_MATERIAL_SECTIONS = [
+  { value: "PPE" as const, label: "СИЗ" },
+  { value: "TOOL_CONSUMABLE" as const, label: "Расходники" },
+  { value: "KIP" as const, label: "КИП" },
+  { value: "OTHER" as const, label: "Прочее" }
+];
+
+export type CatalogMaterialSection = (typeof CATALOG_MATERIAL_SECTIONS)[number]["value"];
+
+export function catalogMaterialSectionLabel(section: string | null | undefined): string {
+  const hit = CATALOG_MATERIAL_SECTIONS.find((s) => s.value === section);
+  return hit?.label ?? section ?? "—";
+}
+
 export const TOOL_SUB_HUB_CARDS: HubCardDef[] = [
   { id: "tool-manual", label: "Ручной", icon: "🔧" },
   { id: "tool-electric", label: "Электрический", icon: "⚡" }

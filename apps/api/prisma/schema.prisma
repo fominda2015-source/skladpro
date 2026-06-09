@@ -171,6 +171,8 @@ model User {
   role             Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
   customPermissions Json?
   positionId       String?
+  /** Материально ответственное лицо — участник материального отчёта. */
+  isMol            Boolean              @default(false)
   activeWarehouseId String?
   activeSection    ObjectSection?
   position         Position?            @relation(fields: [positionId], references: [id], onDelete: SetNull)

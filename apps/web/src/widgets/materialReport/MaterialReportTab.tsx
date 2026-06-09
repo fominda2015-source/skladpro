@@ -48,6 +48,7 @@ type MatReportUser = {
   avatarUrl?: string | null;
   position?: string | null;
   role?: string;
+  isMol?: boolean;
 };
 
 type SubTab = "balances" | "history";
@@ -103,7 +104,7 @@ export function MaterialReportTab({
   const [subTab, setSubTab] = useState<SubTab>("balances");
   const [warehouseFilter, setWarehouseFilter] = useState("");
   const [sectionFilter, setSectionFilter] = useState<SectionFilter>("ALL");
-  const [allUsers, setAllUsers] = useState<MatReportUser[]>([]);
+  const [molUsers, setMolUsers] = useState<MatReportUser[]>([]);
   const [holders, setHolders] = useState<MaterialReportHolder[]>([]);
   const [history, setHistory] = useState<MaterialWriteoffHistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -125,13 +126,24 @@ export function MaterialReportTab({
     [warehouses]
   );
 
-  const loadUsers = useCallback(async () => {
-    if (!token) return;
-    const res = await fetchWithSession(`${apiUrl}/api/chat/users`, {
+  const loadMolUsers = useCallback(async () => {
+    if (!token || !warehouseFilter) {
+      setMolUsers([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      warehouseId: warehouseFilter,
+      section: sectionFilter
+    });
+    const res = await fetchWithSession(`${apiUrl}/api/material-report/mol-users?${params}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (res.ok) setAllUsers((await res.json()) as MatReportUser[]);
-  }, [token, apiUrl, fetchWithSession]);
+    if (res.ok) {
+      setMolUsers((await res.json()) as MatReportUser[]);
+    } else {
+      setMolUsers([]);
+    }
+  }, [token, apiUrl, fetchWithSession, warehouseFilter, sectionFilter]);
 
   const reportQuery = useCallback(() => {
     const params = new URLSearchParams({ section: sectionFilter });
@@ -186,8 +198,8 @@ export function MaterialReportTab({
   }, [token, loadBalances, loadHistory]);
 
   useEffect(() => {
-    void loadUsers();
-  }, [loadUsers]);
+    void loadMolUsers();
+  }, [loadMolUsers]);
 
   useEffect(() => {
     void reload();
@@ -199,20 +211,23 @@ export function MaterialReportTab({
 
   const holdersByKey = useMemo(() => new Map(holders.map((h) => [h.holderKey, h])), [holders]);
 
-  const extraHolders = useMemo(() => {
-    const userKeys = new Set(allUsers.map((u) => userHolderKey(u.id)));
-    return holders.filter((h) => !userKeys.has(h.holderKey));
-  }, [holders, allUsers]);
+  const molUserKeys = useMemo(() => new Set(molUsers.map((u) => userHolderKey(u.id))), [molUsers]);
 
   const sidebarUsers = useMemo(() => {
     const q = holderSearch.trim().toLowerCase();
-    return allUsers.filter((u) => !q || u.fullName.toLowerCase().includes(q));
-  }, [allUsers, holderSearch]);
+    return molUsers.filter((u) => !q || u.fullName.toLowerCase().includes(q));
+  }, [molUsers, holderSearch]);
 
   const sidebarExtras = useMemo(() => {
     const q = holderSearch.trim().toLowerCase();
-    return extraHolders.filter((h) => !q || h.holderName.toLowerCase().includes(q));
-  }, [extraHolders, holderSearch]);
+    return holders.filter((h) => {
+      if (molUserKeys.has(h.holderKey)) return false;
+      if (h.holderKey.startsWith("user:")) return false;
+      if (h.holderKey === "__storekeeper__") return false;
+      if (!h.lines.length) return false;
+      return !q || h.holderName.toLowerCase().includes(q);
+    });
+  }, [holders, molUserKeys, holderSearch]);
 
   const sidebarHasAny = sidebarUsers.length > 0 || sidebarExtras.length > 0;
 
@@ -238,8 +253,8 @@ export function MaterialReportTab({
   const selectedUser = useMemo(() => {
     if (!selectedKey.startsWith("user:")) return null;
     const id = selectedKey.slice(5);
-    return allUsers.find((u) => u.id === id) ?? null;
-  }, [selectedKey, allUsers]);
+    return molUsers.find((u) => u.id === id) ?? null;
+  }, [selectedKey, molUsers]);
 
   const threadTitle = selectedUser?.fullName ?? selectedHolder?.holderName ?? "";
   const threadSubtitle = selectedUser
@@ -331,9 +346,9 @@ export function MaterialReportTab({
         variant="compact"
         icon="▪"
         title="Материальный отчёт"
-        subtitle="По всем объектам · подотчёт и списания"
+        subtitle="МОЛ объекта · подотчёт и списания"
         stats={[
-          { label: "Сотрудников", value: allUsers.length, tone: "neutral" },
+          { label: "МОЛ", value: molUsers.length, tone: "neutral" },
           { label: "С подотчётом", value: holders.filter((h) => h.lines.length > 0).length, tone: "ok" },
           { label: "Позиций", value: posCount, tone: posCount > 0 ? "ok" : "neutral" }
         ]}
@@ -391,7 +406,7 @@ export function MaterialReportTab({
         <ResultBanner text={message} tone={/ошиб|403|502|недостат/i.test(message) ? "error" : "neutral"} />
       ) : null}
 
-      {loading && !holders.length && !allUsers.length ? (
+      {loading && !holders.length && !molUsers.length ? (
         <LoadingState text="Загрузка материального отчёта…" />
       ) : (
         <div className="chatLayout materialReportLayout">
@@ -453,10 +468,14 @@ export function MaterialReportTab({
 
               <div className="chatSidebarSection chatSidebarSectionGrow">
                 <span className="chatSidebarSectionTitle">
-                  {subTab === "balances" ? "Все сотрудники" : "Списания по людям"}
+                  {subTab === "balances" ? "МОЛ объекта" : "Списания по людям"}
                 </span>
-                {!sidebarHasAny ? (
-                  <p className="chatSidebarEmpty muted">Никого не найдено</p>
+                {!warehouseFilter ? (
+                  <p className="chatSidebarEmpty muted">Выберите объект в фильтре выше</p>
+                ) : !sidebarHasAny ? (
+                  <p className="chatSidebarEmpty muted">
+                    Нет МОЛ на объекте. Отметьте сотрудников в карточке пользователя (Доступы).
+                  </p>
                 ) : null}
                 <ul className="chatContactList">
                   {sidebarUsers.map((u) => {

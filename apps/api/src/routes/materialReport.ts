@@ -47,27 +47,39 @@ const REPORT_MATERIAL_KINDS: MaterialKind[] = [
 ];
 
 export const STOREKEEPER_HOLDER_KEY = "__storekeeper__";
-export const STOREKEEPER_HOLDER_NAME = "Кладовщик (не назначен на объекте)";
+
+/** Руководители не участвуют в материальном отчёте. */
+const MATERIAL_REPORT_EXCLUDED_ROLES = ["PROJECT_MANAGER", "MANAGEMENT"] as const;
 
 const STOREKEEPER_POSITION_NAMES = ["Кладовщик"];
 
-async function resolveWarehouseStorekeeper(
+function molUserWarehouseFilter(warehouseId: string, section?: "SS" | "EOM") {
+  return {
+    status: "ACTIVE" as const,
+    isMol: true,
+    role: { name: { notIn: [...MATERIAL_REPORT_EXCLUDED_ROLES] } },
+    OR: [
+      { warehouseScopes: { some: { warehouseId } } },
+      {
+        warehouseSectionScopes: {
+          some: section ? { warehouseId, section } : { warehouseId }
+        }
+      }
+    ]
+  };
+}
+
+async function resolveWarehouseMolHolder(
   warehouseId: string,
   section: "SS" | "EOM"
 ): Promise<{ userId: string; fullName: string } | null> {
   const users = await prisma.user.findMany({
-    where: {
-      status: "ACTIVE",
-      position: { name: { in: STOREKEEPER_POSITION_NAMES } },
-      OR: [
-        { warehouseScopes: { some: { warehouseId } } },
-        { warehouseSectionScopes: { some: { warehouseId } } }
-      ]
-    },
+    where: molUserWarehouseFilter(warehouseId),
     select: {
       id: true,
       fullName: true,
       email: true,
+      position: { select: { name: true } },
       warehouseSectionScopes: { where: { warehouseId }, select: { section: true } }
     },
     orderBy: { fullName: "asc" }
@@ -75,25 +87,33 @@ async function resolveWarehouseStorekeeper(
 
   if (!users.length) return null;
 
-  const sectionMatched = users.filter((u) =>
+  const storekeepers = users.filter((u) =>
+    STOREKEEPER_POSITION_NAMES.includes(u.position?.name || "")
+  );
+  const pool = storekeepers.length ? storekeepers : users;
+  const sectionMatched = pool.filter((u) =>
     u.warehouseSectionScopes.some((s) => s.section === section)
   );
-  const pick = (sectionMatched.length ? sectionMatched : users)[0]!;
+  const pick = (sectionMatched.length ? sectionMatched : pool)[0]!;
   return {
     userId: pick.id,
     fullName: (pick.fullName || pick.email || pick.id).trim()
   };
 }
 
-function warehouseStockHolderKey(storekeeper: { userId: string } | null): string {
-  return storekeeper ? `user:${storekeeper.userId}` : STOREKEEPER_HOLDER_KEY;
+function warehouseStockHolderKey(holder: { userId: string } | null): string | null {
+  return holder ? `user:${holder.userId}` : null;
 }
 
 function normalizeLegacyHolderKey(
   holderKey: string,
   warehouseStockKey: string
 ): string {
-  if (holderKey === STOREKEEPER_HOLDER_KEY && warehouseStockKey !== STOREKEEPER_HOLDER_KEY) {
+  if (
+    holderKey === STOREKEEPER_HOLDER_KEY &&
+    warehouseStockKey &&
+    warehouseStockKey !== STOREKEEPER_HOLDER_KEY
+  ) {
     return warehouseStockKey;
   }
   return holderKey;
@@ -143,12 +163,12 @@ type BalanceMaps = {
   holderIssueLines: Map<string, Map<string, { meta: IssueGroupMeta; lines: Map<string, BalanceLine> }>>;
 };
 
-function emptyBalanceMaps(warehouseStockHolderKey: string): BalanceMaps {
+function emptyBalanceMaps(warehouseStockHolderKey: string | null): BalanceMaps {
   return {
     qtyByKey: new Map(),
     holderLabels: new Map(),
     materialMeta: new Map(),
-    warehouseStockHolderKey,
+    warehouseStockHolderKey: warehouseStockHolderKey ?? "",
     holderIssueMeta: new Map(),
     holderIssueLines: new Map()
   };
@@ -223,7 +243,7 @@ async function buildAggregatedMaterialReportBalances(
 ): Promise<BalanceMaps> {
   const targets = await resolveMaterialReportTargets(scope, warehouseId, sectionFilter);
   if (!targets.length) {
-    return emptyBalanceMaps(STOREKEEPER_HOLDER_KEY);
+    return emptyBalanceMaps(null);
   }
   let merged: BalanceMaps | null = null;
   for (const t of targets) {
@@ -231,7 +251,7 @@ async function buildAggregatedMaterialReportBalances(
     if (!merged) merged = maps;
     else mergeBalanceMaps(merged, maps);
   }
-  return merged ?? emptyBalanceMaps(STOREKEEPER_HOLDER_KEY);
+  return merged ?? emptyBalanceMaps(null);
 }
 
 async function buildMaterialReportBalances(
@@ -239,12 +259,15 @@ async function buildMaterialReportBalances(
   section: string
 ): Promise<BalanceMaps> {
   const sectionEnum = section as "SS" | "EOM";
-  const storekeeper = await resolveWarehouseStorekeeper(warehouseId, sectionEnum);
-  const whHolderKey = warehouseStockHolderKey(storekeeper);
-  const whHolderName = storekeeper?.fullName ?? STOREKEEPER_HOLDER_NAME;
+  const molHolder = await resolveWarehouseMolHolder(warehouseId, sectionEnum);
+  const whHolderKey = warehouseStockHolderKey(molHolder);
+  const whHolderName = molHolder?.fullName ?? "";
 
   const qtyByKey = new Map<string, number>();
-  const holderLabels = new Map<string, string>([[whHolderKey, whHolderName]]);
+  const holderLabels = new Map<string, string>();
+  if (whHolderKey && whHolderName) {
+    holderLabels.set(whHolderKey, whHolderName);
+  }
   const materialMeta = new Map<string, { name: string; unit: string }>();
   const holderIssueMeta = new Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>();
   const holderIssueLines = new Map<
@@ -313,19 +336,21 @@ async function buildMaterialReportBalances(
     section: sectionEnum
   };
 
-  for (const row of stocks) {
-    const qty = Number(row.quantity) || 0;
-    if (qty < 1e-9) continue;
-    rememberMaterial(row.material.id, row.material.name, row.material.unit);
-    addQty(whHolderKey, whHolderName, row.materialId, qty);
-    addIssueLine(
-      whHolderKey,
-      stockIssueMeta,
-      row.materialId,
-      row.material.name,
-      row.material.unit,
-      qty
-    );
+  if (whHolderKey && whHolderName) {
+    for (const row of stocks) {
+      const qty = Number(row.quantity) || 0;
+      if (qty < 1e-9) continue;
+      rememberMaterial(row.material.id, row.material.name, row.material.unit);
+      addQty(whHolderKey, whHolderName, row.materialId, qty);
+      addIssueLine(
+        whHolderKey,
+        stockIssueMeta,
+        row.materialId,
+        row.material.name,
+        row.material.unit,
+        qty
+      );
+    }
   }
 
   const issues = await prisma.issueRequest.findMany({
@@ -414,7 +439,7 @@ async function buildMaterialReportBalances(
   });
 
   for (const w of woRows) {
-    const holderKey = normalizeLegacyHolderKey(w.holderKey, whHolderKey);
+    const holderKey = normalizeLegacyHolderKey(w.holderKey, whHolderKey || "");
     const key = composeKey(holderKey, w.materialId);
     const cur = qtyByKey.get(key) || 0;
     const sub = Number(w._sum.quantity || 0) || 0;
@@ -425,7 +450,7 @@ async function buildMaterialReportBalances(
     qtyByKey,
     holderLabels,
     materialMeta,
-    warehouseStockHolderKey: whHolderKey,
+    warehouseStockHolderKey: whHolderKey || "",
     holderIssueMeta,
     holderIssueLines
   };
@@ -475,7 +500,7 @@ function balancesToPayload(maps: BalanceMaps) {
       holderKey,
       holderUserId: holderKey.startsWith("user:") ? holderKey.slice(5) : null,
       holderName: holderLabels.get(holderKey) || holderKey,
-      isWarehouseBalance: holderKey === warehouseStockHolderKey,
+      isWarehouseBalance: Boolean(warehouseStockHolderKey) && holderKey === warehouseStockHolderKey,
       issueNumbers: meta?.issueNumbers ?? [],
       lastIssueAt: meta?.lastIssueAt ?? null,
       issues,
@@ -483,17 +508,66 @@ function balancesToPayload(maps: BalanceMaps) {
     };
   });
 
-  payload.sort((a, b) => {
+  const filtered = payload.filter(
+    (row) => row.holderKey !== STOREKEEPER_HOLDER_KEY && row.lines.length > 0
+  );
+
+  filtered.sort((a, b) => {
     if (a.isWarehouseBalance) return -1;
     if (b.isWarehouseBalance) return 1;
     return String(a.holderName).localeCompare(String(b.holderName), "ru");
   });
 
-  return payload;
+  return filtered;
+}
+
+async function listMaterialReportMolUsers(
+  warehouseId: string,
+  sectionFilter: "SS" | "EOM" | "ALL"
+) {
+  const section =
+    sectionFilter === "SS" || sectionFilter === "EOM" ? sectionFilter : undefined;
+  const rows = await prisma.user.findMany({
+    where: molUserWarehouseFilter(warehouseId, section),
+    include: { role: true, position: true },
+    orderBy: { fullName: "asc" }
+  });
+  return rows.map((u) => ({
+    id: u.id,
+    fullName: u.fullName,
+    avatarUrl: u.avatarUrl,
+    position: u.position?.name || null,
+    role: u.role.name,
+    isMol: u.isMol
+  }));
 }
 
 export const materialReportRouter = Router();
 materialReportRouter.use(requireAuth);
+
+materialReportRouter.get("/mol-users", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  if (!warehouseId) {
+    return res.status(400).json({ error: "warehouseId обязателен" });
+  }
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "ALL";
+  if (sectionRaw && sectionRaw !== "SS" && sectionRaw !== "EOM" && sectionRaw !== "ALL") {
+    return res.status(400).json({ error: "section: SS, EOM или ALL" });
+  }
+  const sectionFilter: "SS" | "EOM" | "ALL" =
+    sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : "ALL";
+
+  const scope = await resolveReadScope(req, { warehouseId });
+  try {
+    assertWarehouseInScope(scope, warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+
+  return res.json(await listMaterialReportMolUsers(warehouseId, sectionFilter));
+});
 
 materialReportRouter.get("/balances", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {
   const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
@@ -664,7 +738,7 @@ materialReportRouter.post(
     let holderKey =
       parsed.data.holderKey?.trim() ||
       (parsed.data.holderUserId ? `user:${parsed.data.holderUserId}` : "");
-    holderKey = normalizeLegacyHolderKey(holderKey, maps.warehouseStockHolderKey);
+    holderKey = normalizeLegacyHolderKey(holderKey, maps.warehouseStockHolderKey || "");
     if (!holderKey) {
       return res.status(400).json({ error: "holderKey обязателен" });
     }

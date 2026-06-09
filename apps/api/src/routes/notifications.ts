@@ -10,6 +10,7 @@ import {
   setCriticalRecipientUserIds
 } from "../lib/criticalRecipients.js";
 import { getRequestDataScope } from "../lib/dataScope.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { withRepairedFileName } from "../lib/uploadFileName.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -40,7 +41,7 @@ const criticalRecipientsSchema = z.object({
 
 function canManageRules(req: AuthedRequest): boolean {
   const perms = Array.isArray(req.user?.permissions) ? req.user!.permissions : [];
-  if (req.user?.role === "ADMIN") return true;
+  if (isAdminEquivalent(req.user?.role)) return true;
   return perms.includes("notifications.rules.manage") || perms.includes("admin.users.manage");
 }
 

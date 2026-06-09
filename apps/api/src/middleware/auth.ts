@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { getEffectivePermissions } from "../lib/access.js";
+import { isAdminEquivalent, OPEN_ACCESS_ALL } from "../lib/openAccess.js";
 import { hasPermission } from "../lib/permissions.js";
 import { prisma } from "../lib/prisma.js";
 import type { JwtPayload } from "../types.js";
@@ -56,8 +57,10 @@ export function requireAdminRole(req: AuthedRequest, res: Response, next: NextFu
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
-  if (req.user.role !== "ADMIN") {
+  if (!isAdminEquivalent(req.user.role)) {
     return res.status(403).json({ error: "Только для администратора" });
   }
   return next();
 }
+
+export { OPEN_ACCESS_ALL };

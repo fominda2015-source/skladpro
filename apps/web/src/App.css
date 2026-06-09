@@ -1627,6 +1627,30 @@ button:hover {
   }
 }
 
+/* Карточка инструмента поверх главной (рядом с drill-модалкой) */
+.homeToolDrawerLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  pointer-events: none;
+}
+.detailDrawer.detailDrawerTool.detailDrawerHomeOverlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: none;
+  height: auto;
+  z-index: 1301;
+  pointer-events: auto;
+}
+@media (min-width: 1400px) {
+  .detailDrawer.detailDrawerTool.detailDrawerHomeOverlay {
+    right: max(16px, calc((100vw - 1280px) / 2 - 436px));
+  }
+}
+
 .detailDrawerHeader {
   display: flex;
   justify-content: space-between;
@@ -3625,6 +3649,18 @@ html[data-mobile="1"] .chatPage--thread .chatThread--placeholder {
 /* Таблица материалов внутри узла лимита.
    Растягивается на 100% родителя, но числовые колонки сжаты до содержимого (width: 1%),
    а вся «лишняя» ширина уходит «Материалу» и «Структуре» — пустых мест внутри строки не остаётся. */
+.limitMaterialsTableWrap {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .limitMaterialsTableWrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 .limitMaterialsTable {
   width: 100%;
   border-collapse: collapse;
@@ -3643,7 +3679,9 @@ html[data-mobile="1"] .chatPage--thread .chatThread--placeholder {
   color: #475569;
   background: #f8fafc;
   position: sticky;
-  top: 0;
+  top: var(--limits-table-head-top, 88px);
+  z-index: 6;
+  box-shadow: 0 1px 0 #e2e8f0;
 }
 .limitMaterialsTable td.num,
 .limitMaterialsTable th.num {

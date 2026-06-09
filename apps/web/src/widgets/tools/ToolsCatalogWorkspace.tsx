@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ToolsCatalogNav } from "./ToolsCatalogNav";
 import { ToolsHubNav } from "./ToolsHubNav";
 import { ToolCatalogMaterialsTable } from "./ToolCatalogMaterialsTable";
@@ -7,6 +7,8 @@ import {
   TOOL_SUB_HUB_CARDS,
   TOOLS_HUB_CARDS,
   buildToolsHubStats,
+  catalogMaterialSectionLabel,
+  type CatalogMaterialSection,
   type ToolCatalogMaterialRow,
   type ToolCatalogSummary,
   type ToolsNavId,
@@ -26,6 +28,8 @@ type Props = {
   fetchWithSession: (url: string, init?: RequestInit) => Promise<Response>;
   toolListSlot: ReactNode;
   showHubOnly?: boolean;
+  canWrite?: boolean;
+  onCatalogMessage?: (msg: string, tone?: "success" | "error" | "neutral") => void;
 };
 
 export function ToolsCatalogWorkspace({
@@ -37,12 +41,16 @@ export function ToolsCatalogWorkspace({
   apiUrl,
   fetchWithSession,
   toolListSlot,
-  showHubOnly
+  showHubOnly,
+  canWrite,
+  onCatalogMessage
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
   const [materialRows, setMaterialRows] = useState<ToolCatalogMaterialRow[]>([]);
   const [matLoading, setMatLoading] = useState(false);
+  const [matRefresh, setMatRefresh] = useState(0);
+  const [busyMaterialId, setBusyMaterialId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -55,11 +63,11 @@ export function ToolsCatalogWorkspace({
       });
       if (res.ok) setSummary((await res.json()) as ToolCatalogSummary);
     })();
-  }, [token, warehouseId, sectionFilter, apiUrl, fetchWithSession]);
+  }, [token, warehouseId, sectionFilter, apiUrl, fetchWithSession, matRefresh]);
 
-  const materialSection = navToMaterialSection(current);
+  const materialSection = navToMaterialSection(current) as CatalogMaterialSection | null;
 
-  useEffect(() => {
+  const loadMaterials = useCallback(async () => {
     if (!token || !materialSection) {
       setMaterialRows([]);
       return;
@@ -67,17 +75,44 @@ export function ToolsCatalogWorkspace({
     setMatLoading(true);
     const q = new URLSearchParams({ section: materialSection, sectionFilter });
     if (warehouseId) q.set("warehouseId", warehouseId);
-    void fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${q}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(async (res) => {
-        if (res.ok) setMaterialRows((await res.json()) as ToolCatalogMaterialRow[]);
-        else setMaterialRows([]);
-      })
-      .finally(() => setMatLoading(false));
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${q}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setMaterialRows((await res.json()) as ToolCatalogMaterialRow[]);
+      else setMaterialRows([]);
+    } finally {
+      setMatLoading(false);
+    }
   }, [token, materialSection, warehouseId, sectionFilter, apiUrl, fetchWithSession]);
 
+  useEffect(() => {
+    void loadMaterials();
+  }, [loadMaterials, matRefresh]);
+
   const hubStats = useMemo(() => (summary ? buildToolsHubStats(summary) : undefined), [summary]);
+
+  async function changeMaterialSection(materialId: string, section: CatalogMaterialSection | null) {
+    if (!token || !canWrite) return;
+    setBusyMaterialId(materialId);
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/materials/${materialId}/section`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ toolCatalogSection: section })
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        onCatalogMessage?.(body.error || "Не удалось изменить раздел", "error");
+        return;
+      }
+      const label = section ? catalogMaterialSectionLabel(section) : "склад (без раздела инструментов)";
+      onCatalogMessage?.(`Позиция перенесена: ${label}`, "success");
+      setMatRefresh((n) => n + 1);
+    } finally {
+      setBusyMaterialId(null);
+    }
+  }
 
   function pushNav(id: ToolsNavId) {
     if (id === "hub") {
@@ -123,7 +158,14 @@ export function ToolsCatalogWorkspace({
       {isMaterialNav(current) && (
         <>
           <h3 style={{ marginTop: hubCards ? 16 : 0 }}>{toolsNavTitle(navPath)}</h3>
-          <ToolCatalogMaterialsTable rows={materialRows} loading={matLoading} />
+          <ToolCatalogMaterialsTable
+            rows={materialRows}
+            loading={matLoading}
+            canWrite={canWrite}
+            currentSection={materialSection}
+            busyMaterialId={busyMaterialId}
+            onChangeSection={changeMaterialSection}
+          />
         </>
       )}
 
