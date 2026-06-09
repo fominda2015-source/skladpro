@@ -45,6 +45,11 @@ import { requireAuth, requirePermission, type AuthedRequest } from "../middlewar
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
 import { buildMaterialUpdatesFromReceiptItem, parseReceiptStoragePlace } from "../lib/receiptMaterialApply.js";
+import {
+  createToolsFromReceiptAccept,
+  isToolInventoryReceiptCategory,
+  resolveToolCategoryIdFromReceipt
+} from "../lib/receiptToolApply.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 
@@ -1154,7 +1159,12 @@ receiptRequestsRouter.post(
 
       const stockResolved = parsed.data.skipWarehouseStock
         ? []
-        : resolved.filter((r) => !r.campCategory && r.materialId);
+        : resolved.filter((r) => {
+            if (r.campCategory || !r.materialId) return false;
+            const m = parsed.data.itemMappings.find((x) => x.itemId === r.item.id);
+            const cat = m?.category ?? r.item.category ?? null;
+            return !isToolInventoryReceiptCategory(cat);
+          });
       const operation =
         stockResolved.length > 0
           ? await tx.operation.create({
@@ -1297,8 +1307,27 @@ receiptRequestsRouter.post(
             data: materialPatch
           });
         }
+
+        const toolInventory = isToolInventoryReceiptCategory(itemCategory);
+        if (toolInventory) {
+          const categoryId = await resolveToolCategoryIdFromReceipt(tx, itemCategory);
+          if (categoryId) {
+            await createToolsFromReceiptAccept(tx, {
+              receiptNumber: row.number,
+              itemId: r.item.id,
+              name: cardName,
+              categoryId,
+              warehouseId: row.warehouseId,
+              section: row.section,
+              qty: r.acceptedQty,
+              userId: req.user!.userId,
+              storagePlace: storagePlaceRaw
+            });
+          }
+        }
+
         const { storageRoom, storageCell } = parseReceiptStoragePlace(storagePlaceRaw);
-        if (!operation || parsed.data.skipWarehouseStock) continue;
+        if (!operation || parsed.data.skipWarehouseStock || toolInventory) continue;
         await tx.stock.upsert({
           where: {
             warehouseId_materialId_section_condition: {
