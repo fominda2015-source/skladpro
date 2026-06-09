@@ -97,70 +97,8 @@ export type HomeObjectRow = {
   };
 };
 
-function aggregateHomeTotals(list: HomeObjectRow[]) {
-  let camp = 0;
-  let tools = 0;
-  let overLines = 0;
-  let stockLines = 0;
-  let receiptOpen = 0;
-  let toolsInRepair = 0;
-  let withoutTemplate = 0;
-  let toolsInStock = 0;
-  let toolsIssued = 0;
-  const ss = { plannedQty: 0, issuedQty: 0, overCount: 0, hasTemplate: false, percent: 0 };
-  const eom = { ...ss };
-  for (const o of list) {
-    camp += o.campSs + o.campEom;
-    tools += o.tools.total;
-    overLines += o.limitsSs.overCount + o.limitsEom.overCount;
-    stockLines += o.stockLines;
-    receiptOpen += o.receiptOpen;
-    toolsInRepair += o.tools.inRepair;
-    toolsInStock += o.tools.inStock;
-    toolsIssued += o.tools.issued;
-    if (!o.limitsSs.hasTemplate && !o.limitsEom.hasTemplate) withoutTemplate += 1;
-    if (o.limitsSs.hasTemplate) {
-      ss.hasTemplate = true;
-      ss.plannedQty += o.limitsSs.plannedQty;
-      ss.issuedQty += o.limitsSs.issuedQty;
-      ss.overCount += o.limitsSs.overCount;
-    }
-    if (o.limitsEom.hasTemplate) {
-      eom.hasTemplate = true;
-      eom.plannedQty += o.limitsEom.plannedQty;
-      eom.issuedQty += o.limitsEom.issuedQty;
-      eom.overCount += o.limitsEom.overCount;
-    }
-  }
-  ss.percent = ss.plannedQty > 0 ? Math.min(100, Math.round((ss.issuedQty / ss.plannedQty) * 100)) : 0;
-  eom.percent = eom.plannedQty > 0 ? Math.min(100, Math.round((eom.issuedQty / eom.plannedQty) * 100)) : 0;
-  return {
-    camp,
-    tools,
-    ss,
-    eom,
-    overLines,
-    stockLines,
-    receiptOpen,
-    toolsInRepair,
-    withoutTemplate,
-    toolsInStock,
-    toolsIssued
-  };
-}
-
-function formatObjectCount(n: number): string {
-  if (n === 1) return "1 объект";
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} объекта`;
-  return `${n} объектов`;
-}
-
 type Props = {
   objects: HomeObjectRow[];
-  /** Если выбран один объект в шапке — карточки сводки считаем только по нему. */
-  statsWarehouseId?: string | null;
   summary?: HomeOverviewSummary | null;
   loading: boolean;
   error: string;
@@ -168,7 +106,7 @@ type Props = {
   expandedId: string | null;
   onExpand: (warehouseId: string | null) => void;
   onRefresh: () => void;
-  /** Закрыть вложенные панели (например карточку инструмента) при закрытии drill или «назад». */
+  /** Закрыть вложенные панели (карточка инструмента) при закрытии drill или «назад». */
   onDrillDismiss?: () => void;
   onOpenCamp: (warehouseId: string) => void;
   onOpenLimits: (warehouseId: string, section: "SS" | "EOM") => void;
@@ -382,7 +320,6 @@ function chartTooltipQty(value: unknown): [string, string] {
 
 export function HomeOverview({
   objects,
-  statsWarehouseId = null,
   summary,
   loading,
   error,
@@ -458,15 +395,76 @@ export function HomeOverview({
     setDrillHistoryIndex((i) => Math.max(0, i - 1));
   };
   const goForward = () => setDrillHistoryIndex((i) => Math.min(drillHistory.length - 1, i + 1));
-  const statsObjects = useMemo(
-    () => (statsWarehouseId ? objects.filter((o) => o.warehouseId === statsWarehouseId) : objects),
-    [objects, statsWarehouseId]
-  );
-  const totals = useMemo(() => aggregateHomeTotals(statsObjects), [statsObjects]);
+  const totals = useMemo(() => {
+    if (summary) {
+      return {
+        camp: summary.campTotal,
+        tools: summary.toolsTotal,
+        ss: summary.limitsSs,
+        eom: summary.limitsEom,
+        overLines: summary.limitsOverLines,
+        stockLines: summary.stockLines,
+        receiptOpen: summary.receiptOpen,
+        toolsInRepair: summary.toolsInRepair,
+        withoutTemplate: summary.objectsWithoutTemplate,
+        toolsInStock: summary.toolsInStock,
+        toolsIssued: summary.toolsIssued
+      };
+    }
+    let camp = 0;
+    let tools = 0;
+    let overLines = 0;
+    let stockLines = 0;
+    let receiptOpen = 0;
+    let toolsInRepair = 0;
+    let withoutTemplate = 0;
+    let toolsInStock = 0;
+    let toolsIssued = 0;
+    const ss = { plannedQty: 0, issuedQty: 0, overCount: 0, hasTemplate: false, percent: 0 };
+    const eom = { ...ss };
+    for (const o of objects) {
+      camp += o.campSs + o.campEom;
+      tools += o.tools.total;
+      overLines += o.limitsSs.overCount + o.limitsEom.overCount;
+      stockLines += o.stockLines;
+      receiptOpen += o.receiptOpen;
+      toolsInRepair += o.tools.inRepair;
+      toolsInStock += o.tools.inStock;
+      toolsIssued += o.tools.issued;
+      if (!o.limitsSs.hasTemplate && !o.limitsEom.hasTemplate) withoutTemplate += 1;
+      if (o.limitsSs.hasTemplate) {
+        ss.hasTemplate = true;
+        ss.plannedQty += o.limitsSs.plannedQty;
+        ss.issuedQty += o.limitsSs.issuedQty;
+        ss.overCount += o.limitsSs.overCount;
+      }
+      if (o.limitsEom.hasTemplate) {
+        eom.hasTemplate = true;
+        eom.plannedQty += o.limitsEom.plannedQty;
+        eom.issuedQty += o.limitsEom.issuedQty;
+        eom.overCount += o.limitsEom.overCount;
+      }
+    }
+    ss.percent = ss.plannedQty > 0 ? Math.min(100, Math.round((ss.issuedQty / ss.plannedQty) * 100)) : 0;
+    eom.percent = eom.plannedQty > 0 ? Math.min(100, Math.round((eom.issuedQty / eom.plannedQty) * 100)) : 0;
+    return {
+      camp,
+      tools,
+      ss,
+      eom,
+      overLines,
+      stockLines,
+      receiptOpen,
+      toolsInRepair,
+      withoutTemplate,
+      toolsInStock,
+      toolsIssued
+    };
+  }, [objects, summary]);
 
   const limitsChartRows = useMemo(
     () =>
-      statsObjects
+      objects
         .map((o) => ({
           id: o.warehouseId,
           name: shortName(o.name, 16),
@@ -477,12 +475,12 @@ export function HomeOverview({
           eomOver: o.limitsEom.overCount
         }))
         .sort((a, b) => Math.max(b.ss ?? 0, b.eom ?? 0) - Math.max(a.ss ?? 0, a.eom ?? 0) || a.fullName.localeCompare(b.fullName, "ru")),
-    [statsObjects]
+    [objects]
   );
 
   const campChartRows = useMemo(
     () =>
-      statsObjects
+      objects
         .map((o) => ({
           id: o.warehouseId,
           name: shortName(o.name, 12),
@@ -491,16 +489,19 @@ export function HomeOverview({
           tools: o.tools.total
         }))
         .sort((a, b) => b.camp - a.camp || b.tools - a.tools || a.fullName.localeCompare(b.fullName, "ru")),
-    [statsObjects]
+    [objects]
   );
 
   const toolsPieData = useMemo(() => {
+    const inStock = summary?.toolsInStock ?? totals.toolsInStock;
+    const issued = summary?.toolsIssued ?? totals.toolsIssued;
+    const inRepair = summary?.toolsInRepair ?? totals.toolsInRepair;
     return [
-      { name: "На складе", value: totals.toolsInStock, key: "stock" },
-      { name: "Выдано", value: totals.toolsIssued, key: "issued" },
-      { name: "В ремонте", value: totals.toolsInRepair, key: "repair" }
+      { name: "На складе", value: inStock, key: "stock" },
+      { name: "Выдано", value: issued, key: "issued" },
+      { name: "В ремонте", value: inRepair, key: "repair" }
     ].filter((s) => s.value > 0);
-  }, [totals]);
+  }, [summary, totals]);
 
   const movementChartRows = useMemo(() => {
     const src = summary?.movementTrend30d;
@@ -512,10 +513,9 @@ export function HomeOverview({
   }, [summary?.movementTrend30d]);
 
   const topToolsRows = useMemo(() => {
-    const src =
-      statsWarehouseId || !summary?.toolsByCategory?.length
-        ? statsObjects.flatMap((o) => o.tools.categories)
-        : summary.toolsByCategory;
+    const src = summary?.toolsByCategory?.length
+      ? summary.toolsByCategory
+      : objects.flatMap((o) => o.tools.categories);
     return [...src]
       .sort((a, b) => b.count - a.count)
       .map((c) => ({
@@ -523,13 +523,12 @@ export function HomeOverview({
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
         count: c.count
       }));
-  }, [statsObjects, statsWarehouseId, summary]);
+  }, [objects, summary]);
 
   const topCampRows = useMemo(() => {
-    const src =
-      statsWarehouseId || !summary?.campByCategory?.length
-        ? statsObjects.flatMap((o) => o.camp?.categories ?? [])
-        : summary.campByCategory;
+    const src = summary?.campByCategory?.length
+      ? summary.campByCategory
+      : objects.flatMap((o) => o.camp?.categories ?? []);
     return [...src]
       .sort((a, b) => b.count - a.count)
       .map((c) => ({
@@ -537,11 +536,11 @@ export function HomeOverview({
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
         count: c.count
       }));
-  }, [statsObjects, statsWarehouseId, summary]);
+  }, [objects, summary]);
 
   const toolsByObjectRows = useMemo(
     () =>
-      statsObjects
+      objects
         .map((o) => ({
           id: o.warehouseId,
           name: shortName(o.name, 14),
@@ -553,10 +552,10 @@ export function HomeOverview({
         }))
         .filter((r) => r.total > 0)
         .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, "ru")),
-    [statsObjects]
+    [objects]
   );
 
-  const showCharts = statsObjects.length > 0 && !loading;
+  const showCharts = objects.length > 0 && !loading;
 
   const sortedObjects = useMemo(() => {
     const score = (o: HomeObjectRow) => {
@@ -569,17 +568,10 @@ export function HomeOverview({
       );
       return pct;
     };
-    return [...statsObjects].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "ru"));
-  }, [statsObjects]);
+    return [...objects].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "ru"));
+  }, [objects]);
 
-  const objectCount = statsWarehouseId ? statsObjects.length : (summary?.objectCount ?? objects.length);
-  const statsScopeLabel = statsWarehouseId
-    ? statsObjects[0]?.name ?? "выбранный объект"
-    : null;
-  const chartScopeHint = statsScopeLabel ? `по объекту «${statsScopeLabel}»` : "по всем объектам";
-  const drillListSubtitle = statsScopeLabel
-    ? `${statsScopeLabel} · детализация · «Подробнее» — переход в раздел`
-    : `${formatObjectCount(objectCount)} · детализация по каждому · «Подробнее» — переход в раздел`;
+  const objectCount = summary?.objectCount ?? objects.length;
 
   const limitsChartH = chartRowsHeight(limitsChartRows.length);
   const toolsObjChartH = chartRowsHeight(toolsByObjectRows.length);
@@ -965,7 +957,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, ...limitDrillCells(o.limitsSs)]
             }))}
@@ -977,7 +969,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, ...limitDrillCells(o.limitsEom)]
             }))}
@@ -989,7 +981,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "ТМЦ на складе"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, fmtQty(o.stockLines)]
             }))}
@@ -1001,7 +993,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Городок", "СС", "ЭОМ"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [
                 o.name,
@@ -1018,7 +1010,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Всего", "На складе", "Выдано", "В ремонте"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
             }))}
@@ -1030,7 +1022,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "На складе"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, o.tools.inStock]
             }))}
@@ -1042,7 +1034,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Выдано"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, o.tools.issued]
             }))}
@@ -1054,7 +1046,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "В ремонте"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, o.tools.inRepair]
             }))}
@@ -1066,7 +1058,7 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Приёмки в работе"]}
             onRowClick={openObjectMini}
-            rows={statsObjects.map((o) => ({
+            rows={objects.map((o) => ({
               key: o.warehouseId,
               cells: [o.name, o.receiptOpen]
             }))}
@@ -1078,7 +1070,7 @@ export function HomeOverview({
       if (drill.key === "movement") {
         return (
           <HomeDrillByObjects
-            objectCount={objectCount}
+            objectCount={objects.length}
             chart={
               movementChartRows.length ? (
                 <HomeScrollChart height={220} maxPreview={CHART_MODAL_H}>
@@ -1091,7 +1083,7 @@ export function HomeOverview({
             <ObjectDrillTable
               columns={["Объект", "ТМЦ на складе", "Приёмки"]}
               onRowClick={openObjectMini}
-              rows={statsObjects.map((o) => ({
+              rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
               }))}
@@ -1101,11 +1093,11 @@ export function HomeOverview({
       }
       if (drill.key === "limits") {
         return (
-          <HomeDrillByObjects objectCount={objectCount}>
+          <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "Лимиты СС", "Лимиты ЭОМ", "Перерасход"]}
               onRowClick={openObjectMini}
-              rows={statsObjects.map((o) => ({
+              rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [
                   o.name,
@@ -1120,11 +1112,11 @@ export function HomeOverview({
       }
       if (drill.key === "toolsByObject") {
         return (
-          <HomeDrillByObjects objectCount={objectCount}>
+          <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               onRowClick={openObjectMini}
-              rows={statsObjects.map((o) => ({
+              rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
@@ -1135,14 +1127,14 @@ export function HomeOverview({
       if (drill.key === "toolsStatus") {
         return (
           <HomeDrillByObjects
-            objectCount={objectCount}
+            objectCount={objects.length}
             chart={toolsPieData.length ? renderToolsPie(240) : undefined}
-            note={statsScopeLabel ? `Сводка ${chartScopeHint}.` : "Круговая диаграмма — сводка по всем объектам. Таблица — разбивка по каждому объекту."}
+            note="Круговая диаграмма — сводка по всем объектам. Таблица — разбивка по каждому объекту."
           >
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               onRowClick={openObjectMini}
-              rows={statsObjects.map((o) => ({
+              rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
               }))}
@@ -1152,11 +1144,11 @@ export function HomeOverview({
       }
       if (drill.key === "camp") {
         return (
-          <HomeDrillByObjects objectCount={objectCount}>
+          <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
               columns={["Объект", "Городок", "СС", "ЭОМ"]}
               onRowClick={openObjectMini}
-              rows={statsObjects.map((o) => ({
+              rows={objects.map((o) => ({
                 key: o.warehouseId,
                 cells: [
                   o.name,
@@ -1171,9 +1163,9 @@ export function HomeOverview({
       }
       if (drill.key === "campCategories") {
         return (
-          <HomeDrillByObjects objectCount={objectCount} note="Категории имущества городка по объектам.">
+          <HomeDrillByObjects objectCount={objects.length} note="Категории имущества городка по объектам.">
             <div className="homeDrillObjectList">
-              {statsObjects.map((o) => (
+              {objects.map((o) => (
                 <section key={o.warehouseId} className="homeDrillObjectBlock">
                   <header className="homeDrillObjectBlockHead">
                     <strong>{o.name}</strong>
@@ -1196,7 +1188,7 @@ export function HomeOverview({
             {topCampRows.length > 0 ? (
               <>
                 <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
-                  {statsScopeLabel ? "Сводно по объекту" : "Сводно по всем объектам"}
+                  Сводно по всем объектам
                 </h4>
                 <ObjectDrillTable
                   columns={["Категория", "Штук"]}
@@ -1213,11 +1205,11 @@ export function HomeOverview({
       if (drill.key === "categories") {
         return (
           <HomeDrillByObjects
-            objectCount={objectCount}
+            objectCount={objects.length}
             note="Категории инструментов внутри каждого объекта."
           >
             <div className="homeDrillObjectList">
-              {statsObjects.map((o) => (
+              {objects.map((o) => (
                 <section key={o.warehouseId} className="homeDrillObjectBlock">
                   <header className="homeDrillObjectBlockHead">
                     <strong>{o.name}</strong>
@@ -1246,7 +1238,7 @@ export function HomeOverview({
             {topToolsRows.length > 0 ? (
               <>
                 <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
-                  {statsScopeLabel ? "Сводно по объекту" : "Сводно по всем объектам"}
+                  Сводно по всем объектам
                 </h4>
                 <ObjectDrillTable
                   columns={["Категория", "Штук"]}
@@ -1272,13 +1264,7 @@ export function HomeOverview({
         title="Главная"
         subtitle={
           <>
-            {statsScopeLabel ? (
-              <>Сводка по объекту «{statsScopeLabel}»</>
-            ) : objectCount > 0 ? (
-              `${formatObjectCount(objectCount)} · сводка СС и ЭОМ по всем площадкам`
-            ) : (
-              "Нет доступных объектов"
-            )}
+            {objectCount > 0 ? `${objectCount} объектов` : "Нет доступных объектов"} · сводка СС и ЭОМ по всем площадкам
             {generatedAt ? (
               <span className="homeOverviewMeta"> · обновлено {new Date(generatedAt).toLocaleTimeString()}</span>
             ) : null}
@@ -1323,7 +1309,8 @@ export function HomeOverview({
               <>
                 <span>{totals.tools}</span>
                 <small className="homeStatSubline">
-                  склад {totals.toolsInStock} · выдано {totals.toolsIssued} · ремонт {totals.toolsInRepair}
+                  склад {summary?.toolsInStock ?? totals.toolsInStock} · выдано {summary?.toolsIssued ?? totals.toolsIssued} ·
+                  ремонт {summary?.toolsInRepair ?? totals.toolsInRepair}
                 </small>
               </>
             ),
@@ -1394,7 +1381,7 @@ export function HomeOverview({
 
       {showCharts ? (
         <div className="homeChartsGrid">
-          {movementChartRows.length > 0 && !statsWarehouseId ? (
+          {movementChartRows.length > 0 ? (
             <section
               className="homeChartCard homeChartCardWide homeChartCardClickable"
               onClick={() => openChartDrill("movement")}
@@ -1439,7 +1426,7 @@ export function HomeOverview({
           >
             <ChartCardHead
               title="Инструменты"
-              hint={chartScopeHint}
+              hint="по всем объектам"
               count={toolsByObjectRows.length}
               onExpand={() => openChartDrill("toolsByObject")}
             />
@@ -1459,7 +1446,7 @@ export function HomeOverview({
           >
             <ChartCardHead
               title="Статусы инструментов"
-              hint={chartScopeHint}
+              hint="сводно по всем объектам"
               onExpand={() => openChartDrill("toolsStatus")}
             />
             {renderToolsPie(220)}
@@ -1472,7 +1459,7 @@ export function HomeOverview({
           >
             <ChartCardHead
               title="Городок"
-              hint={chartScopeHint}
+              hint="по объектам"
               count={campChartRows.length}
               onExpand={() => openChartDrill("camp")}
             />
@@ -1493,7 +1480,7 @@ export function HomeOverview({
             >
               <ChartCardHead
                 title="Категории городка"
-                hint={statsScopeLabel ? chartScopeHint : "суммарно по всем объектам"}
+                hint="суммарно по всем объектам"
                 count={topCampRows.length}
                 onExpand={() => openChartDrill("campCategories")}
               />
@@ -1511,7 +1498,7 @@ export function HomeOverview({
             >
               <ChartCardHead
                 title="Категории инструментов"
-                hint={statsScopeLabel ? chartScopeHint : "суммарно по всем объектам"}
+                hint="суммарно по всем объектам"
                 count={topToolsRows.length}
                 onExpand={() => openChartDrill("categories")}
               />
@@ -1541,12 +1528,12 @@ export function HomeOverview({
             drill.kind === "stat" && drill.key === "tools"
               ? selectedObject
                 ? `${selectedObject.name} · разделы и таблица инструментов`
-                : `${formatObjectCount(objectCount)} · выберите объект для детализации`
+                : `${objectCount} объектов · выберите объект для детализации`
               : drill.kind === "stat" && drill.key === "camp"
                 ? selectedObject
                   ? `${selectedObject.name} · категории и карточки городка`
-                  : `${formatObjectCount(objectCount)} · выберите объект для детализации`
-                : drillListSubtitle
+                  : `${objectCount} объектов · выберите объект для детализации`
+                : `${objectCount} объектов · детализация по каждому · «Подробнее» — переход в раздел`
           }
           onClose={dismissDrill}
           onBack={goBack}

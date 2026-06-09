@@ -2070,9 +2070,6 @@ function App() {
       loadOperations(section, seq),
       loadApprovalQueue(section, seq)
     ];
-    if (tab === "stocks" && canDashboard) {
-      tasks.push(loadHomeOverview(section).then(() => undefined));
-    }
     const receiptWh =
       activeObjectId === ALL_OBJECTS_ID
         ? tabWarehouseFilters[tab] || tabWarehouseFilters.operations || tabWarehouseFilters.approvals || ""
@@ -2283,14 +2280,12 @@ function App() {
     setChatProfileData(null);
   }
 
-  async function loadHomeOverview(sectionOverride?: "SS" | "EOM") {
+  async function loadHomeOverview() {
     if (!token || !canDashboard) return;
     setHomeOverviewError("");
     setHomeOverviewLoading(true);
     try {
-      const params = new URLSearchParams();
-      params.set("section", sectionOverride ?? objectSectionFilter);
-      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview?${params}`, {
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -5324,7 +5319,7 @@ function App() {
       return;
     }
     void loadHomeOverview();
-  }, [token, canDashboard, activeTab, objectSectionFilter, activeObjectId]);
+  }, [token, canDashboard, activeTab]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -6285,7 +6280,6 @@ function App() {
         {activeTab === "stocks" && (
           <HomeOverview
             objects={homeObjectsDisplay}
-            statsWarehouseId={isAllObjectsView ? null : activeObjectId || null}
             summary={homeOverview?.summary}
             loading={homeOverviewLoading}
             error={homeOverviewError}

@@ -255,27 +255,19 @@ function HomeDrillLimitsPanel({
                     <strong style={{ color: "#243656" }}>{safeName(node.title)}</strong>
                     {agg.plan > 0 ? (
                       <span className="muted limitGroupMetrics" style={{ fontSize: 11 }}>
-                        приход {groupArrivedPct}% · выдача {groupIssuedPct}%
+                        приход {metricFmt(agg.arrived)} / {metricFmt(agg.plan)} ({groupArrivedPct}%) · выдача{" "}
+                        {metricFmt(agg.issued)} / {metricFmt(agg.plan)} ({groupIssuedPct}%)
                       </span>
                     ) : null}
                   </div>
                   {agg.plan > 0 ? (
                     <div className="limitGroupRowBars">
-                      <LimitStructureBars
-                        plan={agg.plan}
-                        issued={agg.issued}
-                        arrived={agg.arrived}
-                        compact
-                        percentOnly
-                      />
+                      <LimitStructureBars plan={agg.plan} issued={agg.issued} arrived={agg.arrived} compact />
                     </div>
                   ) : null}
                 </div>
                 {isExpanded && directMaterials.length > 0 ? (
-                  <div
-                    className="limitMaterialsTableWrap"
-                    style={{ marginLeft: (depth + 1) * 10, marginBottom: 8 }}
-                  >
+                  <div style={{ marginLeft: (depth + 1) * 10, marginBottom: 8, overflowX: "auto" }}>
                     <table className="limitMaterialsTable">
                       <thead>
                         <tr>
@@ -364,13 +356,11 @@ function HomeDrillLimitsPanel({
 
 function HomeDrillStockPanel({
   warehouseId,
-  section,
   token,
   fetchWithSession,
   safeName
 }: {
   warehouseId: string;
-  section: Section;
   token: string | null;
   fetchWithSession: typeof fetch;
   safeName: (v: string) => string;
@@ -384,7 +374,7 @@ function HomeDrillStockPanel({
     if (!token) return;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ warehouseId, section });
+    const params = new URLSearchParams({ warehouseId });
     if (search.trim()) params.set("q", search.trim());
     try {
       const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
@@ -398,7 +388,7 @@ function HomeDrillStockPanel({
     } finally {
       setLoading(false);
     }
-  }, [token, fetchWithSession, warehouseId, section, search]);
+  }, [token, fetchWithSession, warehouseId, search]);
 
   useEffect(() => {
     void load();
@@ -650,7 +640,6 @@ export function HomeDrillContent({
     return (
       <HomeDrillStockPanel
         warehouseId={warehouseId}
-        section={defaultSection}
         token={token}
         fetchWithSession={fetchWithSession}
         safeName={safeName}

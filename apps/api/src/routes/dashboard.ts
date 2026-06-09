@@ -23,7 +23,6 @@ import {
   waybillWhereFromScope
 } from "../lib/dataScope.js";
 import { buildHomeOverview } from "../lib/homeOverview.js";
-import { isAdminEquivalent } from "../lib/openAccess.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
@@ -257,7 +256,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
     },
     object: objectSummary,
     admin:
-      isAdminEquivalent(role)
+      role === "ADMIN"
         ? {
             activeUsers,
             auditEvents24h
@@ -270,9 +269,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
 
 dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
   const scope = await getHomeOverviewDataScope(req);
-  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : undefined;
-  const { objects, summary } = await buildHomeOverview(scope, { section });
+  const { objects, summary } = await buildHomeOverview(scope);
   return res.json({
     generatedAt: new Date().toISOString(),
     summary,
