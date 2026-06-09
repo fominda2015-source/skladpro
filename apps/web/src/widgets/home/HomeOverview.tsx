@@ -454,24 +454,7 @@ export function HomeOverview({
     () => (statsWarehouseId ? objects.filter((o) => o.warehouseId === statsWarehouseId) : objects),
     [objects, statsWarehouseId]
   );
-  const totals = useMemo(() => {
-    if (statsWarehouseId || !summary) {
-      return aggregateHomeTotals(statsObjects);
-    }
-    return {
-      camp: summary.campTotal,
-      tools: summary.toolsTotal,
-      ss: summary.limitsSs,
-      eom: summary.limitsEom,
-      overLines: summary.limitsOverLines,
-      stockLines: summary.stockLines,
-      receiptOpen: summary.receiptOpen,
-      toolsInRepair: summary.toolsInRepair,
-      withoutTemplate: summary.objectsWithoutTemplate,
-      toolsInStock: summary.toolsInStock,
-      toolsIssued: summary.toolsIssued
-    };
-  }, [statsObjects, statsWarehouseId, summary]);
+  const totals = useMemo(() => aggregateHomeTotals(statsObjects), [statsObjects]);
 
   const limitsChartRows = useMemo(
     () =>
@@ -504,15 +487,12 @@ export function HomeOverview({
   );
 
   const toolsPieData = useMemo(() => {
-    const inStock = summary?.toolsInStock ?? totals.toolsInStock;
-    const issued = summary?.toolsIssued ?? totals.toolsIssued;
-    const inRepair = summary?.toolsInRepair ?? totals.toolsInRepair;
     return [
-      { name: "На складе", value: inStock, key: "stock" },
-      { name: "Выдано", value: issued, key: "issued" },
-      { name: "В ремонте", value: inRepair, key: "repair" }
+      { name: "На складе", value: totals.toolsInStock, key: "stock" },
+      { name: "Выдано", value: totals.toolsIssued, key: "issued" },
+      { name: "В ремонте", value: totals.toolsInRepair, key: "repair" }
     ].filter((s) => s.value > 0);
-  }, [summary, totals]);
+  }, [totals]);
 
   const movementChartRows = useMemo(() => {
     const src = summary?.movementTrend30d;
@@ -524,9 +504,10 @@ export function HomeOverview({
   }, [summary?.movementTrend30d]);
 
   const topToolsRows = useMemo(() => {
-    const src = summary?.toolsByCategory?.length
-      ? summary.toolsByCategory
-      : objects.flatMap((o) => o.tools.categories);
+    const src =
+      statsWarehouseId || !summary?.toolsByCategory?.length
+        ? statsObjects.flatMap((o) => o.tools.categories)
+        : summary.toolsByCategory;
     return [...src]
       .sort((a, b) => b.count - a.count)
       .map((c) => ({
@@ -534,12 +515,13 @@ export function HomeOverview({
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
         count: c.count
       }));
-  }, [objects, summary]);
+  }, [statsObjects, statsWarehouseId, summary]);
 
   const topCampRows = useMemo(() => {
-    const src = summary?.campByCategory?.length
-      ? summary.campByCategory
-      : objects.flatMap((o) => o.camp?.categories ?? []);
+    const src =
+      statsWarehouseId || !summary?.campByCategory?.length
+        ? statsObjects.flatMap((o) => o.camp?.categories ?? [])
+        : summary.campByCategory;
     return [...src]
       .sort((a, b) => b.count - a.count)
       .map((c) => ({
@@ -547,11 +529,11 @@ export function HomeOverview({
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
         count: c.count
       }));
-  }, [objects, summary]);
+  }, [statsObjects, statsWarehouseId, summary]);
 
   const toolsByObjectRows = useMemo(
     () =>
-      objects
+      statsObjects
         .map((o) => ({
           id: o.warehouseId,
           name: shortName(o.name, 14),
@@ -563,7 +545,7 @@ export function HomeOverview({
         }))
         .filter((r) => r.total > 0)
         .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, "ru")),
-    [objects]
+    [statsObjects]
   );
 
   const showCharts = objects.length > 0 && !loading;
@@ -582,7 +564,10 @@ export function HomeOverview({
     return [...objects].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "ru"));
   }, [objects]);
 
-  const objectCount = summary?.objectCount ?? objects.length;
+  const objectCount = statsWarehouseId ? statsObjects.length : (summary?.objectCount ?? objects.length);
+  const statsScopeLabel = statsWarehouseId
+    ? statsObjects[0]?.name ?? "выбранный объект"
+    : null;
 
   const limitsChartH = chartRowsHeight(limitsChartRows.length);
   const toolsObjChartH = chartRowsHeight(toolsByObjectRows.length);
@@ -1275,7 +1260,13 @@ export function HomeOverview({
         title="Главная"
         subtitle={
           <>
-            {objectCount > 0 ? `${objectCount} объектов` : "Нет доступных объектов"} · сводка СС и ЭОМ по всем площадкам
+            {statsScopeLabel ? (
+              <>Сводка по объекту «{statsScopeLabel}»</>
+            ) : objectCount > 0 ? (
+              `${objectCount} объектов · сводка СС и ЭОМ по всем площадкам`
+            ) : (
+              "Нет доступных объектов"
+            )}
             {generatedAt ? (
               <span className="homeOverviewMeta"> · обновлено {new Date(generatedAt).toLocaleTimeString()}</span>
             ) : null}
@@ -1320,8 +1311,7 @@ export function HomeOverview({
               <>
                 <span>{totals.tools}</span>
                 <small className="homeStatSubline">
-                  склад {summary?.toolsInStock ?? totals.toolsInStock} · выдано {summary?.toolsIssued ?? totals.toolsIssued} ·
-                  ремонт {summary?.toolsInRepair ?? totals.toolsInRepair}
+                  склад {totals.toolsInStock} · выдано {totals.toolsIssued} · ремонт {totals.toolsInRepair}
                 </small>
               </>
             ),

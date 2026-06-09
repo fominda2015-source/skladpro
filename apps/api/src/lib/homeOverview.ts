@@ -305,7 +305,11 @@ export async function buildHomeOverview(
   };
 
   const toolWhere: Prisma.ToolWhereInput = {
-    AND: [toolWhereFromScope(scope), { warehouseId: { in: warehouseIds } }]
+    AND: [
+      toolWhereFromScope(scope),
+      { warehouseId: { in: warehouseIds } },
+      ...(options.section ? [{ section: options.section }] : [])
+    ]
   };
 
   const stockScoped = stockWhereFromScope(scope);
