@@ -1,7 +1,6 @@
 import { ToolStatus, type ObjectSection, type Prisma, type ReceiptItemCategory } from "@prisma/client";
 import { recordAudit } from "./audit.js";
 import {
-  ensureDefaultToolCategories,
   receiptCategoryToToolSection,
   toolSectionToCategorySlugs
 } from "./toolCatalog.js";
@@ -33,9 +32,6 @@ export async function resolveToolCategoryIdFromReceipt(
   };
 
   let id = await findBySlugs();
-  if (id) return id;
-  await ensureDefaultToolCategories();
-  id = await findBySlugs();
   return id;
 }
 

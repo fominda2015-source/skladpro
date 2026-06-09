@@ -3546,6 +3546,13 @@ function App() {
         try {
           body = (await res.json()) as Record<string, unknown>;
           serverMsg = typeof body.error === "string" ? body.error : "";
+          if (
+            (!serverMsg || serverMsg === "Internal server error") &&
+            typeof body.message === "string" &&
+            body.message.trim()
+          ) {
+            serverMsg = body.message.trim();
+          }
         } catch {
           // ignore
         }
@@ -3570,6 +3577,8 @@ function App() {
               ? ("limit_plan" as const)
               : ("receipt_order" as const);
           if (it && m) {
+            setPendingAcceptanceRequestId(null);
+            setPendingAcceptanceFiles([]);
             setReceiptOverageModal({
               kind,
               row,
@@ -3663,18 +3672,16 @@ function App() {
       }
       await loadNotifications();
       if (canReadTools) {
-        for (const m of mappings) {
-          const nav = receiptCategoryToToolsNav(m.category ?? null);
-          if (nav) {
-            setObjectSectionFilter(row.section);
-            setActiveObjectId(row.warehouseId);
-            setToolsNavPath(toolsNavPathFromSegment(nav));
-            setActiveTab("tools");
-            break;
-          }
+        const hasToolNav = mappings.some((m) => receiptCategoryToToolsNav(m.category ?? null));
+        if (hasToolNav) {
+          await loadTools().catch(() => undefined);
         }
       }
       return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOpsMessage(msg.includes("Failed to fetch") || msg.includes("NetworkError") ? "Сеть недоступна — проверьте подключение" : msg || "Не удалось провести приёмку");
+      return false;
     } finally {
       setAcceptanceSubmitting((prev) => {
         const next = { ...prev };
@@ -3711,6 +3718,8 @@ function App() {
               current: Array<{ id: string; path: string }>;
               otherSections: Array<{ id: string; path: string }>;
             };
+            setPendingAcceptanceRequestId(null);
+            setPendingAcceptanceFiles([]);
             setReceiptOverageModal({
               kind: "receipt_order",
               row: freshRow,
@@ -5905,6 +5914,15 @@ function App() {
       return Number.isFinite(q) && q > 0;
     });
     const isSubmitting = Boolean(acceptanceSubmitting[row.id]);
+    const acceptErr =
+      opsMessage &&
+      (opsMessage.includes("Не удалось") ||
+        opsMessage.includes("Ошибка") ||
+        opsMessage.includes("Internal server") ||
+        opsMessage.includes("категория") ||
+        opsMessage.includes("Сеть"))
+        ? opsMessage
+        : "";
     return (
       <div
         role="dialog"
@@ -5976,6 +5994,11 @@ function App() {
             </ul>
           )}
           <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            {acceptErr ? (
+              <p className="error" style={{ flex: "1 1 100%", margin: "0 0 8px" }}>
+                {acceptErr}
+              </p>
+            ) : null}
             <button
               type="button"
               className="ghostBtn"

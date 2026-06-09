@@ -1,6 +1,6 @@
 import { NotificationLevel, OperationType, StockCondition, StockMovementDirection, CampItemStatus, type Prisma } from "@prisma/client";
 import { receiptCategoryToCampCategory } from "../lib/campCatalog.js";
-import { receiptCategoryToToolSection } from "../lib/toolCatalog.js";
+import { ensureDefaultToolCategories, receiptCategoryToToolSection } from "../lib/toolCatalog.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -1118,6 +1118,15 @@ receiptRequestsRouter.post(
       }
     }
 
+    const hasToolInventoryItems = parsed.data.itemMappings.some((m) => {
+      const it = itemsById.get(m.itemId);
+      const cat = m.category ?? it?.category ?? null;
+      return isToolInventoryReceiptCategory(cat);
+    });
+    if (hasToolInventoryItems) {
+      await ensureDefaultToolCategories();
+    }
+
     try {
     const op = await prisma.$transaction(async (tx) => {
       const resolved: Array<{
@@ -1154,7 +1163,9 @@ receiptRequestsRouter.post(
       }
 
       if (!resolved.length) {
-        throw new Error("Нет позиций для приёмки — возможно, выбранные строки уже приняты полностью");
+        throw Object.assign(new Error("Нет позиций для приёмки — возможно, выбранные строки уже приняты полностью"), {
+          status: 400
+        });
       }
 
       const stockResolved = parsed.data.skipWarehouseStock
@@ -1311,19 +1322,27 @@ receiptRequestsRouter.post(
         const toolInventory = isToolInventoryReceiptCategory(itemCategory);
         if (toolInventory) {
           const categoryId = await resolveToolCategoryIdFromReceipt(tx, itemCategory);
-          if (categoryId) {
-            await createToolsFromReceiptAccept(tx, {
-              receiptNumber: row.number,
-              itemId: r.item.id,
-              name: cardName,
-              categoryId,
-              warehouseId: row.warehouseId,
-              section: row.section,
-              qty: r.acceptedQty,
-              userId: req.user!.userId,
-              storagePlace: storagePlaceRaw
-            });
+          if (!categoryId) {
+            throw Object.assign(
+              new Error("Не найдена категория инструмента на сервере. Обновите страницу или обратитесь к администратору."),
+              { status: 400 }
+            );
           }
+          const toolName = cardName.trim() || r.item.sourceName.trim();
+          if (!toolName) {
+            throw Object.assign(new Error("Укажите наименование инструмента для приёмки"), { status: 400 });
+          }
+          await createToolsFromReceiptAccept(tx, {
+            receiptNumber: row.number,
+            itemId: r.item.id,
+            name: toolName,
+            categoryId,
+            warehouseId: row.warehouseId,
+            section: row.section,
+            qty: r.acceptedQty,
+            userId: req.user!.userId,
+            storagePlace: storagePlaceRaw
+          });
         }
 
         const { storageRoom, storageCell } = parseReceiptStoragePlace(storagePlaceRaw);
@@ -1659,6 +1678,10 @@ receiptRequestsRouter.post(
     });
     } catch (e) {
       console.error("receipt accept failed:", e);
+      const err = e as Error & { status?: number };
+      if (err.status && err.message) {
+        return res.status(err.status).json({ error: err.message });
+      }
       const mapped = handlePrismaError(e);
       return res.status(mapped.status).json(mapped.body);
     }
