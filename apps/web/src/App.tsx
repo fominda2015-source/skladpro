@@ -107,8 +107,7 @@ import {
   TOOL_CATEGORY_SLUGS,
   type ToolsNavId,
   isElectricToolCategorySlug,
-  receiptCategoryToToolsNav,
-  toolsNavPathFromSegment
+  receiptCategoryToToolsNav
 } from "./widgets/tools/toolCatalog";
 import { ToolsListToolbar } from "./widgets/tools/ToolsListToolbar";
 import { ToolsInventoryBlock } from "./widgets/tools/ToolsInventoryBlock";
