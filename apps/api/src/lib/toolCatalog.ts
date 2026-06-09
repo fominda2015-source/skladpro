@@ -6,6 +6,9 @@ export const TOOL_CATEGORY_SLUGS = {
   ELECTRIC: "tool-electric",
   ELECTRIC_CORDLESS: "tool-electric-cordless",
   ELECTRIC_CORDED: "tool-electric-corded",
+  PPE: "tool-ppe",
+  TOOL_CONSUMABLE: "tool-consumable",
+  KIP: "tool-kip",
   OTHER: "tool-other"
 } as const;
 
@@ -13,7 +16,12 @@ export const MANUAL_TOOL_CATEGORY = "Ручной";
 export const ELECTRIC_TOOL_CATEGORY = "Электрический";
 export const ELECTRIC_CORDLESS_CATEGORY = "Аккумуляторный";
 export const ELECTRIC_CORDED_CATEGORY = "Сетевой";
+export const PPE_TOOL_CATEGORY = "СИЗ";
+export const TOOL_CONSUMABLE_CATEGORY = "Расходники для инструмента";
+export const KIP_TOOL_CATEGORY = "КИП";
 export const OTHER_TOOL_CATEGORY = "Прочее";
+
+export const ALL_TOOL_CATEGORY_SLUGS = new Set<string>(Object.values(TOOL_CATEGORY_SLUGS));
 
 export function isManualToolCategoryName(name: string | null | undefined) {
   return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
@@ -51,12 +59,34 @@ export async function isElectricToolCategoryId(categoryId: string | null | undef
   return cat.parent ? isElectricToolCategoryName(cat.parent.name) : false;
 }
 
+export function isKitTrackableCategorySlug(slug: string | null | undefined): boolean {
+  return isElectricToolCategorySlug(slug) || String(slug || "").toLowerCase() === TOOL_CATEGORY_SLUGS.KIP;
+}
+
+export function isKitTrackableCategoryName(name: string | null | undefined): boolean {
+  const n = String(name || "").trim().toLowerCase();
+  return isElectricToolCategoryName(name) || n === KIP_TOOL_CATEGORY.toLowerCase();
+}
+
+export async function isKitTrackableCategoryId(categoryId: string | null | undefined): Promise<boolean> {
+  if (!categoryId) return false;
+  const cat = await prisma.toolCategory.findUnique({
+    where: { id: categoryId },
+    include: { parent: true }
+  });
+  if (!cat) return false;
+  if (isKitTrackableCategorySlug(cat.slug)) return true;
+  if (cat.parent && isKitTrackableCategorySlug(cat.parent.slug)) return true;
+  if (isKitTrackableCategoryName(cat.name)) return true;
+  return cat.parent ? isKitTrackableCategoryName(cat.parent.name) : false;
+}
+
 export function normalizeToolKitFields(
-  isElectric: boolean,
+  kitTrackable: boolean,
   kitComplete?: boolean,
   kitMissingNote?: string | null
 ): { kitComplete: boolean; kitMissingNote: string | null } | { error: string } {
-  if (!isElectric) {
+  if (!kitTrackable) {
     return { kitComplete: true, kitMissingNote: null };
   }
   const complete = kitComplete !== false;
@@ -94,6 +124,14 @@ export function toolSectionToCategorySlugs(section: ToolCatalogSection): string[
       return [TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS];
     case "TOOL_ELECTRIC_CORDED":
       return [TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED];
+    case "PPE":
+      return [TOOL_CATEGORY_SLUGS.PPE];
+    case "TOOL_CONSUMABLE":
+      return [TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE];
+    case "KIP":
+      return [TOOL_CATEGORY_SLUGS.KIP];
+    case "OTHER":
+      return [TOOL_CATEGORY_SLUGS.OTHER];
     default:
       return [];
   }
@@ -123,7 +161,15 @@ export async function ensureDefaultToolCategories() {
       order: 4,
       parentSlug: TOOL_CATEGORY_SLUGS.ELECTRIC
     },
-    { name: OTHER_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.OTHER, icon: "📁", order: 5 }
+    { name: PPE_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.PPE, icon: "🦺", order: 5 },
+    {
+      name: TOOL_CONSUMABLE_CATEGORY,
+      slug: TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE,
+      icon: "📦",
+      order: 6
+    },
+    { name: KIP_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.KIP, icon: "📊", order: 7 },
+    { name: OTHER_TOOL_CATEGORY, slug: TOOL_CATEGORY_SLUGS.OTHER, icon: "📁", order: 8 }
   ];
   const idBySlug = new Map<string, string>();
   for (const row of rows.filter((r) => !r.parentSlug)) {

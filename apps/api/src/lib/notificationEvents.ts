@@ -128,6 +128,12 @@ export const NOTIFICATION_EVENTS = [
     group: "Инструменты"
   },
   {
+    code: "TOOL_KIT_CHANGED",
+    label: "Изменена комплектность инструмента",
+    defaultLevel: NotificationLevel.WARNING,
+    group: "Инструменты"
+  },
+  {
     code: "TRANSFER_REQUESTED",
     label: "Запрошен трансфер материала между объектами",
     defaultLevel: NotificationLevel.INFO,

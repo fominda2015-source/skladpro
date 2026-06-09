@@ -58,7 +58,7 @@ import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFields";
 import {
   buildToolDisplayName,
-  isElectricToolCategoryId,
+  isKitTrackableToolCategoryId,
   loadToolCreateDefaults,
   formatEditableToolCategoryOptions,
   pickDefaultCategories,
@@ -1274,7 +1274,8 @@ function App() {
       MARK_DAMAGED: "Пометка повреждения",
       MARK_LOST: "Пометка утери",
       MARK_DISPUTED: "Спор",
-      WRITE_OFF: "Списание"
+      WRITE_OFF: "Списание",
+      KIT_UPDATE: "Комплектность"
     })[action] ?? action;
   const issueActionLabel = (action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue") =>
     ({
@@ -2332,6 +2333,43 @@ function App() {
       setToolsTone("success");
       await loadTools().catch(() => undefined);
       await loadToolWarehouseSummary().catch(() => undefined);
+      return true;
+    } finally {
+      setToolSaving(false);
+    }
+  }
+
+  async function saveToolKitCompleteness(
+    toolId: string,
+    kitComplete: boolean,
+    kitMissingNote: string
+  ): Promise<boolean> {
+    if (!token) return false;
+    setToolSaving(true);
+    setToolsMessage("");
+    setToolsTone("neutral");
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/tools/${toolId}/kit`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kitComplete,
+          kitMissingNote: kitComplete ? null : kitMissingNote.trim() || null
+        })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось сохранить комплектность");
+        setToolsTone("error");
+        return false;
+      }
+      const updated = (await res.json()) as ToolItem;
+      setToolDetailRecord(updated);
+      setToolsMessage("Комплектность сохранена — подписчики получат уведомление");
+      setToolsTone("success");
+      await loadToolEvents(toolId).catch(() => undefined);
+      await loadTools().catch(() => undefined);
+      await loadNotifications().catch(() => undefined);
       return true;
     } finally {
       setToolSaving(false);
@@ -4971,6 +5009,10 @@ function App() {
           setToolDetailModalId(null);
         }}
         onSave={(patch) => (toolDetailModalId ? saveToolCard(toolDetailModalId, patch) : false)}
+        onSaveKit={(kitComplete, kitMissingNote) =>
+          toolDetailModalId ? saveToolKitCompleteness(toolDetailModalId, kitComplete, kitMissingNote) : false
+        }
+        savingKit={toolSaving}
         onIssue={() => t && openToolActionDialog(t.id, "ISSUE")}
         onReturn={() => t && openToolActionDialog(t.id, "RETURN")}
         onRepair={() => t && openToolActionDialog(t.id, "SEND_TO_REPAIR")}
@@ -10591,7 +10633,7 @@ function App() {
                     Ответственный при создании
                     <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
                   </label>
-                  {isElectricToolCategoryId(toolCategoryDraft, toolCategories) ? (
+                  {isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) ? (
                     <ToolKitCompletenessFields
                       kitComplete={toolKitComplete}
                       kitMissingNote={toolKitMissingNote}
@@ -10615,7 +10657,7 @@ function App() {
                       !toolToolType.trim() ||
                       !toolName.trim() ||
                       !toolInventoryNumber.trim() ||
-                      (isElectricToolCategoryId(toolCategoryDraft, toolCategories) &&
+                      (isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) &&
                         !toolKitComplete &&
                         !toolKitMissingNote.trim())
                     }
@@ -10641,7 +10683,7 @@ function App() {
                           section: objectSectionFilter,
                           responsible: toolResponsible.trim() || undefined,
                           categoryId: toolCategoryDraft,
-                          ...(isElectricToolCategoryId(toolCategoryDraft, toolCategories)
+                          ...(isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories)
                             ? {
                                 kitComplete: toolKitComplete,
                                 kitMissingNote: toolKitComplete ? null : toolKitMissingNote.trim()

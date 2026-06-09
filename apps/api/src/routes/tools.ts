@@ -1,11 +1,11 @@
-import { StockCondition, StockMovementDirection, ToolStatus, type Prisma, type ToolCatalogSection } from "@prisma/client";
+import { StockCondition, StockMovementDirection, NotificationLevel, ToolStatus, type Prisma, type ToolCatalogSection } from "@prisma/client";
 import path from "node:path";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
-import { dispatchCriticalNotification } from "../lib/notifications.js";
+import { dispatchCriticalNotification, dispatchNotification } from "../lib/notifications.js";
 import {
   assertProjectInScope,
   assertWarehouseInScope,
@@ -21,6 +21,7 @@ import {
   ensureDefaultToolCategories,
   isElectricToolCategoryId,
   isElectricToolCategorySlug,
+  isKitTrackableCategoryId,
   isManualToolCategoryName,
   normalizeToolKitFields,
   MANUAL_TOOL_CATEGORY,
@@ -46,6 +47,17 @@ const createToolSchema = z.object({
   kitComplete: z.boolean().optional(),
   kitMissingNote: z.string().max(2000).nullable().optional()
 });
+
+const kitPatchSchema = z.object({
+  kitComplete: z.boolean(),
+  kitMissingNote: z.string().max(2000).nullable().optional()
+});
+
+function formatKitStateLabel(kitComplete: boolean, kitMissingNote: string | null | undefined): string {
+  if (kitComplete !== false) return "комплект";
+  const note = String(kitMissingNote || "").trim();
+  return note ? `некомплект: ${note}` : "некомплект";
+}
 
 const updateToolSchema = z.object({
   name: z.string().min(1).optional(),
@@ -436,8 +448,8 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedReques
       assertWarehouseInScope(scope, parsed.data.warehouseId);
     }
     assertProjectInScope(scope, parsed.data.projectId);
-    const isElectric = await isElectricToolCategoryId(parsed.data.categoryId);
-    const kit = normalizeToolKitFields(isElectric, parsed.data.kitComplete, parsed.data.kitMissingNote);
+    const isKitTrackable = await isKitTrackableCategoryId(parsed.data.categoryId);
+    const kit = normalizeToolKitFields(isKitTrackable, parsed.data.kitComplete, parsed.data.kitMissingNote);
     if ("error" in kit) {
       return res.status(400).json({ error: kit.error });
     }
@@ -480,6 +492,93 @@ toolsRouter.post("/", requirePermission("tools.write"), async (req: AuthedReques
   }
 });
 
+toolsRouter.patch("/:id/kit", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = kitPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    const existing = await prisma.tool.findFirst({
+      where: { AND: [toolWhereFromScope(scope), { id: String(req.params.id) }] },
+      include: { category: true, warehouse: true }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Tool not found" });
+    }
+    const kitTrackable = await isKitTrackableCategoryId(existing.categoryId);
+    if (!kitTrackable) {
+      return res.status(400).json({
+        error: "Комплектность можно менять только у электроинструмента и КИП"
+      });
+    }
+    const kit = normalizeToolKitFields(kitTrackable, parsed.data.kitComplete, parsed.data.kitMissingNote);
+    if ("error" in kit) {
+      return res.status(400).json({ error: kit.error });
+    }
+    const unchanged =
+      existing.kitComplete === kit.kitComplete &&
+      String(existing.kitMissingNote || "").trim() === String(kit.kitMissingNote || "").trim();
+    if (unchanged) {
+      return res.json(existing);
+    }
+
+    const prevLabel = formatKitStateLabel(existing.kitComplete, existing.kitMissingNote);
+    const nextLabel = formatKitStateLabel(kit.kitComplete, kit.kitMissingNote);
+    const eventComment = `${prevLabel} → ${nextLabel}`;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const tool = await tx.tool.update({
+        where: { id: existing.id },
+        data: {
+          kitComplete: kit.kitComplete,
+          kitMissingNote: kit.kitMissingNote
+        },
+        include: { warehouse: true, project: true, category: true }
+      });
+      await tx.toolEvent.create({
+        data: {
+          toolId: existing.id,
+          action: "KIT_UPDATE",
+          status: tool.status,
+          comment: eventComment,
+          actorId: req.user!.userId
+        }
+      });
+      return tool;
+    });
+
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_KIT_UPDATE",
+      entityType: "Tool",
+      entityId: updated.id,
+      summary: `Комплектность «${updated.name}» (инв. ${updated.inventoryNumber}): ${eventComment}`,
+      before: { kitComplete: existing.kitComplete, kitMissingNote: existing.kitMissingNote },
+      after: { kitComplete: updated.kitComplete, kitMissingNote: updated.kitMissingNote }
+    });
+
+    void dispatchNotification({
+      eventCode: "TOOL_KIT_CHANGED",
+      title: "Изменена комплектность инструмента",
+      message: `«${updated.name}» (инв. ${updated.inventoryNumber}): ${eventComment}`,
+      entityType: "Tool",
+      entityId: updated.id,
+      level: kit.kitComplete ? NotificationLevel.INFO : NotificationLevel.WARNING,
+      excludeUserIds: [req.user!.userId]
+    }).catch(() => undefined);
+
+    return res.json(updated);
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
 toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = updateToolSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -501,7 +600,7 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
     }
     const categoryId =
       parsed.data.categoryId !== undefined ? parsed.data.categoryId : existing.categoryId;
-    const isElectric = await isElectricToolCategoryId(categoryId);
+    const isKitTrackable = await isKitTrackableCategoryId(categoryId);
     const kitInput =
       parsed.data.kitComplete !== undefined || parsed.data.kitMissingNote !== undefined
         ? {
@@ -509,7 +608,7 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
             kitMissingNote: parsed.data.kitMissingNote ?? existing.kitMissingNote
           }
         : { kitComplete: existing.kitComplete, kitMissingNote: existing.kitMissingNote };
-    const kit = normalizeToolKitFields(isElectric, kitInput.kitComplete, kitInput.kitMissingNote);
+    const kit = normalizeToolKitFields(isKitTrackable, kitInput.kitComplete, kitInput.kitMissingNote);
     if ("error" in kit) {
       return res.status(400).json({ error: kit.error });
     }
@@ -707,10 +806,22 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
     ]),
     toolElectricCordless: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS]),
     toolElectricCorded: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]),
-    ppe: matCounts.PPE,
-    toolConsumable: matCounts.TOOL_CONSUMABLE,
-    kip: matCounts.KIP,
-    other: matCounts.OTHER
+    ppe: {
+      count: matCounts.PPE.count + countBySlug([TOOL_CATEGORY_SLUGS.PPE]).count,
+      qty: matCounts.PPE.qty
+    },
+    toolConsumable: {
+      count: matCounts.TOOL_CONSUMABLE.count + countBySlug([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE]).count,
+      qty: matCounts.TOOL_CONSUMABLE.qty
+    },
+    kip: {
+      count: matCounts.KIP.count + countBySlug([TOOL_CATEGORY_SLUGS.KIP]).count,
+      qty: matCounts.KIP.qty
+    },
+    other: {
+      count: matCounts.OTHER.count + countBySlug([TOOL_CATEGORY_SLUGS.OTHER]).count,
+      qty: matCounts.OTHER.qty
+    }
   });
 });
 

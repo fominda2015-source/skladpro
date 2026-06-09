@@ -4,10 +4,10 @@ import { ToolKitCompletenessFields } from "./ToolKitCompletenessFields";
 import {
   buildToolDisplayName,
   formatKitCompleteness,
-  isElectricToolCategory,
-  isElectricToolCategoryId,
-  isManualToolCategory,
-  formatEditableToolCategoryOptions
+  formatEditableToolCategoryOptions,
+  isKitTrackableToolCategory,
+  isKitTrackableToolCategoryId,
+  isManualToolCategory
 } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
@@ -22,7 +22,7 @@ export type ToolDrawerRecord = {
   brand?: string | null;
   toolType?: string | null;
   categoryId?: string | null;
-  category?: { id: string; name: string } | null;
+  category?: { id: string; name: string; slug?: string | null } | null;
   warehouseId?: string | null;
   warehouse?: { name: string } | null;
   responsible?: string | null;
@@ -75,8 +75,10 @@ type Props = {
   safeName: (n: string) => string;
   canWrite: boolean;
   saving?: boolean;
+  savingKit?: boolean;
   onClose: () => void;
   onSave: (patch: ToolEditPatch) => boolean | void | Promise<boolean | void>;
+  onSaveKit: (kitComplete: boolean, kitMissingNote: string) => boolean | void | Promise<boolean | void>;
   onIssue: () => void;
   onReturn: () => void;
   onRepair: () => void;
@@ -103,6 +105,13 @@ function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
   };
 }
 
+function buildKitDraft(tool: ToolDrawerRecord) {
+  return {
+    kitComplete: tool.kitComplete !== false,
+    kitMissingNote: tool.kitMissingNote || ""
+  };
+}
+
 export function ToolDetailDrawer({
   tool,
   loading,
@@ -115,8 +124,10 @@ export function ToolDetailDrawer({
   safeName,
   canWrite,
   saving,
+  savingKit,
   onClose,
   onSave,
+  onSaveKit,
   onIssue,
   onReturn,
   onRepair,
@@ -127,24 +138,32 @@ export function ToolDetailDrawer({
   qrPreview
 }: Props) {
   const [editing, setEditing] = useState(false);
+  const [kitEditing, setKitEditing] = useState(false);
   const [draft, setDraft] = useState<ToolEditPatch | null>(null);
+  const [kitDraft, setKitDraft] = useState({ kitComplete: true, kitMissingNote: "" });
 
   useEffect(() => {
     setEditing(false);
+    setKitEditing(false);
     setDraft(tool ? buildDraft(tool) : null);
+    setKitDraft(tool ? buildKitDraft(tool) : { kitComplete: true, kitMissingNote: "" });
   }, [tool?.id]);
 
   useEffect(() => {
-    if (tool && !editing) {
+    if (tool && !editing && !kitEditing) {
       setDraft(buildDraft(tool));
+      setKitDraft(buildKitDraft(tool));
     }
-  }, [tool, editing]);
+  }, [tool, editing, kitEditing]);
 
   if (!tool && !loading) return null;
 
   const categoryOptions = formatEditableToolCategoryOptions(categories, draft?.categoryId || tool?.categoryId);
-  const draftElectric = draft ? isElectricToolCategoryId(draft.categoryId, categories) : false;
-  const kitValid = !draftElectric || draft?.kitComplete !== false || Boolean(draft?.kitMissingNote.trim());
+  const draftKitTrackable = draft ? isKitTrackableToolCategoryId(draft.categoryId, categories) : false;
+  const toolKitTrackable = isKitTrackableToolCategory(tool?.category);
+  const kitValid = !draftKitTrackable || draft?.kitComplete !== false || Boolean(draft?.kitMissingNote.trim());
+  const kitDraftValid =
+    kitDraft.kitComplete !== false || Boolean(kitDraft.kitMissingNote.trim());
   const canSave =
     Boolean(draft?.categoryId && draft.name.trim() && draft.brand.trim() && draft.toolType.trim()) &&
     kitValid &&
@@ -172,20 +191,21 @@ export function ToolDetailDrawer({
                 value={draft.categoryId}
                 onChange={(e) => {
                   const categoryId = e.target.value;
-                  const electric = isElectricToolCategoryId(categoryId, categories);
+                  const kitTrackable = isKitTrackableToolCategoryId(categoryId, categories);
                   setDraft((prev) =>
                     prev
                       ? {
                           ...prev,
                           categoryId,
-                          ...(electric
-                            ? {}
-                            : { kitComplete: true, kitMissingNote: "" })
+                          ...(kitTrackable ? {} : { kitComplete: true, kitMissingNote: "" })
                         }
                       : prev
                   );
                 }}
               >
+                {!draft.categoryId ? (
+                  <option value="">— выберите категорию —</option>
+                ) : null}
                 {categoryOptions.map((c) => (
                   <option key={`ted-${c.id}`} value={c.id}>
                     {c.label}
@@ -283,7 +303,7 @@ export function ToolDetailDrawer({
                 onChange={(e) => setDraft((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
               />
             </label>
-            {draftElectric ? (
+            {draftKitTrackable ? (
               <ToolKitCompletenessFields
                 kitComplete={draft.kitComplete}
                 kitMissingNote={draft.kitMissingNote}
@@ -357,7 +377,7 @@ export function ToolDetailDrawer({
               Примечание: {tool.note}
             </p>
           ) : null}
-          {isElectricToolCategory(tool.category) ? (
+          {toolKitTrackable ? (
             <p
               className={`toolKitStatusLine${tool.kitComplete === false ? " toolKitStatusLine--warn" : ""}`}
               style={{ fontSize: 13 }}
@@ -365,10 +385,62 @@ export function ToolDetailDrawer({
               {formatKitCompleteness(tool)}
             </p>
           ) : null}
+          {kitEditing && toolKitTrackable ? (
+            <div style={{ marginTop: 10 }}>
+              <ToolKitCompletenessFields
+                kitComplete={kitDraft.kitComplete}
+                kitMissingNote={kitDraft.kitMissingNote}
+                onKitCompleteChange={(kitComplete) =>
+                  setKitDraft((prev) => ({
+                    kitComplete,
+                    kitMissingNote: kitComplete ? "" : prev.kitMissingNote
+                  }))
+                }
+                onKitMissingNoteChange={(kitMissingNote) =>
+                  setKitDraft((prev) => ({ ...prev, kitMissingNote }))
+                }
+                disabled={savingKit}
+              />
+              <div className="erpCellActions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="primaryBtn"
+                  disabled={!kitDraftValid || savingKit}
+                  onClick={() => {
+                    void (async () => {
+                      const ok = await onSaveKit(
+                        kitDraft.kitComplete,
+                        kitDraft.kitComplete ? "" : kitDraft.kitMissingNote
+                      );
+                      if (ok !== false) setKitEditing(false);
+                    })();
+                  }}
+                >
+                  {savingKit ? "Сохранение…" : "Сохранить комплектность"}
+                </button>
+                <button
+                  type="button"
+                  className="ghostBtn"
+                  disabled={savingKit}
+                  onClick={() => {
+                    setKitDraft(buildKitDraft(tool));
+                    setKitEditing(false);
+                  }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="erpCellActions" style={{ marginTop: 10 }}>
             {canWrite ? (
               <button type="button" className="ghostBtn" onClick={() => setEditing(true)}>
                 Редактировать
+              </button>
+            ) : null}
+            {canWrite && toolKitTrackable && !kitEditing ? (
+              <button type="button" className="ghostBtn" onClick={() => setKitEditing(true)}>
+                Изменить комплектность
               </button>
             ) : null}
             {tool.status !== "ISSUED" && canWrite ? (
@@ -417,18 +489,19 @@ export function ToolDetailDrawer({
                   <th>Дата</th>
                   <th>Действие</th>
                   <th>Статус</th>
+                  <th>Комментарий</th>
                 </tr>
               </thead>
               <tbody>
                 {eventsLoading ? (
                   <tr>
-                    <td colSpan={3} className="muted">
+                    <td colSpan={4} className="muted">
                       Загрузка…
                     </td>
                   </tr>
                 ) : events.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="muted">
+                    <td colSpan={4} className="muted">
                       Записей нет
                     </td>
                   </tr>
@@ -438,6 +511,9 @@ export function ToolDetailDrawer({
                       <td style={{ fontSize: 12 }}>{new Date(e.createdAt).toLocaleString()}</td>
                       <td>{actionLabel(e.action)}</td>
                       <td>{statusLabel(e.status)}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        {e.comment || "—"}
+                      </td>
                     </tr>
                   ))
                 )}

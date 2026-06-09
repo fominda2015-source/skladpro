@@ -71,8 +71,13 @@ export const TOOL_CATEGORY_SLUGS = {
   ELECTRIC: "tool-electric",
   ELECTRIC_CORDLESS: "tool-electric-cordless",
   ELECTRIC_CORDED: "tool-electric-corded",
+  PPE: "tool-ppe",
+  TOOL_CONSUMABLE: "tool-consumable",
+  KIP: "tool-kip",
   OTHER: "tool-other"
 } as const;
+
+export const ALL_TOOL_CATEGORY_SLUGS = new Set<string>(Object.values(TOOL_CATEGORY_SLUGS));
 
 export function isElectricToolCategorySlug(slug: string | null | undefined) {
   const s = String(slug || "").toLowerCase();
@@ -119,6 +124,10 @@ export function navToCategorySlug(nav: ToolsNavId): string | null {
   if (nav === "tool-electric") return TOOL_CATEGORY_SLUGS.ELECTRIC;
   if (nav === "tool-electric-cordless") return TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS;
   if (nav === "tool-electric-corded") return TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED;
+  if (nav === "ppe") return TOOL_CATEGORY_SLUGS.PPE;
+  if (nav === "tool-consumable") return TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
+  if (nav === "kip") return TOOL_CATEGORY_SLUGS.KIP;
+  if (nav === "other") return TOOL_CATEGORY_SLUGS.OTHER;
   return null;
 }
 
@@ -137,7 +146,8 @@ export function navCategorySlugChain(nav: ToolsNavId): Array<string | null> {
 
 export function showToolsInventoryList(navPath: ToolsNavId[]): boolean {
   const current = navPath[navPath.length - 1] ?? "hub";
-  if (current === "hub" || isMaterialNav(current)) return false;
+  if (current === "hub") return false;
+  if (navToCategorySlug(current)) return true;
   return navPath.includes("tool");
 }
 
