@@ -14,6 +14,7 @@ type Props = {
   /** Не переключать вкладку при навигации по хабу (модалка на главной). */
   embedMode?: boolean;
   canWrite?: boolean;
+  onCatalogMessage?: (msg: string, tone?: "success" | "error" | "neutral") => void;
   /** Группа в «Прочее» и смежных разделах — фильтр списка учётных единиц. */
   toolsListGroupFilter?: { categoryId: string; nameGroup: string; label: string } | null;
   onToolsListGroupFilterChange?: (

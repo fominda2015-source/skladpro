@@ -8,7 +8,6 @@ import {
   isKitTrackableToolCategory,
   isKitTrackableToolCategoryId,
   isManualToolCategory,
-  isMiscToolCategory,
   toolCardRequiresBrandType
 } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
