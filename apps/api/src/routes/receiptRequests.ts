@@ -176,6 +176,62 @@ const limitLinkSchema = z.object({
   objectLimitTemplateId: z.string().nullable().optional()
 });
 
+const linkUnboundLimitsSchema = z.object({
+  warehouseId: z.string().optional(),
+  section: z.enum(["SS", "EOM"]).optional()
+});
+
+type ReceiptLimitItemRow = {
+  id: string;
+  sourceName: string;
+  namePartD: string | null;
+  namePartE: string | null;
+  limitCatalogNameN: string | null;
+  limitCatalogNameO: string | null;
+  externalComment: string | null;
+  limitSectionPath: string | null;
+};
+
+async function syncReceiptItemsToLimitTemplate(
+  tx: Prisma.TransactionClient,
+  templateId: string,
+  items: ReceiptLimitItemRow[]
+): Promise<number> {
+  let synced = 0;
+  for (const item of items) {
+    const meta = analyzeCatalogNames(
+      item.sourceName,
+      item.namePartD || "",
+      item.namePartE || "",
+      item.limitCatalogNameN || "",
+      item.limitCatalogNameO || "",
+      item.externalComment || ""
+    );
+    const sync = await syncReceiptItemToLimitTemplate(tx, templateId, {
+      limitSectionPath: item.limitSectionPath,
+      namePartC: item.sourceName,
+      limitCatalogNameN: item.limitCatalogNameN,
+      limitCatalogNameO: item.limitCatalogNameO,
+      renameLimitToO: meta.renameLimitToO,
+      limitDisplayName: meta.limitDisplayName,
+      nameAlertNote: meta.nameAlertNote
+    });
+    if (sync.limitNodeId) {
+      const mappedMaterialId = await resolveMaterialIdForLimitNode(tx, sync.limitNodeId);
+      await tx.receiptRequestItem.update({
+        where: { id: item.id },
+        data: {
+          limitNodeId: sync.limitNodeId,
+          limitNameRenamed: sync.limitNameRenamed,
+          ...(mappedMaterialId ? { mappedMaterialId } : {})
+        }
+      });
+      synced += 1;
+    }
+  }
+  return synced;
+}
+
 async function saveReceiptDocumentFile(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   opts: {
@@ -570,7 +626,7 @@ receiptRequestsRouter.post(
           attachedTemplateId = tpl.id;
         }
       }
-      if (!attachedTemplateId && hasLimitPath) {
+      if (!attachedTemplateId) {
         const activeTpl = await prisma.objectLimitTemplate.findFirst({
           where: { warehouseId: parsed.data.warehouseId, section: parsed.data.section },
           orderBy: { createdAt: "desc" },
@@ -669,6 +725,74 @@ receiptRequestsRouter.post(
   }
 );
 
+// Привязать к активному шаблону лимита заявки, загруженные без привязки.
+receiptRequestsRouter.post(
+  "/link-unbound-limits",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    const parsed = linkUnboundLimitsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const scope = await getRequestDataScope(req);
+    const where: Prisma.ReceiptRequestWhereInput = { objectLimitTemplateId: null };
+    if (parsed.data.warehouseId) {
+      try {
+        assertWarehouseInScope(scope, parsed.data.warehouseId);
+      } catch (e) {
+        const err = e as Error & { status?: number };
+        if (err.status === 403) return res.status(403).json({ error: err.message });
+        throw e;
+      }
+      where.warehouseId = parsed.data.warehouseId;
+    } else if (scope.warehouseIds?.length) {
+      where.warehouseId = { in: scope.warehouseIds };
+    }
+    if (parsed.data.section) where.section = parsed.data.section;
+
+    const unbound = await prisma.receiptRequest.findMany({
+      where,
+      include: { items: true },
+      orderBy: { createdAt: "asc" }
+    });
+    if (!unbound.length) {
+      return res.json({ linked: 0, itemsSynced: 0, message: "Нет непривязанных заявок" });
+    }
+
+    let linked = 0;
+    let itemsSynced = 0;
+    const templateByKey = new Map<string, string | null>();
+
+    for (const row of unbound) {
+      const key = `${row.warehouseId}:${row.section}`;
+      let templateId = templateByKey.get(key);
+      if (templateId === undefined) {
+        templateId = await getActiveLimitTemplateId(prisma, row.warehouseId, row.section);
+        templateByKey.set(key, templateId);
+      }
+      if (!templateId) continue;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.receiptRequest.update({
+          where: { id: row.id },
+          data: { objectLimitTemplateId: templateId, fromLimit: true }
+        });
+        itemsSynced += await syncReceiptItemsToLimitTemplate(tx, templateId!, row.items);
+      });
+      linked += 1;
+    }
+
+    return res.json({
+      linked,
+      itemsSynced,
+      message:
+        linked > 0
+          ? `Привязано заявок: ${linked}, позиций сопоставлено с лимитом: ${itemsSynced}`
+          : "Активный шаблон лимита не найден для выбранного объекта"
+    });
+  }
+);
+
 receiptRequestsRouter.post(
   "/:id/invoice",
   requirePermission("operations.write"),
@@ -755,36 +879,7 @@ receiptRequestsRouter.patch(
       });
 
       if (parsed.data.fromLimit && nextTemplateId) {
-        for (const item of rowUpd.items) {
-          const meta = analyzeCatalogNames(
-            item.sourceName,
-            item.namePartD || "",
-            item.namePartE || "",
-            item.limitCatalogNameN || "",
-            item.limitCatalogNameO || "",
-            item.externalComment || ""
-          );
-          const sync = await syncReceiptItemToLimitTemplate(tx, nextTemplateId, {
-            limitSectionPath: item.limitSectionPath,
-            namePartC: item.sourceName,
-            limitCatalogNameN: item.limitCatalogNameN,
-            limitCatalogNameO: item.limitCatalogNameO,
-            renameLimitToO: meta.renameLimitToO,
-            limitDisplayName: meta.limitDisplayName,
-            nameAlertNote: meta.nameAlertNote
-          });
-          if (sync.limitNodeId) {
-            const mappedMaterialId = await resolveMaterialIdForLimitNode(tx, sync.limitNodeId);
-            await tx.receiptRequestItem.update({
-              where: { id: item.id },
-              data: {
-                limitNodeId: sync.limitNodeId,
-                limitNameRenamed: sync.limitNameRenamed,
-                ...(mappedMaterialId ? { mappedMaterialId } : {})
-              }
-            });
-          }
-        }
+        await syncReceiptItemsToLimitTemplate(tx, nextTemplateId, rowUpd.items);
       }
 
       return tx.receiptRequest.findUniqueOrThrow({
@@ -1012,9 +1107,20 @@ receiptRequestsRouter.post(
     if (parsed.data.skipWarehouseStock && req.user?.role !== "ADMIN") {
       return res.status(403).json({ error: "Принять без склада может только администратор" });
     }
+
+    const limitTemplateId = row.objectLimitTemplateId;
+    const acceptItemMappings =
+      limitTemplateId == null
+        ? parsed.data.itemMappings.map((m) => ({
+            ...m,
+            limitNodeId: undefined,
+            spreadLimitNodeId: undefined
+          }))
+        : parsed.data.itemMappings;
+
     // Валидация позиций
     const itemsById = new Map(row.items.map((it) => [it.id, it]));
-    for (const m of parsed.data.itemMappings) {
+    for (const m of acceptItemMappings) {
       const it = itemsById.get(m.itemId);
       if (!it) return res.status(400).json({ error: `Позиция ${m.itemId} не найдена в заявке` });
       const canResolveCard =
@@ -1139,16 +1245,13 @@ receiptRequestsRouter.post(
     }
 
     // Валидация limitNodeId — узел должен принадлежать шаблону этой заявки.
-    const proposedNodeIds = parsed.data.itemMappings
+    const proposedNodeIds = acceptItemMappings
       .flatMap((m) => [m.limitNodeId, m.spreadLimitNodeId])
       .filter((x): x is string => typeof x === "string" && x.length > 0);
-    if (proposedNodeIds.length && !row.objectLimitTemplateId) {
-      return res.status(400).json({ error: "Заявка не привязана к шаблону лимита" });
-    }
     let nodeOwnership = new Map<string, true>();
-    if (proposedNodeIds.length && row.objectLimitTemplateId) {
+    if (proposedNodeIds.length && limitTemplateId) {
       const nodes = await prisma.objectLimitNode.findMany({
-        where: { templateId: row.objectLimitTemplateId, id: { in: proposedNodeIds } },
+        where: { templateId: limitTemplateId, id: { in: proposedNodeIds } },
         select: { id: true }
       });
       nodeOwnership = new Map(nodes.map((n) => [n.id, true as const]));
@@ -1158,7 +1261,7 @@ receiptRequestsRouter.post(
       }
     }
 
-    const hasToolInventoryItems = parsed.data.itemMappings.some((m) => {
+    const hasToolInventoryItems = acceptItemMappings.some((m) => {
       const it = itemsById.get(m.itemId);
       const cat = m.category ?? it?.category ?? null;
       return isToolInventoryReceiptCategory(cat);
@@ -1177,7 +1280,7 @@ receiptRequestsRouter.post(
         limitNodeId: string | null;
         campCategory: ReturnType<typeof receiptCategoryToCampCategory>;
       }> = [];
-      for (const m of parsed.data.itemMappings) {
+      for (const m of acceptItemMappings) {
         const it = itemsById.get(m.itemId)!;
         const unitHint = m.newMaterialUnit?.trim() || m.factLabelUnit?.trim() || it.sourceUnit || "шт";
         const itemCategory = m.category ?? it.category ?? null;
@@ -1213,7 +1316,7 @@ receiptRequestsRouter.post(
         ? []
         : resolved.filter((r) => {
             if (r.campCategory || !r.materialId) return false;
-            const m = parsed.data.itemMappings.find((x) => x.itemId === r.item.id);
+            const m = acceptItemMappings.find((x) => x.itemId === r.item.id);
             const cat = m?.category ?? r.item.category ?? null;
             return !isToolInventoryReceiptCategory(cat);
           });
@@ -1238,7 +1341,7 @@ receiptRequestsRouter.post(
           : null;
 
       for (const r of resolved) {
-        const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
+        const mapping = acceptItemMappings.find((m) => m.itemId === r.item.id);
         const itemCategory = mapping?.category ?? r.item.category ?? null;
         const campCategory = r.campCategory ?? receiptCategoryToCampCategory(itemCategory);
         const toolInventory = isToolInventoryReceiptCategory(itemCategory);
@@ -1532,7 +1635,7 @@ receiptRequestsRouter.post(
 
       for (const r of resolved) {
         if (r.campCategory || !r.materialId) continue;
-        const mapping = parsed.data.itemMappings.find((m) => m.itemId === r.item.id);
+        const mapping = acceptItemMappings.find((m) => m.itemId === r.item.id);
         const prevAccepted = receiptAcceptedQty(r.item.acceptedQty);
         const newTotal = prevAccepted + r.acceptedQty;
         const ordered = receiptPlannedQty(r.item.quantity);

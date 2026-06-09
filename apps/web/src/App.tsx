@@ -3496,7 +3496,9 @@ function App() {
         factLabelUnit: factLabel ? explicitUnit || it.sourceUnit || "шт" : undefined,
         newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
         acceptedQty: qty,
-        limitNodeId: draft?.limitNodeId || it.limitNodeId || null,
+        ...(row.objectLimitTemplateId
+          ? { limitNodeId: draft?.limitNodeId || it.limitNodeId || null }
+          : {}),
         category: draft?.category || it.category || null,
         unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
         storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
