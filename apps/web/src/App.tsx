@@ -2322,8 +2322,18 @@ function App() {
         })
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setToolsMessage(typeof body?.error === "string" ? body.error : "Не удалось сохранить карточку");
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          details?: { fieldErrors?: Record<string, string[]> };
+        };
+        let msg = typeof body?.error === "string" ? body.error : "Не удалось сохранить карточку";
+        if (msg === "Invalid body" && body.details?.fieldErrors) {
+          const parts = Object.entries(body.details.fieldErrors).flatMap(([k, v]) =>
+            (v || []).map((e) => `${k}: ${e}`)
+          );
+          if (parts.length) msg = parts.join("; ");
+        }
+        setToolsMessage(msg);
         setToolsTone("error");
         return false;
       }

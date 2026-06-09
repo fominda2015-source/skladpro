@@ -35,7 +35,7 @@ export { MANUAL_TOOL_CATEGORY, ELECTRIC_TOOL_CATEGORY, isManualToolCategoryName 
 const createToolSchema = z.object({
   name: z.string().min(1),
   inventoryNumber: z.string().min(1),
-  serialNumber: z.string().optional(),
+  serialNumber: z.string().nullable().optional(),
   warehouseId: z.string().optional(),
   section: z.enum(["SS", "EOM"]).default("SS"),
   projectId: z.string().optional(),
@@ -61,7 +61,7 @@ function formatKitStateLabel(kitComplete: boolean, kitMissingNote: string | null
 
 const updateToolSchema = z.object({
   name: z.string().min(1).optional(),
-  serialNumber: z.string().optional(),
+  serialNumber: z.string().nullable().optional(),
   warehouseId: z.string().nullable().optional(),
   section: z.enum(["SS", "EOM"]).optional(),
   projectId: z.string().nullable().optional(),
@@ -74,6 +74,18 @@ const updateToolSchema = z.object({
   kitComplete: z.boolean().optional(),
   kitMissingNote: z.string().max(2000).nullable().optional()
 });
+
+function toolPatchValidationMessage(error: z.ZodError): string {
+  const flat = error.flatten().fieldErrors as Record<string, string[] | undefined>;
+  const parts: string[] = [];
+  for (const [field, msgs] of Object.entries(flat)) {
+    if (!msgs?.length) continue;
+    for (const m of msgs) {
+      parts.push(`${field}: ${m}`);
+    }
+  }
+  return parts.length ? parts.join("; ") : "Некорректные данные карточки";
+}
 
 const toolCategorySchema = z.object({
   name: z.string().min(1).max(120),
@@ -582,7 +594,10 @@ toolsRouter.patch("/:id/kit", requirePermission("tools.write"), async (req: Auth
 toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
   const parsed = updateToolSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    return res.status(400).json({
+      error: toolPatchValidationMessage(parsed.error),
+      details: parsed.error.flatten()
+    });
   }
   try {
     const scope = await getRequestDataScope(req);
