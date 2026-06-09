@@ -60,6 +60,7 @@ import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFi
 import {
   buildToolDisplayName,
   isKitTrackableToolCategoryId,
+  isMiscToolCategoryId,
   loadToolCreateDefaults,
   formatEditableToolCategoryOptions,
   pickDefaultCategories,
@@ -105,6 +106,7 @@ import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueM
 import { ToolConsumablesReturnModal } from "./widgets/tools/ToolConsumablesReturnModal";
 import {
   navCategorySlugChain,
+  navToCategorySlug,
   TOOL_CATEGORY_SLUGS,
   type ToolsNavId,
   isElectricToolCategorySlug,
@@ -1106,6 +1108,11 @@ function App() {
   const [toolActionComment, setToolActionComment] = useState("");
   const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
   const [toolsNavPath, setToolsNavPath] = useState<ToolsNavId[]>(["hub"]);
+  const [toolsListGroupFilter, setToolsListGroupFilter] = useState<{
+    categoryId: string;
+    nameGroup: string;
+    label: string;
+  } | null>(null);
   const [toolsListScopeNote, setToolsListScopeNote] = useState("");
   const [toolConsumablesIssueOpen, setToolConsumablesIssueOpen] = useState(false);
   const [toolConsumablesIssueContext, setToolConsumablesIssueContext] = useState<{
@@ -4578,17 +4585,25 @@ function App() {
     return "Показан расширенный список по разделу.";
   }
 
-  async function fetchToolsPage(categorySlug: string | null | undefined) {
+  async function fetchToolsPage(
+    categorySlug: string | null | undefined,
+    groupFilter?: { categoryId?: string; nameGroup?: string }
+  ) {
     const queryParts = [
       toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
       toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
       `section=${encodeURIComponent(objectSectionFilter)}`,
       toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
-      categorySlug
-        ? `categorySlug=${encodeURIComponent(categorySlug)}`
-        : toolCategoryFilter
-          ? `categoryId=${encodeURIComponent(toolCategoryFilter)}`
-          : "",
+      ...(groupFilter?.nameGroup
+        ? [
+            `nameGroup=${encodeURIComponent(groupFilter.nameGroup)}`,
+            groupFilter.categoryId ? `categoryId=${encodeURIComponent(groupFilter.categoryId)}` : ""
+          ]
+        : categorySlug
+          ? [`categorySlug=${encodeURIComponent(categorySlug)}`]
+          : toolCategoryFilter
+            ? [`categoryId=${encodeURIComponent(toolCategoryFilter)}`]
+            : []),
       `sort=${encodeURIComponent(toolsSort)}`,
       `page=${encodeURIComponent(String(toolsPage))}`,
       `pageSize=${encodeURIComponent(String(toolsPageSize))}`
@@ -4614,12 +4629,20 @@ function App() {
       const slugChain = navCategorySlugChain(navLeaf);
       const requestedSlug = slugChain[0] ?? null;
       const hasManualFilters = Boolean(toolSearch.trim() || toolStatusFilter || toolCategoryFilter);
+      const groupFilter = toolsListGroupFilter
+        ? { categoryId: toolsListGroupFilter.categoryId, nameGroup: toolsListGroupFilter.nameGroup }
+        : undefined;
 
       let items: ToolItem[] = [];
       let total = 0;
       let usedSlug: string | null = requestedSlug;
 
-      if (hasManualFilters || slugChain.length <= 1) {
+      if (groupFilter?.nameGroup) {
+        const r = await fetchToolsPage(null, groupFilter);
+        items = r.items;
+        total = r.total;
+        setToolsListScopeNote("");
+      } else if (hasManualFilters || slugChain.length <= 1) {
         const r = await fetchToolsPage(requestedSlug);
         items = r.items;
         total = r.total;
@@ -4650,7 +4673,10 @@ function App() {
     if (!toolCategories.length) await loadToolCategories();
     const saved = loadToolCreateDefaults();
     const cats = pickDefaultCategories(toolCategories);
-    const categoryId = saved.categoryId || cats[0]?.id || "";
+    const navLeaf = toolsNavPath[toolsNavPath.length - 1] ?? "hub";
+    const navSlug = navToCategorySlug(navLeaf);
+    const navCategory = navSlug ? toolCategories.find((c) => c.slug === navSlug) : null;
+    const categoryId = navCategory?.id || saved.categoryId || cats[0]?.id || "";
     setToolsMessage("");
     setToolsTone("neutral");
     setToolCategoryDraft(categoryId);
@@ -5051,6 +5077,8 @@ function App() {
           setToolsMessage(msg);
           setToolsTone(tone ?? "neutral");
         }}
+        toolsListGroupFilter={toolsListGroupFilter}
+        onToolsListGroupFilterChange={setToolsListGroupFilter}
       />
     );
   }
@@ -5813,8 +5841,13 @@ function App() {
     toolsPageSize,
     objectSectionFilter,
     toolListWarehouseId,
-    toolsNavPath
+    toolsNavPath,
+    toolsListGroupFilter
   ]);
+
+  useEffect(() => {
+    setToolsListGroupFilter(null);
+  }, [toolsNavPath]);
 
   useEffect(() => {
     if (!token || !toolDetailModalId) {
@@ -10748,8 +10781,8 @@ function App() {
                     type="button"
                     disabled={
                       !toolCategoryDraft ||
-                      !toolBrand.trim() ||
-                      !toolToolType.trim() ||
+                      (!isMiscToolCategoryId(toolCategoryDraft, toolCategories) &&
+                        (!toolBrand.trim() || !toolToolType.trim())) ||
                       !toolName.trim() ||
                       !toolInventoryNumber.trim() ||
                       (isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) &&

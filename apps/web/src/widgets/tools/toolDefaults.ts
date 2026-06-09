@@ -71,6 +71,22 @@ export function isManualToolCategory(name?: string | null) {
   return String(name || "").trim().toLowerCase() === MANUAL_TOOL_CATEGORY.toLowerCase();
 }
 
+export function isMiscToolCategory(cat?: { name?: string | null; slug?: string | null } | null) {
+  if (!cat) return false;
+  const slug = String(cat.slug || "").toLowerCase();
+  if (slug === TOOL_CATEGORY_SLUGS.OTHER) return true;
+  return String(cat.name || "").trim().toLowerCase() === OTHER_TOOL_CATEGORY.toLowerCase();
+}
+
+export function isMiscToolCategoryId(categoryId: string, categories: ToolCategoryLike[]) {
+  const cat = categories.find((c) => c.id === categoryId);
+  return isMiscToolCategory(cat);
+}
+
+export function toolCardRequiresBrandType(cat?: { name?: string | null; slug?: string | null } | null) {
+  return !isMiscToolCategory(cat);
+}
+
 export function isElectricToolCategory(cat?: { name?: string | null; slug?: string | null } | null) {
   if (!cat) return false;
   if (isElectricToolCategorySlug(cat.slug)) return true;

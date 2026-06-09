@@ -14,8 +14,8 @@ export function ToolsHubNav({ cards, stats, onSelect }: Props) {
       {cards.map((card) => {
         const st = stats?.[card.id];
         const sub =
-          st?.count != null
-            ? `Всего ${st.count}${st.inStock != null ? ` · на складе ${st.inStock}` : ""}${st.issued != null ? ` · выдано ${st.issued}` : ""}`
+          st?.inStock != null
+            ? `Всего ${st.count ?? 0} · на складе ${st.inStock}${st.issued != null ? ` · выдано ${st.issued}` : ""}`
             : st?.qty != null
               ? `${st.count ?? 0} поз. · ${st.qty} ед.`
               : card.hint;

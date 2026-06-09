@@ -8,6 +8,7 @@ import {
   TOOLS_HUB_CARDS,
   buildToolsHubStats,
   catalogMaterialSectionLabel,
+  navToCategorySlug,
   type CatalogMaterialSection,
   type ToolCatalogMaterialRow,
   type ToolCatalogSummary,
@@ -15,8 +16,10 @@ import {
   isMaterialNav,
   navToMaterialSection,
   showToolsInventoryList,
-  toolsNavTitle
+  toolsNavTitle,
+  usesToolNameGroupCards
 } from "./toolCatalog";
+import { ToolsCategoryTable, type ToolGroupCardRow } from "./ToolsCategoryTable";
 
 type Props = {
   navPath: ToolsNavId[];
@@ -30,6 +33,10 @@ type Props = {
   showHubOnly?: boolean;
   canWrite?: boolean;
   onCatalogMessage?: (msg: string, tone?: "success" | "error" | "neutral") => void;
+  toolsListGroupFilter?: { categoryId: string; nameGroup: string; label: string } | null;
+  onToolsListGroupFilterChange?: (
+    filter: { categoryId: string; nameGroup: string; label: string } | null
+  ) => void;
 };
 
 export function ToolsCatalogWorkspace({
@@ -43,7 +50,9 @@ export function ToolsCatalogWorkspace({
   toolListSlot,
   showHubOnly,
   canWrite,
-  onCatalogMessage
+  onCatalogMessage,
+  toolsListGroupFilter = null,
+  onToolsListGroupFilterChange
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
@@ -51,6 +60,8 @@ export function ToolsCatalogWorkspace({
   const [matLoading, setMatLoading] = useState(false);
   const [matRefresh, setMatRefresh] = useState(0);
   const [busyMaterialId, setBusyMaterialId] = useState<string | null>(null);
+  const [groupCards, setGroupCards] = useState<ToolGroupCardRow[]>([]);
+  const [groupLoading, setGroupLoading] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -89,6 +100,42 @@ export function ToolsCatalogWorkspace({
   useEffect(() => {
     void loadMaterials();
   }, [loadMaterials, matRefresh]);
+
+  useEffect(() => {
+    if (!usesToolNameGroupCards(current)) {
+      setGroupCards([]);
+      return;
+    }
+    if (!token) return;
+    const slug = navToCategorySlug(current);
+    if (!slug) return;
+    let cancelled = false;
+    setGroupLoading(true);
+    void (async () => {
+      const q = new URLSearchParams({ section: sectionFilter });
+      if (warehouseId) q.set("warehouseId", warehouseId);
+      q.set("categorySlug", slug);
+      try {
+        const res = await fetchWithSession(`${apiUrl}/api/tools/by-category?${q}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!cancelled && res.ok) {
+          setGroupCards((await res.json()) as ToolGroupCardRow[]);
+        } else if (!cancelled) {
+          setGroupCards([]);
+        }
+      } finally {
+        if (!cancelled) setGroupLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [current, token, warehouseId, sectionFilter, apiUrl, fetchWithSession, matRefresh]);
+
+  const showGroupCards = usesToolNameGroupCards(current) && !toolsListGroupFilter;
+  const showToolList =
+    showToolsInventoryList(navPath) && (!usesToolNameGroupCards(current) || Boolean(toolsListGroupFilter));
 
   const hubStats = useMemo(() => (summary ? buildToolsHubStats(summary) : undefined), [summary]);
 
@@ -169,8 +216,42 @@ export function ToolsCatalogWorkspace({
         </>
       )}
 
-      {showToolsInventoryList(navPath) ? (
-        <div className="toolsCatalogListSection" style={{ marginTop: hubCards ? 16 : 0 }}>
+      {showGroupCards ? (
+        <div style={{ marginTop: hubCards || isMaterialNav(current) ? 16 : 0 }}>
+          <h3 style={{ marginTop: 0 }}>Учётные единицы</h3>
+          <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>
+            Выберите группу — откроется список с карточками инструментов (инв. №, QR, выдача).
+          </p>
+          {groupLoading ? (
+            <p className="muted">Загрузка групп…</p>
+          ) : groupCards.length ? (
+            <ToolsCategoryTable
+              cards={groupCards}
+              onOpen={(card) => {
+                if (!card.categoryId) return;
+                onToolsListGroupFilterChange?.({
+                  categoryId: card.categoryId,
+                  nameGroup: card.label,
+                  label: card.label
+                });
+              }}
+            />
+          ) : (
+            <p className="muted">Учётные единицы в этом разделе не заведены.</p>
+          )}
+        </div>
+      ) : null}
+
+      {showToolList ? (
+        <div className="toolsCatalogListSection" style={{ marginTop: hubCards || isMaterialNav(current) || showGroupCards ? 16 : 0 }}>
+          {toolsListGroupFilter ? (
+            <div className="toolbar" style={{ marginBottom: 8 }}>
+              <button type="button" className="ghostBtn" onClick={() => onToolsListGroupFilterChange?.(null)}>
+                ← К группам
+              </button>
+              <span className="muted">{toolsListGroupFilter.label}</span>
+            </div>
+          ) : null}
           {toolListSlot}
         </div>
       ) : null}

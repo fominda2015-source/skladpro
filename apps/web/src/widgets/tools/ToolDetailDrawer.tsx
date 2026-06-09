@@ -7,7 +7,9 @@ import {
   formatEditableToolCategoryOptions,
   isKitTrackableToolCategory,
   isKitTrackableToolCategoryId,
-  isManualToolCategory
+  isManualToolCategory,
+  isMiscToolCategory,
+  toolCardRequiresBrandType
 } from "./toolDefaults";
 import { toolStatusTone } from "./ToolsListTable";
 
@@ -171,8 +173,14 @@ export function ToolDetailDrawer({
   const kitValid = !draftKitTrackable || draft?.kitComplete !== false || Boolean(draft?.kitMissingNote.trim());
   const kitDraftValid =
     kitDraft.kitComplete !== false || Boolean(kitDraft.kitMissingNote.trim());
+  const draftCategory = draft?.categoryId ? categories.find((c) => c.id === draft.categoryId) : null;
+  const requiresBrandType = toolCardRequiresBrandType(draftCategory ?? tool?.category);
   const canSave =
-    Boolean(draft?.categoryId && draft.name.trim() && draft.brand.trim() && draft.toolType.trim()) &&
+    Boolean(
+      draft?.categoryId &&
+        draft.name.trim() &&
+        (requiresBrandType ? draft.brand.trim() && draft.toolType.trim() : true)
+    ) &&
     kitValid &&
     !saving;
 
@@ -236,11 +244,12 @@ export function ToolDetailDrawer({
                       ? {
                           ...prev,
                           brand,
-                          name: buildToolDisplayName(brand, prev.toolType)
+                          name: buildToolDisplayName(brand, prev.toolType) || prev.name
                         }
                       : prev
                   );
                 }}
+                placeholder={requiresBrandType ? "Обязательно" : "Необязательно"}
               />
             </label>
             <label>
@@ -254,11 +263,12 @@ export function ToolDetailDrawer({
                       ? {
                           ...prev,
                           toolType,
-                          name: buildToolDisplayName(prev.brand, toolType)
+                          name: buildToolDisplayName(prev.brand, toolType) || prev.name
                         }
                       : prev
                   );
                 }}
+                placeholder={requiresBrandType ? "Обязательно" : "Необязательно"}
               />
             </label>
             <label>

@@ -254,6 +254,7 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     }),
     prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] })
   ]);
+  const categorySlugParam = typeof req.query.categorySlug === "string" ? req.query.categorySlug.trim() : "";
   type Card = {
     key: string;
     label: string;
@@ -265,6 +266,25 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     issued: number;
     inRepair: number;
   };
+  let categorySlugIds: string[] | undefined;
+  if (categorySlugParam) {
+    await ensureDefaultToolCategories();
+    const slugs =
+      categorySlugParam === TOOL_CATEGORY_SLUGS.ELECTRIC
+        ? [TOOL_CATEGORY_SLUGS.ELECTRIC, TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS, TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]
+        : [categorySlugParam];
+    const cats = await prisma.toolCategory.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true } });
+    categorySlugIds = cats.map((c) => c.id);
+  }
+  const filteredTools =
+    categorySlugIds !== undefined
+      ? tools.filter((t) => t.categoryId && categorySlugIds!.includes(t.categoryId))
+      : tools;
+  const groupMiscByName =
+    categorySlugParam === TOOL_CATEGORY_SLUGS.OTHER ||
+    categorySlugParam === TOOL_CATEGORY_SLUGS.PPE ||
+    categorySlugParam === TOOL_CATEGORY_SLUGS.KIP ||
+    categorySlugParam === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
   const cardsByKey = new Map<string, Card>();
   const ensureCard = (key: string, label: string, type: Card["type"], categoryId: string | null, icon: string | null) => {
     let c = cardsByKey.get(key);
@@ -275,12 +295,18 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     return c;
   };
   const catById = new Map(categories.map((c) => [c.id, c]));
-  for (const cat of categories) {
-    ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
+  if (!categorySlugParam) {
+    for (const cat of categories) {
+      ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
+    }
   }
-  for (const t of tools) {
+  for (const t of filteredTools) {
     let card: Card;
-    if (t.categoryId && catById.has(t.categoryId)) {
+    if (groupMiscByName && t.categoryId && catById.has(t.categoryId)) {
+      const cat = catById.get(t.categoryId)!;
+      const nameKey = (t.name || "Без названия").trim() || "Без названия";
+      card = ensureCard(`name:${cat.id}:${nameKey.toLowerCase()}`, nameKey, "NAME", cat.id, cat.icon);
+    } else if (t.categoryId && catById.has(t.categoryId)) {
       const cat = catById.get(t.categoryId)!;
       card = ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
     } else {
@@ -292,10 +318,12 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     else if (t.status === ToolStatus.ISSUED) card.issued += 1;
     else if (t.status === ToolStatus.IN_REPAIR) card.inRepair += 1;
   }
-  const list = Array.from(cardsByKey.values()).sort((a, b) => {
-    if (a.type !== b.type) return a.type === "CATEGORY" ? -1 : 1;
-    return b.count - a.count || a.label.localeCompare(b.label, "ru");
-  });
+  const list = Array.from(cardsByKey.values())
+    .filter((c) => c.count > 0)
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === "CATEGORY" ? -1 : 1;
+      return b.count - a.count || a.label.localeCompare(b.label, "ru");
+    });
   return res.json(list);
 });
 
@@ -353,7 +381,10 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
             : { categoryId: { in: [] } }
           : {}),
         ...(nameGroupParam
-          ? { categoryId: null, name: { equals: nameGroupParam, mode: "insensitive" as const } }
+          ? {
+              categoryId: categoryIdParam || undefined,
+              name: { equals: nameGroupParam, mode: "insensitive" as const }
+            }
           : {}),
         ...(q
           ? {
@@ -864,22 +895,46 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
     ]),
     toolElectricCordless: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS]),
     toolElectricCorded: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]),
-    ppe: {
-      count: matCounts.PPE.count + countBySlug([TOOL_CATEGORY_SLUGS.PPE]).count,
-      qty: matCounts.PPE.qty
-    },
-    toolConsumable: {
-      count: matCounts.TOOL_CONSUMABLE.count + countBySlug([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE]).count,
-      qty: matCounts.TOOL_CONSUMABLE.qty
-    },
-    kip: {
-      count: matCounts.KIP.count + countBySlug([TOOL_CATEGORY_SLUGS.KIP]).count,
-      qty: matCounts.KIP.qty
-    },
-    other: {
-      count: matCounts.OTHER.count + countBySlug([TOOL_CATEGORY_SLUGS.OTHER]).count,
-      qty: matCounts.OTHER.qty
-    }
+    ppe: (() => {
+      const t = countBySlug([TOOL_CATEGORY_SLUGS.PPE]);
+      return {
+        count: matCounts.PPE.count + t.count,
+        qty: matCounts.PPE.qty,
+        inStock: t.inStock,
+        issued: t.issued,
+        inRepair: t.inRepair
+      };
+    })(),
+    toolConsumable: (() => {
+      const t = countBySlug([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE]);
+      return {
+        count: matCounts.TOOL_CONSUMABLE.count + t.count,
+        qty: matCounts.TOOL_CONSUMABLE.qty,
+        inStock: t.inStock,
+        issued: t.issued,
+        inRepair: t.inRepair
+      };
+    })(),
+    kip: (() => {
+      const t = countBySlug([TOOL_CATEGORY_SLUGS.KIP]);
+      return {
+        count: matCounts.KIP.count + t.count,
+        qty: matCounts.KIP.qty,
+        inStock: t.inStock,
+        issued: t.issued,
+        inRepair: t.inRepair
+      };
+    })(),
+    other: (() => {
+      const t = countBySlug([TOOL_CATEGORY_SLUGS.OTHER]);
+      return {
+        count: matCounts.OTHER.count + t.count,
+        qty: matCounts.OTHER.qty,
+        inStock: t.inStock,
+        issued: t.issued,
+        inRepair: t.inRepair
+      };
+    })()
   });
 });
 

@@ -182,6 +182,10 @@ export function isToolListNav(nav: ToolsNavId): boolean {
   return navToCategorySlug(nav) != null;
 }
 
+export function usesToolNameGroupCards(nav: ToolsNavId): boolean {
+  return nav === "other";
+}
+
 export function receiptCategoryToToolsNav(cat: string | null | undefined): ToolsNavId | null {
   const c = String(cat || "").toUpperCase();
   const map: Record<string, ToolsNavId> = {

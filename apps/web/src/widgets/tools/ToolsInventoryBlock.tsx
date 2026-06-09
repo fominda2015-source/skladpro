@@ -14,7 +14,11 @@ type Props = {
   /** Не переключать вкладку при навигации по хабу (модалка на главной). */
   embedMode?: boolean;
   canWrite?: boolean;
-  onCatalogMessage?: (msg: string, tone?: "success" | "error" | "neutral") => void;
+  /** Группа в «Прочее» и смежных разделах — фильтр списка учётных единиц. */
+  toolsListGroupFilter?: { categoryId: string; nameGroup: string; label: string } | null;
+  onToolsListGroupFilterChange?: (
+    filter: { categoryId: string; nameGroup: string; label: string } | null
+  ) => void;
 };
 
 export function ToolsInventoryBlock({
@@ -28,7 +32,9 @@ export function ToolsInventoryBlock({
   toolListSlot,
   embedMode,
   canWrite,
-  onCatalogMessage
+  onCatalogMessage,
+  toolsListGroupFilter,
+  onToolsListGroupFilterChange
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -45,6 +51,8 @@ export function ToolsInventoryBlock({
         toolListSlot={toolListSlot}
         canWrite={canWrite}
         onCatalogMessage={onCatalogMessage}
+        toolsListGroupFilter={toolsListGroupFilter}
+        onToolsListGroupFilterChange={onToolsListGroupFilterChange}
       />
     </div>
   );
