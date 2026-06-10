@@ -1071,6 +1071,8 @@ function App() {
   const [toolsTotal, setToolsTotal] = useState(0);
   const [toolWarehouseSummary, setToolWarehouseSummary] = useState<ToolWarehouseSummaryRow[]>([]);
   const [toolListWarehouseId, setToolListWarehouseId] = useState("");
+  /** Объект в drill «Инструменты» на главной — отдельно от фильтра вкладки. */
+  const [homeToolsDrillWarehouseId, setHomeToolsDrillWarehouseId] = useState<string | null>(null);
   const [toolManualModalOpen, setToolManualModalOpen] = useState(false);
   const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
   const [toolDrawerHomeOverlay, setToolDrawerHomeOverlay] = useState(false);
@@ -2292,7 +2294,8 @@ function App() {
     setHomeOverviewError("");
     setHomeOverviewLoading(true);
     try {
-      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview`, {
+      const q = new URLSearchParams({ section: objectSectionFilter });
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview?${q}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -4587,13 +4590,15 @@ function App() {
 
   async function fetchToolsPage(
     categorySlug: string | null | undefined,
-    groupFilter?: { categoryId?: string; nameGroup?: string }
+    groupFilter?: { categoryId?: string; nameGroup?: string },
+    warehouseIdOverride?: string
   ) {
+    const warehouseId = warehouseIdOverride ?? toolListWarehouseId;
     const queryParts = [
       toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
       toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
       `section=${encodeURIComponent(objectSectionFilter)}`,
-      toolListWarehouseId ? `warehouseId=${encodeURIComponent(toolListWarehouseId)}` : "",
+      warehouseId ? `warehouseId=${encodeURIComponent(warehouseId)}` : "",
       ...(groupFilter?.nameGroup
         ? [
             `nameGroup=${encodeURIComponent(groupFilter.nameGroup)}`,
@@ -4619,7 +4624,7 @@ function App() {
     return { items, total };
   }
 
-  async function loadTools() {
+  async function loadTools(warehouseIdOverride?: string) {
     if (!token) return;
     setToolsError("");
     setToolsLoading(true);
@@ -4638,18 +4643,18 @@ function App() {
       let usedSlug: string | null = requestedSlug;
 
       if (groupFilter?.nameGroup) {
-        const r = await fetchToolsPage(null, groupFilter);
+        const r = await fetchToolsPage(null, groupFilter, warehouseIdOverride);
         items = r.items;
         total = r.total;
         setToolsListScopeNote("");
       } else if (hasManualFilters || slugChain.length <= 1) {
-        const r = await fetchToolsPage(requestedSlug);
+        const r = await fetchToolsPage(requestedSlug, undefined, warehouseIdOverride);
         items = r.items;
         total = r.total;
       } else {
         for (let i = 0; i < slugChain.length; i += 1) {
           const slug = slugChain[i];
-          const r = await fetchToolsPage(slug);
+          const r = await fetchToolsPage(slug, undefined, warehouseIdOverride);
           usedSlug = slug;
           items = r.items;
           total = r.total;
@@ -5347,7 +5352,7 @@ function App() {
       return;
     }
     void loadHomeOverview();
-  }, [token, canDashboard, activeTab]);
+  }, [token, canDashboard, activeTab, objectSectionFilter]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -5846,6 +5851,24 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (!token || activeTab !== "stocks" || !homeToolsDrillWarehouseId) return;
+    void loadTools(homeToolsDrillWarehouseId);
+  }, [
+    token,
+    activeTab,
+    homeToolsDrillWarehouseId,
+    toolSearch,
+    toolStatusFilter,
+    toolCategoryFilter,
+    toolsSort,
+    toolsPage,
+    toolsPageSize,
+    objectSectionFilter,
+    toolsNavPath,
+    toolsListGroupFilter
+  ]);
+
+  useEffect(() => {
     setToolsListGroupFilter(null);
   }, [toolsNavPath]);
 
@@ -6331,6 +6354,7 @@ function App() {
             onRefresh={() => void loadHomeOverview()}
             onDrillDismiss={() => {
               if (toolDrawerHomeOverlay) closeToolDrawer();
+              setHomeToolsDrillWarehouseId(null);
             }}
             onOpenCamp={(id) => openHomeObjectTab(id, "camp")}
             onOpenLimits={(id, section) => {
@@ -6370,12 +6394,11 @@ function App() {
               canReadTools ? (warehouseId) => renderToolsInventoryBlock(true, warehouseId) : undefined
             }
             onToolsObjectDrill={(warehouseId) => {
-              setToolListWarehouseId(warehouseId);
+              setHomeToolsDrillWarehouseId(warehouseId);
               setToolsNavPath(["hub"]);
+              setToolsListGroupFilter(null);
               setToolsPage(1);
               void loadToolCategories().catch(() => undefined);
-              void loadToolWarehouseSummary().catch(() => undefined);
-              void loadTools().catch(() => undefined);
             }}
             renderCampStatDrillContent={(warehouseId) => (
               <CampTab

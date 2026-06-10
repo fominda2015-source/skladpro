@@ -278,7 +278,8 @@ const emptySummary = (): HomeOverviewSummary => ({
 });
 
 export async function buildHomeOverview(
-  scope: DataScope
+  scope: DataScope,
+  section?: "SS" | "EOM"
 ): Promise<{ objects: HomeObjectOverview[]; summary: HomeOverviewSummary }> {
   const whWhere = warehouseWhereFromScope(scope);
   const warehouses = await prisma.warehouse.findMany({
@@ -298,7 +299,11 @@ export async function buildHomeOverview(
   };
 
   const toolWhere: Prisma.ToolWhereInput = {
-    AND: [toolWhereFromScope(scope), { warehouseId: { in: warehouseIds } }]
+    AND: [
+      toolWhereFromScope(scope),
+      { warehouseId: { in: warehouseIds } },
+      ...(section ? [{ section }] : [])
+    ]
   };
 
   const stockScoped = stockWhereFromScope(scope);

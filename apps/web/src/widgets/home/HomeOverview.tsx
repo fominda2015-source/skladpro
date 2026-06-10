@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { StatusBadge, objectRiskLabel, objectRiskStatus } from "../../shared/ui/StatusBadge";
 import {
   Bar,
@@ -373,10 +373,16 @@ export function HomeOverview({
   const selectedObject =
     drillView.mode === "object" ? objects.find((o) => o.warehouseId === drillView.warehouseId) || null : null;
 
+  const drillToolsWarehouseId =
+    drill?.kind === "stat" && drill.key === "tools" && drillView.mode === "object"
+      ? drillView.warehouseId
+      : null;
+
+  useEffect(() => {
+    if (drillToolsWarehouseId) onToolsObjectDrill?.(drillToolsWarehouseId);
+  }, [drillToolsWarehouseId, onToolsObjectDrill]);
+
   const openObjectMini = (warehouseId: string) => {
-    if (drill?.kind === "stat" && drill.key === "tools") {
-      onToolsObjectDrill?.(warehouseId);
-    }
     if (drill?.kind === "stat" && drill.key === "camp") {
       onCampObjectDrill?.(warehouseId);
     }
