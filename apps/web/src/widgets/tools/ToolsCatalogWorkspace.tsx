@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ToolsCatalogNav } from "./ToolsCatalogNav";
 import { ToolsHubNav } from "./ToolsHubNav";
-import { ToolCatalogMaterialsTable } from "./ToolCatalogMaterialsTable";
+import { ToolCatalogMaterialCards } from "./ToolCatalogMaterialCards";
+import { ToolCatalogMaterialDetailModal } from "./ToolCatalogMaterialDetailModal";
 import {
   ELECTRIC_SUB_HUB_CARDS,
   TOOL_SUB_HUB_CARDS,
@@ -67,6 +68,7 @@ export function ToolsCatalogWorkspace({
   const [busyMaterialId, setBusyMaterialId] = useState<string | null>(null);
   const [groupCards, setGroupCards] = useState<ToolGroupCardRow[]>([]);
   const [groupLoading, setGroupLoading] = useState(false);
+  const [selectedMaterial, setSelectedMaterial] = useState<ToolCatalogMaterialRow | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -219,14 +221,29 @@ export function ToolsCatalogWorkspace({
               </button>
             ) : null}
           </div>
-          <ToolCatalogMaterialsTable
+          {canWrite && materialRows.length > 0 && !matLoading ? (
+            <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>
+              Нажмите на карточку — откроется остаток и действия с разделом.
+            </p>
+          ) : null}
+          <ToolCatalogMaterialCards
             rows={materialRows}
             loading={matLoading}
-            canWrite={canWrite}
-            currentSection={materialSection}
-            busyMaterialId={busyMaterialId}
-            onChangeSection={changeMaterialSection}
+            onOpen={setSelectedMaterial}
           />
+          {selectedMaterial ? (
+            <ToolCatalogMaterialDetailModal
+              row={selectedMaterial}
+              currentSection={materialSection}
+              canWrite={canWrite}
+              busy={busyMaterialId === selectedMaterial.materialId}
+              onClose={() => setSelectedMaterial(null)}
+              onChangeSection={async (materialId, section) => {
+                await changeMaterialSection(materialId, section);
+                setSelectedMaterial(null);
+              }}
+            />
+          ) : null}
         </>
       )}
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { parseMaterialQty } from "../../shared/quantity";
 
 type OpenLine = {
@@ -120,7 +121,7 @@ export function ToolConsumablesReturnModal({
     }
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -217,6 +218,7 @@ export function ToolConsumablesReturnModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

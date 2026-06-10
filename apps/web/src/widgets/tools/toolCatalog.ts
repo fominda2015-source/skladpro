@@ -102,7 +102,7 @@ export type HubCardDef = {
 export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "tool", label: "Инструмент", icon: "🛠️", hint: "Ручной и электрический" },
   { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Учётные единицы с инв. № и QR" },
-  { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Пики, диски, оснастка" },
+  { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Карточки с количеством на объекте" },
   { id: "kip", label: "КИП", icon: "📊", hint: "Контрольно-измерительные приборы" },
   { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Вышки-туры, стремянки" },
   { id: "other", label: "Прочее", icon: "📁" }

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
+import { createPortal } from "react-dom";
+import { parseMaterialQty } from "../../shared/quantity";
+import { ToolCatalogMaterialCards } from "./ToolCatalogMaterialCards";
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
 import type { ConsumablePickLine, ElectricToolIssueWizardSubmit } from "./electricToolIssue";
 
@@ -103,8 +105,6 @@ export function ElectricToolIssueWizardModal({
     [lines]
   );
 
-  if (!open) return null;
-
   async function finish() {
     const holder = recipient.trim();
     if (!holder) {
@@ -128,7 +128,9 @@ export function ElectricToolIssueWizardModal({
     }
   }
 
-  return (
+  if (!open) return null;
+
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -155,7 +157,7 @@ export function ElectricToolIssueWizardModal({
         {step === "consumables" ? (
           <>
             <p className="muted">
-              Электрический инструмент: <strong>{toolLabel}</strong>. В одной карточке может быть несколько штук — после
+              Электрический инструмент: <strong>{toolLabel}</strong>. Выберите карточки и укажите количество — после
               первой выдачи и возврата «б/у» остаток делится на новые и использованные.
             </p>
             {loading && <p className="muted">Загрузка номенклатуры...</p>}
@@ -163,43 +165,26 @@ export function ElectricToolIssueWizardModal({
               <p className="muted">На объекте нет расходников для инструмента в наличии — можно перейти к выдаче.</p>
             )}
             {!loading && lines.length > 0 && (
-              <div className="erpTableWrap" style={{ maxHeight: 360, overflow: "auto" }}>
-                <table className="erpTable desktopTable">
-                  <thead>
-                    <tr>
-                      <th>Карточка / наименование</th>
-                      <th style={{ width: 72 }}>Новые</th>
-                      <th style={{ width: 72 }}>Б/у</th>
-                      <th style={{ width: 100 }}>Выдать</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.map((l, i) => (
-                      <tr key={l.materialId}>
-                        <td>
-                          {l.name} <span className="muted">({l.unit})</span>
-                        </td>
-                        <td>{l.qtyNew}</td>
-                        <td>{l.qtyUsed > 0 ? l.qtyUsed : "—"}</td>
-                        <td>
-                          <input
-                            type="number"
-                            min={0}
-                            max={l.maxQty}
-                            step={MATERIAL_QTY_STEP}
-                            value={l.qty}
-                            onChange={(e) => {
-                              const qty = e.target.value.replace(/[^\d]/g, "");
-                              setLines((prev) => prev.map((row, j) => (j === i ? { ...row, qty } : row)));
-                            }}
-                            style={{ width: "100%" }}
-                            aria-label={`Количество: ${l.name}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="toolCatalogMaterialPickScroll">
+                <ToolCatalogMaterialCards
+                  mode="pick"
+                  loading={loading}
+                  rows={lines.map((l, i) => ({
+                    materialId: l.materialId,
+                    name: l.name,
+                    unit: l.unit,
+                    warehouseId,
+                    warehouseName: "",
+                    section,
+                    qtyNew: l.qtyNew,
+                    qtyUsed: l.qtyUsed,
+                    maxQty: l.maxQty,
+                    qty: l.qty,
+                    onQtyChange: (qty) => {
+                      setLines((prev) => prev.map((row, j) => (j === i ? { ...row, qty } : row)));
+                    }
+                  }))}
+                />
               </div>
             )}
             {message && step === "consumables" ? <p className="resultBanner error">{message}</p> : null}
@@ -225,10 +210,7 @@ export function ElectricToolIssueWizardModal({
             <p className="muted">
               Инструмент: <strong>{toolLabel}</strong>
               {pickedConsumables.length ? (
-                <>
-                  {" "}
-                  · расходников: {pickedConsumables.length} поз.
-                </>
+                <> · расходников: {pickedConsumables.length} поз.</>
               ) : (
                 " · без расходников"
               )}
@@ -282,6 +264,7 @@ export function ElectricToolIssueWizardModal({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
-};
+}
