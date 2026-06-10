@@ -4710,6 +4710,14 @@ function App() {
     }
   }
 
+  const handleHomeToolsObjectDrill = useCallback((warehouseId: string) => {
+    setHomeToolsDrillWarehouseId((prev) => (prev === warehouseId ? prev : warehouseId));
+    setToolsNavPath((prev) => (prev.length === 1 && prev[0] === "hub" ? prev : ["hub"]));
+    setToolsListGroupFilter((prev) => (prev === null ? prev : null));
+    setToolsPage((prev) => (prev === 1 ? prev : 1));
+    void loadToolCategories().catch(() => undefined);
+  }, []);
+
   async function loadToolWarehouseSummary() {
     if (!token) return;
     try {
@@ -6393,13 +6401,7 @@ function App() {
             renderToolsStatDrillContent={
               canReadTools ? (warehouseId) => renderToolsInventoryBlock(true, warehouseId) : undefined
             }
-            onToolsObjectDrill={(warehouseId) => {
-              setHomeToolsDrillWarehouseId(warehouseId);
-              setToolsNavPath(["hub"]);
-              setToolsListGroupFilter(null);
-              setToolsPage(1);
-              void loadToolCategories().catch(() => undefined);
-            }}
+            onToolsObjectDrill={handleHomeToolsObjectDrill}
             renderCampStatDrillContent={(warehouseId) => (
               <CampTab
                 compact
