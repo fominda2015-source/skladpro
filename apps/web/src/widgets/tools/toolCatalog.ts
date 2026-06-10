@@ -19,8 +19,8 @@ export type ToolCatalogSummary = {
   ppe: ToolCountStats;
   toolConsumable: { count: number; qty: number };
   kip: { count: number; qty: number };
-  towersLadders: { count: number; qty: number };
-  other: { count: number; qty: number };
+  towersLadders: ToolCountStats;
+  other: ToolCountStats;
 };
 
 export type ToolCountStats = {
@@ -161,16 +161,14 @@ export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Учётные единицы с инв. № и QR" },
   { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Карточки с количеством на объекте" },
   { id: "kip", label: "КИП", icon: "📊", hint: "Контрольно-измерительные приборы" },
-  { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Вышки-туры, стремянки" },
-  { id: "other", label: "Прочее", icon: "📁" }
+  { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Учётные единицы с инв. № и QR" },
+  { id: "other", label: "Прочее", icon: "📁", hint: "Учётные единицы с инв. № и QR" }
 ];
 
-/** Разделы каталога для складских материалов (не учётных единиц Tool). СИЗ — учётные единицы, см. категорию tool-ppe. */
+/** Разделы каталога для складских материалов (кол-во на объекте). СИЗ, туры и прочее — учётные единицы Tool. */
 export const CATALOG_MATERIAL_SECTIONS = [
   { value: "TOOL_CONSUMABLE" as const, label: "Расходники для инструмента" },
-  { value: "KIP" as const, label: "КИП" },
-  { value: "TOWERS_LADDERS" as const, label: "Туры и стремянки" },
-  { value: "OTHER" as const, label: "Прочее" }
+  { value: "KIP" as const, label: "КИП" }
 ];
 
 export type CatalogMaterialSection = (typeof CATALOG_MATERIAL_SECTIONS)[number]["value"];
@@ -232,6 +230,11 @@ export function showToolsInventoryList(navPath: ToolsNavId[]): boolean {
 export function navToMaterialSection(nav: ToolsNavId): string | null {
   if (nav === "tool-consumable") return "TOOL_CONSUMABLE";
   if (nav === "kip") return "KIP";
+  return null;
+}
+
+/** Старые остатки, ошибочно заведённые как материалы (до перехода на учётные единицы). */
+export function legacyMaterialCatalogSection(nav: ToolsNavId): CatalogMaterialSection | null {
   if (nav === "towers-ladders") return "TOWERS_LADDERS";
   if (nav === "other") return "OTHER";
   return null;
@@ -246,12 +249,7 @@ export function isPureMaterialCatalogNav(nav: ToolsNavId): boolean {
   return nav === "kip";
 }
 
-const CATALOG_MATERIAL_SLUGS = new Set<string>([
-  TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE,
-  TOOL_CATEGORY_SLUGS.KIP,
-  TOOL_CATEGORY_SLUGS.TOWERS_LADDERS,
-  TOOL_CATEGORY_SLUGS.OTHER
-]);
+const CATALOG_MATERIAL_SLUGS = new Set<string>([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE, TOOL_CATEGORY_SLUGS.KIP]);
 
 export function isCatalogMaterialCategorySlug(slug: string | null | undefined): boolean {
   return CATALOG_MATERIAL_SLUGS.has(String(slug || "").toLowerCase());

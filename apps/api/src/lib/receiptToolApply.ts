@@ -11,7 +11,9 @@ export function isToolInventoryReceiptCategory(cat: ReceiptItemCategory | null |
     cat === "TOOL_MANUAL" ||
     cat === "TOOL_ELECTRIC_CORDLESS" ||
     cat === "TOOL_ELECTRIC_CORDED" ||
-    cat === "PPE"
+    cat === "PPE" ||
+    cat === "TOWERS_LADDERS" ||
+    cat === "OTHER"
   );
 }
 

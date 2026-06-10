@@ -120,9 +120,7 @@ export function toolCatalogSectionToReceiptCategory(
 
 export const CATALOG_MATERIAL_TOOL_SECTIONS = [
   "TOOL_CONSUMABLE",
-  "KIP",
-  "TOWERS_LADDERS",
-  "OTHER"
+  "KIP"
 ] as const satisfies readonly ToolCatalogSection[];
 
 export function receiptCategoryToToolSection(

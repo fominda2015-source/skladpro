@@ -10,7 +10,7 @@ import {
   TOOLS_HUB_CARDS,
   buildToolsHubStats,
   catalogMaterialSectionLabel,
-  navToCategorySlug,
+  legacyMaterialCatalogSection,
   type CatalogMaterialSection,
   type ToolCatalogMaterialRow,
   type ToolCatalogSummary,
@@ -94,14 +94,16 @@ export function ToolsCatalogWorkspace({
   }, [token, warehouseId, sectionFilter, apiUrl, fetchWithSession, matRefresh]);
 
   const materialSection = navToMaterialSection(current) as CatalogMaterialSection | null;
+  const legacyMaterialSection = legacyMaterialCatalogSection(current);
+  const stockMaterialSection = materialSection ?? legacyMaterialSection;
 
   const loadMaterials = useCallback(async () => {
-    if (!token || !materialSection) {
+    if (!token || !stockMaterialSection) {
       setMaterialRows([]);
       return;
     }
     setMatLoading(true);
-    const q = new URLSearchParams({ section: materialSection, sectionFilter });
+    const q = new URLSearchParams({ section: stockMaterialSection, sectionFilter });
     if (warehouseId) q.set("warehouseId", warehouseId);
     try {
       const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${q}`, {
@@ -112,7 +114,7 @@ export function ToolsCatalogWorkspace({
     } finally {
       setMatLoading(false);
     }
-  }, [token, materialSection, warehouseId, sectionFilter, apiUrl, fetchWithSession]);
+  }, [token, stockMaterialSection, warehouseId, sectionFilter, apiUrl, fetchWithSession]);
 
   useEffect(() => {
     void loadMaterials();
@@ -150,6 +152,7 @@ export function ToolsCatalogWorkspace({
     };
   }, [current, token, warehouseId, sectionFilter, apiUrl, fetchWithSession, matRefresh]);
 
+  const showLegacyMaterialCards = Boolean(legacyMaterialSection && materialRows.length > 0);
   const showGroupCards = usesToolNameGroupCards(current) && !toolsListGroupFilter;
   const showToolList =
     showToolsInventoryList(navPath) &&
@@ -239,7 +242,18 @@ export function ToolsCatalogWorkspace({
         />
       )}
 
-      {isMaterialNav(current) && !isConsumableCatalogNav(current) && (
+      {usesToolNameGroupCards(current) ? (
+        <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
+          <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>
+          {canWrite && onAddCatalogItem ? (
+            <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
+              + Добавить
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isMaterialNav(current) && !isConsumableCatalogNav(current) ? (
         <>
           <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
             <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>
@@ -273,10 +287,37 @@ export function ToolsCatalogWorkspace({
             />
           ) : null}
         </>
-      )}
+      ) : null}
+
+      {showLegacyMaterialCards ? (
+        <div style={{ marginTop: usesToolNameGroupCards(current) ? 12 : hubCards ? 16 : 0 }}>
+          <p className="resultBanner warn" style={{ fontSize: 13 }}>
+            Ниже — старые остатки, заведённые по количеству. Уберите их из раздела после создания учётных единиц
+            (инв. №, QR).
+          </p>
+          <ToolCatalogMaterialCards
+            rows={materialRows}
+            loading={matLoading}
+            onOpen={setSelectedMaterial}
+          />
+          {selectedMaterial ? (
+            <ToolCatalogMaterialDetailModal
+              row={selectedMaterial}
+              currentSection={legacyMaterialSection}
+              canWrite={canWrite}
+              busy={busyMaterialId === selectedMaterial.materialId}
+              onClose={() => setSelectedMaterial(null)}
+              onChangeSection={async (materialId, section) => {
+                await changeMaterialSection(materialId, section);
+                setSelectedMaterial(null);
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {showGroupCards ? (
-        <div style={{ marginTop: hubCards || isMaterialNav(current) ? 16 : 0 }}>
+        <div style={{ marginTop: hubCards || isMaterialNav(current) || showLegacyMaterialCards || usesToolNameGroupCards(current) ? 16 : 0 }}>
           <h3 style={{ marginTop: 0 }}>Учётные единицы</h3>
           <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>
             Выберите группу — откроется список с карточками инструментов (инв. №, QR, выдача).
@@ -302,7 +343,7 @@ export function ToolsCatalogWorkspace({
       ) : null}
 
       {showToolList ? (
-        <div className="toolsCatalogListSection" style={{ marginTop: hubCards || isMaterialNav(current) || showGroupCards ? 16 : 0 }}>
+        <div className="toolsCatalogListSection" style={{ marginTop: hubCards || isMaterialNav(current) || showGroupCards || showLegacyMaterialCards || usesToolNameGroupCards(current) ? 16 : 0 }}>
           {toolsListGroupFilter ? (
             <div className="toolbar" style={{ marginBottom: 8 }}>
               <button type="button" className="ghostBtn" onClick={() => onToolsListGroupFilterChange?.(null)}>
