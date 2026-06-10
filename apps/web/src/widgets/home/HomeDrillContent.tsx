@@ -356,11 +356,13 @@ function HomeDrillLimitsPanel({
 
 function HomeDrillStockPanel({
   warehouseId,
+  section,
   token,
   fetchWithSession,
   safeName
 }: {
   warehouseId: string;
+  section: Section;
   token: string | null;
   fetchWithSession: typeof fetch;
   safeName: (v: string) => string;
@@ -374,7 +376,7 @@ function HomeDrillStockPanel({
     if (!token) return;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ warehouseId });
+    const params = new URLSearchParams({ warehouseId, section });
     if (search.trim()) params.set("q", search.trim());
     try {
       const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
@@ -388,7 +390,7 @@ function HomeDrillStockPanel({
     } finally {
       setLoading(false);
     }
-  }, [token, fetchWithSession, warehouseId, search]);
+  }, [token, fetchWithSession, warehouseId, section, search]);
 
   useEffect(() => {
     void load();
@@ -640,6 +642,7 @@ export function HomeDrillContent({
     return (
       <HomeDrillStockPanel
         warehouseId={warehouseId}
+        section={defaultSection}
         token={token}
         fetchWithSession={fetchWithSession}
         safeName={safeName}

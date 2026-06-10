@@ -310,7 +310,7 @@ export async function buildHomeOverview(
   const stockWhere: Prisma.StockWhereInput = {
     ...(Object.keys(stockScoped).length ? { AND: [stockScoped] } : {}),
     warehouseId: { in: warehouseIds },
-    section: { in: ["SS", "EOM"] }
+    ...(section ? { section } : { section: { in: ["SS", "EOM"] } })
   };
 
   const campWhere: Prisma.CampItemWhereInput =
@@ -407,7 +407,7 @@ export async function buildHomeOverview(
       by: ["warehouseId"],
       where: {
         warehouseId: { in: warehouseIds },
-        section: { in: ["SS", "EOM"] },
+        ...(section ? { section } : { section: { in: ["SS", "EOM"] } }),
         status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
       },
       _count: { id: true }
