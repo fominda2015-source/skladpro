@@ -287,7 +287,6 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
   const groupMiscByName =
     categorySlugParam === TOOL_CATEGORY_SLUGS.OTHER ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS ||
-    categorySlugParam === TOOL_CATEGORY_SLUGS.PPE ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.KIP ||
     categorySlugParam === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
   const cardsByKey = new Map<string, Card>();
@@ -873,7 +872,7 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
       inRepair: subset.filter((t) => t.status === ToolStatus.IN_REPAIR).length
     };
   };
-  const materialSections: ToolCatalogSection[] = ["PPE", "TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"];
+  const materialSections: ToolCatalogSection[] = ["TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"];
   const stocks = await prisma.stock.findMany({
     where: {
       ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
@@ -901,16 +900,7 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
     ]),
     toolElectricCordless: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS]),
     toolElectricCorded: countBySlug([TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED]),
-    ppe: (() => {
-      const t = countBySlug([TOOL_CATEGORY_SLUGS.PPE]);
-      return {
-        count: matCounts.PPE.count + t.count,
-        qty: matCounts.PPE.qty,
-        inStock: t.inStock,
-        issued: t.issued,
-        inRepair: t.inRepair
-      };
-    })(),
+    ppe: countBySlug([TOOL_CATEGORY_SLUGS.PPE]),
     toolConsumable: (() => {
       const t = countBySlug([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE]);
       return {
@@ -1160,7 +1150,7 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
 });
 
 const catalogMaterialSectionPatchSchema = z.object({
-  toolCatalogSection: z.enum(["PPE", "TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"]).nullable()
+  toolCatalogSection: z.enum(["TOOL_CONSUMABLE", "KIP", "TOWERS_LADDERS", "OTHER"]).nullable()
 });
 
 toolsRouter.patch(

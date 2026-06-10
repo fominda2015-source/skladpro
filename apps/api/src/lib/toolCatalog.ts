@@ -119,7 +119,6 @@ export function toolCatalogSectionToReceiptCategory(
 }
 
 export const CATALOG_MATERIAL_TOOL_SECTIONS = [
-  "PPE",
   "TOOL_CONSUMABLE",
   "KIP",
   "TOWERS_LADDERS",

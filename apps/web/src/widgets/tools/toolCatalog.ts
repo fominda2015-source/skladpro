@@ -16,7 +16,7 @@ export type ToolCatalogSummary = {
   toolElectric: { count: number; inStock: number; issued: number; inRepair: number };
   toolElectricCordless: { count: number; inStock: number; issued: number; inRepair: number };
   toolElectricCorded: { count: number; inStock: number; issued: number; inRepair: number };
-  ppe: { count: number; qty: number };
+  ppe: ToolCountStats;
   toolConsumable: { count: number; qty: number };
   kip: { count: number; qty: number };
   towersLadders: { count: number; qty: number };
@@ -101,16 +101,15 @@ export type HubCardDef = {
 
 export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "tool", label: "Инструмент", icon: "🛠️", hint: "Ручной и электрический" },
-  { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Средства индивидуальной защиты" },
+  { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Учётные единицы с инв. № и QR" },
   { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Пики, диски, оснастка" },
   { id: "kip", label: "КИП", icon: "📊", hint: "Контрольно-измерительные приборы" },
   { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Вышки-туры, стремянки" },
   { id: "other", label: "Прочее", icon: "📁" }
 ];
 
-/** Разделы каталога для складских материалов (не учётных единиц Tool). */
+/** Разделы каталога для складских материалов (не учётных единиц Tool). СИЗ — учётные единицы, см. категорию tool-ppe. */
 export const CATALOG_MATERIAL_SECTIONS = [
-  { value: "PPE" as const, label: "СИЗ" },
   { value: "TOOL_CONSUMABLE" as const, label: "Расходники для инструмента" },
   { value: "KIP" as const, label: "КИП" },
   { value: "TOWERS_LADDERS" as const, label: "Туры и стремянки" },
@@ -174,7 +173,6 @@ export function showToolsInventoryList(navPath: ToolsNavId[]): boolean {
 }
 
 export function navToMaterialSection(nav: ToolsNavId): string | null {
-  if (nav === "ppe") return "PPE";
   if (nav === "tool-consumable") return "TOOL_CONSUMABLE";
   if (nav === "kip") return "KIP";
   if (nav === "towers-ladders") return "TOWERS_LADDERS";
@@ -188,11 +186,10 @@ export function isMaterialNav(nav: ToolsNavId): boolean {
 
 /** Разделы каталога только со складскими материалами (без учётных единиц Tool). */
 export function isPureMaterialCatalogNav(nav: ToolsNavId): boolean {
-  return nav === "ppe" || nav === "tool-consumable" || nav === "kip";
+  return nav === "tool-consumable" || nav === "kip";
 }
 
 const CATALOG_MATERIAL_SLUGS = new Set<string>([
-  TOOL_CATEGORY_SLUGS.PPE,
   TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE,
   TOOL_CATEGORY_SLUGS.KIP,
   TOOL_CATEGORY_SLUGS.TOWERS_LADDERS,
@@ -205,7 +202,6 @@ export function isCatalogMaterialCategorySlug(slug: string | null | undefined): 
 
 export function slugToCatalogMaterialSection(slug: string | null | undefined): CatalogMaterialSection | null {
   const s = String(slug || "").toLowerCase();
-  if (s === TOOL_CATEGORY_SLUGS.PPE) return "PPE";
   if (s === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE) return "TOOL_CONSUMABLE";
   if (s === TOOL_CATEGORY_SLUGS.KIP) return "KIP";
   if (s === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS) return "TOWERS_LADDERS";

@@ -7,7 +7,12 @@ import {
 
 export function isToolInventoryReceiptCategory(cat: ReceiptItemCategory | null | undefined): boolean {
   if (!cat) return false;
-  return cat === "TOOL_MANUAL" || cat === "TOOL_ELECTRIC_CORDLESS" || cat === "TOOL_ELECTRIC_CORDED";
+  return (
+    cat === "TOOL_MANUAL" ||
+    cat === "TOOL_ELECTRIC_CORDLESS" ||
+    cat === "TOOL_ELECTRIC_CORDED" ||
+    cat === "PPE"
+  );
 }
 
 /** Категория прихода ведёт в каталог инструментов/СИЗ (учётные единицы Tool). */
@@ -15,7 +20,7 @@ export function isToolCatalogReceiptCategory(cat: ReceiptItemCategory | null | u
   return receiptCategoryToToolSection(cat) != null;
 }
 
-/** Категория прихода — складская позиция каталога (PPE, Прочее, КИП…), не учётная единица. */
+/** Категория прихода — складская позиция каталога (расходники, КИП…), не учётная единица Tool. */
 export function isToolCatalogMaterialReceiptCategory(cat: ReceiptItemCategory | null | undefined): boolean {
   if (!cat || isToolInventoryReceiptCategory(cat)) return false;
   return receiptCategoryToToolSection(cat) != null;

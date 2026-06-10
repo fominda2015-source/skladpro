@@ -102,8 +102,13 @@ import { ChatPanel } from "./widgets/chat/ChatPanel";
 import { ChatUserProfileModal, type ChatUserProfile } from "./widgets/chat/ChatUserProfileModal";
 import { ActsTab } from "./widgets/acts/ActsTab";
 import { ToolDetailDrawer, type ToolEditPatch } from "./widgets/tools/ToolDetailDrawer";
-import { ToolConsumablesIssueModal } from "./widgets/tools/ToolConsumablesIssueModal";
 import { ToolConsumablesReturnModal } from "./widgets/tools/ToolConsumablesReturnModal";
+import { ElectricToolIssueWizardModal } from "./widgets/tools/ElectricToolIssueWizardModal";
+import {
+  filterElectricToolIds,
+  isElectricToolRecord,
+  type ElectricToolIssueWizardSubmit
+} from "./widgets/tools/electricToolIssue";
 import {
   navCategorySlugChain,
   navToCategorySlug,
@@ -1130,12 +1135,13 @@ function App() {
     label: string;
   } | null>(null);
   const [toolsListScopeNote, setToolsListScopeNote] = useState("");
-  const [toolConsumablesIssueOpen, setToolConsumablesIssueOpen] = useState(false);
-  const [toolConsumablesIssueContext, setToolConsumablesIssueContext] = useState<{
+  const [electricToolWizard, setElectricToolWizard] = useState<{
     toolIds: string[];
-    label: string;
-    holderName: string;
-    issueRequestId?: string;
+    electricToolIds: string[];
+    toolLabel: string;
+    mode: "single" | "batch";
+    initialRecipient?: string;
+    initialComment?: string;
   } | null>(null);
   const [toolConsumablesReturn, setToolConsumablesReturn] = useState<{
     toolId: string;
@@ -4465,6 +4471,26 @@ function App() {
       setIssuesTone("error");
       return;
     }
+    const electricIds = filterElectricToolIds(tools, issueToolPickIds);
+    if (electricIds.length) {
+      const responsibleName = issueResponsible.trim();
+      const actualRecipientName = (issueActualRecipient.trim() || responsibleName).trim();
+      if (!responsibleName || !actualRecipientName) {
+        setIssuesMessage("Укажите ответственное и фактическое лицо перед выдачей электроинструмента");
+        setIssuesTone("error");
+        return;
+      }
+      if (
+        openElectricToolWizard({
+          toolIds: [...issueToolPickIds],
+          mode: "batch",
+          initialRecipient: actualRecipientName,
+          initialComment: issueNote.trim()
+        })
+      ) {
+        return;
+      }
+    }
     setIssueSubmitting(true);
     setIssuesMessage("");
     try {
@@ -4529,28 +4555,12 @@ function App() {
       }
       setIssuesMessage(`Инструмент по заявке ${created.number} выдан. Акт сформирован автоматически.`);
       setIssuesTone("success");
-      const issuedToolIds = [...issueToolPickIds];
       setIssueToolPickIds([]);
       setIssueToolSearch("");
       setIssueNote("");
       setDirectIssueSignedFile(null);
       await loadIssues();
       void loadTools().catch(() => undefined);
-      const issuedElectric = tools.filter(
-        (t) =>
-          issuedToolIds.includes(t.id) &&
-          (isElectricToolCategorySlug(t.category?.slug ?? null) ||
-            /электр|аккумулятор|сетев/i.test(t.category?.name ?? ""))
-      );
-      if (issuedElectric.length && activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
-        setToolConsumablesIssueContext({
-          toolIds: issuedElectric.map((t) => t.id),
-          label: issuedElectric.map((t) => safeName(t.name)).join(", "),
-          holderName: actualRecipientName,
-          issueRequestId: created.id
-        });
-        setToolConsumablesIssueOpen(true);
-      }
     } catch (e) {
       setIssuesMessage(`Ошибка выдачи инструмента: ${String(e)}`);
       setIssuesTone("error");
@@ -4854,6 +4864,171 @@ function App() {
     setWaybillsTone("neutral");
   }
 
+  async function uploadToolPhoto(toolId: string, photo: File) {
+    if (!token) return;
+    const formData = new FormData();
+    formData.append("entityType", "tool");
+    formData.append("entityId", toolId);
+    formData.append("type", "photo");
+    formData.append("file", photo);
+    await fetchWithSession(`${API_URL}/api/documents/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    });
+  }
+
+  async function issueToolConsumables(
+    electricToolIds: string[],
+    data: ElectricToolIssueWizardSubmit,
+    issueRequestId?: string
+  ) {
+    if (!token || !activeObjectId || activeObjectId === ALL_OBJECTS_ID || !data.consumables.length) return;
+    for (const toolId of electricToolIds) {
+      const res = await fetchWithSession(`${API_URL}/api/tools/consumables/issue`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toolId,
+          warehouseId: activeObjectId,
+          section: objectSectionFilter,
+          holderName: data.recipient,
+          issueRequestId,
+          items: data.consumables
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof (err as { error?: string }).error === "string" ? (err as { error: string }).error : "Ошибка выдачи расходников");
+      }
+    }
+  }
+
+  async function submitElectricToolWizard(data: ElectricToolIssueWizardSubmit): Promise<boolean> {
+    if (!electricToolWizard || !token) return false;
+    const ctx = electricToolWizard;
+    try {
+      if (ctx.mode === "single") {
+        for (const toolId of ctx.toolIds) {
+          const ok = await doToolAction(toolId, "ISSUE", {
+            responsible: data.recipient,
+            comment: data.comment || undefined,
+            photo: null
+          });
+          if (!ok) return false;
+        }
+        if (data.photo && ctx.toolIds[0]) {
+          await uploadToolPhoto(ctx.toolIds[0], data.photo);
+        }
+        await issueToolConsumables(ctx.electricToolIds, data);
+        setToolsMessage("Инструмент и расходники выданы");
+        setToolsTone("success");
+        await loadTools();
+        await loadToolWarehouseSummary();
+        if (toolDetailModalId && ctx.toolIds.includes(toolDetailModalId)) {
+          const res = await fetchWithSession(`${API_URL}/api/tools/${toolDetailModalId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) setToolDetailRecord((await res.json()) as ToolItem);
+        }
+        return true;
+      }
+
+      const responsibleName = data.recipient;
+      const actualRecipientName = data.recipient;
+      const createRes = await fetchWithSession(`${API_URL}/api/issues`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouseId: activeObjectId,
+          section: objectSectionFilter,
+          note: data.comment.trim() || issueNote.trim() || undefined,
+          responsibleName,
+          flowType: "DIRECT_ISSUE",
+          basisType: "OTHER",
+          toolItems: ctx.toolIds.map((toolId) => ({ toolId }))
+        })
+      });
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}));
+        setIssuesMessage(typeof (err as { error?: string }).error === "string" ? (err as { error: string }).error : "Не удалось создать заявку");
+        setIssuesTone("error");
+        return false;
+      }
+      const created = (await createRes.json()) as { id: string; number: string };
+      let issueRes: Response;
+      if (directIssueSignedFile) {
+        const fd = new FormData();
+        fd.append("payload", JSON.stringify({ actualRecipientName }));
+        fd.append("signedFile", directIssueSignedFile);
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd
+        });
+      } else {
+        issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ actualRecipientName })
+        });
+      }
+      if (!issueRes.ok) {
+        const err = await issueRes.json().catch(() => ({}));
+        setIssuesMessage(
+          typeof (err as { error?: string }).error === "string"
+            ? `Заявка ${created.number} создана, но выдача не проведена: ${(err as { error: string }).error}`
+            : `Заявка ${created.number}: выдача не проведена`
+        );
+        setIssuesTone("conflict");
+        await loadIssues();
+        return false;
+      }
+      if (data.photo && ctx.electricToolIds[0]) {
+        await uploadToolPhoto(ctx.electricToolIds[0], data.photo);
+      }
+      await issueToolConsumables(ctx.electricToolIds, data, created.id);
+      setIssuesMessage(`Инструмент по заявке ${created.number} выдан${data.consumables.length ? " с расходниками" : ""}.`);
+      setIssuesTone("success");
+      setIssueToolPickIds([]);
+      setIssueToolSearch("");
+      setIssueNote("");
+      setDirectIssueSignedFile(null);
+      await loadIssues();
+      await loadTools().catch(() => undefined);
+      return true;
+    } catch (e) {
+      setToolsMessage(String(e));
+      setToolsTone("error");
+      setIssuesMessage(String(e));
+      setIssuesTone("error");
+      return false;
+    }
+  }
+
+  function openElectricToolWizard(opts: {
+    toolIds: string[];
+    mode: "single" | "batch";
+    initialRecipient?: string;
+    initialComment?: string;
+  }) {
+    const electricToolIds = filterElectricToolIds(tools, opts.toolIds);
+    if (!electricToolIds.length) return false;
+    const labels = opts.toolIds
+      .map((id) => tools.find((t) => t.id === id) || (toolDetailRecord?.id === id ? toolDetailRecord : null))
+      .filter(Boolean)
+      .map((t) => safeName(t!.name));
+    setElectricToolWizard({
+      toolIds: opts.toolIds,
+      electricToolIds,
+      toolLabel: labels.join(", ") || "инструмент",
+      mode: opts.mode,
+      initialRecipient: opts.initialRecipient,
+      initialComment: opts.initialComment
+    });
+    return true;
+  }
+
   async function doToolAction(
     toolId: string,
     action: ToolActionKind,
@@ -4897,7 +5072,17 @@ function App() {
   }
 
   function openToolActionDialog(toolId: string, action: ToolActionKind) {
-    const selected = tools.find((t) => t.id === toolId);
+    const selected = tools.find((t) => t.id === toolId) || (toolDetailRecord?.id === toolId ? toolDetailRecord : null);
+    if (
+      action === "ISSUE" &&
+      isElectricToolRecord(selected) &&
+      activeObjectId &&
+      activeObjectId !== ALL_OBJECTS_ID
+    ) {
+      if (openElectricToolWizard({ toolIds: [toolId], mode: "single", initialRecipient: selected?.responsible || "" })) {
+        return;
+      }
+    }
     setToolAction({ toolId, action });
     setToolActionResponsible(selected?.responsible || "");
     setToolActionComment("");
@@ -10707,23 +10892,21 @@ function App() {
 
           </div>
 
-          {toolConsumablesIssueOpen && toolConsumablesIssueContext && activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? (
-            <ToolConsumablesIssueModal
-              open={toolConsumablesIssueOpen}
-              toolIds={toolConsumablesIssueContext.toolIds}
-              toolLabel={toolConsumablesIssueContext.label}
+          {electricToolWizard && activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? (
+            <ElectricToolIssueWizardModal
+              open={Boolean(electricToolWizard)}
+              toolIds={electricToolWizard.toolIds}
+              toolLabel={electricToolWizard.toolLabel}
               warehouseId={activeObjectId}
               section={objectSectionFilter}
-              holderName={toolConsumablesIssueContext.holderName}
-              issueRequestId={toolConsumablesIssueContext.issueRequestId}
               token={token}
               apiUrl={API_URL}
               fetchWithSession={fetchWithSession}
-              onClose={() => {
-                setToolConsumablesIssueOpen(false);
-                setToolConsumablesIssueContext(null);
-              }}
-              onDone={() => void loadTools().catch(() => undefined)}
+              recipientSuggestions={chatUsers.map((u) => u.fullName)}
+              initialRecipient={electricToolWizard.initialRecipient}
+              initialComment={electricToolWizard.initialComment}
+              onClose={() => setElectricToolWizard(null)}
+              onSubmit={submitElectricToolWizard}
             />
           ) : null}
 

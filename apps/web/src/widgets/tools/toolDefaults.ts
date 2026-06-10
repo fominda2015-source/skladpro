@@ -75,10 +75,18 @@ export function isManualToolCategory(name?: string | null) {
 export function isMiscToolCategory(cat?: { name?: string | null; slug?: string | null } | null) {
   if (!cat) return false;
   const slug = String(cat.slug || "").toLowerCase();
-  if (slug === TOOL_CATEGORY_SLUGS.OTHER || slug === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS) return true;
+  if (
+    slug === TOOL_CATEGORY_SLUGS.OTHER ||
+    slug === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS ||
+    slug === TOOL_CATEGORY_SLUGS.PPE
+  ) {
+    return true;
+  }
   const name = String(cat.name || "").trim().toLowerCase();
   return (
-    name === OTHER_TOOL_CATEGORY.toLowerCase() || name === TOWERS_LADDERS_TOOL_CATEGORY.toLowerCase()
+    name === OTHER_TOOL_CATEGORY.toLowerCase() ||
+    name === TOWERS_LADDERS_TOOL_CATEGORY.toLowerCase() ||
+    name === PPE_TOOL_CATEGORY.toLowerCase()
   );
 }
 

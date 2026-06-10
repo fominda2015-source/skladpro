@@ -55,7 +55,7 @@ export function ToolCatalogMaterialsTable({
           <tbody>
             {rows.map((r) => {
               const busy = busyMaterialId === r.materialId;
-              const draftTarget = moveDraft[r.materialId] ?? moveTargets[0]?.value ?? "PPE";
+              const draftTarget = moveDraft[r.materialId] ?? moveTargets[0]?.value ?? "TOOL_CONSUMABLE";
               return (
                 <tr key={`${r.warehouseId}-${r.materialId}-${r.section}`}>
                   <td>
@@ -120,7 +120,7 @@ export function ToolCatalogMaterialsTable({
       <div className="mobileCards">
         {rows.map((r) => {
           const busy = busyMaterialId === r.materialId;
-          const draftTarget = moveDraft[r.materialId] ?? moveTargets[0]?.value ?? "PPE";
+          const draftTarget = moveDraft[r.materialId] ?? moveTargets[0]?.value ?? "TOOL_CONSUMABLE";
           return (
             <MobileCard key={`m-${r.warehouseId}-${r.materialId}-${r.section}`}>
               <h4>{r.name}</h4>
