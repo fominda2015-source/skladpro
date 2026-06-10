@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ToolsListToolbar } from "./ToolsListToolbar";
+import { ToolConsumableActionModal, type ConsumableCardAction } from "./ToolConsumableActionModal";
 import { ToolConsumableDrawer } from "./ToolConsumableDrawer";
 import { ToolConsumableIssueModal } from "./ToolConsumableIssueModal";
 import { ToolConsumableListTable } from "./ToolConsumableListTable";
-import type { ToolCatalogConsumableLine } from "./toolCatalog";
+import type { ToolCatalogConsumableDetail, ToolCatalogConsumableLine } from "./toolCatalog";
 
 type Props = {
   warehouseId: string;
@@ -38,8 +39,16 @@ export function ToolConsumablesCatalogSection({
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ToolCatalogConsumableDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [issueLine, setIssueLine] = useState<ToolCatalogConsumableLine | null>(null);
   const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [cardAction, setCardAction] = useState<{ action: ConsumableCardAction; line: ToolCatalogConsumableLine } | null>(
+    null
+  );
+  const [actionSubmitting, setActionSubmitting] = useState(false);
 
   const loadLines = useCallback(async () => {
     if (!token) {
@@ -65,6 +74,23 @@ export function ToolConsumablesCatalogSection({
     }
   }, [token, warehouseId, sectionFilter, search, apiUrl, fetchWithSession]);
 
+  const loadDetail = useCallback(
+    async (stockId: string) => {
+      if (!token) return;
+      setDetailLoading(true);
+      try {
+        const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/consumables/card/${stockId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) setDetail((await res.json()) as ToolCatalogConsumableDetail);
+        else setDetail(null);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [token, apiUrl, fetchWithSession]
+  );
+
   useEffect(() => {
     void loadLines();
   }, [loadLines, catalogRefreshNonce]);
@@ -77,6 +103,16 @@ export function ToolConsumablesCatalogSection({
   useEffect(() => {
     onDrawerOpenChange?.(Boolean(selectedKey));
   }, [selectedKey, onDrawerOpenChange]);
+
+  useEffect(() => {
+    if (selectedLine?.stockId) void loadDetail(selectedLine.stockId);
+    else setDetail(null);
+  }, [selectedLine?.stockId, loadDetail, catalogRefreshNonce]);
+
+  async function refreshAfterMutation(stockId?: string) {
+    await loadLines();
+    if (stockId) await loadDetail(stockId);
+  }
 
   async function submitIssue(data: { recipient: string; quantity: number; comment: string }) {
     if (!token || !issueLine || !warehouseId) return false;
@@ -102,11 +138,101 @@ export function ToolConsumablesCatalogSection({
       }
       onCatalogMessage?.("Расходник выдан", "success");
       setIssueLine(null);
-      setSelectedKey(null);
-      await loadLines();
+      const sid = issueLine.stockId;
+      await refreshAfterMutation(sid);
+      const still = (await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${new URLSearchParams({
+        section: "TOOL_CONSUMABLE",
+        sectionFilter,
+        splitByCondition: "1",
+        ...(warehouseId ? { warehouseId } : {})
+      })}`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => (r.ok ? r.json() : []))) as ToolCatalogConsumableLine[];
+      if (!still.some((l) => l.stockId === sid && l.quantity > 0)) setSelectedKey(null);
       return true;
     } finally {
       setIssueSubmitting(false);
+    }
+  }
+
+  async function saveCard(stockId: string, patch: { name: string; unit: string; note: string }) {
+    if (!token) return false;
+    setSaving(true);
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/consumables/card/${stockId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: patch.name.trim(),
+          unit: patch.unit.trim(),
+          note: patch.note.trim() || null
+        })
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        onCatalogMessage?.(err.error || "Не удалось сохранить", "error");
+        return false;
+      }
+      onCatalogMessage?.("Карточка сохранена", "success");
+      await refreshAfterMutation(stockId);
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runCardAction(stockId: string, action: "WRITE_OFF" | "DISPUTE" | "CLEAR_DISPUTE", data: { comment: string; quantity?: number }) {
+    if (!token) return false;
+    setActionSubmitting(true);
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/consumables/card/${stockId}/action`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comment: data.comment || undefined, quantity: data.quantity })
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        onCatalogMessage?.(err.error || "Не удалось выполнить действие", "error");
+        return false;
+      }
+      onCatalogMessage?.(
+        action === "WRITE_OFF" ? "Расходник списан" : action === "DISPUTE" ? "Помечено спорным" : "Спор снят",
+        "success"
+      );
+      setCardAction(null);
+      await refreshAfterMutation(stockId);
+      if (action === "WRITE_OFF") {
+        const d = await fetchWithSession(`${apiUrl}/api/tools/catalog/consumables/card/${stockId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (d.ok) {
+          const body = (await d.json()) as ToolCatalogConsumableDetail;
+          if (body.quantity <= 0) setSelectedKey(null);
+        }
+      }
+      return true;
+    } finally {
+      setActionSubmitting(false);
+    }
+  }
+
+  async function deleteCard(stockId: string) {
+    if (!token) return;
+    setDeleting(true);
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/consumables/card/${stockId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok && res.status !== 204) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        onCatalogMessage?.(err.error || "Не удалось удалить карточку", "error");
+        return;
+      }
+      onCatalogMessage?.("Карточка удалена", "success");
+      setSelectedKey(null);
+      setDetail(null);
+      await loadLines();
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -136,7 +262,8 @@ export function ToolConsumablesCatalogSection({
         {!loading && lines.length > 0 && (
           <>
             <p className="muted" style={{ margin: "8px 0" }}>
-              Клик по строке — карточка расходника. Б/у (старые) строки выше — их рекомендуется выдавать первыми.
+              Клик по строке — карточка расходника (редактирование, списание, спор, удаление). Б/у строки выше —
+              выдавать первыми.
             </p>
             <ToolConsumableListTable
               lines={lines}
@@ -148,15 +275,30 @@ export function ToolConsumablesCatalogSection({
         )}
       </div>
 
-      {selectedLine ? (
+      {(selectedLine || detailLoading) && (
         <ToolConsumableDrawer
-          line={selectedLine}
+          detail={detail}
+          loading={detailLoading}
           canWrite={Boolean(canWrite)}
+          saving={saving}
+          deleting={deleting}
           safeName={safeName}
-          onClose={() => setSelectedKey(null)}
-          onIssue={() => setIssueLine(selectedLine)}
+          onClose={() => {
+            setSelectedKey(null);
+            setDetail(null);
+          }}
+          onIssue={() => selectedLine && setIssueLine(selectedLine)}
+          onSave={(patch) => (selectedLine ? saveCard(selectedLine.stockId, patch) : Promise.resolve(false))}
+          onWriteOff={() => selectedLine && setCardAction({ action: "WRITE_OFF", line: selectedLine })}
+          onDispute={() => selectedLine && setCardAction({ action: "DISPUTE", line: selectedLine })}
+          onClearDispute={() =>
+            selectedLine &&
+            void runCardAction(selectedLine.stockId, "CLEAR_DISPUTE", { comment: "Спор снят" })
+          }
+          onDelete={() => selectedLine && void deleteCard(selectedLine.stockId)}
+          onRefreshEvents={() => selectedLine && void loadDetail(selectedLine.stockId)}
         />
-      ) : null}
+      )}
 
       {issueLine ? (
         <ToolConsumableIssueModal
@@ -166,6 +308,17 @@ export function ToolConsumablesCatalogSection({
           submitting={issueSubmitting}
           onClose={() => setIssueLine(null)}
           onSubmit={submitIssue}
+        />
+      ) : null}
+
+      {cardAction ? (
+        <ToolConsumableActionModal
+          open={Boolean(cardAction)}
+          action={cardAction.action}
+          line={cardAction.line}
+          submitting={actionSubmitting}
+          onClose={() => setCardAction(null)}
+          onSubmit={(data) => runCardAction(cardAction.line.stockId, cardAction.action, data)}
         />
       ) : null}
     </>

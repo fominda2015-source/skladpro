@@ -81,10 +81,44 @@ export type ToolCatalogConsumableLine = {
   section: string;
   condition: "NEW" | "USED";
   quantity: number;
+  disputed?: boolean;
+  note?: string | null;
+  cardStatus?: "IN_STOCK" | "DISPUTED" | "WRITTEN_OFF";
+};
+
+export type ToolCatalogConsumableEvent = {
+  id: string;
+  action: string;
+  comment?: string | null;
+  createdAt: string;
+};
+
+export type ToolCatalogConsumableDetail = ToolCatalogConsumableLine & {
+  reserved?: number;
+  events: ToolCatalogConsumableEvent[];
 };
 
 export function consumableConditionLabel(condition: "NEW" | "USED"): string {
   return condition === "USED" ? "Б/у (старые)" : "Новые";
+}
+
+export function consumableCardStatusLabel(status: string | undefined): string {
+  if (status === "DISPUTED") return "Спор";
+  if (status === "WRITTEN_OFF") return "Списано";
+  return "На складе";
+}
+
+export function consumableActionLabel(action: string): string {
+  const map: Record<string, string> = {
+    CREATE: "Создание",
+    EDIT: "Редактирование",
+    ISSUE: "Выдача",
+    WRITE_OFF: "Списание",
+    DISPUTE: "Спор",
+    CLEAR_DISPUTE: "Снят спор",
+    DELETE: "Удаление"
+  };
+  return map[action] ?? action;
 }
 
 export function isConsumableCatalogNav(nav: ToolsNavId): boolean {

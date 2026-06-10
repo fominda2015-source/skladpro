@@ -311,6 +311,7 @@ model Material {
   mergedFrom      Material[]           @relation("MaterialMergedInto")
   materialHolderWriteoffs MaterialHolderWriteoff[]
   toolConsumableIssues ToolConsumableIssue[]
+  toolCatalogConsumableEvents ToolCatalogConsumableEvent[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 }
@@ -359,11 +360,29 @@ model Stock {
   reserved      Decimal    @default(0) @db.Decimal(14, 3)
   storageRoom   String?
   storageCell   String?
+  catalogDisputed Boolean @default(false)
+  catalogNote     String?
   warehouse     Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   material      Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
   updatedAt     DateTime   @updatedAt
 
   @@unique([warehouseId, materialId, section, condition])
+}
+
+model ToolCatalogConsumableEvent {
+  id          String          @id @default(cuid())
+  stockId     String?
+  materialId  String
+  warehouseId String
+  section     ObjectSection
+  condition   StockCondition
+  action      String
+  comment     String?
+  actorId     String?
+  createdAt   DateTime        @default(now())
+  material    Material        @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, warehouseId, createdAt])
 }
 
 model Project {

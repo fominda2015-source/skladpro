@@ -1105,7 +1105,10 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
         warehouseName: st.warehouse?.name ?? "—",
         section: st.section,
         condition: st.condition,
-        quantity: Number(st.quantity)
+        quantity: Number(st.quantity),
+        disputed: st.catalogDisputed,
+        note: st.catalogNote,
+        cardStatus: st.catalogDisputed ? "DISPUTED" : "IN_STOCK"
       }))
     );
   }
@@ -1399,6 +1402,326 @@ toolsRouter.post("/catalog/consumables/issue-direct", requirePermission("tools.w
       });
     });
     return res.status(201).json({ ok: true });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+async function recordConsumableCatalogEvent(
+  tx: Prisma.TransactionClient,
+  data: {
+    stockId: string;
+    materialId: string;
+    warehouseId: string;
+    section: "SS" | "EOM";
+    condition: StockCondition;
+    action: string;
+    comment?: string | null;
+    actorId?: string | null;
+  }
+) {
+  await tx.toolCatalogConsumableEvent.create({
+    data: {
+      stockId: data.stockId,
+      materialId: data.materialId,
+      warehouseId: data.warehouseId,
+      section: data.section,
+      condition: data.condition,
+      action: data.action,
+      comment: data.comment?.trim() || null,
+      actorId: data.actorId ?? null
+    }
+  });
+}
+
+const consumableCardPatchSchema = z.object({
+  name: z.string().min(2).optional(),
+  unit: z.string().min(1).optional(),
+  note: z.string().max(2000).nullable().optional()
+});
+
+const consumableCardActionSchema = z.object({
+  action: z.enum(["WRITE_OFF", "DISPUTE", "CLEAR_DISPUTE"]),
+  comment: z.string().max(500).optional(),
+  quantity: materialQtySchema.optional()
+});
+
+toolsRouter.get("/catalog/consumables/card/:stockId", async (req: AuthedRequest, res) => {
+  const stockId = String(req.params.stockId);
+  const scope = await resolveReadScope(req);
+  const stock = await prisma.stock.findUnique({
+    where: { id: stockId },
+    include: {
+      material: { select: { id: true, name: true, unit: true, toolCatalogSection: true } },
+      warehouse: { select: { id: true, name: true } }
+    }
+  });
+  if (!stock || stock.material.toolCatalogSection !== "TOOL_CONSUMABLE") {
+    return res.status(404).json({ error: "Карточка расходника не найдена" });
+  }
+  try {
+    assertWarehouseInScope(scope, stock.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const events = await prisma.toolCatalogConsumableEvent.findMany({
+    where: {
+      materialId: stock.materialId,
+      warehouseId: stock.warehouseId,
+      section: stock.section,
+      condition: stock.condition
+    },
+    orderBy: { createdAt: "desc" },
+    take: 80
+  });
+  return res.json({
+    key: `${stock.warehouseId}:${stock.materialId}:${stock.section}:${stock.condition}`,
+    stockId: stock.id,
+    materialId: stock.materialId,
+    name: stock.material.name,
+    unit: stock.material.unit,
+    warehouseId: stock.warehouseId,
+    warehouseName: stock.warehouse?.name ?? "—",
+    section: stock.section,
+    condition: stock.condition,
+    quantity: Number(stock.quantity),
+    reserved: Number(stock.reserved),
+    disputed: stock.catalogDisputed,
+    note: stock.catalogNote,
+    cardStatus: stock.catalogDisputed ? "DISPUTED" : Number(stock.quantity) > 0 ? "IN_STOCK" : "WRITTEN_OFF",
+    events: events.map((e) => ({
+      id: e.id,
+      action: e.action,
+      comment: e.comment,
+      createdAt: e.createdAt.toISOString()
+    }))
+  });
+});
+
+toolsRouter.patch("/catalog/consumables/card/:stockId", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const stockId = String(req.params.stockId);
+  const parsed = consumableCardPatchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const scope = await getRequestDataScope(req);
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const stock = await tx.stock.findUnique({
+        where: { id: stockId },
+        include: { material: true }
+      });
+      if (!stock || stock.material.toolCatalogSection !== "TOOL_CONSUMABLE") {
+        throw Object.assign(new Error("Карточка расходника не найдена"), { status: 404 });
+      }
+      assertWarehouseInScope(scope, stock.warehouseId);
+      if (parsed.data.name != null || parsed.data.unit != null) {
+        await tx.material.update({
+          where: { id: stock.materialId },
+          data: {
+            ...(parsed.data.name != null ? { name: parsed.data.name.trim() } : {}),
+            ...(parsed.data.unit != null ? { unit: parsed.data.unit.trim() } : {})
+          }
+        });
+      }
+      if (parsed.data.note !== undefined) {
+        await tx.stock.update({
+          where: { id: stockId },
+          data: { catalogNote: parsed.data.note }
+        });
+      }
+      await recordConsumableCatalogEvent(tx, {
+        stockId,
+        materialId: stock.materialId,
+        warehouseId: stock.warehouseId,
+        section: stock.section,
+        condition: stock.condition,
+        action: "EDIT",
+        comment: "Изменены данные карточки",
+        actorId: req.user!.userId
+      });
+      return tx.stock.findUnique({
+        where: { id: stockId },
+        include: {
+          material: { select: { id: true, name: true, unit: true } },
+          warehouse: { select: { id: true, name: true } }
+        }
+      });
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_CONSUMABLE_EDIT",
+      entityType: "Stock",
+      entityId: stockId,
+      summary: `Изменена карточка расходника: ${updated?.material.name ?? stockId}`
+    });
+    return res.json(updated);
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+toolsRouter.post("/catalog/consumables/card/:stockId/action", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const stockId = String(req.params.stockId);
+  const parsed = consumableCardActionSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const scope = await getRequestDataScope(req);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const stock = await tx.stock.findUnique({
+        where: { id: stockId },
+        include: { material: true }
+      });
+      if (!stock || stock.material.toolCatalogSection !== "TOOL_CONSUMABLE") {
+        throw Object.assign(new Error("Карточка расходника не найдена"), { status: 404 });
+      }
+      assertWarehouseInScope(scope, stock.warehouseId);
+      const qty = Number(stock.quantity);
+      const reserved = Number(stock.reserved);
+      if (parsed.data.action === "WRITE_OFF") {
+        const writeQty = parsed.data.quantity ?? qty;
+        if (writeQty <= 0 || writeQty > qty) {
+          throw Object.assign(new Error("Некорректное количество для списания"), { status: 400 });
+        }
+        if (reserved > 0 && writeQty > qty - reserved) {
+          throw Object.assign(new Error("Часть остатка зарезервирована"), { status: 409 });
+        }
+        await tx.stock.update({
+          where: { id: stockId },
+          data: { quantity: { decrement: writeQty } }
+        });
+        await tx.stockMovement.create({
+          data: {
+            warehouseId: stock.warehouseId,
+            materialId: stock.materialId,
+            quantity: writeQty,
+            direction: StockMovementDirection.OUT,
+            sourceDocumentType: "TOOL_CONSUMABLE_WRITEOFF",
+            note: parsed.data.comment?.trim() || "Списание расходника из каталога",
+            createdById: req.user!.userId
+          }
+        });
+        await recordConsumableCatalogEvent(tx, {
+          stockId,
+          materialId: stock.materialId,
+          warehouseId: stock.warehouseId,
+          section: stock.section,
+          condition: stock.condition,
+          action: "WRITE_OFF",
+          comment: parsed.data.comment?.trim() || `Списано ${writeQty} ${stock.material.unit}`,
+          actorId: req.user!.userId
+        });
+      } else if (parsed.data.action === "DISPUTE") {
+        await tx.stock.update({
+          where: { id: stockId },
+          data: { catalogDisputed: true }
+        });
+        await recordConsumableCatalogEvent(tx, {
+          stockId,
+          materialId: stock.materialId,
+          warehouseId: stock.warehouseId,
+          section: stock.section,
+          condition: stock.condition,
+          action: "DISPUTE",
+          comment: parsed.data.comment?.trim() || "Помечено спорным",
+          actorId: req.user!.userId
+        });
+      } else if (parsed.data.action === "CLEAR_DISPUTE") {
+        await tx.stock.update({
+          where: { id: stockId },
+          data: { catalogDisputed: false }
+        });
+        await recordConsumableCatalogEvent(tx, {
+          stockId,
+          materialId: stock.materialId,
+          warehouseId: stock.warehouseId,
+          section: stock.section,
+          condition: stock.condition,
+          action: "CLEAR_DISPUTE",
+          comment: parsed.data.comment?.trim() || "Спор снят",
+          actorId: req.user!.userId
+        });
+      }
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_CONSUMABLE_ACTION",
+      entityType: "Stock",
+      entityId: stockId,
+      summary: `Действие по расходнику: ${parsed.data.action}`
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
+toolsRouter.delete("/catalog/consumables/card/:stockId", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const stockId = String(req.params.stockId);
+  const scope = await getRequestDataScope(req);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const stock = await tx.stock.findUnique({
+        where: { id: stockId },
+        include: { material: true }
+      });
+      if (!stock || stock.material.toolCatalogSection !== "TOOL_CONSUMABLE") {
+        throw Object.assign(new Error("Карточка расходника не найдена"), { status: 404 });
+      }
+      assertWarehouseInScope(scope, stock.warehouseId);
+      if (Number(stock.quantity) > 0) {
+        throw Object.assign(new Error("Удалить можно только при нулевом остатке — сначала спишите"), { status: 400 });
+      }
+      if (Number(stock.reserved) > 0) {
+        throw Object.assign(new Error("Остаток зарезервирован"), { status: 409 });
+      }
+      const openIssues = await tx.toolConsumableIssue.count({
+        where: { materialId: stock.materialId, warehouseId: stock.warehouseId, status: "OPEN" }
+      });
+      if (openIssues > 0) {
+        throw Object.assign(new Error("Есть открытые выдачи расходника — сначала закройте их"), { status: 409 });
+      }
+      await recordConsumableCatalogEvent(tx, {
+        stockId,
+        materialId: stock.materialId,
+        warehouseId: stock.warehouseId,
+        section: stock.section,
+        condition: stock.condition,
+        action: "DELETE",
+        comment: "Карточка удалена",
+        actorId: req.user!.userId
+      });
+      await tx.stock.delete({ where: { id: stockId } });
+      const otherStock = await tx.stock.count({
+        where: {
+          materialId: stock.materialId,
+          OR: [{ quantity: { gt: 0 } }, { reserved: { gt: 0 } }]
+        }
+      });
+      if (otherStock === 0) {
+        await tx.material.update({
+          where: { id: stock.materialId },
+          data: { toolCatalogSection: null }
+        });
+      }
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_CONSUMABLE_DELETE",
+      entityType: "Stock",
+      entityId: stockId,
+      summary: "Удалена карточка расходника"
+    });
+    return res.status(204).send();
   } catch (error) {
     const err = error as Error & { status?: number };
     if (err.status) return res.status(err.status).json({ error: err.message });

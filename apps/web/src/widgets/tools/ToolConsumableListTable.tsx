@@ -1,7 +1,12 @@
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { formatMaterialQty } from "../../shared/quantity";
 import { MobileCard, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
-import { consumableConditionLabel, type ToolCatalogConsumableLine } from "./toolCatalog";
+import { consumableCardStatusLabel, consumableConditionLabel, type ToolCatalogConsumableLine } from "./toolCatalog";
+
+function lineStatusTone(line: ToolCatalogConsumableLine): "ok" | "warn" | "bad" | "neutral" {
+  if (line.disputed || line.cardStatus === "DISPUTED") return "warn";
+  return "ok";
+}
 
 type Props = {
   lines: ToolCatalogConsumableLine[];
@@ -64,7 +69,7 @@ export function ToolConsumableListTable({ lines, selectedKey, onOpen, safeName }
                   <td className="muted">{line.unit}</td>
                   <td className="muted">{safeName(line.warehouseName)}</td>
                   <td>
-                    <StatusBadge tone="ok">На складе</StatusBadge>
+                    <StatusBadge tone={lineStatusTone(line)}>{consumableCardStatusLabel(line.cardStatus ?? (line.disputed ? "DISPUTED" : "IN_STOCK"))}</StatusBadge>
                   </td>
                 </tr>
               );
