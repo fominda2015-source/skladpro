@@ -42,6 +42,7 @@ import {
   receiptItemRemaining,
   receiptPlannedQty
 } from "../lib/receiptQty.js";
+import { isPackReceiptUnit, resolveReceiptStockQty } from "../lib/receiptUnits.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
@@ -138,6 +139,8 @@ const acceptItemSchema = z.object({
   newMaterialName: z.string().max(500).optional(),
   newMaterialUnit: z.string().max(50).optional(),
   acceptedQty: materialQtySchema,
+  /** Штук (или базовых ед.) в одной упаковке — если ед. изм. «упаковка». */
+  unitsPerPack: materialQtyCoerceSchema.optional(),
   // Опциональная привязка к конкретному узлу шаблона лимита (раздел/подраздел).
   // Если в шаблоне один и тот же материал лежит сразу в нескольких узлах,
   // мы спрашиваем пользователя «куда пихаем»; иначе пусто.
@@ -1186,6 +1189,23 @@ receiptRequestsRouter.post(
         });
       }
       const bindLimitNodeId = m.limitNodeId ?? it.limitNodeId ?? null;
+      const unitHint = m.newMaterialUnit?.trim() || m.factLabelUnit?.trim() || it.sourceUnit || "шт";
+      if (isPackReceiptUnit(unitHint) && (m.unitsPerPack == null || m.unitsPerPack <= 0)) {
+        return res.status(400).json({
+          error: `Укажите количество в упаковке (шт/уп) для «${it.sourceName}»`
+        });
+      }
+      let acceptStockQty = m.acceptedQty;
+      try {
+        acceptStockQty = resolveReceiptStockQty({
+          acceptedQty: m.acceptedQty,
+          sourceUnit: unitHint,
+          unitsPerPack: m.unitsPerPack
+        }).stockQty;
+      } catch (e) {
+        const err = e as Error & { status?: number };
+        return res.status(err.status ?? 400).json({ error: err.message });
+      }
 
       const mappingCategory = m.category ?? it.category ?? null;
       if (
@@ -1223,7 +1243,7 @@ receiptRequestsRouter.post(
             limitCatalogNameO: it.limitCatalogNameO,
             acceptedQty: it.acceptedQty
           },
-          m.acceptedQty,
+          acceptStockQty,
           pathFor
         );
         if (limitOver) {
@@ -1232,11 +1252,15 @@ receiptRequestsRouter.post(
             materialId: m.materialId
           });
           const spread = spreadInfo.suggestions.otherSections;
+          const stockNote =
+            isPackReceiptUnit(unitHint) && m.unitsPerPack
+              ? ` (${m.acceptedQty} уп × ${m.unitsPerPack} = ${acceptStockQty} шт на склад)`
+              : "";
           if (spread.length > 0 && !m.spreadLimitNodeId) {
             return res.status(409).json({
               error: "RECEIPT_LIMIT_OVERAGE_PICK",
               kind: "limit_plan",
-              message: `По «${it.sourceName}» в подразделе «${limitOver.primaryPath}» план ${limitOver.plannedQty}, уже ${limitOver.receivedOnNode}, принимаете ${m.acceptedQty} — выберите, куда отнести излишек ${limitOver.excessQty}`,
+              message: `По «${it.sourceName}» в подразделе «${limitOver.primaryPath}» план ${limitOver.plannedQty}, уже ${limitOver.receivedOnNode}, принимаете ${acceptStockQty}${stockNote} — выберите, куда отнести излишек ${limitOver.excessQty}`,
               itemId: m.itemId,
               ...limitOver,
               suggestions: spreadInfo.suggestions
@@ -1321,6 +1345,7 @@ receiptRequestsRouter.post(
         item: (typeof row.items)[number];
         materialId: string | null;
         acceptedQty: number;
+        stockQty: number;
         sourceUnit: string;
         limitNodeId: string | null;
         campCategory: ReturnType<typeof receiptCategoryToCampCategory>;
@@ -1333,6 +1358,17 @@ receiptRequestsRouter.post(
         const remainingBefore = receiptItemRemaining(it);
         const acceptedQty = parsed.data.allowOverage ? m.acceptedQty : Math.min(m.acceptedQty, remainingBefore);
         if (acceptedQty <= 0) continue;
+        let stockQty = acceptedQty;
+        try {
+          stockQty = resolveReceiptStockQty({
+            acceptedQty,
+            sourceUnit: unitHint,
+            unitsPerPack: m.unitsPerPack
+          }).stockQty;
+        } catch (e) {
+          const err = e as Error & { status?: number };
+          throw Object.assign(new Error(err.message), { status: err.status ?? 400 });
+        }
         const toolInventory = isToolInventoryReceiptCategory(itemCategory);
         let materialId: string | undefined;
         if (!campCategory && !toolInventory) {
@@ -1345,6 +1381,7 @@ receiptRequestsRouter.post(
           item: it,
           materialId: materialId ?? null,
           acceptedQty,
+          stockQty,
           sourceUnit: unitHint,
           limitNodeId: m.limitNodeId ?? null,
           campCategory
@@ -1377,7 +1414,7 @@ receiptRequestsRouter.post(
                 items: {
                   create: stockResolved.map((r) => ({
                     materialId: r.materialId!,
-                    quantity: r.acceptedQty
+                    quantity: r.stockQty
                   }))
                 }
               },
@@ -1416,7 +1453,7 @@ receiptRequestsRouter.post(
             explicitLimitNodeId: mapping?.limitNodeId ?? null,
             materialId: r.materialId,
             materialName: cardName,
-            acceptedQty: r.acceptedQty
+            acceptedQty: r.stockQty
           });
           r.limitNodeId = limitNodeId;
         } else if (
@@ -1547,6 +1584,12 @@ receiptRequestsRouter.post(
             data: materialPatch
           });
         }
+        if (isPackReceiptUnit(r.sourceUnit) && mapping?.unitsPerPack) {
+          await tx.material.update({
+            where: { id: materialId },
+            data: { unit: "шт" }
+          });
+        }
 
         if (parsed.data.skipWarehouseStock) continue;
 
@@ -1565,13 +1608,13 @@ receiptRequestsRouter.post(
             section: row.section,
             materialId,
             condition: StockCondition.NEW,
-            quantity: r.acceptedQty,
+            quantity: r.stockQty,
             reserved: 0,
             storageRoom,
             storageCell
           },
           update: {
-            quantity: { increment: r.acceptedQty },
+            quantity: { increment: r.stockQty },
             ...(storageRoom ? { storageRoom } : {}),
             ...(storageCell ? { storageCell } : {})
           }
@@ -1582,7 +1625,7 @@ receiptRequestsRouter.post(
             data: {
               warehouseId: row.warehouseId,
               materialId,
-              quantity: r.acceptedQty,
+              quantity: r.stockQty,
               direction: StockMovementDirection.IN,
               sourceDocumentType: "RECEIPT_REQUEST",
               sourceDocumentId: row.id,
@@ -1594,7 +1637,7 @@ receiptRequestsRouter.post(
             data: {
               warehouseId: row.warehouseId,
               materialId,
-              quantity: r.acceptedQty,
+              quantity: r.stockQty,
               direction: StockMovementDirection.IN,
               sourceDocumentType: "OPERATION",
               sourceDocumentId: operation.id,
@@ -1653,7 +1696,7 @@ receiptRequestsRouter.post(
               limitCatalogNameO: r.item.limitCatalogNameO,
               acceptedQty: r.item.acceptedQty
             },
-            r.acceptedQty,
+            r.stockQty,
             pathFor
           );
           if (limitOver && limitOver.excessQty > 0) {
@@ -1782,7 +1825,8 @@ receiptRequestsRouter.post(
         operation,
         acceptedItems: resolved.map((r) => ({
           materialId: r.materialId,
-          quantity: r.acceptedQty,
+          quantity: r.stockQty,
+          packQty: r.acceptedQty,
           receiptRequestItemId: r.item.id,
           sourceName: r.item.sourceName,
           sourceUnit: r.item.sourceUnit

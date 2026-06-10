@@ -39,6 +39,8 @@ export type ReceiptAcceptDraft = {
   newName: string;
   newUnit: string;
   qty: string;
+  /** Штук (или базовых ед.) в одной упаковке. */
+  unitsPerPack?: string;
   limitNodeId?: string;
   category?: ReceiptItemCategory | "";
   unitPrice?: string;

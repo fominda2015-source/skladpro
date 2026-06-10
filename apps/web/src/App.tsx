@@ -96,6 +96,7 @@ import {
   writeReceiptAcceptDrafts,
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
+import { isPackReceiptUnit, receiptStockQtyPreview } from "./widgets/receipts/receiptUnits";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { TransfersTab } from "./widgets/transfers/TransfersTab";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
@@ -3624,6 +3625,7 @@ function App() {
       factLabelUnit?: string;
       newMaterialUnit?: string;
       acceptedQty: number;
+      unitsPerPack?: number;
       limitNodeId?: string | null;
       spreadLimitNodeId?: string | null;
       category?: ReceiptItemCategory | null;
@@ -3640,16 +3642,17 @@ function App() {
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
       const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
+      const unit = explicitUnit || it.sourceUnit || "шт";
       const factLabel =
         explicitName && explicitName !== canonName ? explicitName : undefined;
       const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
       const priceNum = priceRaw === "" ? null : Number(priceRaw);
-      mappings.push({
+      const mapping: (typeof mappings)[number] = {
         itemId: it.id,
         materialId: it.mappedMaterialId || undefined,
         factLabel,
-        factLabelUnit: factLabel ? explicitUnit || it.sourceUnit || "шт" : undefined,
-        newMaterialUnit: explicitUnit || it.sourceUnit || "шт",
+        factLabelUnit: factLabel ? unit : undefined,
+        newMaterialUnit: unit,
         acceptedQty: qty,
         ...(row.objectLimitTemplateId
           ? { limitNodeId: draft?.limitNodeId || it.limitNodeId || null }
@@ -3657,7 +3660,13 @@ function App() {
         category: draft?.category || it.category || null,
         unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
         storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
-      });
+      };
+      if (isPackReceiptUnit(unit)) {
+        const perPack = parseMaterialQty(draft?.unitsPerPack);
+        if (perPack <= 0) continue;
+        mapping.unitsPerPack = perPack;
+      }
+      mappings.push(mapping);
     }
     return mappings;
   }
@@ -3893,6 +3902,16 @@ function App() {
     if (!mappings.length) {
       setOpsMessage("Поставьте галочки на тех позициях, которые сейчас принимаются");
       return false;
+    }
+    for (const m of mappings) {
+      const it = freshRow.items.find((x) => x.id === m.itemId);
+      if (!it) continue;
+      const draft = acceptanceDrafts[freshRow.id]?.[it.id];
+      const unit = (draft?.newUnit || it.sourceUnit || "шт").trim();
+      if (isPackReceiptUnit(unit) && !m.unitsPerPack) {
+        setOpsMessage(`Укажите количество в упаковке для «${it.sourceName}»`);
+        return false;
+      }
     }
     for (const m of mappings) {
       const it = freshRow.items.find((x) => x.id === m.itemId);
@@ -7446,7 +7465,7 @@ function App() {
 
                     {(() => {
                       const { itemsOpen, itemsDone } = splitReceiptItems(row.items);
-                      const tableColSpan = row.objectLimitTemplateId ? 10 : 9;
+                      const tableColSpan = row.objectLimitTemplateId ? 11 : 10;
                       const selectedCount = itemsOpen.filter((it) => {
                         const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
                         return Number.isFinite(q) && q > 0;
@@ -7604,6 +7623,9 @@ function App() {
                                   <th>Принято / план</th>
                                   <th>Название по УПД</th>
                                   <th>Ед.</th>
+                                  <th style={{ width: 110 }} title="Сколько штук (или базовых ед.) в одной упаковке">
+                                    В упаковке
+                                  </th>
                                   <th>Принять сейчас</th>
                                   <th>Категория</th>
                                   <th>Цена, ₽</th>
@@ -7686,6 +7708,7 @@ function App() {
                                     newName: "",
                                     newUnit: "",
                                     qty: "",
+                                    unitsPerPack: "",
                                     category: it.category ?? "",
                                     unitPrice: it.unitPrice != null ? String(it.unitPrice) : "",
                                     storagePlace: it.storagePlace ?? ""
@@ -7693,6 +7716,10 @@ function App() {
                                   const defaultName = draft.newName ?? "";
                                   const defaultUnit =
                                     draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
+                                  const packUnit = isPackReceiptUnit(defaultUnit);
+                                  const stockPreview = packUnit
+                                    ? receiptStockQtyPreview(draft.qty, draft.unitsPerPack)
+                                    : null;
                                   const nomenclatureHint =
                                     it.mappedMaterial?.name || it.sourceName;
                                   const defaultCategory = draft.category ?? it.category ?? "";
@@ -7709,6 +7736,10 @@ function App() {
                                           newName: patch.newName ?? prev[row.id]?.[it.id]?.newName ?? defaultName,
                                           newUnit: patch.newUnit ?? prev[row.id]?.[it.id]?.newUnit ?? defaultUnit,
                                           qty: patch.qty ?? prev[row.id]?.[it.id]?.qty ?? "",
+                                          unitsPerPack:
+                                            patch.unitsPerPack !== undefined
+                                              ? patch.unitsPerPack
+                                              : prev[row.id]?.[it.id]?.unitsPerPack ?? "",
                                           limitNodeId:
                                             patch.limitNodeId !== undefined
                                               ? patch.limitNodeId
@@ -7744,6 +7775,7 @@ function App() {
                                                 parseMaterialQty(prev[row.id]?.[it.id]?.qty) > 0
                                                   ? prev[row.id][it.id]!.qty
                                                   : String(remaining),
+                                              unitsPerPack: prev[row.id]?.[it.id]?.unitsPerPack ?? "",
                                               limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
                                               category: defaultCategory,
                                               unitPrice: defaultPrice,
@@ -7753,6 +7785,7 @@ function App() {
                                               newName: prev[row.id]?.[it.id]?.newName || "",
                                               newUnit: prev[row.id]?.[it.id]?.newUnit || "",
                                               qty: "",
+                                              unitsPerPack: "",
                                               limitNodeId: prev[row.id]?.[it.id]?.limitNodeId,
                                               category: defaultCategory,
                                               unitPrice: defaultPrice,
@@ -7807,6 +7840,24 @@ function App() {
                                           onChange={(e) => saveDraft({ newUnit: e.target.value })}
                                         />
                                       </td>
+                                      <td style={{ width: 110 }}>
+                                        {packUnit ? (
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            step={MATERIAL_QTY_STEP}
+                                            value={draft.unitsPerPack ?? ""}
+                                            disabled={finished}
+                                            placeholder="шт/уп"
+                                            title="Количество штук в одной упаковке"
+                                            onChange={(e) =>
+                                              saveDraft({ unitsPerPack: e.target.value.replace(/[^\d]/g, "") })
+                                            }
+                                          />
+                                        ) : (
+                                          <span className="muted">—</span>
+                                        )}
+                                      </td>
                                       <td style={{ width: 130 }}>
                                         <input
                                           type="number"
@@ -7818,6 +7869,15 @@ function App() {
                                           placeholder={remaining ? String(remaining) : ""}
                                           onChange={(e) => saveDraft({ qty: e.target.value.replace(/[^\d]/g, "") })}
                                         />
+                                        {stockPreview != null ? (
+                                          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                                            на склад: {stockPreview.toLocaleString("ru-RU")} шт
+                                          </div>
+                                        ) : packUnit && parseMaterialQty(draft.qty) > 0 ? (
+                                          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                                            укажите «в упаковке»
+                                          </div>
+                                        ) : null}
                                       </td>
                                       <td style={{ minWidth: 160 }}>
                                         <select
