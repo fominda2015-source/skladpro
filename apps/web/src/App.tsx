@@ -1006,6 +1006,7 @@ function App() {
     primaryPath?: string;
     excessQty?: number;
     suggestions: { current: Array<{ id: string; path: string }>; otherSections: Array<{ id: string; path: string }> };
+    limitBound?: boolean;
   }>(null);
   const [showCriticalAssignedModal, setShowCriticalAssignedModal] = useState(false);
   /** Ручной приход на склад — форма только в модалке. */
@@ -3778,6 +3779,9 @@ function App() {
                 typeof body.receivedOnNode === "number" ? body.receivedOnNode : undefined,
               primaryPath: typeof body.primaryPath === "string" ? body.primaryPath : undefined,
               excessQty: typeof body.excessQty === "number" ? body.excessQty : undefined,
+              limitBound:
+                body.limitBound === true ||
+                (kind === "limit_plan" && isReceiptRequestFromLimit(row)),
               suggestions
             });
             return false;
@@ -3918,34 +3922,55 @@ function App() {
       if (!it) continue;
       const remaining = receiptItemRemainingQty(it);
       if (m.acceptedQty > remaining) {
+        const limitBound = isReceiptRequestFromLimit(freshRow);
         if (!token) return false;
-        try {
-          const r = await fetchWithSession(
-            `${API_URL}/api/receipt-requests/${encodeURIComponent(freshRow.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (r.ok) {
-            const data = (await r.json()) as {
-              current: Array<{ id: string; path: string }>;
-              otherSections: Array<{ id: string; path: string }>;
-            };
-            setPendingAcceptanceRequestId(null);
-            setPendingAcceptanceFiles([]);
-            setReceiptOverageModal({
-              kind: "receipt_order",
-              row: freshRow,
-              itemId: it.id,
-              extraFiles,
-              mappings,
-              sourceName: it.sourceName,
-              orderedQty: Number(it.quantity),
-              acceptedQty: m.acceptedQty,
-              suggestions: { current: data.current || [], otherSections: data.otherSections || [] }
-            });
-            return false;
+        if (limitBound) {
+          try {
+            const r = await fetchWithSession(
+              `${API_URL}/api/receipt-requests/${encodeURIComponent(freshRow.id)}/overage-limit-options?itemId=${encodeURIComponent(it.id)}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (r.ok) {
+              const data = (await r.json()) as {
+                current: Array<{ id: string; path: string }>;
+                otherSections: Array<{ id: string; path: string }>;
+                limitBound?: boolean;
+              };
+              setPendingAcceptanceRequestId(null);
+              setPendingAcceptanceFiles([]);
+              setReceiptOverageModal({
+                kind: "receipt_order",
+                row: freshRow,
+                itemId: it.id,
+                extraFiles,
+                mappings,
+                sourceName: it.sourceName,
+                orderedQty: Number(it.quantity),
+                acceptedQty: m.acceptedQty,
+                limitBound: data.limitBound !== false,
+                suggestions: { current: data.current || [], otherSections: data.otherSections || [] }
+              });
+              return false;
+            }
+          } catch {
+            // fallback — сервер вернёт 409
           }
-        } catch {
-          // fallback — сервер вернёт 409
+        } else {
+          setPendingAcceptanceRequestId(null);
+          setPendingAcceptanceFiles([]);
+          setReceiptOverageModal({
+            kind: "receipt_order",
+            row: freshRow,
+            itemId: it.id,
+            extraFiles,
+            mappings,
+            sourceName: it.sourceName,
+            orderedQty: Number(it.quantity),
+            acceptedQty: m.acceptedQty,
+            limitBound: false,
+            suggestions: { current: [], otherSections: [] }
+          });
+          return false;
         }
       }
     }
@@ -13213,6 +13238,7 @@ function App() {
           primaryPath={receiptOverageModal.primaryPath}
           excessQty={receiptOverageModal.excessQty}
           suggestions={receiptOverageModal.suggestions}
+          limitBound={receiptOverageModal.limitBound ?? isReceiptRequestFromLimit(receiptOverageModal.row)}
           onCancel={() => setReceiptOverageModal(null)}
           onConfirm={(spreadLimitNodeId, flags) => {
             const { row, itemId, mappings, extraFiles } = receiptOverageModal;

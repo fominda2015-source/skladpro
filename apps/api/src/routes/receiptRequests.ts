@@ -1051,6 +1051,20 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
   }
   const item = itemId ? row.items.find((it) => it.id === itemId) : row.items[0];
   if (!item) return res.status(400).json({ error: "itemId обязателен" });
+  if (!row.objectLimitTemplateId) {
+    return res.json({
+      itemId: item.id,
+      sourceName: item.sourceName,
+      orderedQty: receiptPlannedQty(item.quantity),
+      acceptedQty: receiptAcceptedQty(item.acceptedQty),
+      currentTemplateId: null,
+      limitBound: false,
+      primaryNodeId: null,
+      primaryPath: "",
+      current: [],
+      otherSections: []
+    });
+  }
   const spreadInfo = await buildSpreadLimitSuggestions(row, item, {
     limitNodeId: item.limitNodeId,
     materialId: materialIdQ || item.mappedMaterialId || undefined
@@ -1061,6 +1075,7 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
     orderedQty: receiptPlannedQty(item.quantity),
     acceptedQty: receiptAcceptedQty(item.acceptedQty),
     currentTemplateId: row.objectLimitTemplateId,
+    limitBound: true,
     primaryNodeId: spreadInfo.primaryNodeId,
     primaryPath: spreadInfo.primaryPath,
     ...spreadInfo.suggestions
@@ -1281,10 +1296,12 @@ receiptRequestsRouter.post(
 
       const isOver = m.acceptedQty > remaining;
       if (isOver && !parsed.data.allowOverage) {
-        const spreadInfo = await buildSpreadLimitSuggestions(row, it, {
-          limitNodeId: bindLimitNodeId,
-          materialId: m.materialId
-        });
+        const spreadInfo = limitTemplateId
+          ? await buildSpreadLimitSuggestions(row, it, {
+              limitNodeId: bindLimitNodeId,
+              materialId: m.materialId
+            })
+          : { suggestions: { current: [], otherSections: [] } };
         return res.status(409).json({
           error: "RECEIPT_OVERAGE_NEEDS_CONFIRM",
           kind: "receipt_order",
@@ -1293,10 +1310,11 @@ receiptRequestsRouter.post(
           orderedQty: receiptPlannedQty(it.quantity),
           remainingQty: remaining,
           acceptedQty: m.acceptedQty,
+          limitBound: Boolean(limitTemplateId),
           suggestions: spreadInfo.suggestions
         });
       }
-      if (isOver && parsed.data.allowOverage && !m.spreadLimitNodeId) {
+      if (isOver && limitTemplateId && parsed.data.allowOverage && !m.spreadLimitNodeId) {
         const spreadInfo = await buildSpreadLimitSuggestions(row, it, {
           limitNodeId: bindLimitNodeId,
           materialId: m.materialId
@@ -1307,6 +1325,7 @@ receiptRequestsRouter.post(
             kind: "receipt_order",
             message: `Превышение по «${it.sourceName}»: выберите раздел лимита для излишка`,
             itemId: m.itemId,
+            limitBound: true,
             suggestions: spreadInfo.suggestions
           });
         }

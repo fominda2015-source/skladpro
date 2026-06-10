@@ -19,6 +19,8 @@ type Props = {
   primaryPath?: string;
   excessQty?: number;
   suggestions: { current: LimitPick[]; otherSections: LimitPick[] };
+  /** Заявка привязана к шаблону лимита — иначе излишек в лимит не распределяется. */
+  limitBound?: boolean;
   initialLimitNodeId?: string;
   onCancel: () => void;
   onConfirm: (
@@ -37,12 +39,13 @@ export function ReceiptOverageModal({
   primaryPath,
   excessQty,
   suggestions,
+  limitBound = true,
   initialLimitNodeId,
   onCancel,
   onConfirm
 }: Props) {
   const spreadOptions = suggestions.otherSections;
-  const needPick = spreadOptions.length > 0;
+  const needPick = limitBound && spreadOptions.length > 0;
   const [spreadLimitNodeId, setSpreadLimitNodeId] = useState(
     initialLimitNodeId && spreadOptions.some((s) => s.id === initialLimitNodeId)
       ? initialLimitNodeId
@@ -121,6 +124,11 @@ export function ReceiptOverageModal({
           <p className="muted">
             В других разделах лимита этот материал не найден — размазать излишек некуда. Подтвердите
             перерасход в текущем подразделе.
+          </p>
+        ) : !limitBound ? (
+          <p className="muted">
+            Заявка не привязана к лимиту — излишек будет принят на склад без распределения по подразделам
+            лимита. Будет отправлено критическое уведомление.
           </p>
         ) : (
           <p className="muted">
