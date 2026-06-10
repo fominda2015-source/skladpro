@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { parseMaterialQty } from "../../shared/quantity";
-import { ToolCatalogMaterialCards } from "./ToolCatalogMaterialCards";
-import type { ToolCatalogMaterialRow } from "./toolCatalog";
+import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
+import { ToolConsumableListTable } from "./ToolConsumableListTable";
+import type { ToolCatalogConsumableLine } from "./toolCatalog";
 import type { ConsumablePickLine, ElectricToolIssueWizardSubmit } from "./electricToolIssue";
+import { sortConsumablePickLines } from "./electricToolIssue";
 
 type WizardStep = "consumables" | "recipient";
 
@@ -39,6 +40,7 @@ export function ElectricToolIssueWizardModal({
 }: Props) {
   const [step, setStep] = useState<WizardStep>("consumables");
   const [lines, setLines] = useState<ConsumablePickLine[]>([]);
+  const [pickQty, setPickQty] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -53,6 +55,7 @@ export function ElectricToolIssueWizardModal({
     setComment(initialComment);
     setPhoto(null);
     setMessage("");
+    setPickQty({});
   }, [open, initialRecipient, initialComment]);
 
   useEffect(() => {
@@ -64,7 +67,8 @@ export function ElectricToolIssueWizardModal({
         const q = new URLSearchParams({
           section: "TOOL_CONSUMABLE",
           warehouseId,
-          sectionFilter: section
+          sectionFilter: section,
+          splitByCondition: "1"
         });
         const res = await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${q}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -74,20 +78,17 @@ export function ElectricToolIssueWizardModal({
           setLines([]);
           return;
         }
-        const rows = (await res.json()) as ToolCatalogMaterialRow[];
+        const rows = sortConsumablePickLines((await res.json()) as ToolCatalogConsumableLine[]);
         setLines(
-          rows
-            .filter((r) => r.qtyNew > 0)
-            .slice(0, 80)
-            .map((r) => ({
-              materialId: r.materialId,
-              name: r.name,
-              unit: r.unit,
-              maxQty: r.qtyNew,
-              qtyNew: r.qtyNew,
-              qtyUsed: r.qtyUsed,
-              qty: ""
-            }))
+          rows.slice(0, 80).map((r) => ({
+            key: r.key,
+            materialId: r.materialId,
+            name: r.name,
+            unit: r.unit,
+            condition: r.condition,
+            maxQty: r.quantity,
+            qty: ""
+          }))
         );
       } catch {
         setMessage("Ошибка загрузки расходников");
@@ -97,12 +98,33 @@ export function ElectricToolIssueWizardModal({
     })();
   }, [open, token, warehouseId, section, apiUrl, fetchWithSession]);
 
+  const tableLines: ToolCatalogConsumableLine[] = useMemo(
+    () =>
+      lines.map((l) => ({
+        key: l.key,
+        stockId: l.key,
+        materialId: l.materialId,
+        name: l.name,
+        unit: l.unit,
+        warehouseId,
+        warehouseName: "",
+        section,
+        condition: l.condition,
+        quantity: l.maxQty
+      })),
+    [lines, warehouseId, section]
+  );
+
   const pickedConsumables = useMemo(
     () =>
       lines
-        .map((l) => ({ materialId: l.materialId, quantity: parseMaterialQty(l.qty) }))
+        .map((l) => ({
+          materialId: l.materialId,
+          condition: l.condition,
+          quantity: parseMaterialQty(pickQty[l.key] ?? l.qty)
+        }))
         .filter((x) => x.quantity > 0),
-    [lines]
+    [lines, pickQty]
   );
 
   async function finish() {
@@ -157,8 +179,8 @@ export function ElectricToolIssueWizardModal({
         {step === "consumables" ? (
           <>
             <p className="muted">
-              Электрический инструмент: <strong>{toolLabel}</strong>. Выберите карточки и укажите количество — после
-              первой выдачи и возврата «б/у» остаток делится на новые и использованные.
+              Электрический инструмент: <strong>{toolLabel}</strong>. Сначала предлагаем б/у строки — укажите
+              количество в таблице ниже.
             </p>
             {loading && <p className="muted">Загрузка номенклатуры...</p>}
             {!loading && !lines.length && (
@@ -166,25 +188,49 @@ export function ElectricToolIssueWizardModal({
             )}
             {!loading && lines.length > 0 && (
               <div className="toolCatalogMaterialPickScroll">
-                <ToolCatalogMaterialCards
-                  mode="pick"
-                  loading={loading}
-                  rows={lines.map((l, i) => ({
-                    materialId: l.materialId,
-                    name: l.name,
-                    unit: l.unit,
-                    warehouseId,
-                    warehouseName: "",
-                    section,
-                    qtyNew: l.qtyNew,
-                    qtyUsed: l.qtyUsed,
-                    maxQty: l.maxQty,
-                    qty: l.qty,
-                    onQtyChange: (qty) => {
-                      setLines((prev) => prev.map((row, j) => (j === i ? { ...row, qty } : row)));
-                    }
-                  }))}
+                <ToolConsumableListTable
+                  lines={tableLines}
+                  selectedKey={null}
+                  onOpen={() => undefined}
+                  safeName={(n) => n}
                 />
+                <div className="erpTableWrap" style={{ marginTop: 8 }}>
+                  <table className="erpTable desktopTable">
+                    <thead>
+                      <tr>
+                        <th>Наименование</th>
+                        <th style={{ width: 100 }}>Выдать</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((l) => (
+                        <tr key={l.key}>
+                          <td>
+                            {l.name}{" "}
+                            <span className="muted">
+                              ({l.condition === "USED" ? "б/у" : "новые"} · макс. {l.maxQty})
+                            </span>
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              max={l.maxQty}
+                              step={MATERIAL_QTY_STEP}
+                              value={pickQty[l.key] ?? l.qty}
+                              onChange={(e) => {
+                                const qty = e.target.value.replace(/[^\d]/g, "");
+                                setPickQty((prev) => ({ ...prev, [l.key]: qty }));
+                              }}
+                              style={{ width: "100%" }}
+                              aria-label={`Количество: ${l.name}`}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
             {message && step === "consumables" ? <p className="resultBanner error">{message}</p> : null}

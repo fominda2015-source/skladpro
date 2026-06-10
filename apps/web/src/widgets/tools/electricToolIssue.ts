@@ -18,12 +18,12 @@ export function filterElectricToolIds(tools: ElectricToolLike[], ids: string[]):
 }
 
 export type ConsumablePickLine = {
+  key: string;
   materialId: string;
   name: string;
   unit: string;
+  condition: "NEW" | "USED";
   maxQty: number;
-  qtyNew: number;
-  qtyUsed: number;
   qty: string;
 };
 
@@ -31,5 +31,13 @@ export type ElectricToolIssueWizardSubmit = {
   recipient: string;
   comment: string;
   photo: File | null;
-  consumables: Array<{ materialId: string; quantity: number }>;
+  consumables: Array<{ materialId: string; quantity: number; condition: "NEW" | "USED" }>;
 };
+
+/** Сначала б/у, затем новые; внутри группы — по названию. */
+export function sortConsumablePickLines<T extends { condition: "NEW" | "USED"; name: string }>(lines: T[]): T[] {
+  return [...lines].sort((a, b) => {
+    if (a.condition !== b.condition) return a.condition === "USED" ? -1 : 1;
+    return a.name.localeCompare(b.name, "ru");
+  });
+}

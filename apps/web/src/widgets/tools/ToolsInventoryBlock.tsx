@@ -22,6 +22,9 @@ type Props = {
   ) => void;
   onAddCatalogItem?: () => void;
   catalogRefreshNonce?: number;
+  recipientSuggestions?: string[];
+  safeName?: (name: string) => string;
+  onConsumableDrawerChange?: (open: boolean) => void;
 };
 
 export function ToolsInventoryBlock({
@@ -39,7 +42,10 @@ export function ToolsInventoryBlock({
   toolsListGroupFilter,
   onToolsListGroupFilterChange,
   onAddCatalogItem,
-  catalogRefreshNonce
+  catalogRefreshNonce,
+  recipientSuggestions,
+  safeName,
+  onConsumableDrawerChange
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -60,6 +66,9 @@ export function ToolsInventoryBlock({
         onToolsListGroupFilterChange={onToolsListGroupFilterChange}
         onAddCatalogItem={onAddCatalogItem}
         catalogRefreshNonce={catalogRefreshNonce}
+        recipientSuggestions={recipientSuggestions}
+        safeName={safeName}
+        onConsumableDrawerChange={onConsumableDrawerChange}
       />
     </div>
   );

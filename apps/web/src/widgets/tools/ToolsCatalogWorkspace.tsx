@@ -3,6 +3,7 @@ import { ToolsCatalogNav } from "./ToolsCatalogNav";
 import { ToolsHubNav } from "./ToolsHubNav";
 import { ToolCatalogMaterialCards } from "./ToolCatalogMaterialCards";
 import { ToolCatalogMaterialDetailModal } from "./ToolCatalogMaterialDetailModal";
+import { ToolConsumablesCatalogSection } from "./ToolConsumablesCatalogSection";
 import {
   ELECTRIC_SUB_HUB_CARDS,
   TOOL_SUB_HUB_CARDS,
@@ -15,6 +16,7 @@ import {
   type ToolCatalogSummary,
   type ToolsNavId,
   isMaterialNav,
+  isConsumableCatalogNav,
   isPureMaterialCatalogNav,
   navToMaterialSection,
   showToolsInventoryList,
@@ -41,6 +43,9 @@ type Props = {
   ) => void;
   onAddCatalogItem?: () => void;
   catalogRefreshNonce?: number;
+  recipientSuggestions?: string[];
+  safeName?: (name: string) => string;
+  onConsumableDrawerChange?: (open: boolean) => void;
 };
 
 export function ToolsCatalogWorkspace({
@@ -58,7 +63,10 @@ export function ToolsCatalogWorkspace({
   toolsListGroupFilter = null,
   onToolsListGroupFilterChange,
   onAddCatalogItem,
-  catalogRefreshNonce = 0
+  catalogRefreshNonce = 0,
+  recipientSuggestions = [],
+  safeName = (n) => n,
+  onConsumableDrawerChange
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
@@ -211,7 +219,24 @@ export function ToolsCatalogWorkspace({
         </>
       )}
 
-      {isMaterialNav(current) && (
+      {isConsumableCatalogNav(current) && (
+        <ToolConsumablesCatalogSection
+          warehouseId={warehouseId}
+          sectionFilter={sectionFilter}
+          token={token}
+          apiUrl={apiUrl}
+          fetchWithSession={fetchWithSession}
+          canWrite={canWrite}
+          onAddCatalogItem={onAddCatalogItem}
+          onCatalogMessage={onCatalogMessage}
+          catalogRefreshNonce={catalogRefreshNonce}
+          recipientSuggestions={recipientSuggestions}
+          safeName={safeName}
+          onDrawerOpenChange={onConsumableDrawerChange}
+        />
+      )}
+
+      {isMaterialNav(current) && !isConsumableCatalogNav(current) && (
         <>
           <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
             <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>

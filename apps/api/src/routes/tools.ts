@@ -1076,9 +1076,44 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
   const objectSection: "SS" | "EOM" | undefined =
     sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const splitByCondition =
+    req.query.splitByCondition === "1" || String(req.query.splitByCondition).toLowerCase() === "true";
+
+  if (splitByCondition) {
+    const stocks = await prisma.stock.findMany({
+      where: {
+        material: { toolCatalogSection: parsed.data },
+        quantity: { gt: 0 },
+        ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+        ...(objectSection ? { section: objectSection } : {}),
+        ...(q ? { material: { name: { contains: q, mode: "insensitive" } } } : {})
+      },
+      include: {
+        material: { select: { id: true, name: true, unit: true } },
+        warehouse: { select: { id: true, name: true } }
+      },
+      orderBy: [{ condition: "desc" }, { material: { name: "asc" } }, { warehouse: { name: "asc" } }]
+    });
+    return res.json(
+      stocks.map((st) => ({
+        key: `${st.warehouseId}:${st.materialId}:${st.section}:${st.condition}`,
+        stockId: st.id,
+        materialId: st.material.id,
+        name: st.material.name,
+        unit: st.material.unit,
+        warehouseId: st.warehouseId,
+        warehouseName: st.warehouse?.name ?? "—",
+        section: st.section,
+        condition: st.condition,
+        quantity: Number(st.quantity)
+      }))
+    );
+  }
+
   const rows = await prisma.stock.findMany({
     where: {
       material: { toolCatalogSection: parsed.data },
+      condition: StockCondition.NEW,
       ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
       ...(objectSection ? { section: objectSection } : {}),
       ...(q ? { material: { name: { contains: q, mode: "insensitive" } } } : {})
@@ -1210,7 +1245,8 @@ const consumableIssueSchema = z.object({
     .array(
       z.object({
         materialId: z.string().min(1),
-        quantity: materialQtySchema
+        quantity: materialQtySchema,
+        condition: z.enum(["NEW", "USED"]).optional()
       })
     )
     .min(1)
@@ -1236,18 +1272,21 @@ toolsRouter.post("/consumables/issue", requirePermission("tools.write"), async (
     const created = await prisma.$transaction(async (tx) => {
       const lines = [];
       for (const it of parsed.data.items) {
+        const condition =
+          it.condition === "USED" ? StockCondition.USED : StockCondition.NEW;
         const stock = await tx.stock.findUnique({
           where: {
             warehouseId_materialId_section_condition: {
               warehouseId: parsed.data.warehouseId,
               materialId: it.materialId,
               section: parsed.data.section,
-              condition: StockCondition.NEW
+              condition
             }
           }
         });
         if (!stock || Number(stock.quantity) < it.quantity) {
-          throw Object.assign(new Error("Недостаточно расходника на складе"), { status: 409 });
+          const label = condition === StockCondition.USED ? "б/у" : "новых";
+          throw Object.assign(new Error(`Недостаточно расходника (${label}) на складе`), { status: 409 });
         }
         await tx.stock.update({
           where: { id: stock.id },
@@ -1293,6 +1332,79 @@ const consumableReturnSchema = z.object({
       })
     )
     .min(1)
+});
+
+const consumableDirectIssueSchema = z.object({
+  warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]).default("SS"),
+  materialId: z.string().min(1),
+  condition: z.enum(["NEW", "USED"]).default("NEW"),
+  quantity: materialQtySchema,
+  holderName: z.string().min(1),
+  comment: z.string().max(500).optional()
+});
+
+toolsRouter.post("/catalog/consumables/issue-direct", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = consumableDirectIssueSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  const scope = await getRequestDataScope(req);
+  try {
+    assertWarehouseInScope(scope, parsed.data.warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const condition = parsed.data.condition === "USED" ? StockCondition.USED : StockCondition.NEW;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const material = await tx.material.findFirst({
+        where: { id: parsed.data.materialId, toolCatalogSection: "TOOL_CONSUMABLE" }
+      });
+      if (!material) throw Object.assign(new Error("Расходник не найден в каталоге"), { status: 404 });
+      const stock = await tx.stock.findUnique({
+        where: {
+          warehouseId_materialId_section_condition: {
+            warehouseId: parsed.data.warehouseId,
+            materialId: parsed.data.materialId,
+            section: parsed.data.section,
+            condition
+          }
+        }
+      });
+      if (!stock || Number(stock.quantity) < parsed.data.quantity) {
+        const label = condition === StockCondition.USED ? "б/у" : "новых";
+        throw Object.assign(new Error(`Недостаточно расходника (${label}) на складе`), { status: 409 });
+      }
+      await tx.stock.update({
+        where: { id: stock.id },
+        data: { quantity: { decrement: parsed.data.quantity } }
+      });
+      await tx.stockMovement.create({
+        data: {
+          warehouseId: parsed.data.warehouseId,
+          materialId: parsed.data.materialId,
+          quantity: parsed.data.quantity,
+          direction: StockMovementDirection.OUT,
+          sourceDocumentType: "TOOL_CONSUMABLE_ISSUE",
+          note: [
+            `Выдача расходника: ${parsed.data.holderName}`,
+            condition === StockCondition.USED ? "б/у" : "новые",
+            parsed.data.comment?.trim()
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          createdById: req.user!.userId
+        }
+      });
+    });
+    return res.status(201).json({ ok: true });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
 });
 
 toolsRouter.post("/consumables/return", requirePermission("tools.write"), async (req: AuthedRequest, res) => {

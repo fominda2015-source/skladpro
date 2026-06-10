@@ -8897,6 +8897,14 @@ button.whMenuItem:hover,
   border-top: 1px solid #e2e8f0;
 }
 
+.toolConsumableQtyCell {
+  font-size: 1.15rem;
+}
+
+.toolConsumableDrawerQty {
+  font-size: 1.35rem;
+}
+
 .receiptOverageOverlay {
   z-index: 80;
 }

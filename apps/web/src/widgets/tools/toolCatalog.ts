@@ -69,6 +69,28 @@ export type ToolCatalogMaterialRow = {
   qtyUsed: number;
 };
 
+/** Строка расходника в каталоге (отдельно новые и б/у). */
+export type ToolCatalogConsumableLine = {
+  key: string;
+  stockId: string;
+  materialId: string;
+  name: string;
+  unit: string;
+  warehouseId: string;
+  warehouseName: string;
+  section: string;
+  condition: "NEW" | "USED";
+  quantity: number;
+};
+
+export function consumableConditionLabel(condition: "NEW" | "USED"): string {
+  return condition === "USED" ? "Б/у (старые)" : "Новые";
+}
+
+export function isConsumableCatalogNav(nav: ToolsNavId): boolean {
+  return nav === "tool-consumable";
+}
+
 export const TOOL_CATEGORY_SLUGS = {
   MANUAL: "tool-manual",
   ELECTRIC: "tool-electric",
@@ -181,12 +203,12 @@ export function navToMaterialSection(nav: ToolsNavId): string | null {
 }
 
 export function isMaterialNav(nav: ToolsNavId): boolean {
-  return navToMaterialSection(nav) != null;
+  return navToMaterialSection(nav) != null && !isConsumableCatalogNav(nav);
 }
 
 /** Разделы каталога только со складскими материалами (без учётных единиц Tool). */
 export function isPureMaterialCatalogNav(nav: ToolsNavId): boolean {
-  return nav === "tool-consumable" || nav === "kip";
+  return nav === "kip";
 }
 
 const CATALOG_MATERIAL_SLUGS = new Set<string>([

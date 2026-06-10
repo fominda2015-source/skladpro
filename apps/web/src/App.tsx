@@ -1092,6 +1092,7 @@ function App() {
   const [toolMaterialUnit, setToolMaterialUnit] = useState("шт");
   const [toolMaterialUnitPrice, setToolMaterialUnitPrice] = useState("");
   const [toolsCatalogRefreshNonce, setToolsCatalogRefreshNonce] = useState(0);
+  const [consumableDrawerOpen, setConsumableDrawerOpen] = useState(false);
   const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
   const [toolDrawerHomeOverlay, setToolDrawerHomeOverlay] = useState(false);
   const [toolDetailRecord, setToolDetailRecord] = useState<ToolItem | null>(null);
@@ -5324,6 +5325,9 @@ function App() {
         }}
         onAddCatalogItem={() => void openToolAddModal()}
         catalogRefreshNonce={toolsCatalogRefreshNonce}
+        recipientSuggestions={chatUsers.map((u) => u.fullName)}
+        safeName={safeName}
+        onConsumableDrawerChange={setConsumableDrawerOpen}
         toolsListGroupFilter={toolsListGroupFilter}
         onToolsListGroupFilterChange={setToolsListGroupFilter}
       />
@@ -10826,7 +10830,7 @@ function App() {
 
       {activeTab === "tools" && (
         <div
-          className={`toolsWorkspace${drawerMode === "tool" && toolDetailModalId ? " toolsWorkspace--drawer" : ""}`}
+          className={`toolsWorkspace${drawerMode === "tool" && toolDetailModalId ? " toolsWorkspace--drawer" : ""}${consumableDrawerOpen ? " toolsWorkspace--drawer" : ""}`}
         >
           <div className="toolsWorkspaceMain">
           <PageHero
