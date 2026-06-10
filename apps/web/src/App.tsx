@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent } from "react";
 import {
@@ -1093,6 +1093,10 @@ function App() {
   const [toolMaterialUnitPrice, setToolMaterialUnitPrice] = useState("");
   const [toolsCatalogRefreshNonce, setToolsCatalogRefreshNonce] = useState(0);
   const [consumableDrawerOpen, setConsumableDrawerOpen] = useState(false);
+  const [consumableDrawerEl, setConsumableDrawerEl] = useState<ReactNode>(null);
+  const mountConsumableDrawer = useCallback((drawer: ReactNode) => {
+    setConsumableDrawerEl(drawer);
+  }, []);
   const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
   const [toolDrawerHomeOverlay, setToolDrawerHomeOverlay] = useState(false);
   const [toolDetailRecord, setToolDetailRecord] = useState<ToolItem | null>(null);
@@ -5328,6 +5332,7 @@ function App() {
         recipientSuggestions={chatUsers.map((u) => u.fullName)}
         safeName={safeName}
         onConsumableDrawerChange={setConsumableDrawerOpen}
+        onConsumableDrawerMount={mountConsumableDrawer}
         toolsListGroupFilter={toolsListGroupFilter}
         onToolsListGroupFilterChange={setToolsListGroupFilter}
       />
@@ -10929,6 +10934,8 @@ function App() {
           ) : null}
 
           {drawerMode === "tool" && toolDetailModalId && renderToolDetailDrawer()}
+
+          {consumableDrawerEl}
 
           {toolManualModalOpen && hasPermission("tools.write") && (
             <div

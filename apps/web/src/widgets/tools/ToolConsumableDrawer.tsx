@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { formatMaterialQty } from "../../shared/quantity";
 import {
@@ -68,7 +67,7 @@ export function ToolConsumableDrawer({
 
   const cardStatus = detail?.cardStatus ?? (detail?.disputed ? "DISPUTED" : "IN_STOCK");
 
-  return createPortal(
+  return (
     <aside className="detailDrawer detailDrawerTool detailDrawerSticky">
       <div className="detailDrawerHeader">
         <h3>{detail ? safeName(detail.name) : "Расходник"}</h3>
@@ -220,7 +219,6 @@ export function ToolConsumableDrawer({
           </div>
         </>
       )}
-    </aside>,
-    document.body
+    </aside>
   );
 }

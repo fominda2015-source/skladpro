@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ToolsListToolbar } from "./ToolsListToolbar";
 import { ToolConsumableActionModal, type ConsumableCardAction } from "./ToolConsumableActionModal";
 import { ToolConsumableDrawer } from "./ToolConsumableDrawer";
@@ -19,6 +19,8 @@ type Props = {
   recipientSuggestions: string[];
   safeName: (name: string) => string;
   onDrawerOpenChange?: (open: boolean) => void;
+  /** Рендер карточки в колонке toolsWorkspace (как у инструментов). */
+  onDrawerMount?: (drawer: ReactNode) => void;
 };
 
 export function ToolConsumablesCatalogSection({
@@ -33,7 +35,8 @@ export function ToolConsumablesCatalogSection({
   catalogRefreshNonce = 0,
   recipientSuggestions,
   safeName,
-  onDrawerOpenChange
+  onDrawerOpenChange,
+  onDrawerMount
 }: Props) {
   const [lines, setLines] = useState<ToolCatalogConsumableLine[]>([]);
   const [loading, setLoading] = useState(false);
@@ -140,12 +143,15 @@ export function ToolConsumablesCatalogSection({
       setIssueLine(null);
       const sid = issueLine.stockId;
       await refreshAfterMutation(sid);
-      const still = (await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${new URLSearchParams({
+      const listQ = new URLSearchParams({
         section: "TOOL_CONSUMABLE",
         sectionFilter,
-        splitByCondition: "1",
-        ...(warehouseId ? { warehouseId } : {})
-      })}`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => (r.ok ? r.json() : []))) as ToolCatalogConsumableLine[];
+        splitByCondition: "1"
+      });
+      if (warehouseId) listQ.set("warehouseId", warehouseId);
+      const still = (await fetchWithSession(`${apiUrl}/api/tools/catalog/materials?${listQ}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then((r) => (r.ok ? r.json() : []))) as ToolCatalogConsumableLine[];
       if (!still.some((l) => l.stockId === sid && l.quantity > 0)) setSelectedKey(null);
       return true;
     } finally {
@@ -179,7 +185,11 @@ export function ToolConsumablesCatalogSection({
     }
   }
 
-  async function runCardAction(stockId: string, action: "WRITE_OFF" | "DISPUTE" | "CLEAR_DISPUTE", data: { comment: string; quantity?: number }) {
+  async function runCardAction(
+    stockId: string,
+    action: "WRITE_OFF" | "DISPUTE" | "CLEAR_DISPUTE",
+    data: { comment: string; quantity?: number }
+  ) {
     if (!token) return false;
     setActionSubmitting(true);
     try {
@@ -236,6 +246,48 @@ export function ToolConsumablesCatalogSection({
     }
   }
 
+  const drawerNode = useMemo(() => {
+    if (!selectedLine && !detailLoading) return null;
+    return (
+      <ToolConsumableDrawer
+        detail={detail}
+        loading={detailLoading}
+        canWrite={Boolean(canWrite)}
+        saving={saving}
+        deleting={deleting}
+        safeName={safeName}
+        onClose={() => {
+          setSelectedKey(null);
+          setDetail(null);
+        }}
+        onIssue={() => selectedLine && setIssueLine(selectedLine)}
+        onSave={(patch) => (selectedLine ? saveCard(selectedLine.stockId, patch) : Promise.resolve(false))}
+        onWriteOff={() => selectedLine && setCardAction({ action: "WRITE_OFF", line: selectedLine })}
+        onDispute={() => selectedLine && setCardAction({ action: "DISPUTE", line: selectedLine })}
+        onClearDispute={() =>
+          selectedLine && void runCardAction(selectedLine.stockId, "CLEAR_DISPUTE", { comment: "Спор снят" })
+        }
+        onDelete={() => selectedLine && void deleteCard(selectedLine.stockId)}
+        onRefreshEvents={() => selectedLine && void loadDetail(selectedLine.stockId)}
+      />
+    );
+  }, [
+    selectedLine,
+    detailLoading,
+    detail,
+    saving,
+    deleting,
+    canWrite,
+    safeName,
+    loadDetail
+  ]);
+
+  useEffect(() => {
+    if (!onDrawerMount) return;
+    onDrawerMount(drawerNode);
+    return () => onDrawerMount(null);
+  }, [onDrawerMount, drawerNode]);
+
   return (
     <>
       <div className="toolsCatalogListSection" style={{ marginTop: 16 }}>
@@ -275,30 +327,7 @@ export function ToolConsumablesCatalogSection({
         )}
       </div>
 
-      {(selectedLine || detailLoading) && (
-        <ToolConsumableDrawer
-          detail={detail}
-          loading={detailLoading}
-          canWrite={Boolean(canWrite)}
-          saving={saving}
-          deleting={deleting}
-          safeName={safeName}
-          onClose={() => {
-            setSelectedKey(null);
-            setDetail(null);
-          }}
-          onIssue={() => selectedLine && setIssueLine(selectedLine)}
-          onSave={(patch) => (selectedLine ? saveCard(selectedLine.stockId, patch) : Promise.resolve(false))}
-          onWriteOff={() => selectedLine && setCardAction({ action: "WRITE_OFF", line: selectedLine })}
-          onDispute={() => selectedLine && setCardAction({ action: "DISPUTE", line: selectedLine })}
-          onClearDispute={() =>
-            selectedLine &&
-            void runCardAction(selectedLine.stockId, "CLEAR_DISPUTE", { comment: "Спор снят" })
-          }
-          onDelete={() => selectedLine && void deleteCard(selectedLine.stockId)}
-          onRefreshEvents={() => selectedLine && void loadDetail(selectedLine.stockId)}
-        />
-      )}
+      {!onDrawerMount ? drawerNode : null}
 
       {issueLine ? (
         <ToolConsumableIssueModal

@@ -46,6 +46,7 @@ type Props = {
   recipientSuggestions?: string[];
   safeName?: (name: string) => string;
   onConsumableDrawerChange?: (open: boolean) => void;
+  onConsumableDrawerMount?: (drawer: import("react").ReactNode) => void;
 };
 
 export function ToolsCatalogWorkspace({
@@ -66,7 +67,8 @@ export function ToolsCatalogWorkspace({
   catalogRefreshNonce = 0,
   recipientSuggestions = [],
   safeName = (n) => n,
-  onConsumableDrawerChange
+  onConsumableDrawerChange,
+  onConsumableDrawerMount
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
@@ -233,6 +235,7 @@ export function ToolsCatalogWorkspace({
           recipientSuggestions={recipientSuggestions}
           safeName={safeName}
           onDrawerOpenChange={onConsumableDrawerChange}
+          onDrawerMount={onConsumableDrawerMount}
         />
       )}
 

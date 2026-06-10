@@ -25,6 +25,7 @@ type Props = {
   recipientSuggestions?: string[];
   safeName?: (name: string) => string;
   onConsumableDrawerChange?: (open: boolean) => void;
+  onConsumableDrawerMount?: (drawer: React.ReactNode) => void;
 };
 
 export function ToolsInventoryBlock({
@@ -45,7 +46,8 @@ export function ToolsInventoryBlock({
   catalogRefreshNonce,
   recipientSuggestions,
   safeName,
-  onConsumableDrawerChange
+  onConsumableDrawerChange,
+  onConsumableDrawerMount
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -69,6 +71,7 @@ export function ToolsInventoryBlock({
         recipientSuggestions={recipientSuggestions}
         safeName={safeName}
         onConsumableDrawerChange={onConsumableDrawerChange}
+        onConsumableDrawerMount={onConsumableDrawerMount}
       />
     </div>
   );
