@@ -10,6 +10,17 @@ export function isToolInventoryReceiptCategory(cat: ReceiptItemCategory | null |
   return cat === "TOOL_MANUAL" || cat === "TOOL_ELECTRIC_CORDLESS" || cat === "TOOL_ELECTRIC_CORDED";
 }
 
+/** Категория прихода ведёт в каталог инструментов/СИЗ (учётные единицы Tool). */
+export function isToolCatalogReceiptCategory(cat: ReceiptItemCategory | null | undefined): boolean {
+  return receiptCategoryToToolSection(cat) != null;
+}
+
+/** Категория прихода — складская позиция каталога (PPE, Прочее, КИП…), не учётная единица. */
+export function isToolCatalogMaterialReceiptCategory(cat: ReceiptItemCategory | null | undefined): boolean {
+  if (!cat || isToolInventoryReceiptCategory(cat)) return false;
+  return receiptCategoryToToolSection(cat) != null;
+}
+
 function buildToolQrCode(inventoryNumber: string): string {
   return `TOOL:${inventoryNumber}`;
 }

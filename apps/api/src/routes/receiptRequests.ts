@@ -45,9 +45,14 @@ import {
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
-import { buildMaterialUpdatesFromReceiptItem, parseReceiptStoragePlace } from "../lib/receiptMaterialApply.js";
+import {
+  buildMaterialCreateFromReceiptItem,
+  buildMaterialUpdatesFromReceiptItem,
+  parseReceiptStoragePlace
+} from "../lib/receiptMaterialApply.js";
 import {
   createToolsFromReceiptAccept,
+  isToolCatalogReceiptCategory,
   isToolInventoryReceiptCategory,
   resolveToolCategoryIdFromReceipt
 } from "../lib/receiptToolApply.js";
@@ -266,14 +271,23 @@ async function saveReceiptDocumentFile(
 async function findOrCreateMaterial(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   nameRaw: string,
-  unitRaw: string | undefined | null
+  unitRaw: string | undefined | null,
+  itemCategory?: import("@prisma/client").ReceiptItemCategory | null,
+  unitPrice?: number | null
 ): Promise<string | undefined> {
   const name = String(nameRaw || "").trim();
   if (!name) return undefined;
   const unit = String(unitRaw || "шт").trim() || "шт";
+  const toolSection = receiptCategoryToToolSection(itemCategory);
+  const catalogFields = buildMaterialCreateFromReceiptItem(itemCategory, toolSection, unitPrice);
   const existing = await tx.material.findFirst({ where: { name, unit } });
-  if (existing) return existing.id;
-  const created = await tx.material.create({ data: { name, unit } });
+  if (existing) {
+    if (Object.keys(catalogFields).length > 0) {
+      await tx.material.update({ where: { id: existing.id }, data: catalogFields });
+    }
+    return existing.id;
+  }
+  const created = await tx.material.create({ data: { name, unit, ...catalogFields } });
   return created.id;
 }
 
@@ -317,22 +331,50 @@ async function upsertWarehouseMaterialMapping(
 /** Карточка материала = номенклатура из заявки/лимита, не наименование по УПД. */
 async function resolveReceiptTargetMaterialId(
   tx: ReceiptAcceptTx,
-  item: { sourceName: string; sourceUnit: string; mappedMaterialId: string | null; limitNodeId: string | null },
-  mapping: { materialId?: string; newMaterialName?: string }
+  item: {
+    sourceName: string;
+    sourceUnit: string;
+    mappedMaterialId: string | null;
+    limitNodeId: string | null;
+    category?: import("@prisma/client").ReceiptItemCategory | null;
+    unitPrice?: unknown;
+  },
+  mapping: {
+    materialId?: string;
+    newMaterialName?: string;
+    category?: import("@prisma/client").ReceiptItemCategory | null;
+    unitPrice?: number | null;
+  }
 ): Promise<string | undefined> {
+  const itemCategory = mapping.category ?? item.category ?? null;
+  const unitPrice =
+    mapping.unitPrice != null
+      ? mapping.unitPrice
+      : item.unitPrice != null
+        ? Number(item.unitPrice)
+        : null;
+  const applyCatalogFields = async (materialId: string) => {
+    const toolSection = receiptCategoryToToolSection(itemCategory);
+    const patch = buildMaterialUpdatesFromReceiptItem(itemCategory, toolSection, unitPrice);
+    if (Object.keys(patch).length > 0) {
+      await tx.material.update({ where: { id: materialId }, data: patch });
+    }
+    return materialId;
+  };
+
   if (item.limitNodeId) {
     const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
-    if (fromNode) return fromNode;
+    if (fromNode) return applyCatalogFields(fromNode);
   }
-  if (mapping.materialId) return mapping.materialId;
-  if (item.mappedMaterialId) return item.mappedMaterialId;
+  if (mapping.materialId) return applyCatalogFields(mapping.materialId);
+  if (item.mappedMaterialId) return applyCatalogFields(item.mappedMaterialId);
   const cardName = item.sourceName.trim();
   if (cardName) {
-    return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт");
+    return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт", itemCategory, unitPrice);
   }
   const legacyName = mapping.newMaterialName?.trim();
   if (legacyName) {
-    return findOrCreateMaterial(tx, legacyName, item.sourceUnit || "шт");
+    return findOrCreateMaterial(tx, legacyName, item.sourceUnit || "шт", itemCategory, unitPrice);
   }
   return undefined;
 }
@@ -1263,12 +1305,12 @@ receiptRequestsRouter.post(
       }
     }
 
-    const hasToolInventoryItems = acceptItemMappings.some((m) => {
+    const hasToolCatalogItems = acceptItemMappings.some((m) => {
       const it = itemsById.get(m.itemId);
       const cat = m.category ?? it?.category ?? null;
-      return isToolInventoryReceiptCategory(cat);
+      return isToolCatalogReceiptCategory(cat);
     });
-    if (hasToolInventoryItems) {
+    if (hasToolCatalogItems) {
       await ensureDefaultToolCategories();
     }
 

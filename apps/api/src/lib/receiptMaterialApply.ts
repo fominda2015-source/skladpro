@@ -25,17 +25,37 @@ export function receiptCategoryToMaterialKind(
   return "MATERIAL";
 }
 
+function materialFieldsFromReceiptItem(
+  itemCategory: ReceiptItemCategory | null | undefined,
+  toolSection: ToolCatalogSection | null,
+  unitPrice: number | null | undefined
+) {
+  const fields: {
+    toolCatalogSection?: ToolCatalogSection;
+    kind?: MaterialKind;
+    unitPrice?: number;
+  } = {};
+  if (toolSection) fields.toolCatalogSection = toolSection;
+  const kind = receiptCategoryToMaterialKind(itemCategory);
+  if (kind) fields.kind = kind;
+  if (unitPrice != null && Number.isFinite(unitPrice) && unitPrice >= 0) {
+    fields.unitPrice = unitPrice;
+  }
+  return fields;
+}
+
 export function buildMaterialUpdatesFromReceiptItem(
   itemCategory: ReceiptItemCategory | null | undefined,
   toolSection: ToolCatalogSection | null,
   unitPrice: number | null | undefined
 ): Prisma.MaterialUpdateInput {
-  const data: Prisma.MaterialUpdateInput = {};
-  if (toolSection) data.toolCatalogSection = toolSection;
-  const kind = receiptCategoryToMaterialKind(itemCategory);
-  if (kind) data.kind = kind;
-  if (unitPrice != null && Number.isFinite(unitPrice) && unitPrice >= 0) {
-    data.unitPrice = unitPrice;
-  }
-  return data;
+  return materialFieldsFromReceiptItem(itemCategory, toolSection, unitPrice);
+}
+
+export function buildMaterialCreateFromReceiptItem(
+  itemCategory: ReceiptItemCategory | null | undefined,
+  toolSection: ToolCatalogSection | null,
+  unitPrice: number | null | undefined
+): Pick<Prisma.MaterialCreateInput, "toolCatalogSection" | "kind" | "unitPrice"> {
+  return materialFieldsFromReceiptItem(itemCategory, toolSection, unitPrice);
 }

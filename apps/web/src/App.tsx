@@ -3606,7 +3606,10 @@ function App() {
         ...(row.objectLimitTemplateId
           ? { limitNodeId: draft?.limitNodeId || it.limitNodeId || null }
           : {}),
-        category: draft?.category || it.category || null,
+        category:
+          typeof draft?.category === "string" && draft.category.trim() !== ""
+            ? draft.category
+            : it.category ?? null,
         unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
         storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
       });
