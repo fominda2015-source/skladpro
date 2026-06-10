@@ -1508,7 +1508,7 @@ receiptRequestsRouter.post(
         });
 
         if (campCategory) {
-          const qty = Math.max(1, Math.round(r.acceptedQty));
+          const qty = Math.max(1, Math.round(r.stockQty));
           for (let i = 0; i < qty; i++) {
             const suffix = qty > 1 ? ` (${i + 1}/${qty})` : "";
             const campRow = await tx.campItem.create({
@@ -1566,7 +1566,7 @@ receiptRequestsRouter.post(
             categoryId,
             warehouseId: row.warehouseId,
             section: row.section,
-            qty: r.acceptedQty,
+            qty: r.stockQty,
             userId: req.user!.userId,
             storagePlace: storagePlaceRaw
           });
