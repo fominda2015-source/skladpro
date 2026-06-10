@@ -1,3 +1,5 @@
+import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
+
 export type ToolGroupCardRow = {
   key: string;
   label: string;
@@ -16,51 +18,88 @@ type Props = {
   onOpen: (card: ToolGroupCardRow) => void;
 };
 
-function metricChip(label: string, value: number, tone?: "ok" | "warn" | "bad" | "neutral") {
-  const toneClass =
-    tone === "ok"
-      ? "toolNameGroupMetric--ok"
-      : tone === "warn"
-        ? "toolNameGroupMetric--warn"
-        : tone === "bad"
-          ? "toolNameGroupMetric--bad"
-          : "";
-  return (
-    <span className={`toolNameGroupMetric ${toneClass}`.trim()}>
-      <span className="toolNameGroupMetricLabel">{label}</span>
-      <strong>{value}</strong>
-    </span>
-  );
+function normalizeCard(card: ToolGroupCardRow): ToolGroupCardRow {
+  return {
+    ...card,
+    count: Number(card.count) || 0,
+    inStock: Number(card.inStock) || 0,
+    issued: Number(card.issued) || 0,
+    inRepair: Number(card.inRepair) || 0,
+    writtenOff: Number(card.writtenOff) || 0
+  };
 }
 
 export function ToolsCategoryTable({ cards, onOpen }: Props) {
+  const rows = cards.map(normalizeCard);
+
   return (
-    <div className="toolNameGroupList">
-      {cards.map((card) => (
-        <button
-          key={card.key}
-          type="button"
-          className="toolNameGroupRow"
-          onClick={() => onOpen(card)}
-        >
-          <span className="toolNameGroupRowChevron" aria-hidden>
-            ▸
-          </span>
-          <span className="toolNameGroupRowMain">
-            <strong className="toolNameGroupRowTitle">
+    <ResponsiveTableShell>
+      <div className="erpTableWrap toolNameGroupTableWrap">
+        <table className="erpTable desktopTable toolNameGroupTable">
+          <thead>
+            <tr>
+              <th>Наименование</th>
+              <th className="toolNameGroupNumCol">Всего</th>
+              <th className="toolNameGroupNumCol">На складе</th>
+              <th className="toolNameGroupNumCol">Выдано</th>
+              <th className="toolNameGroupNumCol">Списано</th>
+              <th className="toolNameGroupActionCol" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((card) => (
+              <tr
+                key={card.key}
+                className="rowHighlight toolNameGroupTableRow"
+                tabIndex={0}
+                style={{ cursor: "pointer" }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpen(card);
+                  }
+                }}
+                onClick={() => onOpen(card)}
+              >
+                <td className="toolNameGroupNameCell">
+                  <span className="toolNameGroupNameText">
+                    {card.icon ? `${card.icon} ` : ""}
+                    {card.label}
+                  </span>
+                </td>
+                <td className="toolNameGroupNumCell">{card.count}</td>
+                <td className="toolNameGroupNumCell toolNameGroupNumCell--ok">{card.inStock}</td>
+                <td className="toolNameGroupNumCell toolNameGroupNumCell--warn">{card.issued}</td>
+                <td className="toolNameGroupNumCell toolNameGroupNumCell--bad">{card.writtenOff}</td>
+                <td className="toolNameGroupActionCell">
+                  <span className="toolNameGroupOpenLink">Открыть →</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mobileCards">
+        {rows.map((card) => (
+          <MobileCard key={`m-${card.key}`} onClick={() => onOpen(card)}>
+            <h4>
               {card.icon ? `${card.icon} ` : ""}
               {card.label}
-            </strong>
-            <span className="toolNameGroupRowMetrics">
-              {metricChip("всего", card.count)}
-              {metricChip("на складе", card.inStock, "ok")}
-              {metricChip("выдано", card.issued, card.issued > 0 ? "warn" : "neutral")}
-              {metricChip("списано", card.writtenOff, card.writtenOff > 0 ? "bad" : "neutral")}
-            </span>
-          </span>
-          <span className="toolNameGroupRowAction muted">Открыть</span>
-        </button>
-      ))}
-    </div>
+            </h4>
+            <div className="toolNameGroupMobileMetrics">
+              <MobileCardField label="Всего">{card.count}</MobileCardField>
+              <MobileCardField label="На складе">{card.inStock}</MobileCardField>
+              <MobileCardField label="Выдано">{card.issued}</MobileCardField>
+              <MobileCardField label="Списано">{card.writtenOff}</MobileCardField>
+            </div>
+            <MobileCardActions>
+              <button type="button" className="ghostBtn" onClick={() => onOpen(card)}>
+                Открыть →
+              </button>
+            </MobileCardActions>
+          </MobileCard>
+        ))}
+      </div>
+    </ResponsiveTableShell>
   );
 }

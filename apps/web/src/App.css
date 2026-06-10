@@ -2290,107 +2290,71 @@ tr.low {
   }
 }
 
-.toolNameGroupList {
-  display: grid;
-  gap: 8px;
+.toolNameGroupTableWrap {
   margin-top: 8px;
 }
 
-.toolNameGroupRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+.toolNameGroupTable .toolNameGroupNumCol {
+  width: 88px;
+  text-align: right;
+  white-space: nowrap;
 }
 
-.toolNameGroupRow:hover {
-  border-color: #93c5fd;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08);
+.toolNameGroupTable .toolNameGroupActionCol {
+  width: 96px;
+  text-align: right;
 }
 
-.toolNameGroupRowChevron {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: #eff6ff;
+.toolNameGroupTableRow:hover .toolNameGroupOpenLink {
   color: #1d4ed8;
-  font-size: 14px;
 }
 
-.toolNameGroupRowMain {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.toolNameGroupNameCell {
+  max-width: 0;
+  min-width: 180px;
 }
 
-.toolNameGroupRowTitle {
+.toolNameGroupNameText {
+  display: block;
+  font-weight: 600;
   color: #243656;
-  font-size: 14px;
   line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.toolNameGroupRowMetrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
+.toolNameGroupNumCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
 }
 
-.toolNameGroupMetric {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+.toolNameGroupNumCell--ok {
+  color: #15803d;
+}
+
+.toolNameGroupNumCell--warn {
+  color: #b45309;
+}
+
+.toolNameGroupNumCell--bad {
+  color: #b91c1c;
+}
+
+.toolNameGroupOpenLink {
   font-size: 12px;
-}
-
-.toolNameGroupMetricLabel {
+  font-weight: 600;
   color: #64748b;
+  white-space: nowrap;
 }
 
-.toolNameGroupMetric--ok {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
-}
-
-.toolNameGroupMetric--warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-}
-
-.toolNameGroupMetric--bad {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.toolNameGroupRowAction {
-  flex: 0 0 auto;
-  font-size: 12px;
-}
-
-@media (max-width: 640px) {
-  .toolNameGroupRow {
-    flex-wrap: wrap;
-  }
-  .toolNameGroupRowAction {
-    width: 100%;
-    padding-left: 38px;
-  }
+.toolNameGroupMobileMetrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-top: 4px;
 }
 
 .limitMaterialRow {
