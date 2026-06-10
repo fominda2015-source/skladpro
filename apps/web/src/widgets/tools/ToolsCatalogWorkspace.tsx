@@ -11,6 +11,7 @@ import {
   buildToolsHubStats,
   catalogMaterialSectionLabel,
   legacyMaterialCatalogSection,
+  navToCategorySlug,
   type CatalogMaterialSection,
   type ToolCatalogMaterialRow,
   type ToolCatalogSummary,

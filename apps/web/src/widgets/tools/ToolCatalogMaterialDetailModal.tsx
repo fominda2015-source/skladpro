@@ -4,12 +4,13 @@ import {
   CATALOG_MATERIAL_SECTIONS,
   catalogMaterialSectionLabel,
   type CatalogMaterialSection,
+  type LegacyCatalogMaterialSection,
   type ToolCatalogMaterialRow
 } from "./toolCatalog";
 
 type Props = {
   row: ToolCatalogMaterialRow;
-  currentSection?: CatalogMaterialSection | null;
+  currentSection?: CatalogMaterialSection | LegacyCatalogMaterialSection | null;
   canWrite?: boolean;
   busy?: boolean;
   onClose: () => void;

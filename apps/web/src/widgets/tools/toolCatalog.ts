@@ -173,6 +173,11 @@ export const CATALOG_MATERIAL_SECTIONS = [
 
 export type CatalogMaterialSection = (typeof CATALOG_MATERIAL_SECTIONS)[number]["value"];
 
+/** Устаревшие разделы материалов (остатки до перехода на учётные единицы). */
+export type LegacyCatalogMaterialSection = "TOWERS_LADDERS" | "OTHER";
+
+export type ApiCatalogMaterialSection = CatalogMaterialSection | LegacyCatalogMaterialSection;
+
 export function catalogMaterialSectionLabel(section: string | null | undefined): string {
   const hit = CATALOG_MATERIAL_SECTIONS.find((s) => s.value === section);
   return hit?.label ?? section ?? "—";
@@ -234,7 +239,7 @@ export function navToMaterialSection(nav: ToolsNavId): string | null {
 }
 
 /** Старые остатки, ошибочно заведённые как материалы (до перехода на учётные единицы). */
-export function legacyMaterialCatalogSection(nav: ToolsNavId): CatalogMaterialSection | null {
+export function legacyMaterialCatalogSection(nav: ToolsNavId): LegacyCatalogMaterialSection | null {
   if (nav === "towers-ladders") return "TOWERS_LADDERS";
   if (nav === "other") return "OTHER";
   return null;
@@ -255,7 +260,7 @@ export function isCatalogMaterialCategorySlug(slug: string | null | undefined): 
   return CATALOG_MATERIAL_SLUGS.has(String(slug || "").toLowerCase());
 }
 
-export function slugToCatalogMaterialSection(slug: string | null | undefined): CatalogMaterialSection | null {
+export function slugToCatalogMaterialSection(slug: string | null | undefined): ApiCatalogMaterialSection | null {
   const s = String(slug || "").toLowerCase();
   if (s === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE) return "TOOL_CONSUMABLE";
   if (s === TOOL_CATEGORY_SLUGS.KIP) return "KIP";
