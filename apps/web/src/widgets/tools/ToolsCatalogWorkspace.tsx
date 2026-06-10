@@ -10,6 +10,7 @@ import {
   TOOLS_HUB_CARDS,
   buildToolsHubStats,
   catalogMaterialSectionLabel,
+  isToolsCatalogLeafNav,
   legacyMaterialCatalogSection,
   navToCategorySlug,
   type CatalogMaterialSection,
@@ -122,7 +123,7 @@ export function ToolsCatalogWorkspace({
   }, [loadMaterials, matRefresh, catalogRefreshNonce]);
 
   useEffect(() => {
-    if (!usesToolNameGroupCards(current)) {
+    if (!usesToolNameGroupCards(current) || !isToolsCatalogLeafNav(current)) {
       setGroupCards([]);
       return;
     }
@@ -154,11 +155,10 @@ export function ToolsCatalogWorkspace({
   }, [current, token, warehouseId, sectionFilter, apiUrl, fetchWithSession, matRefresh]);
 
   const showLegacyMaterialCards = Boolean(legacyMaterialSection && materialRows.length > 0);
-  const showGroupCards = usesToolNameGroupCards(current) && !toolsListGroupFilter;
+  const showGroupCards =
+    isToolsCatalogLeafNav(current) && usesToolNameGroupCards(current) && !toolsListGroupFilter;
   const showToolList =
-    showToolsInventoryList(navPath) &&
-    !isPureMaterialCatalogNav(current) &&
-    (!usesToolNameGroupCards(current) || Boolean(toolsListGroupFilter));
+    showToolsInventoryList(navPath, Boolean(toolsListGroupFilter)) && !isPureMaterialCatalogNav(current);
 
   const hubStats = useMemo(() => (summary ? buildToolsHubStats(summary) : undefined), [summary]);
 
@@ -321,7 +321,7 @@ export function ToolsCatalogWorkspace({
         <div style={{ marginTop: hubCards || isMaterialNav(current) || showLegacyMaterialCards || usesToolNameGroupCards(current) ? 16 : 0 }}>
           <h3 style={{ marginTop: 0 }}>Учётные единицы</h3>
           <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>
-            Выберите группу — откроется список с карточками инструментов (инв. №, QR, выдача).
+            Одинаковые наименования сгруппированы. Нажмите строку — откроется список с инв. №, QR и выдачей.
           </p>
           {groupLoading ? (
             <p className="muted">Загрузка групп…</p>
@@ -338,7 +338,7 @@ export function ToolsCatalogWorkspace({
               }}
             />
           ) : (
-            <p className="muted">Учётные единицы в этом разделе не заведены.</p>
+            <p className="muted">В этой категории учётные единицы пока не заведены.</p>
           )}
         </div>
       ) : null}
@@ -352,6 +352,8 @@ export function ToolsCatalogWorkspace({
               </button>
               <span className="muted">{toolsListGroupFilter.label}</span>
             </div>
+          ) : !usesToolNameGroupCards(current) ? (
+            <h3 style={{ marginTop: 0 }}>Учётные единицы</h3>
           ) : null}
           {toolListSlot}
         </div>

@@ -216,20 +216,35 @@ export function navToCategorySlug(nav: ToolsNavId): string | null {
 export function navCategorySlugChain(nav: ToolsNavId): Array<string | null> {
   const primary = navToCategorySlug(nav);
   if (!primary) return [null];
-  if (primary === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS || primary === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED) {
-    return [primary, TOOL_CATEGORY_SLUGS.ELECTRIC, null];
-  }
-  if (primary === TOOL_CATEGORY_SLUGS.MANUAL || primary === TOOL_CATEGORY_SLUGS.ELECTRIC) {
-    return [primary, null];
-  }
-  return [primary, null];
+  return [primary];
 }
 
-export function showToolsInventoryList(navPath: ToolsNavId[]): boolean {
+/** Промежуточные уровни навигации — без списков учётных единиц. */
+export function isToolsCatalogIntermediateNav(nav: ToolsNavId): boolean {
+  return nav === "hub" || nav === "tool" || nav === "tool-electric";
+}
+
+/** Конечная категория каталога (не хаб и не подменю «Инструмент» / «Электрический»). */
+export function isToolsCatalogLeafNav(nav: ToolsNavId): boolean {
+  if (isToolsCatalogIntermediateNav(nav)) return false;
+  if (isConsumableCatalogNav(nav)) return false;
+  return navToCategorySlug(nav) != null;
+}
+
+/** Список учётных единиц: только на конечной категории; для групп — после выбора строки. */
+export function showToolsInventoryList(navPath: ToolsNavId[], hasGroupFilter = false): boolean {
   const current = navPath[navPath.length - 1] ?? "hub";
-  if (current === "hub") return false;
-  if (navToCategorySlug(current)) return true;
-  return navPath.includes("tool");
+  if (!isToolsCatalogLeafNav(current)) return false;
+  if (isPureMaterialCatalogNav(current)) return false;
+  if (usesToolNameGroupCards(current)) return hasGroupFilter;
+  const slug = navToCategorySlug(current);
+  return (
+    slug === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS || slug === TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED
+  );
+}
+
+export function shouldLoadToolsInventoryList(navPath: ToolsNavId[], hasGroupFilter: boolean): boolean {
+  return showToolsInventoryList(navPath, hasGroupFilter);
 }
 
 export function navToMaterialSection(nav: ToolsNavId): string | null {
@@ -273,8 +288,11 @@ export function isToolListNav(nav: ToolsNavId): boolean {
   return navToCategorySlug(nav) != null;
 }
 
+/** Группировка одинаковых названий — во всех категориях, кроме аккумуляторного и сетевого инструмента. */
 export function usesToolNameGroupCards(nav: ToolsNavId): boolean {
-  return nav === "other" || nav === "towers-ladders";
+  const slug = navToCategorySlug(nav);
+  if (!slug) return false;
+  return slug !== TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS && slug !== TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED;
 }
 
 export function receiptCategoryToToolsNav(cat: string | null | undefined): ToolsNavId | null {

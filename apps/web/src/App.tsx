@@ -110,9 +110,8 @@ import {
   type ElectricToolIssueWizardSubmit
 } from "./widgets/tools/electricToolIssue";
 import {
-  navCategorySlugChain,
   navToCategorySlug,
-  TOOL_CATEGORY_SLUGS,
+  shouldLoadToolsInventoryList,
   type ToolsNavId,
   isCatalogMaterialCategorySlug,
   receiptCategoryToToolsNav,
@@ -1138,7 +1137,6 @@ function App() {
     nameGroup: string;
     label: string;
   } | null>(null);
-  const [toolsListScopeNote, setToolsListScopeNote] = useState("");
   const [electricToolWizard, setElectricToolWizard] = useState<{
     toolIds: string[];
     electricToolIds: string[];
@@ -4628,15 +4626,6 @@ function App() {
   // Прямой приход/возврат через ручную форму удалены —
   // материал теперь принимается только через заявки (см. submitReceiptAcceptance).
 
-  function toolsListScopeNoteText(requestedSlug: string | null, usedSlug: string | null) {
-    if (!requestedSlug || requestedSlug === usedSlug) return "";
-    if (usedSlug === null) return "В выбранной категории ничего нет — показан общий список инструментов.";
-    if (usedSlug === TOOL_CATEGORY_SLUGS.ELECTRIC) {
-      return "В подкатегории ничего нет — показаны все электрические инструменты.";
-    }
-    return "Показан расширенный список по разделу.";
-  }
-
   async function fetchToolsPage(
     categorySlug: string | null | undefined,
     groupFilter?: { categoryId?: string; nameGroup?: string },
@@ -4677,41 +4666,30 @@ function App() {
     if (!token) return;
     setToolsError("");
     setToolsLoading(true);
-    setToolsListScopeNote("");
     try {
       const navLeaf = toolsNavPath[toolsNavPath.length - 1] ?? "hub";
-      const slugChain = navCategorySlugChain(navLeaf);
-      const requestedSlug = slugChain[0] ?? null;
-      const hasManualFilters = Boolean(toolSearch.trim() || toolStatusFilter || toolCategoryFilter);
       const groupFilter = toolsListGroupFilter
         ? { categoryId: toolsListGroupFilter.categoryId, nameGroup: toolsListGroupFilter.nameGroup }
         : undefined;
 
+      if (!shouldLoadToolsInventoryList(toolsNavPath, Boolean(groupFilter?.nameGroup))) {
+        setTools([]);
+        setToolsTotal(0);
+        return;
+      }
+
+      const slug = navToCategorySlug(navLeaf);
       let items: ToolItem[] = [];
       let total = 0;
-      let usedSlug: string | null = requestedSlug;
 
       if (groupFilter?.nameGroup) {
         const r = await fetchToolsPage(null, groupFilter, warehouseIdOverride);
         items = r.items;
         total = r.total;
-        setToolsListScopeNote("");
-      } else if (hasManualFilters || slugChain.length <= 1) {
-        const r = await fetchToolsPage(requestedSlug, undefined, warehouseIdOverride);
+      } else if (slug) {
+        const r = await fetchToolsPage(slug, undefined, warehouseIdOverride);
         items = r.items;
         total = r.total;
-      } else {
-        for (let i = 0; i < slugChain.length; i += 1) {
-          const slug = slugChain[i];
-          const r = await fetchToolsPage(slug, undefined, warehouseIdOverride);
-          usedSlug = slug;
-          items = r.items;
-          total = r.total;
-          if (r.total > 0 || i === slugChain.length - 1) {
-            setToolsListScopeNote(toolsListScopeNoteText(requestedSlug, usedSlug));
-            break;
-          }
-        }
       }
 
       setTools(items);
@@ -5238,7 +5216,6 @@ function App() {
             </>
           }
         />
-        {toolsListScopeNote ? <p className="muted toolsListScopeNote">{toolsListScopeNote}</p> : null}
         {toolsMessage && <ResultBanner text={toolsMessage} tone={toolsTone} />}
         {!toolsLoading && !toolsError && !tools.length && (
           <EmptyState title="Инструменты не найдены" hint="Смените фильтры или добавьте карточку вручную." />

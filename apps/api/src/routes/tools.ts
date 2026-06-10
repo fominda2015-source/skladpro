@@ -27,6 +27,7 @@ import {
   isKitTrackableCategoryId,
   isManualToolCategoryName,
   normalizeToolKitFields,
+  normalizeToolNameForGroup,
   toolCatalogSectionToReceiptCategory,
   MANUAL_TOOL_CATEGORY,
   ELECTRIC_TOOL_CATEGORY,
@@ -269,6 +270,7 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     inStock: number;
     issued: number;
     inRepair: number;
+    writtenOff: number;
   };
   let categorySlugIds: string[] | undefined;
   if (categorySlugParam) {
@@ -284,16 +286,15 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     categorySlugIds !== undefined
       ? tools.filter((t) => t.categoryId && categorySlugIds!.includes(t.categoryId))
       : tools;
-  const groupMiscByName =
-    categorySlugParam === TOOL_CATEGORY_SLUGS.OTHER ||
-    categorySlugParam === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS ||
-    categorySlugParam === TOOL_CATEGORY_SLUGS.KIP ||
-    categorySlugParam === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE;
+  const groupByName =
+    Boolean(categorySlugParam) &&
+    categorySlugParam !== TOOL_CATEGORY_SLUGS.ELECTRIC_CORDLESS &&
+    categorySlugParam !== TOOL_CATEGORY_SLUGS.ELECTRIC_CORDED;
   const cardsByKey = new Map<string, Card>();
   const ensureCard = (key: string, label: string, type: Card["type"], categoryId: string | null, icon: string | null) => {
     let c = cardsByKey.get(key);
     if (!c) {
-      c = { key, label, type, categoryId, icon, count: 0, inStock: 0, issued: 0, inRepair: 0 };
+      c = { key, label, type, categoryId, icon, count: 0, inStock: 0, issued: 0, inRepair: 0, writtenOff: 0 };
       cardsByKey.set(key, c);
     }
     return c;
@@ -306,10 +307,11 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
   }
   for (const t of filteredTools) {
     let card: Card;
-    if (groupMiscByName && t.categoryId && catById.has(t.categoryId)) {
+    if (groupByName && t.categoryId && catById.has(t.categoryId)) {
       const cat = catById.get(t.categoryId)!;
-      const nameKey = (t.name || "Без названия").trim() || "Без названия";
-      card = ensureCard(`name:${cat.id}:${nameKey.toLowerCase()}`, nameKey, "NAME", cat.id, cat.icon);
+      const groupLabel = normalizeToolNameForGroup(t.name || "Без названия");
+      const nameKey = groupLabel.toLowerCase();
+      card = ensureCard(`name:${cat.id}:${nameKey}`, groupLabel, "NAME", cat.id, cat.icon);
     } else if (t.categoryId && catById.has(t.categoryId)) {
       const cat = catById.get(t.categoryId)!;
       card = ensureCard(`cat:${cat.id}`, cat.name, "CATEGORY", cat.id, cat.icon);
@@ -321,6 +323,7 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     if (t.status === ToolStatus.IN_STOCK) card.inStock += 1;
     else if (t.status === ToolStatus.ISSUED) card.issued += 1;
     else if (t.status === ToolStatus.IN_REPAIR) card.inRepair += 1;
+    else if (t.status === ToolStatus.WRITTEN_OFF) card.writtenOff += 1;
   }
   const list = Array.from(cardsByKey.values())
     .filter((c) => c.count > 0)
@@ -371,36 +374,49 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     const cats = await prisma.toolCategory.findMany({ where: { slug: { in: slugs } }, select: { id: true } });
     categorySlugIds = cats.map((c) => c.id);
   }
+  const baseScopeWhere: Prisma.ToolWhereInput = {
+    ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
+    ...(status ? { status } : {}),
+    ...(section ? { section } : {}),
+    ...(categoryIdParam ? { categoryId: categoryIdParam } : {}),
+    ...(categorySlugIds !== undefined
+      ? categorySlugIds.length > 0
+        ? { categoryId: { in: categorySlugIds } }
+        : { categoryId: { in: [] } }
+      : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { inventoryNumber: { contains: q, mode: "insensitive" as const } },
+            { serialNumber: { contains: q, mode: "insensitive" as const } },
+            { qrCode: { contains: q, mode: "insensitive" as const } }
+          ]
+        }
+      : {})
+  };
+
+  let nameGroupIds: string[] | undefined;
+  if (nameGroupParam) {
+    const groupKey = normalizeToolNameForGroup(nameGroupParam).toLowerCase();
+    const candidates = await prisma.tool.findMany({
+      where: {
+        AND: [toolWhereFromScope(scope), baseScopeWhere]
+      },
+      select: { id: true, name: true }
+    });
+    nameGroupIds = candidates
+      .filter((t) => normalizeToolNameForGroup(t.name).toLowerCase() === groupKey)
+      .map((t) => t.id);
+  }
+
   const where = {
     AND: [
       toolWhereFromScope(scope),
-      {
-        ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
-        ...(status ? { status } : {}),
-        ...(section ? { section } : {}),
-        ...(categoryIdParam ? { categoryId: categoryIdParam } : {}),
-        ...(categorySlugIds !== undefined
-          ? categorySlugIds.length > 0
-            ? { categoryId: { in: categorySlugIds } }
-            : { categoryId: { in: [] } }
-          : {}),
-        ...(nameGroupParam
-          ? {
-              categoryId: categoryIdParam || undefined,
-              name: { equals: nameGroupParam, mode: "insensitive" as const }
-            }
-          : {}),
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" as const } },
-                { inventoryNumber: { contains: q, mode: "insensitive" as const } },
-                { serialNumber: { contains: q, mode: "insensitive" as const } },
-                { qrCode: { contains: q, mode: "insensitive" as const } }
-              ]
-            }
-          : {})
-      }
+      baseScopeWhere,
+      ...(nameGroupIds !== undefined
+        ? [{ id: { in: nameGroupIds.length ? nameGroupIds : ["__none__"] } }]
+        : [])
     ]
   };
   const [total, rows] = await prisma.$transaction([

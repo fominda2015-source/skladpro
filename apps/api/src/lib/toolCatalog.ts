@@ -23,6 +23,12 @@ export const KIP_TOOL_CATEGORY = "КИП";
 export const TOWERS_LADDERS_TOOL_CATEGORY = "Туры и стремянки";
 export const OTHER_TOOL_CATEGORY = "Прочее";
 
+/** Базовое имя для группировки учётных единиц (убирает суффикс «(1/3)» от прихода). */
+export function normalizeToolNameForGroup(name: string): string {
+  const trimmed = String(name || "").trim() || "Без названия";
+  return trimmed.replace(/\s*\(\d+\/\d+\)\s*$/i, "").trim() || trimmed;
+}
+
 export const ALL_TOOL_CATEGORY_SLUGS = new Set<string>(Object.values(TOOL_CATEGORY_SLUGS));
 
 export function isManualToolCategoryName(name: string | null | undefined) {
