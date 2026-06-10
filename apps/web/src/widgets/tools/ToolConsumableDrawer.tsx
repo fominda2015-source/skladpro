@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
-import { formatMaterialQty } from "../../shared/quantity";
+import { formatMaterialQty, parseMaterialQty, sanitizeMaterialQtyInput } from "../../shared/quantity";
 import {
   consumableActionLabel,
   consumableCardStatusLabel,
@@ -8,7 +8,7 @@ import {
   type ToolCatalogConsumableDetail
 } from "./toolCatalog";
 
-type EditDraft = { name: string; unit: string; note: string };
+type EditDraft = { name: string; unit: string; note: string; quantity: string };
 
 type Props = {
   detail: ToolCatalogConsumableDetail | null;
@@ -51,7 +51,7 @@ export function ToolConsumableDrawer({
   safeName
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<EditDraft>({ name: "", unit: "", note: "" });
+  const [draft, setDraft] = useState<EditDraft>({ name: "", unit: "", note: "", quantity: "" });
 
   useEffect(() => {
     if (!detail) return;
@@ -59,9 +59,10 @@ export function ToolConsumableDrawer({
     setDraft({
       name: detail.name,
       unit: detail.unit,
-      note: detail.note ?? ""
+      note: detail.note ?? "",
+      quantity: String(parseMaterialQty(detail.quantity))
     });
-  }, [detail?.stockId, detail?.name, detail?.unit, detail?.note]);
+  }, [detail?.stockId, detail?.name, detail?.unit, detail?.note, detail?.quantity]);
 
   if (!detail && !loading) return null;
 
@@ -90,6 +91,15 @@ export function ToolConsumableDrawer({
               <input value={draft.unit} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} />
             </label>
             <label>
+              Кол-во ({draft.unit || detail?.unit || "шт"})
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draft.quantity}
+                onChange={(e) => setDraft((d) => ({ ...d, quantity: sanitizeMaterialQtyInput(e.target.value) }))}
+              />
+            </label>
+            <label>
               Примечание
               <input value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
             </label>
@@ -98,10 +108,12 @@ export function ToolConsumableDrawer({
             <button
               type="button"
               className="primaryBtn"
-              disabled={saving || !draft.name.trim() || !draft.unit.trim()}
+              disabled={saving || !draft.name.trim() || !draft.unit.trim() || draft.quantity === ""}
               onClick={() => {
                 void (async () => {
-                  const ok = await onSave(draft);
+                  const qty = parseMaterialQty(draft.quantity);
+                  if (draft.quantity === "" || qty < 0) return;
+                  const ok = await onSave({ ...draft, quantity: String(qty) });
                   if (ok) setEditing(false);
                 })();
               }}

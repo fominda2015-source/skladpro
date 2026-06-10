@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { parseMaterialQty } from "../../shared/quantity";
 import { ToolsListToolbar } from "./ToolsListToolbar";
 import { ToolConsumableActionModal, type ConsumableCardAction } from "./ToolConsumableActionModal";
 import { ToolConsumableDrawer } from "./ToolConsumableDrawer";
@@ -159,7 +160,10 @@ export function ToolConsumablesCatalogSection({
     }
   }
 
-  async function saveCard(stockId: string, patch: { name: string; unit: string; note: string }) {
+  async function saveCard(
+    stockId: string,
+    patch: { name: string; unit: string; note: string; quantity: string }
+  ) {
     if (!token) return false;
     setSaving(true);
     try {
@@ -169,7 +173,8 @@ export function ToolConsumablesCatalogSection({
         body: JSON.stringify({
           name: patch.name.trim(),
           unit: patch.unit.trim(),
-          note: patch.note.trim() || null
+          note: patch.note.trim() || null,
+          quantity: parseMaterialQty(patch.quantity)
         })
       });
       if (!res.ok) {

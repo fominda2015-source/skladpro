@@ -112,6 +112,7 @@ export function consumableActionLabel(action: string): string {
   const map: Record<string, string> = {
     CREATE: "Создание",
     EDIT: "Редактирование",
+    QTY_ADJUST: "Корректировка кол-ва",
     ISSUE: "Выдача",
     WRITE_OFF: "Списание",
     DISPUTE: "Спор",

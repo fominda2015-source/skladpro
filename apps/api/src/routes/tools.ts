@@ -17,7 +17,7 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
-import { materialQtyCoerceSchema, materialQtySchema } from "../lib/quantity.js";
+import { materialQtyAcceptedCoerceSchema, materialQtyCoerceSchema, materialQtySchema, qtyFromDb } from "../lib/quantity.js";
 import { buildMaterialCreateFromReceiptItem } from "../lib/receiptMaterialApply.js";
 import {
   CATALOG_MATERIAL_TOOL_SECTIONS,
@@ -1440,7 +1440,8 @@ async function recordConsumableCatalogEvent(
 const consumableCardPatchSchema = z.object({
   name: z.string().min(2).optional(),
   unit: z.string().min(1).optional(),
-  note: z.string().max(2000).nullable().optional()
+  note: z.string().max(2000).nullable().optional(),
+  quantity: materialQtyAcceptedCoerceSchema.optional()
 });
 
 const consumableCardActionSchema = z.object({
@@ -1518,31 +1519,61 @@ toolsRouter.patch("/catalog/consumables/card/:stockId", requirePermission("tools
         throw Object.assign(new Error("Карточка расходника не найдена"), { status: 404 });
       }
       assertWarehouseInScope(scope, stock.warehouseId);
-      if (parsed.data.name != null || parsed.data.unit != null) {
+      const nameChanged = parsed.data.name != null && parsed.data.name.trim() !== stock.material.name;
+      const unitChanged = parsed.data.unit != null && parsed.data.unit.trim() !== stock.material.unit;
+      const noteChanged = parsed.data.note !== undefined && parsed.data.note !== stock.catalogNote;
+      const metaChanged = nameChanged || unitChanged || noteChanged;
+      if (parsed.data.quantity != null) {
+        const prevQty = qtyFromDb(stock.quantity);
+        const nextQty = parsed.data.quantity;
+        const reserved = qtyFromDb(stock.reserved);
+        if (nextQty < reserved) {
+          throw Object.assign(new Error(`Остаток не может быть меньше резерва (${reserved})`), { status: 400 });
+        }
+        if (nextQty !== prevQty) {
+          await tx.stock.update({
+            where: { id: stockId },
+            data: { quantity: nextQty }
+          });
+          await recordConsumableCatalogEvent(tx, {
+            stockId,
+            materialId: stock.materialId,
+            warehouseId: stock.warehouseId,
+            section: stock.section,
+            condition: stock.condition,
+            action: "QTY_ADJUST",
+            comment: `Кол-во: ${prevQty} → ${nextQty} ${stock.material.unit}`,
+            actorId: req.user!.userId
+          });
+        }
+      }
+      if (nameChanged || unitChanged) {
         await tx.material.update({
           where: { id: stock.materialId },
           data: {
-            ...(parsed.data.name != null ? { name: parsed.data.name.trim() } : {}),
-            ...(parsed.data.unit != null ? { unit: parsed.data.unit.trim() } : {})
+            ...(nameChanged ? { name: parsed.data.name!.trim() } : {}),
+            ...(unitChanged ? { unit: parsed.data.unit!.trim() } : {})
           }
         });
       }
-      if (parsed.data.note !== undefined) {
+      if (noteChanged) {
         await tx.stock.update({
           where: { id: stockId },
           data: { catalogNote: parsed.data.note }
         });
       }
-      await recordConsumableCatalogEvent(tx, {
-        stockId,
-        materialId: stock.materialId,
-        warehouseId: stock.warehouseId,
-        section: stock.section,
-        condition: stock.condition,
-        action: "EDIT",
-        comment: "Изменены данные карточки",
-        actorId: req.user!.userId
-      });
+      if (metaChanged) {
+        await recordConsumableCatalogEvent(tx, {
+          stockId,
+          materialId: stock.materialId,
+          warehouseId: stock.warehouseId,
+          section: stock.section,
+          condition: stock.condition,
+          action: "EDIT",
+          comment: "Изменены данные карточки",
+          actorId: req.user!.userId
+        });
+      }
       return tx.stock.findUnique({
         where: { id: stockId },
         include: {
