@@ -115,7 +115,6 @@ import {
   TOOL_CATEGORY_SLUGS,
   type ToolsNavId,
   isCatalogMaterialCategorySlug,
-  isElectricToolCategorySlug,
   receiptCategoryToToolsNav,
   slugToCatalogMaterialSection
 } from "./widgets/tools/toolCatalog";

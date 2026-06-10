@@ -23,7 +23,6 @@ type Props = {
 
 export function ElectricToolIssueWizardModal({
   open,
-  toolIds,
   toolLabel,
   warehouseId,
   section,
