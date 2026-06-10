@@ -3388,7 +3388,7 @@ function App() {
   }
 
   async function saveReceiptAdminItemQty(row: ReceiptRequestRow, itemId: string): Promise<boolean> {
-    if (!token || !isAdmin) return false;
+    if (!token || !canWriteOperations) return false;
     const draft = getReceiptAdminQtyDraft(row.id, row.items.find((x) => x.id === itemId)!);
     const acceptedQty = parseMaterialQty(draft.acceptedQty);
     const quantity = parseMaterialQty(draft.quantity);
@@ -3435,6 +3435,7 @@ function App() {
       } else {
         await loadReceiptRequests(row.section, row.warehouseId);
       }
+      await loadStocks(q, row.section).catch(() => undefined);
       setReceiptAdminQtyDrafts((prev) => {
         const next = { ...prev };
         const rowDrafts = { ...(next[row.id] || {}) };
@@ -3443,7 +3444,7 @@ function App() {
         else delete next[row.id];
         return next;
       });
-      setOpsMessage("Количества по позиции обновлены");
+      setOpsMessage("Количества по позиции обновлены — остаток на складе скорректирован при изменении «принято»");
       return true;
     } finally {
       setReceiptQtySaving((prev) => {
@@ -7312,7 +7313,7 @@ function App() {
                         const unit = it.sourceUnit || "шт";
                         const saveKey = `${row.id}:${it.id}`;
                         const saving = Boolean(receiptQtySaving[saveKey]);
-                        if (!isAdmin || finished) {
+                        if (!canWriteOperations || finished) {
                           return (
                             <>
                               <strong>
@@ -7342,7 +7343,7 @@ function App() {
                           <div
                             className="receiptQtyAdminEdit"
                             style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}
-                            title="Только админ: правка принято/план в заявке (склад не меняется)"
+                            title="Правка принято/план: остаток на складе корректируется вместе с «принято»"
                           >
                             <input
                               type="number"

@@ -111,7 +111,7 @@ export const TOOLS_HUB_CARDS: HubCardDef[] = [
 /** Разделы каталога для складских материалов (не учётных единиц Tool). */
 export const CATALOG_MATERIAL_SECTIONS = [
   { value: "PPE" as const, label: "СИЗ" },
-  { value: "TOOL_CONSUMABLE" as const, label: "Расходники" },
+  { value: "TOOL_CONSUMABLE" as const, label: "Расходники для инструмента" },
   { value: "KIP" as const, label: "КИП" },
   { value: "TOWERS_LADDERS" as const, label: "Туры и стремянки" },
   { value: "OTHER" as const, label: "Прочее" }

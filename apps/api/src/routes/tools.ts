@@ -1186,7 +1186,7 @@ toolsRouter.patch(
     });
     const sectionRu: Record<string, string> = {
       PPE: "СИЗ",
-      TOOL_CONSUMABLE: "Расходники",
+      TOOL_CONSUMABLE: "Расходники для инструмента",
       KIP: "КИП",
       TOWERS_LADDERS: "Туры и стремянки",
       OTHER: "Прочее"

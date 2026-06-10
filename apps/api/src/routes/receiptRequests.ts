@@ -1995,9 +1995,6 @@ receiptRequestsRouter.patch(
   "/:id/items/:itemId/admin-qty",
   requirePermission("operations.write"),
   async (req: AuthedRequest, res) => {
-    if (!isAdminEquivalent(req.user?.role)) {
-      return res.status(403).json({ error: "ADMIN_ONLY", message: "Только администратор может править принято/план" });
-    }
     const receiptId = String(req.params.id);
     const itemId = String(req.params.itemId);
     const parsed = adminReceiptItemQtySchema.safeParse(req.body ?? {});
@@ -2037,13 +2034,90 @@ receiptRequestsRouter.patch(
       quantity: receiptPlannedQty(item.quantity),
       acceptedQty: receiptAcceptedQty(item.acceptedQty)
     };
-    await prisma.receiptRequestItem.update({
-      where: { id: itemId },
-      data: {
-        ...(parsed.data.quantity !== undefined ? { quantity: nextQty } : {}),
-        ...(parsed.data.acceptedQty !== undefined ? { acceptedQty: nextAccepted } : {})
+    const acceptedDelta = nextAccepted - before.acceptedQty;
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.receiptRequestItem.update({
+          where: { id: itemId },
+          data: {
+            ...(parsed.data.quantity !== undefined ? { quantity: nextQty } : {}),
+            ...(parsed.data.acceptedQty !== undefined ? { acceptedQty: nextAccepted } : {})
+          }
+        });
+
+        const materialId = item.mappedMaterialId;
+        const itemCategory = item.category;
+        if (
+          acceptedDelta !== 0 &&
+          materialId &&
+          !isToolInventoryReceiptCategory(itemCategory) &&
+          !receiptCategoryToCampCategory(itemCategory)
+        ) {
+          const stockKey = {
+            warehouseId_materialId_section_condition: {
+              warehouseId: row.warehouseId,
+              materialId,
+              section: row.section,
+              condition: StockCondition.NEW
+            }
+          };
+          const stock = await tx.stock.findUnique({ where: stockKey });
+          if (acceptedDelta < 0) {
+            const dec = -acceptedDelta;
+            if (!stock || Number(stock.quantity) + 1e-6 < dec) {
+              throw Object.assign(
+                new Error(
+                  "Недостаточно остатка на складе для уменьшения принятого количества — возможно, часть уже выдана"
+                ),
+                { status: 409 }
+              );
+            }
+            await tx.stock.update({
+              where: stockKey,
+              data: { quantity: { decrement: dec } }
+            });
+          } else {
+            if (stock) {
+              await tx.stock.update({
+                where: stockKey,
+                data: { quantity: { increment: acceptedDelta } }
+              });
+            } else {
+              await tx.stock.create({
+                data: {
+                  warehouseId: row.warehouseId,
+                  materialId,
+                  section: row.section,
+                  condition: StockCondition.NEW,
+                  quantity: acceptedDelta,
+                  reserved: 0
+                }
+              });
+            }
+          }
+          await tx.stockMovement.create({
+            data: {
+              warehouseId: row.warehouseId,
+              materialId,
+              quantity: Math.abs(acceptedDelta),
+              direction: acceptedDelta > 0 ? StockMovementDirection.IN : StockMovementDirection.OUT,
+              sourceDocumentType: "RECEIPT_QTY_CORRECTION",
+              sourceDocumentId: itemId,
+              note: `Коррекция принятого по заявке ${row.number}: ${parsed.data.reason}`,
+              createdById: req.user!.userId
+            }
+          });
+        }
+      });
+    } catch (error) {
+      const err = error as Error & { status?: number };
+      if (err.status === 409) {
+        return res.status(409).json({ error: err.message });
       }
-    });
+      throw error;
+    }
+
     await reconcileReceiptRequestStatus(receiptId);
     const receiptRequest = await loadSerializedReceiptRequest(receiptId);
     await recordAudit({
@@ -2051,7 +2125,7 @@ receiptRequestsRouter.patch(
       action: "RECEIPT_ITEM_QTY_ADMIN_EDIT",
       entityType: "ReceiptRequestItem",
       entityId: itemId,
-      summary: `Админ: правка принято/план по «${item.sourceName}» в заявке ${row.number}. ${parsed.data.reason}`,
+      summary: `Правка принято/план по «${item.sourceName}» в заявке ${row.number}. ${parsed.data.reason}`,
       before,
       after: { quantity: nextQty, acceptedQty: nextAccepted, reason: parsed.data.reason }
     });
