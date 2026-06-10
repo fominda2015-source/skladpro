@@ -52,6 +52,7 @@ import {
 } from "../lib/receiptMaterialApply.js";
 import {
   createToolsFromReceiptAccept,
+  isToolCatalogMaterialReceiptCategory,
   isToolCatalogReceiptCategory,
   isToolInventoryReceiptCategory,
   resolveToolCategoryIdFromReceipt
@@ -1362,7 +1363,7 @@ receiptRequestsRouter.post(
             if (r.campCategory || !r.materialId) return false;
             const m = acceptItemMappings.find((x) => x.itemId === r.item.id);
             const cat = m?.category ?? r.item.category ?? null;
-            return !isToolInventoryReceiptCategory(cat);
+            return !isToolInventoryReceiptCategory(cat) && !isToolCatalogMaterialReceiptCategory(cat);
           });
       const operation =
         stockResolved.length > 0
@@ -1408,7 +1409,9 @@ receiptRequestsRouter.post(
             ? (mapping?.factLabelUnit?.trim() || mapping?.newMaterialUnit?.trim() || r.sourceUnit || "шт")
             : null;
 
-        if (!campCategory && !toolInventory && row.objectLimitTemplateId && r.materialId) {
+        const toolCatalogMaterial = isToolCatalogMaterialReceiptCategory(itemCategory);
+
+        if (!campCategory && !toolInventory && !toolCatalogMaterial && row.objectLimitTemplateId && r.materialId) {
           limitNodeId = await resolveReceiptAcceptLimitNode(tx, row.objectLimitTemplateId, r.item, {
             explicitLimitNodeId: mapping?.limitNodeId ?? null,
             materialId: r.materialId,
@@ -1416,7 +1419,14 @@ receiptRequestsRouter.post(
             acceptedQty: r.acceptedQty
           });
           r.limitNodeId = limitNodeId;
-        } else if (!campCategory && !toolInventory && !row.fromLimit && !row.objectLimitTemplateId && r.materialId) {
+        } else if (
+          !campCategory &&
+          !toolInventory &&
+          !toolCatalogMaterial &&
+          !row.fromLimit &&
+          !row.objectLimitTemplateId &&
+          r.materialId
+        ) {
           const activeTemplateId = await getActiveLimitTemplateId(tx, row.warehouseId, row.section);
           if (activeTemplateId) {
             const meta = analyzeCatalogNames(
@@ -1442,7 +1452,7 @@ receiptRequestsRouter.post(
               await attachMaterialToLimitNode(tx, oobNodeId, r.materialId);
             }
           }
-        } else if (!campCategory && !toolInventory && limitNodeId && r.materialId) {
+        } else if (!campCategory && !toolInventory && !toolCatalogMaterial && limitNodeId && r.materialId) {
           await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
         }
 
@@ -1538,8 +1548,9 @@ receiptRequestsRouter.post(
           });
         }
 
+        if (parsed.data.skipWarehouseStock) continue;
+
         const { storageRoom, storageCell } = parseReceiptStoragePlace(storagePlaceRaw);
-        if (!operation || parsed.data.skipWarehouseStock) continue;
         await tx.stock.upsert({
           where: {
             warehouseId_materialId_section_condition: {
@@ -1565,38 +1576,53 @@ receiptRequestsRouter.post(
             ...(storageCell ? { storageCell } : {})
           }
         });
-        await tx.stockMovement.create({
-          data: {
-            warehouseId: row.warehouseId,
-            materialId,
-            quantity: r.acceptedQty,
-            direction: StockMovementDirection.IN,
-            sourceDocumentType: "OPERATION",
-            sourceDocumentId: operation.id,
-            operationId: operation.id,
-            createdById: req.user!.userId
-          }
-        });
-        await upsertWarehouseMaterialMapping(tx, {
-          warehouseId: row.warehouseId,
-          section: row.section,
-          sourceName: r.item.sourceName,
-          sourceUnit: r.item.sourceUnit || "",
-          targetMaterialId: materialId,
-          createdById: req.user!.userId
-        });
-        if (factLabel) {
+
+        if (toolCatalogMaterial) {
+          await tx.stockMovement.create({
+            data: {
+              warehouseId: row.warehouseId,
+              materialId,
+              quantity: r.acceptedQty,
+              direction: StockMovementDirection.IN,
+              sourceDocumentType: "RECEIPT_REQUEST",
+              sourceDocumentId: row.id,
+              createdById: req.user!.userId
+            }
+          });
+        } else if (operation) {
+          await tx.stockMovement.create({
+            data: {
+              warehouseId: row.warehouseId,
+              materialId,
+              quantity: r.acceptedQty,
+              direction: StockMovementDirection.IN,
+              sourceDocumentType: "OPERATION",
+              sourceDocumentId: operation.id,
+              operationId: operation.id,
+              createdById: req.user!.userId
+            }
+          });
           await upsertWarehouseMaterialMapping(tx, {
             warehouseId: row.warehouseId,
             section: row.section,
-            sourceName: factLabel,
-            sourceUnit: factUnit || r.sourceUnit || "шт",
+            sourceName: r.item.sourceName,
+            sourceUnit: r.item.sourceUnit || "",
             targetMaterialId: materialId,
             createdById: req.user!.userId
           });
+          if (factLabel) {
+            await upsertWarehouseMaterialMapping(tx, {
+              warehouseId: row.warehouseId,
+              section: row.section,
+              sourceName: factLabel,
+              sourceUnit: factUnit || r.sourceUnit || "шт",
+              targetMaterialId: materialId,
+              createdById: req.user!.userId
+            });
+          }
         }
 
-        if (row.objectLimitTemplateId && materialId && r.limitNodeId && mapping) {
+        if (!toolCatalogMaterial && row.objectLimitTemplateId && materialId && r.limitNodeId && mapping) {
           const allTree = await tx.objectLimitNode.findMany({
             where: { templateId: row.objectLimitTemplateId },
             select: { id: true, parentId: true, title: true, indexLabel: true }

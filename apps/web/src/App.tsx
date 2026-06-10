@@ -209,6 +209,7 @@ type StockRow = {
   materialUnit: string;
   materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
   materialCategory?: string | null;
+  materialToolCatalogSection?: string | null;
   unitPrice?: number | null;
   quantity: number;
   reserved: number;
@@ -1463,17 +1464,22 @@ function App() {
 
   const limitFilterEnabled = limitTemplates.length > 0 && (limitMaterialIdSet.size > 0 || limitMaterialNameSet.size > 0);
 
+  const warehouseStockRows = useMemo(
+    () => stocks.filter((row) => !row.materialToolCatalogSection),
+    [stocks]
+  );
+
   const warehouseVisibleRows = useMemo(() => {
-    if (!limitFilterEnabled) return stocks;
+    if (!limitFilterEnabled) return warehouseStockRows;
 
     const normalize = (v: string) => v.trim().toLowerCase();
     const isLimitRow = (row: StockRow) =>
       limitMaterialIdSet.has(row.materialId) || limitMaterialNameSet.has(normalize(row.materialName));
 
-    return showAttachedMaterials ? stocks : stocks.filter(isLimitRow);
+    return showAttachedMaterials ? warehouseStockRows : warehouseStockRows.filter(isLimitRow);
   }, [
     limitFilterEnabled,
-    stocks,
+    warehouseStockRows,
     showAttachedMaterials,
     limitMaterialIdSet,
     limitMaterialNameSet
@@ -1562,6 +1568,13 @@ function App() {
     for (const s of stocks) {
       if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
       const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+      if (s.materialToolCatalogSection) {
+        const sec = s.materialToolCatalogSection;
+        const allowedInDomain =
+          (issueIssuesDomain === "WORKWEAR" && sec === "PPE") ||
+          (issueIssuesDomain === "CONSUMABLES" && sec === "TOOL_CONSUMABLE");
+        if (!allowedInDomain) continue;
+      }
       if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
       if (issueIssuesDomain === "CONSUMABLES" && mk !== "CONSUMABLE") continue;
       if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;

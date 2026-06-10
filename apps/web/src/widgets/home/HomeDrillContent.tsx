@@ -61,6 +61,7 @@ type StockApiRow = {
   materialSku: string | null;
   materialUnit: string;
   materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+  materialToolCatalogSection?: string | null;
   unitPrice?: number | null;
   quantity: number;
   reserved: number;
@@ -399,6 +400,7 @@ function HomeDrillStockPanel({
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows
+      .filter((r) => !r.materialToolCatalogSection)
       .filter((r) => {
         if (!q) return true;
         return (

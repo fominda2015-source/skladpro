@@ -186,6 +186,11 @@ export function isMaterialNav(nav: ToolsNavId): boolean {
   return navToMaterialSection(nav) != null;
 }
 
+/** Разделы каталога только со складскими материалами (без учётных единиц Tool). */
+export function isPureMaterialCatalogNav(nav: ToolsNavId): boolean {
+  return nav === "ppe" || nav === "tool-consumable" || nav === "kip";
+}
+
 const CATALOG_MATERIAL_SLUGS = new Set<string>([
   TOOL_CATEGORY_SLUGS.PPE,
   TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE,

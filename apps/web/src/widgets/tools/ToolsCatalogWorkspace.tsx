@@ -14,6 +14,7 @@ import {
   type ToolCatalogSummary,
   type ToolsNavId,
   isMaterialNav,
+  isPureMaterialCatalogNav,
   navToMaterialSection,
   showToolsInventoryList,
   toolsNavTitle,
@@ -139,7 +140,9 @@ export function ToolsCatalogWorkspace({
 
   const showGroupCards = usesToolNameGroupCards(current) && !toolsListGroupFilter;
   const showToolList =
-    showToolsInventoryList(navPath) && (!usesToolNameGroupCards(current) || Boolean(toolsListGroupFilter));
+    showToolsInventoryList(navPath) &&
+    !isPureMaterialCatalogNav(current) &&
+    (!usesToolNameGroupCards(current) || Boolean(toolsListGroupFilter));
 
   const hubStats = useMemo(() => (summary ? buildToolsHubStats(summary) : undefined), [summary]);
 

@@ -259,6 +259,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       materialUnit: row.material.unit,
       materialKind: row.material.kind,
       materialCategory: row.material.category,
+      materialToolCatalogSection: row.material.toolCatalogSection,
       unitPrice: row.material.unitPrice != null ? Number(row.material.unitPrice) : null,
       quantity: qty,
       reserved,
