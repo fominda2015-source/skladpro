@@ -888,7 +888,7 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
       inRepair: subset.filter((t) => t.status === ToolStatus.IN_REPAIR).length
     };
   };
-  const materialSections: ToolCatalogSection[] = ["TOOL_CONSUMABLE", "KIP"];
+  const materialSections: ToolCatalogSection[] = ["TOOL_CONSUMABLE"];
   const stocks = await prisma.stock.findMany({
     where: {
       ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
@@ -927,16 +927,7 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
         inRepair: t.inRepair
       };
     })(),
-    kip: (() => {
-      const t = countBySlug([TOOL_CATEGORY_SLUGS.KIP]);
-      return {
-        count: matCounts.KIP.count + t.count,
-        qty: matCounts.KIP.qty,
-        inStock: t.inStock,
-        issued: t.issued,
-        inRepair: t.inRepair
-      };
-    })(),
+    kip: countBySlug([TOOL_CATEGORY_SLUGS.KIP]),
     towersLadders: countBySlug([TOOL_CATEGORY_SLUGS.TOWERS_LADDERS]),
     other: countBySlug([TOOL_CATEGORY_SLUGS.OTHER])
   });

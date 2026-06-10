@@ -12,6 +12,7 @@ export function isToolInventoryReceiptCategory(cat: ReceiptItemCategory | null |
     cat === "TOOL_ELECTRIC_CORDLESS" ||
     cat === "TOOL_ELECTRIC_CORDED" ||
     cat === "PPE" ||
+    cat === "KIP" ||
     cat === "TOWERS_LADDERS" ||
     cat === "OTHER"
   );
@@ -22,7 +23,7 @@ export function isToolCatalogReceiptCategory(cat: ReceiptItemCategory | null | u
   return receiptCategoryToToolSection(cat) != null;
 }
 
-/** Категория прихода — складская позиция каталога (расходники, КИП…), не учётная единица Tool. */
+/** Категория прихода — складская позиция каталога (расходники), не учётная единица Tool. */
 export function isToolCatalogMaterialReceiptCategory(cat: ReceiptItemCategory | null | undefined): boolean {
   if (!cat || isToolInventoryReceiptCategory(cat)) return false;
   return receiptCategoryToToolSection(cat) != null;

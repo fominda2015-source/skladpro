@@ -96,7 +96,7 @@ import {
   writeReceiptAcceptDrafts,
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
-import { isPackReceiptUnit, receiptStockQtyPreview } from "./widgets/receipts/receiptUnits";
+import { receiptItemUsesPackUnit, receiptStockQtyPreview } from "./widgets/receipts/receiptUnits";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { TransfersTab } from "./widgets/transfers/TransfersTab";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
@@ -3643,7 +3643,7 @@ function App() {
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
       const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
-      const unit = explicitUnit || it.sourceUnit || "шт";
+      const unit = explicitUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
       const factLabel =
         explicitName && explicitName !== canonName ? explicitName : undefined;
       const priceRaw = (draft?.unitPrice ?? "").toString().trim().replace(",", ".");
@@ -3662,7 +3662,7 @@ function App() {
         unitPrice: priceNum != null && Number.isFinite(priceNum) ? priceNum : it.unitPrice != null ? Number(it.unitPrice) : null,
         storagePlace: (draft?.storagePlace ?? it.storagePlace ?? "").trim() || null
       };
-      if (isPackReceiptUnit(unit)) {
+      if (receiptItemUsesPackUnit(it.sourceUnit, unit)) {
         const perPack = parseMaterialQty(draft?.unitsPerPack);
         if (perPack <= 0) continue;
         mapping.unitsPerPack = perPack;
@@ -3911,8 +3911,8 @@ function App() {
       const it = freshRow.items.find((x) => x.id === m.itemId);
       if (!it) continue;
       const draft = acceptanceDrafts[freshRow.id]?.[it.id];
-      const unit = (draft?.newUnit || it.sourceUnit || "шт").trim();
-      if (isPackReceiptUnit(unit) && !m.unitsPerPack) {
+      const unit = (draft?.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт").trim();
+      if (receiptItemUsesPackUnit(it.sourceUnit, unit) && !m.unitsPerPack) {
         setOpsMessage(`Укажите количество в упаковке для «${it.sourceName}»`);
         return false;
       }
@@ -7741,7 +7741,7 @@ function App() {
                                   const defaultName = draft.newName ?? "";
                                   const defaultUnit =
                                     draft.newUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
-                                  const packUnit = isPackReceiptUnit(defaultUnit);
+                                  const packUnit = receiptItemUsesPackUnit(it.sourceUnit, defaultUnit);
                                   const stockPreview = packUnit
                                     ? receiptStockQtyPreview(draft.qty, draft.unitsPerPack)
                                     : null;

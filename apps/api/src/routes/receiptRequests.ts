@@ -42,7 +42,10 @@ import {
   receiptItemRemaining,
   receiptPlannedQty
 } from "../lib/receiptQty.js";
-import { isPackReceiptUnit, resolveReceiptStockQty } from "../lib/receiptUnits.js";
+import {
+  receiptItemUsesPackUnit,
+  resolveReceiptStockQty
+} from "../lib/receiptUnits.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
@@ -1205,7 +1208,7 @@ receiptRequestsRouter.post(
       }
       const bindLimitNodeId = m.limitNodeId ?? it.limitNodeId ?? null;
       const unitHint = m.newMaterialUnit?.trim() || m.factLabelUnit?.trim() || it.sourceUnit || "шт";
-      if (isPackReceiptUnit(unitHint) && (m.unitsPerPack == null || m.unitsPerPack <= 0)) {
+      if (receiptItemUsesPackUnit(it.sourceUnit, unitHint) && (m.unitsPerPack == null || m.unitsPerPack <= 0)) {
         return res.status(400).json({
           error: `Укажите количество в упаковке (шт/уп) для «${it.sourceName}»`
         });
@@ -1214,7 +1217,8 @@ receiptRequestsRouter.post(
       try {
         acceptStockQty = resolveReceiptStockQty({
           acceptedQty: m.acceptedQty,
-          sourceUnit: unitHint,
+          orderUnit: it.sourceUnit,
+          displayUnit: unitHint,
           unitsPerPack: m.unitsPerPack
         }).stockQty;
       } catch (e) {
@@ -1268,7 +1272,7 @@ receiptRequestsRouter.post(
           });
           const spread = spreadInfo.suggestions.otherSections;
           const stockNote =
-            isPackReceiptUnit(unitHint) && m.unitsPerPack
+            receiptItemUsesPackUnit(it.sourceUnit, unitHint) && m.unitsPerPack
               ? ` (${m.acceptedQty} уп × ${m.unitsPerPack} = ${acceptStockQty} шт на склад)`
               : "";
           if (spread.length > 0 && !m.spreadLimitNodeId) {
@@ -1381,7 +1385,8 @@ receiptRequestsRouter.post(
         try {
           stockQty = resolveReceiptStockQty({
             acceptedQty,
-            sourceUnit: unitHint,
+            orderUnit: it.sourceUnit,
+            displayUnit: unitHint,
             unitsPerPack: m.unitsPerPack
           }).stockQty;
         } catch (e) {
@@ -1603,7 +1608,7 @@ receiptRequestsRouter.post(
             data: materialPatch
           });
         }
-        if (isPackReceiptUnit(r.sourceUnit) && mapping?.unitsPerPack) {
+        if (receiptItemUsesPackUnit(r.item.sourceUnit, r.sourceUnit) && mapping?.unitsPerPack) {
           await tx.material.update({
             where: { id: materialId },
             data: { unit: "шт" }

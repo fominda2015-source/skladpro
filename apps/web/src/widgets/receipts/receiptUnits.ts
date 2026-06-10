@@ -9,6 +9,14 @@ export function isPackReceiptUnit(unit: string | null | undefined): boolean {
   return u.includes("упак");
 }
 
+/** Упаковка по заявке/УПД, даже если карточка материала уже в «шт». */
+export function receiptItemUsesPackUnit(
+  orderUnit: string | null | undefined,
+  displayUnit?: string | null | undefined
+): boolean {
+  return isPackReceiptUnit(orderUnit) || isPackReceiptUnit(displayUnit);
+}
+
 export function receiptStockQtyPreview(packQty: unknown, unitsPerPack: unknown): number | null {
   const packs = parseMaterialQty(packQty);
   const perPack = parseMaterialQty(unitsPerPack);

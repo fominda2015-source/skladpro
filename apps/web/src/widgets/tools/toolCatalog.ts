@@ -18,7 +18,7 @@ export type ToolCatalogSummary = {
   toolElectricCorded: { count: number; inStock: number; issued: number; inRepair: number };
   ppe: ToolCountStats;
   toolConsumable: { count: number; qty: number };
-  kip: { count: number; qty: number };
+  kip: ToolCountStats;
   towersLadders: ToolCountStats;
   other: ToolCountStats;
 };
@@ -160,21 +160,20 @@ export const TOOLS_HUB_CARDS: HubCardDef[] = [
   { id: "tool", label: "Инструмент", icon: "🛠️", hint: "Ручной и электрический" },
   { id: "ppe", label: "СИЗ", icon: "🦺", hint: "Учётные единицы с инв. № и QR" },
   { id: "tool-consumable", label: "Расходники для инструмента", icon: "📦", hint: "Карточки с количеством на объекте" },
-  { id: "kip", label: "КИП", icon: "📊", hint: "Контрольно-измерительные приборы" },
+  { id: "kip", label: "КИП", icon: "📊", hint: "Учётные единицы с инв. № и QR" },
   { id: "towers-ladders", label: "Туры и стремянки", icon: "🪜", hint: "Учётные единицы с инв. № и QR" },
   { id: "other", label: "Прочее", icon: "📁", hint: "Учётные единицы с инв. № и QR" }
 ];
 
-/** Разделы каталога для складских материалов (кол-во на объекте). СИЗ, туры и прочее — учётные единицы Tool. */
+/** Разделы каталога для складских материалов (кол-во на объекте). СИЗ, КИП, туры и прочее — учётные единицы Tool. */
 export const CATALOG_MATERIAL_SECTIONS = [
-  { value: "TOOL_CONSUMABLE" as const, label: "Расходники для инструмента" },
-  { value: "KIP" as const, label: "КИП" }
+  { value: "TOOL_CONSUMABLE" as const, label: "Расходники для инструмента" }
 ];
 
 export type CatalogMaterialSection = (typeof CATALOG_MATERIAL_SECTIONS)[number]["value"];
 
 /** Устаревшие разделы материалов (остатки до перехода на учётные единицы). */
-export type LegacyCatalogMaterialSection = "TOWERS_LADDERS" | "OTHER";
+export type LegacyCatalogMaterialSection = "KIP" | "TOWERS_LADDERS" | "OTHER";
 
 export type ApiCatalogMaterialSection = CatalogMaterialSection | LegacyCatalogMaterialSection;
 
@@ -249,12 +248,12 @@ export function shouldLoadToolsInventoryList(navPath: ToolsNavId[], hasGroupFilt
 
 export function navToMaterialSection(nav: ToolsNavId): string | null {
   if (nav === "tool-consumable") return "TOOL_CONSUMABLE";
-  if (nav === "kip") return "KIP";
   return null;
 }
 
 /** Старые остатки, ошибочно заведённые как материалы (до перехода на учётные единицы). */
 export function legacyMaterialCatalogSection(nav: ToolsNavId): LegacyCatalogMaterialSection | null {
+  if (nav === "kip") return "KIP";
   if (nav === "towers-ladders") return "TOWERS_LADDERS";
   if (nav === "other") return "OTHER";
   return null;
@@ -264,12 +263,12 @@ export function isMaterialNav(nav: ToolsNavId): boolean {
   return navToMaterialSection(nav) != null && !isConsumableCatalogNav(nav);
 }
 
-/** Разделы каталога только со складскими материалами (без учётных единиц Tool). */
-export function isPureMaterialCatalogNav(nav: ToolsNavId): boolean {
-  return nav === "kip";
+/** @deprecated только расходники — материальный каталог; КИП переведён на учётные единицы */
+export function isPureMaterialCatalogNav(_nav: ToolsNavId): boolean {
+  return false;
 }
 
-const CATALOG_MATERIAL_SLUGS = new Set<string>([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE, TOOL_CATEGORY_SLUGS.KIP]);
+const CATALOG_MATERIAL_SLUGS = new Set<string>([TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE]);
 
 export function isCatalogMaterialCategorySlug(slug: string | null | undefined): boolean {
   return CATALOG_MATERIAL_SLUGS.has(String(slug || "").toLowerCase());

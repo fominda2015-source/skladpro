@@ -12,14 +12,29 @@ export function isPackReceiptUnit(unit: string | null | undefined): boolean {
 
 export const unitsPerPackSchema = materialQtyCoerceSchema;
 
+/** Приёмка в упаковках: по единице из заявки/УПД, не по «шт» карточки материала. */
+export function receiptItemUsesPackUnit(
+  orderUnit: string | null | undefined,
+  displayUnit?: string | null | undefined
+): boolean {
+  return isPackReceiptUnit(orderUnit) || isPackReceiptUnit(displayUnit);
+}
+
 /** Кол-во для склада: упаковки × штук в упаковке. */
 export function resolveReceiptStockQty(opts: {
   acceptedQty: number;
-  sourceUnit: string;
+  /** Ед. изм. строки заявки / УПД — главный признак упаковки. */
+  orderUnit?: string | null;
+  /** Ед. изм. в форме приёмки (карточка материала может быть «шт»). */
+  displayUnit?: string | null;
+  /** @deprecated используйте orderUnit + displayUnit */
+  sourceUnit?: string;
   unitsPerPack?: number | null;
 }): { stockQty: number; unitsPerPack: number | null } {
   const acceptedQty = Math.max(0, Math.round(opts.acceptedQty));
-  if (!isPackReceiptUnit(opts.sourceUnit)) {
+  const orderUnit = opts.orderUnit ?? opts.sourceUnit ?? "";
+  const displayUnit = opts.displayUnit ?? opts.sourceUnit ?? "";
+  if (!receiptItemUsesPackUnit(orderUnit, displayUnit)) {
     return { stockQty: acceptedQty, unitsPerPack: null };
   }
   const perPack =
