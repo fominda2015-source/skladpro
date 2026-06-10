@@ -102,6 +102,30 @@ export function normalizeToolKitFields(
   return { kitComplete: false, kitMissingNote: note };
 }
 
+export function toolCatalogSectionToReceiptCategory(
+  section: ToolCatalogSection
+): ReceiptItemCategory {
+  const map: Record<ToolCatalogSection, ReceiptItemCategory> = {
+    TOOL_MANUAL: "TOOL_MANUAL",
+    TOOL_ELECTRIC_CORDLESS: "TOOL_ELECTRIC_CORDLESS",
+    TOOL_ELECTRIC_CORDED: "TOOL_ELECTRIC_CORDED",
+    PPE: "PPE",
+    TOOL_CONSUMABLE: "TOOL_CONSUMABLE",
+    KIP: "KIP",
+    TOWERS_LADDERS: "TOWERS_LADDERS",
+    OTHER: "OTHER"
+  };
+  return map[section];
+}
+
+export const CATALOG_MATERIAL_TOOL_SECTIONS = [
+  "PPE",
+  "TOOL_CONSUMABLE",
+  "KIP",
+  "TOWERS_LADDERS",
+  "OTHER"
+] as const satisfies readonly ToolCatalogSection[];
+
 export function receiptCategoryToToolSection(
   cat: ReceiptItemCategory | null | undefined
 ): ToolCatalogSection | null {

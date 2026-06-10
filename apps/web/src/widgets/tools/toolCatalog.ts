@@ -186,6 +186,28 @@ export function isMaterialNav(nav: ToolsNavId): boolean {
   return navToMaterialSection(nav) != null;
 }
 
+const CATALOG_MATERIAL_SLUGS = new Set<string>([
+  TOOL_CATEGORY_SLUGS.PPE,
+  TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE,
+  TOOL_CATEGORY_SLUGS.KIP,
+  TOOL_CATEGORY_SLUGS.TOWERS_LADDERS,
+  TOOL_CATEGORY_SLUGS.OTHER
+]);
+
+export function isCatalogMaterialCategorySlug(slug: string | null | undefined): boolean {
+  return CATALOG_MATERIAL_SLUGS.has(String(slug || "").toLowerCase());
+}
+
+export function slugToCatalogMaterialSection(slug: string | null | undefined): CatalogMaterialSection | null {
+  const s = String(slug || "").toLowerCase();
+  if (s === TOOL_CATEGORY_SLUGS.PPE) return "PPE";
+  if (s === TOOL_CATEGORY_SLUGS.TOOL_CONSUMABLE) return "TOOL_CONSUMABLE";
+  if (s === TOOL_CATEGORY_SLUGS.KIP) return "KIP";
+  if (s === TOOL_CATEGORY_SLUGS.TOWERS_LADDERS) return "TOWERS_LADDERS";
+  if (s === TOOL_CATEGORY_SLUGS.OTHER) return "OTHER";
+  return null;
+}
+
 export function isToolListNav(nav: ToolsNavId): boolean {
   return navToCategorySlug(nav) != null;
 }

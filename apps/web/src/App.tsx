@@ -109,9 +109,17 @@ import {
   navToCategorySlug,
   TOOL_CATEGORY_SLUGS,
   type ToolsNavId,
+  isCatalogMaterialCategorySlug,
   isElectricToolCategorySlug,
-  receiptCategoryToToolsNav
+  receiptCategoryToToolsNav,
+  slugToCatalogMaterialSection
 } from "./widgets/tools/toolCatalog";
+import {
+  WAREHOUSE_RECEIPT_CATEGORY_OPTIONS,
+  warehouseStockRowMatchesTab,
+  type WarehouseReceiptCategory,
+  type WarehouseStockKindTab
+} from "./widgets/warehouse/warehouseStockCategory";
 import { ToolsListToolbar } from "./widgets/tools/ToolsListToolbar";
 import { ToolsInventoryBlock } from "./widgets/tools/ToolsInventoryBlock";
 import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
@@ -200,6 +208,7 @@ type StockRow = {
   materialSku: string | null;
   materialUnit: string;
   materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+  materialCategory?: string | null;
   unitPrice?: number | null;
   quantity: number;
   reserved: number;
@@ -742,14 +751,14 @@ function App() {
   const [stockOnlyLow, setStockOnlyLow] = useState(false);
   const [stockOnlyWithFactNames, setStockOnlyWithFactNames] = useState(false);
   /** Вкладка вида номенклатуры на экране «Склад». */
-  const [stockShelfKindTab, setStockShelfKindTab] = useState<"ALL" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR">("ALL");
+  const [stockShelfKindTab, setStockShelfKindTab] = useState<WarehouseStockKindTab>("ALL");
   const [manualStockWarehouseOverride, setManualStockWarehouseOverride] = useState("");
   const [manualStockName, setManualStockName] = useState("");
   const [manualStockQty, setManualStockQty] = useState("1");
   const [manualStockUnit, setManualStockUnit] = useState("шт");
   const [manualStockBusy, setManualStockBusy] = useState(false);
   const [manualStockMessage, setManualStockMessage] = useState("");
-  const [manualStockKind, setManualStockKind] = useState<"MATERIAL" | "CONSUMABLE" | "WORKWEAR">("MATERIAL");
+  const [manualStockCategory, setManualStockCategory] = useState<WarehouseReceiptCategory>("EQUIPMENT");
   const [manualStockUnitPrice, setManualStockUnitPrice] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1074,6 +1083,10 @@ function App() {
   /** Объект в drill «Инструменты» на главной — отдельно от фильтра вкладки. */
   const [homeToolsDrillWarehouseId, setHomeToolsDrillWarehouseId] = useState<string | null>(null);
   const [toolManualModalOpen, setToolManualModalOpen] = useState(false);
+  const [toolMaterialQty, setToolMaterialQty] = useState("1");
+  const [toolMaterialUnit, setToolMaterialUnit] = useState("шт");
+  const [toolMaterialUnitPrice, setToolMaterialUnitPrice] = useState("");
+  const [toolsCatalogRefreshNonce, setToolsCatalogRefreshNonce] = useState(0);
   const [toolDetailModalId, setToolDetailModalId] = useState<string | null>(null);
   const [toolDrawerHomeOverlay, setToolDrawerHomeOverlay] = useState(false);
   const [toolDetailRecord, setToolDetailRecord] = useState<ToolItem | null>(null);
@@ -1504,7 +1517,7 @@ function App() {
   const warehouseDisplayRows = useMemo(() => {
     let rows = warehouseVisibleRows;
     if (stockShelfKindTab !== "ALL") {
-      rows = rows.filter((r) => (r.materialKind ?? "MATERIAL") === stockShelfKindTab);
+      rows = rows.filter((r) => warehouseStockRowMatchesTab(r, stockShelfKindTab));
     }
     if (stockFilterWarehouseId) {
       rows = rows.filter((r) => r.warehouseId === stockFilterWarehouseId);
@@ -1554,24 +1567,37 @@ function App() {
       if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
       const mid = s.materialId;
       const bucket = acceptedBySourceByTargetId.get(mid);
-      if (!bucket?.size) continue;
       const av = Number(s.available);
-      for (const v of bucket.values()) {
-        const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
+      if (bucket?.size) {
+        for (const v of bucket.values()) {
+          const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
+          out.push({
+            pickKey: `${mid}::upd:${encodeURIComponent(uk)}`,
+            materialId: mid,
+            factLabel: v.sourceName,
+            canonName: s.materialName,
+            unit: v.sourceUnit || s.materialUnit,
+            sku: s.materialSku,
+            available: av,
+            acceptedQty: v.quantity
+          });
+        }
+      } else {
         out.push({
-          pickKey: `${mid}::upd:${encodeURIComponent(uk)}`,
+          pickKey: `${mid}::card`,
           materialId: mid,
-          factLabel: v.sourceName,
+          factLabel: null,
           canonName: s.materialName,
-          unit: v.sourceUnit || s.materialUnit,
+          unit: s.materialUnit,
           sku: s.materialSku,
-          available: av,
-          acceptedQty: v.quantity
+          available: av
         });
       }
     }
     return out.sort((a, b) =>
-      (a.factLabel || "").localeCompare(b.factLabel || "", "ru", { sensitivity: "base" })
+      (a.factLabel || a.canonName || "").localeCompare(b.factLabel || b.canonName || "", "ru", {
+        sensitivity: "base"
+      })
     );
   }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId]);
 
@@ -4309,11 +4335,6 @@ function App() {
       setIssuesTone("error");
       return;
     }
-    if (lines.some((line) => !line.factLabel)) {
-      setIssuesMessage("Выдача только по фактическим названиям из УПД — выберите строку из списка «Что выдавать»");
-      setIssuesTone("error");
-      return;
-    }
     const qtySumByMaterial = new Map<string, number>();
     for (const line of lines) {
       qtySumByMaterial.set(line.materialId, (qtySumByMaterial.get(line.materialId) || 0) + line.quantity);
@@ -4687,14 +4708,27 @@ function App() {
     setToolCategoryDraft(categoryId);
     setToolBrand(saved.brand);
     setToolToolType(saved.toolType);
-    setToolName(buildToolDisplayName(saved.brand, saved.toolType));
+    const draftCat = toolCategories.find((c) => c.id === categoryId) ?? navCategory;
+    setToolName(
+      isCatalogMaterialCategorySlug(draftCat?.slug)
+        ? ""
+        : buildToolDisplayName(saved.brand, saved.toolType)
+    );
     setToolSerialNumber("");
     setToolResponsible("");
     setToolKitComplete(true);
     setToolKitMissingNote("");
     setToolInventoryNumber(`INV-${Date.now()}`);
+    setToolMaterialQty("1");
+    setToolMaterialUnit("шт");
+    setToolMaterialUnitPrice("");
     if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) setToolWarehouseId(activeObjectId);
     setToolManualModalOpen(true);
+  }
+
+  function isToolCategoryMaterialMode(categoryId: string): boolean {
+    const cat = toolCategories.find((c) => c.id === categoryId);
+    return isCatalogMaterialCategorySlug(cat?.slug);
   }
 
   async function loadToolCategories() {
@@ -5090,6 +5124,8 @@ function App() {
           setToolsMessage(msg);
           setToolsTone(tone ?? "neutral");
         }}
+        onAddCatalogItem={() => void openToolAddModal()}
+        catalogRefreshNonce={toolsCatalogRefreshNonce}
         toolsListGroupFilter={toolsListGroupFilter}
         onToolsListGroupFilterChange={setToolsListGroupFilter}
       />
@@ -8079,8 +8115,9 @@ function App() {
                 <div>
                   <h3 style={{ margin: 0 }}>Что выдавать</h3>
                   <p className="muted" style={{ margin: "4px 0 0" }}>
-                    Только <strong>названия по УПД</strong> из принятых приходов (отдельно от номенклатуры карточки).
-                    Если названий несколько — каждое отдельной строкой; остаток на складе общий на карточку.
+                    Позиции с остатком на выбранном объекте. Если при приёмке было отдельное название по УПД — оно
+                    показывается отдельной строкой; иначе — по названию карточки. Остаток на складе общий на
+                    карточку.
                   </p>
                 </div>
                 <span className="muted">
@@ -8099,8 +8136,7 @@ function App() {
                   if (!rows.length) {
                     return (
                       <p className="muted">
-                        Нет позиций с остатком и УПД-названиями. При приёмке укажите «Как в УПД», отличное от
-                        номенклатуры в заявке.
+                        Нет позиций с остатком на выбранном объекте в текущем разделе (СС/ЭОМ) и выбранной категории.
                       </p>
                     );
                   }
@@ -8159,7 +8195,7 @@ function App() {
                       .filter((c) => c.materialId === row.materialId)
                       .reduce((acc, c) => acc + parseMaterialQty(issuePickQtyByKey[c.pickKey] ?? 1), 0);
                     const exceeds = stockRow ? totalSameMaterial > stockRow.available : false;
-                    const lineTitle = safeName(row.factLabel || "");
+                    const lineTitle = safeName(row.factLabel || row.canonName);
                     return (
                       <div key={`cart-${row.pickKey}`} className={`issueCartRow ${exceeds ? "warn" : ""}`}>
                         <div className="issueCartName">
@@ -8167,7 +8203,9 @@ function App() {
                           <span className="muted">
                             {row.unit} · доступно по карточке{" "}
                             {stockRow ? formatMaterialQty(stockRow.available) : "—"}
-                            {row.factLabel ? ` · номенклатура: ${safeName(row.canonName)}` : ""}
+                            {row.factLabel && safeName(row.factLabel) !== safeName(row.canonName)
+                              ? ` · номенклатура: ${safeName(row.canonName)}`
+                              : ""}
                           </span>
                           {row.limitPath ? (
                             <span className="issueLimitPathBadge" title="Подраздел лимита для выдачи">
@@ -10711,7 +10749,9 @@ function App() {
               }}
             >
               <div className="card" style={{ maxWidth: 520, width: "100%" }} onMouseDown={(e) => e.stopPropagation()}>
-                <h3 style={{ marginTop: 0 }}>Новый инструмент</h3>
+                <h3 style={{ marginTop: 0 }}>
+                  {isToolCategoryMaterialMode(toolCategoryDraft) ? "Добавить позицию" : "Новый инструмент"}
+                </h3>
                 <div className="form">
                   <label>
                     Категория
@@ -10721,10 +10761,13 @@ function App() {
                         const id = e.target.value;
                         setToolCategoryDraft(id);
                         const saved = loadToolCreateDefaults();
-                        if (saved.categoryId === id) {
+                        if (!isToolCategoryMaterialMode(id) && saved.categoryId === id) {
                           setToolBrand(saved.brand);
                           setToolToolType(saved.toolType);
                           setToolName(buildToolDisplayName(saved.brand, saved.toolType));
+                        }
+                        if (isToolCategoryMaterialMode(id)) {
+                          setToolName("");
                         }
                       }}
                     >
@@ -10735,68 +10778,122 @@ function App() {
                       ))}
                     </select>
                   </label>
-                  <label>
-                    Марка
-                    <input
-                      value={toolBrand}
-                      onChange={(e) => {
-                        const brand = e.target.value;
-                        setToolBrand(brand);
-                        setToolName(buildToolDisplayName(brand, toolToolType));
-                      }}
-                      placeholder="Например, Bosch"
-                    />
-                  </label>
-                  <label>
-                    Вид инструмента
-                    <input
-                      value={toolToolType}
-                      onChange={(e) => {
-                        const toolType = e.target.value;
-                        setToolToolType(toolType);
-                        setToolName(buildToolDisplayName(toolBrand, toolType));
-                      }}
-                      placeholder="Например, перфоратор"
-                    />
-                  </label>
-                  <label>
-                    Наименование
-                    <input value={toolName} onChange={(e) => setToolName(e.target.value)} />
-                  </label>
-                  <label>
-                    Инвентарный номер
-                    <input value={toolInventoryNumber} onChange={(e) => setToolInventoryNumber(e.target.value)} />
-                  </label>
-                  <label>
-                    Серийный номер
-                    <input value={toolSerialNumber} onChange={(e) => setToolSerialNumber(e.target.value)} />
-                  </label>
-                  <label>
-                    Объект (склад)
-                    <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
-                      <option value="">Не указан</option>
-                      {warehouses.map((w) => (
-                        <option key={`tmw-${w.id}`} value={w.id}>
-                          {safeName(w.name)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Ответственный при создании
-                    <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
-                  </label>
-                  {isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) ? (
-                    <ToolKitCompletenessFields
-                      kitComplete={toolKitComplete}
-                      kitMissingNote={toolKitMissingNote}
-                      onKitCompleteChange={(v) => {
-                        setToolKitComplete(v);
-                        if (v) setToolKitMissingNote("");
-                      }}
-                      onKitMissingNoteChange={setToolKitMissingNote}
-                    />
-                  ) : null}
+                  {isToolCategoryMaterialMode(toolCategoryDraft) ? (
+                    <>
+                      <label>
+                        Наименование
+                        <input
+                          value={toolName}
+                          onChange={(e) => setToolName(e.target.value)}
+                          placeholder="Например: Каска защитная"
+                        />
+                      </label>
+                      <label>
+                        Количество
+                        <input
+                          type="number"
+                          min={MATERIAL_QTY_MIN}
+                          step={MATERIAL_QTY_STEP}
+                          value={toolMaterialQty}
+                          onChange={(e) => setToolMaterialQty(e.target.value.replace(/[^\d]/g, ""))}
+                        />
+                      </label>
+                      <label>
+                        Ед. измерения
+                        <input
+                          value={toolMaterialUnit}
+                          onChange={(e) => setToolMaterialUnit(e.target.value)}
+                          placeholder="шт"
+                        />
+                      </label>
+                      <label>
+                        Цена за ед., ₽ (необязательно)
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={toolMaterialUnitPrice}
+                          onChange={(e) => setToolMaterialUnitPrice(e.target.value)}
+                          placeholder="0"
+                        />
+                      </label>
+                      <label>
+                        Объект (склад)
+                        <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
+                          <option value="">Выберите объект</option>
+                          {warehouses.map((w) => (
+                            <option key={`tmw-${w.id}`} value={w.id}>
+                              {safeName(w.name)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label>
+                        Марка
+                        <input
+                          value={toolBrand}
+                          onChange={(e) => {
+                            const brand = e.target.value;
+                            setToolBrand(brand);
+                            setToolName(buildToolDisplayName(brand, toolToolType));
+                          }}
+                          placeholder="Например, Bosch"
+                        />
+                      </label>
+                      <label>
+                        Вид инструмента
+                        <input
+                          value={toolToolType}
+                          onChange={(e) => {
+                            const toolType = e.target.value;
+                            setToolToolType(toolType);
+                            setToolName(buildToolDisplayName(toolBrand, toolType));
+                          }}
+                          placeholder="Например, перфоратор"
+                        />
+                      </label>
+                      <label>
+                        Наименование
+                        <input value={toolName} onChange={(e) => setToolName(e.target.value)} />
+                      </label>
+                      <label>
+                        Инвентарный номер
+                        <input value={toolInventoryNumber} onChange={(e) => setToolInventoryNumber(e.target.value)} />
+                      </label>
+                      <label>
+                        Серийный номер
+                        <input value={toolSerialNumber} onChange={(e) => setToolSerialNumber(e.target.value)} />
+                      </label>
+                      <label>
+                        Объект (склад)
+                        <select value={toolWarehouseId} onChange={(e) => setToolWarehouseId(e.target.value)}>
+                          <option value="">Не указан</option>
+                          {warehouses.map((w) => (
+                            <option key={`tmw-${w.id}`} value={w.id}>
+                              {safeName(w.name)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Ответственный при создании
+                        <input value={toolResponsible} onChange={(e) => setToolResponsible(e.target.value)} />
+                      </label>
+                      {isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) ? (
+                        <ToolKitCompletenessFields
+                          kitComplete={toolKitComplete}
+                          kitMissingNote={toolKitMissingNote}
+                          onKitCompleteChange={(v) => {
+                            setToolKitComplete(v);
+                            if (v) setToolKitMissingNote("");
+                          }}
+                          onKitMissingNoteChange={setToolKitMissingNote}
+                        />
+                      ) : null}
+                    </>
+                  )}
                 </div>
                 <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
                   <button type="button" className="ghostBtn" onClick={() => setToolManualModalOpen(false)}>
@@ -10806,18 +10903,72 @@ function App() {
                     type="button"
                     disabled={
                       !toolCategoryDraft ||
-                      (!isMiscToolCategoryId(toolCategoryDraft, toolCategories) &&
-                        (!toolBrand.trim() || !toolToolType.trim())) ||
-                      !toolName.trim() ||
-                      !toolInventoryNumber.trim() ||
-                      (isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) &&
-                        !toolKitComplete &&
-                        !toolKitMissingNote.trim())
+                      (isToolCategoryMaterialMode(toolCategoryDraft)
+                        ? !toolName.trim() ||
+                          !toolWarehouseId ||
+                          !Number.isFinite(parseMaterialQty(toolMaterialQty)) ||
+                          parseMaterialQty(toolMaterialQty) <= 0
+                        : (!isMiscToolCategoryId(toolCategoryDraft, toolCategories) &&
+                            (!toolBrand.trim() || !toolToolType.trim())) ||
+                          !toolName.trim() ||
+                          !toolInventoryNumber.trim() ||
+                          (isKitTrackableToolCategoryId(toolCategoryDraft, toolCategories) &&
+                            !toolKitComplete &&
+                            !toolKitMissingNote.trim()))
                     }
                     onClick={async () => {
-                      if (!token || !toolCategoryDraft || !toolName.trim() || !toolInventoryNumber.trim()) return;
+                      if (!token || !toolCategoryDraft || !toolName.trim()) return;
                       setToolsMessage("");
                       setToolsTone("neutral");
+                      if (isToolCategoryMaterialMode(toolCategoryDraft)) {
+                        if (!toolWarehouseId) return;
+                        const qty = parseMaterialQty(toolMaterialQty);
+                        if (!Number.isFinite(qty) || qty <= 0) return;
+                        const cat = toolCategories.find((c) => c.id === toolCategoryDraft);
+                        const toolCatalogSection = slugToCatalogMaterialSection(cat?.slug);
+                        if (!toolCatalogSection) return;
+                        const priceRaw = toolMaterialUnitPrice.trim().replace(",", ".");
+                        let unitPrice: number | null | undefined;
+                        if (priceRaw === "") {
+                          unitPrice = undefined;
+                        } else {
+                          const p = Number(priceRaw);
+                          if (!Number.isFinite(p) || p < 0) {
+                            setToolsMessage("Некорректная цена.");
+                            setToolsTone("error");
+                            return;
+                          }
+                          unitPrice = p;
+                        }
+                        const res = await fetchWithSession(`${API_URL}/api/tools/catalog/manual-line`, {
+                          method: "POST",
+                          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            warehouseId: toolWarehouseId,
+                            section: objectSectionFilter,
+                            materialName: toolName.trim(),
+                            quantity: qty,
+                            unit: (toolMaterialUnit.trim() || "шт").slice(0, 64),
+                            toolCatalogSection,
+                            unitPrice: unitPrice ?? null
+                          })
+                        });
+                        const data = (await res.json().catch(() => ({}))) as { error?: string };
+                        if (!res.ok) {
+                          setToolsMessage(data.error || `Ошибка создания: ${res.status}`);
+                          setToolsTone(res.status === 409 ? "conflict" : "error");
+                          return;
+                        }
+                        setToolsMessage("Позиция добавлена");
+                        setToolsTone("success");
+                        setToolManualModalOpen(false);
+                        setToolName("");
+                        setToolMaterialQty("1");
+                        setToolsCatalogRefreshNonce((n) => n + 1);
+                        await loadToolWarehouseSummary();
+                        return;
+                      }
+                      if (!toolInventoryNumber.trim()) return;
                       saveToolCreateDefaults({
                         categoryId: toolCategoryDraft,
                         brand: toolBrand.trim(),
@@ -10859,7 +11010,7 @@ function App() {
                       await loadToolWarehouseSummary();
                     }}
                   >
-                    Создать
+                    {isToolCategoryMaterialMode(toolCategoryDraft) ? "Добавить" : "Создать"}
                   </button>
                 </div>
               </div>
@@ -12552,11 +12703,16 @@ function App() {
                 />
               </label>
               <label>
-                Вид номенклатуры
-                <select value={manualStockKind} onChange={(e) => setManualStockKind(e.target.value as typeof manualStockKind)}>
-                  <option value="MATERIAL">Основной материал</option>
-                  <option value="CONSUMABLE">Расходник</option>
-                  <option value="WORKWEAR">Спецодежда</option>
+                Категория
+                <select
+                  value={manualStockCategory}
+                  onChange={(e) => setManualStockCategory(e.target.value as WarehouseReceiptCategory)}
+                >
+                  {WAREHOUSE_RECEIPT_CATEGORY_OPTIONS.map((o) => (
+                    <option key={`wh-cat-${o.value}`} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
@@ -12615,7 +12771,7 @@ function App() {
                         materialName: manualStockName.trim(),
                         quantity: qty,
                         unit: (manualStockUnit.trim() || "шт").slice(0, 64),
-                        kind: manualStockKind,
+                        warehouseCategory: manualStockCategory,
                         unitPrice: unitPrice ?? null
                       })
                     });

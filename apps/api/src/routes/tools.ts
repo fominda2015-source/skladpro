@@ -7,6 +7,7 @@ import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { dispatchCriticalNotification, dispatchNotification } from "../lib/notifications.js";
 import {
+  assertObjectSectionInScope,
   assertProjectInScope,
   assertWarehouseInScope,
   getRequestDataScope,
@@ -16,14 +17,17 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
-import { materialQtySchema } from "../lib/quantity.js";
+import { materialQtyCoerceSchema, materialQtySchema } from "../lib/quantity.js";
+import { buildMaterialCreateFromReceiptItem } from "../lib/receiptMaterialApply.js";
 import {
+  CATALOG_MATERIAL_TOOL_SECTIONS,
   ensureDefaultToolCategories,
   isElectricToolCategoryId,
   isElectricToolCategorySlug,
   isKitTrackableCategoryId,
   isManualToolCategoryName,
   normalizeToolKitFields,
+  toolCatalogSectionToReceiptCategory,
   MANUAL_TOOL_CATEGORY,
   ELECTRIC_TOOL_CATEGORY,
   TOOL_CATEGORY_SLUGS
@@ -948,6 +952,122 @@ toolsRouter.get("/catalog/summary", async (req: AuthedRequest, res) => {
       };
     })()
   });
+});
+
+const manualCatalogMaterialSchema = z.object({
+  warehouseId: z.string().min(1),
+  section: z.enum(["SS", "EOM"]),
+  materialName: z.string().trim().min(1).max(800),
+  quantity: materialQtyCoerceSchema,
+  unit: z.string().trim().min(1).max(64).optional().default("шт"),
+  toolCatalogSection: z.enum(CATALOG_MATERIAL_TOOL_SECTIONS),
+  unitPrice: z.coerce.number().nonnegative().optional().nullable()
+});
+
+toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
+  const parsed = manualCatalogMaterialSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    assertObjectSectionInScope(scope, parsed.data.warehouseId, parsed.data.section);
+
+    const name = parsed.data.materialName.trim();
+    const qty = parsed.data.quantity;
+    const unit = parsed.data.unit.trim() || "шт";
+    const receiptCategory = toolCatalogSectionToReceiptCategory(parsed.data.toolCatalogSection);
+    const catalogFields = buildMaterialCreateFromReceiptItem(
+      receiptCategory,
+      parsed.data.toolCatalogSection,
+      parsed.data.unitPrice ?? null
+    );
+
+    const { materialId } = await prisma.$transaction(async (tx) => {
+      const existing = await tx.material.findFirst({ where: { name, unit } });
+      let materialId: string;
+      if (existing) {
+        await tx.material.update({
+          where: { id: existing.id },
+          data: catalogFields
+        });
+        materialId = existing.id;
+      } else {
+        const material = await tx.material.create({
+          data: { name, unit, ...catalogFields },
+          select: { id: true }
+        });
+        materialId = material.id;
+      }
+
+      const stockKey = {
+        warehouseId_materialId_section_condition: {
+          warehouseId: parsed.data.warehouseId,
+          materialId,
+          section: parsed.data.section,
+          condition: StockCondition.NEW
+        }
+      };
+      const existingStock = await tx.stock.findUnique({ where: stockKey });
+      if (existingStock) {
+        await tx.stock.update({
+          where: stockKey,
+          data: { quantity: { increment: qty } }
+        });
+      } else {
+        await tx.stock.create({
+          data: {
+            warehouseId: parsed.data.warehouseId,
+            materialId,
+            section: parsed.data.section,
+            condition: StockCondition.NEW,
+            quantity: qty,
+            reserved: 0
+          }
+        });
+      }
+
+      await tx.stockMovement.create({
+        data: {
+          warehouseId: parsed.data.warehouseId,
+          materialId,
+          quantity: qty,
+          direction: StockMovementDirection.IN,
+          sourceDocumentType: "MANUAL_TOOL_CATALOG",
+          note: "Ручная строка в каталоге инструментов/СИЗ",
+          createdById: req.user!.userId
+        }
+      });
+
+      return { materialId };
+    });
+
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "TOOL_CATALOG_MANUAL_LINE",
+      entityType: "Stock",
+      entityId: `${parsed.data.warehouseId}:${materialId}:${parsed.data.section}`,
+      summary: `Ручное добавление в каталог: ${name}, +${qty} ${unit}`,
+      after: {
+        warehouseId: parsed.data.warehouseId,
+        section: parsed.data.section,
+        materialId,
+        toolCatalogSection: parsed.data.toolCatalogSection,
+        quantity: qty,
+        unit,
+        materialName: name
+      }
+    });
+
+    return res.status(201).json({ ok: true, materialId });
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    if (err.status === 403) {
+      return res.status(403).json({ error: err.message });
+    }
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
 });
 
 toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {

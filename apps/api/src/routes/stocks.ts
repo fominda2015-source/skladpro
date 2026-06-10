@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { MaterialKind, StockCondition, StockMovementDirection } from "@prisma/client";
+import { warehouseReceiptCategoryToMaterialFields, WAREHOUSE_RECEIPT_CATEGORIES } from "../lib/warehouseStock.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
@@ -23,7 +24,7 @@ const manualStockLineSchema = z.object({
   materialName: z.string().trim().min(1).max(800),
   quantity: materialQtyCoerceSchema,
   unit: z.string().trim().min(1).max(64).optional().default("шт"),
-  kind: z.nativeEnum(MaterialKind).optional().default(MaterialKind.MATERIAL),
+  warehouseCategory: z.enum(WAREHOUSE_RECEIPT_CATEGORIES).optional().default("EQUIPMENT"),
   unitPrice: z.coerce.number().nonnegative().optional().nullable()
 });
 
@@ -40,12 +41,15 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
     const qty = parsed.data.quantity;
     const unit = parsed.data.unit.trim() || "шт";
 
+    const { kind, category } = warehouseReceiptCategoryToMaterialFields(parsed.data.warehouseCategory);
+
     const { materialId } = await prisma.$transaction(async (tx) => {
       const material = await tx.material.create({
         data: {
           name,
           unit,
-          kind: parsed.data.kind,
+          kind,
+          category: category ?? undefined,
           unitPrice: parsed.data.unitPrice ?? undefined
         },
         select: { id: true }
@@ -254,6 +258,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       materialSku: row.material.sku,
       materialUnit: row.material.unit,
       materialKind: row.material.kind,
+      materialCategory: row.material.category,
       unitPrice: row.material.unitPrice != null ? Number(row.material.unitPrice) : null,
       quantity: qty,
       reserved,

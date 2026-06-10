@@ -20,6 +20,8 @@ type Props = {
   onToolsListGroupFilterChange?: (
     filter: { categoryId: string; nameGroup: string; label: string } | null
   ) => void;
+  onAddCatalogItem?: () => void;
+  catalogRefreshNonce?: number;
 };
 
 export function ToolsInventoryBlock({
@@ -35,7 +37,9 @@ export function ToolsInventoryBlock({
   canWrite,
   onCatalogMessage,
   toolsListGroupFilter,
-  onToolsListGroupFilterChange
+  onToolsListGroupFilterChange,
+  onAddCatalogItem,
+  catalogRefreshNonce
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -54,6 +58,8 @@ export function ToolsInventoryBlock({
         onCatalogMessage={onCatalogMessage}
         toolsListGroupFilter={toolsListGroupFilter}
         onToolsListGroupFilterChange={onToolsListGroupFilterChange}
+        onAddCatalogItem={onAddCatalogItem}
+        catalogRefreshNonce={catalogRefreshNonce}
       />
     </div>
   );

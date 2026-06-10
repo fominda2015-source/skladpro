@@ -34,10 +34,14 @@ function materialFieldsFromReceiptItem(
     toolCatalogSection?: ToolCatalogSection;
     kind?: MaterialKind;
     unitPrice?: number;
+    category?: string;
   } = {};
   if (toolSection) fields.toolCatalogSection = toolSection;
   const kind = receiptCategoryToMaterialKind(itemCategory);
   if (kind) fields.kind = kind;
+  if (itemCategory === "EQUIPMENT" || itemCategory === "CABLE") {
+    fields.category = itemCategory;
+  }
   if (unitPrice != null && Number.isFinite(unitPrice) && unitPrice >= 0) {
     fields.unitPrice = unitPrice;
   }
@@ -56,6 +60,6 @@ export function buildMaterialCreateFromReceiptItem(
   itemCategory: ReceiptItemCategory | null | undefined,
   toolSection: ToolCatalogSection | null,
   unitPrice: number | null | undefined
-): Pick<Prisma.MaterialCreateInput, "toolCatalogSection" | "kind" | "unitPrice"> {
+): Pick<Prisma.MaterialCreateInput, "toolCatalogSection" | "kind" | "unitPrice" | "category"> {
   return materialFieldsFromReceiptItem(itemCategory, toolSection, unitPrice);
 }

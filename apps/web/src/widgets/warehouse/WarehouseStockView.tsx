@@ -1,4 +1,9 @@
 import { Fragment, useState, type ReactNode } from "react";
+import {
+  warehouseStockKindTabLabel,
+  warehouseStockRowLabel,
+  type WarehouseStockKindTab
+} from "./warehouseStockCategory";
 import { WhFloatingMenu, WhMenuAction } from "./WhFloatingMenu";
 
 export type WarehouseStockRow = {
@@ -10,6 +15,7 @@ export type WarehouseStockRow = {
   materialSku: string | null;
   materialUnit: string;
   materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+  materialCategory?: string | null;
   unitPrice?: number | null;
   quantity: number;
   reserved: number;
@@ -30,7 +36,7 @@ type MovementSlice = {
   issueRequest?: { number?: string } | null;
 };
 
-type KindTab = "ALL" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+type KindTab = WarehouseStockKindTab;
 
 export type WarehouseStockViewProps = {
   sectionLabel: string;
@@ -85,16 +91,10 @@ function fmtQty(n: number, maxFrac = 0): string {
   return n.toLocaleString("ru-RU", { maximumFractionDigits: maxFrac });
 }
 
-function kindLabel(kind?: WarehouseStockRow["materialKind"]): string {
-  if (kind === "CONSUMABLE") return "Расходник";
-  if (kind === "WORKWEAR") return "Спецодежда";
-  return "Материал";
-}
-
-function kindTone(kind?: WarehouseStockRow["materialKind"]): string {
-  if (kind === "CONSUMABLE") return "chip warn";
-  if (kind === "WORKWEAR") return "chip ok";
-  return "chip neutral";
+function kindTone(row: Pick<WarehouseStockRow, "materialKind" | "materialCategory">): string {
+  if ((row.materialKind ?? "MATERIAL") === "CONSUMABLE") return "chip warn";
+  if (String(row.materialCategory ?? "").toUpperCase() === "CABLE") return "chip neutral";
+  return "chip ok";
 }
 
 export function WarehouseStockView(props: WarehouseStockViewProps) {
@@ -238,14 +238,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
         </div>
         <div className="whToolbar">
           <div className="whChips" role="tablist" aria-label="Вид номенклатуры">
-            {(
-              [
-                ["ALL", "Все"],
-                ["MATERIAL", "Материалы"],
-                ["CONSUMABLE", "Расходники"],
-                ["WORKWEAR", "Спецодежда"]
-              ] as const
-            ).map(([k, label]) => (
+            {(["ALL", "EQUIPMENT", "CABLE", "CONSUMABLE"] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -254,7 +247,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                 className={`chip ${kindTab === k ? "active" : ""}`}
                 onClick={() => onKindTabChange(k)}
               >
-                {label}
+                {warehouseStockKindTabLabel(k)}
               </button>
             ))}
           </div>
@@ -387,7 +380,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                             {row.materialName}
                           </strong>
                           <span className="whMatMeta">
-                            <span className={kindTone(row.materialKind)}>{kindLabel(row.materialKind)}</span>
+                            <span className={kindTone(row)}>{warehouseStockRowLabel(row)}</span>
                             <span className="muted"> · {row.warehouseName}</span>
                             {showSku && row.materialSku ? (
                               <span className="muted"> · {row.materialSku}</span>

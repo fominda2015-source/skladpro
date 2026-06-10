@@ -37,6 +37,8 @@ type Props = {
   onToolsListGroupFilterChange?: (
     filter: { categoryId: string; nameGroup: string; label: string } | null
   ) => void;
+  onAddCatalogItem?: () => void;
+  catalogRefreshNonce?: number;
 };
 
 export function ToolsCatalogWorkspace({
@@ -52,7 +54,9 @@ export function ToolsCatalogWorkspace({
   canWrite,
   onCatalogMessage,
   toolsListGroupFilter = null,
-  onToolsListGroupFilterChange
+  onToolsListGroupFilterChange,
+  onAddCatalogItem,
+  catalogRefreshNonce = 0
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
@@ -99,7 +103,7 @@ export function ToolsCatalogWorkspace({
 
   useEffect(() => {
     void loadMaterials();
-  }, [loadMaterials, matRefresh]);
+  }, [loadMaterials, matRefresh, catalogRefreshNonce]);
 
   useEffect(() => {
     if (!usesToolNameGroupCards(current)) {
@@ -204,7 +208,14 @@ export function ToolsCatalogWorkspace({
 
       {isMaterialNav(current) && (
         <>
-          <h3 style={{ marginTop: hubCards ? 16 : 0 }}>{toolsNavTitle(navPath)}</h3>
+          <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
+            <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>
+            {canWrite && onAddCatalogItem ? (
+              <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
+                + Добавить
+              </button>
+            ) : null}
+          </div>
           <ToolCatalogMaterialsTable
             rows={materialRows}
             loading={matLoading}
