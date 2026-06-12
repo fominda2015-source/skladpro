@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HomeSectionToggle, type HomeSection } from "./HomeSectionToggle";
 
 type Props = {
   title: string;
@@ -12,6 +13,8 @@ type Props = {
   canForward?: boolean;
   /** Широкое окно для лимитов (таблицы как во вкладке) */
   size?: "default" | "wide";
+  drillSection?: HomeSection;
+  onDrillSectionChange?: (section: HomeSection) => void;
   children: ReactNode;
 };
 
@@ -26,6 +29,8 @@ export function HomeDrillModal({
   canBack = false,
   canForward = false,
   size = "default",
+  drillSection,
+  onDrillSectionChange,
   children
 }: Props) {
   return (
@@ -35,9 +40,14 @@ export function HomeDrillModal({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="homeDrillHead">
-          <div>
-            <h3>{title}</h3>
-            {subtitle ? <p className="muted">{subtitle}</p> : null}
+          <div className="homeDrillHeadMain">
+            <div>
+              <h3>{title}</h3>
+              {subtitle ? <p className="muted">{subtitle}</p> : null}
+            </div>
+            {drillSection && onDrillSectionChange ? (
+              <HomeSectionToggle section={drillSection} onSelect={onDrillSectionChange} />
+            ) : null}
           </div>
           <div className="homeDrillHeadActions">
             <button type="button" className="ghostBtn homeDrillNavBtn" onClick={onBack} disabled={!canBack}>

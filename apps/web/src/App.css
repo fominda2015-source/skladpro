@@ -5904,6 +5904,19 @@ button.homeInsightPill:hover:not(:disabled) {
   padding: 14px 16px 10px;
   border-bottom: 1px solid #e2e8f0;
 }
+.homeDrillHeadMain {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.homeDrillSectionToggle {
+  flex-shrink: 0;
+  align-self: center;
+}
 .homeDrillHeadActions {
   display: inline-flex;
   align-items: center;

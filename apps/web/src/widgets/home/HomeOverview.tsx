@@ -4,10 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -17,6 +14,7 @@ import { formatMaterialQty } from "../../shared/quantity";
 import { PageHero } from "../ui/PageHero";
 import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
 import { HomeDrillModal } from "./HomeDrillModal";
+import { type HomeSection } from "./HomeSectionToggle";
 import {
   HomeScrollChart,
   HomeScrollChartX,
@@ -53,8 +51,20 @@ export type HomeLimitSlice = {
 
 export type HomeMovementTrendRow = {
   day: string;
+  incomeSs: number;
+  outcomeSs: number;
+  incomeEom: number;
+  outcomeEom: number;
   income: number;
   outcome: number;
+};
+
+export type HomeToolsBlock = {
+  total: number;
+  inStock: number;
+  issued: number;
+  inRepair: number;
+  categories: HomeToolCategory[];
 };
 
 export type HomeOverviewSummary = {
@@ -71,7 +81,11 @@ export type HomeOverviewSummary = {
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  toolsByCategorySs?: HomeToolCategory[];
+  toolsByCategoryEom?: HomeToolCategory[];
   campByCategory: HomeCampCategory[];
+  campByCategorySs?: HomeCampCategory[];
+  campByCategoryEom?: HomeCampCategory[];
   movementTrend30d?: HomeMovementTrendRow[];
 };
 
@@ -81,20 +95,22 @@ export type HomeObjectRow = {
   campSs: number;
   campEom: number;
   stockLines: number;
+  stockLinesSs?: number;
+  stockLinesEom?: number;
   receiptOpen: number;
+  receiptOpenSs?: number;
+  receiptOpenEom?: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
   camp: {
     total: number;
     categories: HomeCampCategory[];
+    categoriesSs?: HomeCampCategory[];
+    categoriesEom?: HomeCampCategory[];
   };
-  tools: {
-    total: number;
-    inStock: number;
-    issued: number;
-    inRepair: number;
-    categories: HomeToolCategory[];
-  };
+  tools: HomeToolsBlock;
+  toolsSs?: HomeToolsBlock;
+  toolsEom?: HomeToolsBlock;
 };
 
 type Props = {
@@ -116,10 +132,11 @@ type Props = {
   onOpenLimitsTab?: () => void;
   onOpenToolsTab?: () => void;
   /** Каталог и таблица инструментов в модалке — только после выбора объекта. */
-  renderToolsStatDrillContent?: (warehouseId: string) => ReactNode;
-  renderCampStatDrillContent?: (warehouseId: string) => ReactNode;
-  onToolsObjectDrill?: (warehouseId: string) => void;
+  renderToolsStatDrillContent?: (warehouseId: string, section: HomeSection) => ReactNode;
+  renderCampStatDrillContent?: (warehouseId: string, section: HomeSection) => ReactNode;
+  onToolsObjectDrill?: (warehouseId: string, section: HomeSection) => void;
   onCampObjectDrill?: (warehouseId: string) => void;
+  onDrillSectionChange?: (section: HomeSection) => void;
   onOpenCampTab?: () => void;
   onOpenOperations?: (warehouseId: string) => void;
   onOpenOperationsTab?: () => void;
@@ -134,6 +151,7 @@ type Props = {
     objectName: string;
     drillKind: "stat" | "chart";
     drillKey: string;
+    drillSection: HomeSection;
   }) => ReactNode;
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
@@ -286,7 +304,6 @@ function pctCell(has: boolean, percent: number, over: number) {
   if (!has) return "отсутствует";
   return over > 0 ? `${percent}% ⚠` : `${percent}%`;
 }
-const TOOL_PIE_COLORS = ["#4f46e5", "#0ea5e9", "#f59e0b"] as const;
 const LIMIT_SS_COLOR = "#4f46e5";
 const LIMIT_EOM_COLOR = "#0ea5e9";
 
@@ -312,6 +329,42 @@ function limitDrillCells(slice: HomeLimitSlice): ReactNode[] {
     limitQtyPercent(slice.onOrderQty, slice.plannedQty),
     slice.overCount > 0 ? slice.overCount : "отсутствует"
   ];
+}
+
+function objectToolsBlock(o: HomeObjectRow, section: HomeSection): HomeToolsBlock {
+  if (section === "SS" && o.toolsSs) return o.toolsSs;
+  if (section === "EOM" && o.toolsEom) return o.toolsEom;
+  return o.tools;
+}
+
+function objectLimitSlice(o: HomeObjectRow, section: HomeSection): HomeLimitSlice {
+  return section === "SS" ? o.limitsSs : o.limitsEom;
+}
+
+function objectStockLines(o: HomeObjectRow, section: HomeSection): number {
+  if (section === "SS" && o.stockLinesSs != null) return o.stockLinesSs;
+  if (section === "EOM" && o.stockLinesEom != null) return o.stockLinesEom;
+  return o.stockLines;
+}
+
+function objectReceiptOpen(o: HomeObjectRow, section: HomeSection): number {
+  if (section === "SS" && o.receiptOpenSs != null) return o.receiptOpenSs;
+  if (section === "EOM" && o.receiptOpenEom != null) return o.receiptOpenEom;
+  return o.receiptOpen;
+}
+
+function objectCampCount(o: HomeObjectRow, section: HomeSection): number {
+  return section === "SS" ? o.campSs : o.campEom;
+}
+
+function objectCampCategories(o: HomeObjectRow, section: HomeSection): HomeCampCategory[] {
+  if (section === "SS" && o.camp.categoriesSs?.length) return o.camp.categoriesSs;
+  if (section === "EOM" && o.camp.categoriesEom?.length) return o.camp.categoriesEom;
+  return o.camp.categories;
+}
+
+function sectionLabel(section: HomeSection): string {
+  return section === "SS" ? "СС" : "ЭОМ";
 }
 
 function chartTooltipQty(value: unknown): [string, string] {
@@ -349,6 +402,7 @@ export function HomeOverview({
   canOperations = true,
   announcementsBell = null,
   renderObjectDrillContent,
+  onDrillSectionChange,
   onOpenQr,
   onOpenIssues,
   onOpenApprovals,
@@ -356,15 +410,25 @@ export function HomeOverview({
   onAcceptReturn
 }: Props) {
   const [drill, setDrill] = useState<HomeDrill | null>(null);
+  const [drillSection, setDrillSection] = useState<HomeSection>("SS");
   const [drillHistory, setDrillHistory] = useState<DrillView[]>([{ mode: "list" }]);
   const [drillHistoryIndex, setDrillHistoryIndex] = useState(0);
 
+  const selectDrillSection = (section: HomeSection) => {
+    setDrillSection(section);
+    onDrillSectionChange?.(section);
+  };
+
   const openStatDrill = (key: HomeStatKey) => {
+    setDrillSection(key === "limitsEom" ? "EOM" : "SS");
+    onDrillSectionChange?.(key === "limitsEom" ? "EOM" : "SS");
     setDrill({ kind: "stat", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
   };
   const openChartDrill = (key: HomeChartKey) => {
+    setDrillSection("SS");
+    onDrillSectionChange?.("SS");
     setDrill({ kind: "chart", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
@@ -383,8 +447,8 @@ export function HomeOverview({
 
   useEffect(() => {
     if (!drillToolsWarehouseId) return;
-    onToolsObjectDrillRef.current?.(drillToolsWarehouseId);
-  }, [drillToolsWarehouseId]);
+    onToolsObjectDrillRef.current?.(drillToolsWarehouseId, drillSection);
+  }, [drillToolsWarehouseId, drillSection]);
 
   const openObjectMini = (warehouseId: string) => {
     if (drill?.kind === "stat" && drill.key === "camp") {
@@ -495,6 +559,8 @@ export function HomeOverview({
           id: o.warehouseId,
           name: shortName(o.name, 12),
           fullName: o.name,
+          campSs: o.campSs,
+          campEom: o.campEom,
           camp: o.campSs + o.campEom,
           tools: o.tools.total
         }))
@@ -502,16 +568,40 @@ export function HomeOverview({
     [objects]
   );
 
-  const toolsPieData = useMemo(() => {
-    const inStock = summary?.toolsInStock ?? totals.toolsInStock;
-    const issued = summary?.toolsIssued ?? totals.toolsIssued;
-    const inRepair = summary?.toolsInRepair ?? totals.toolsInRepair;
+  const toolsStatusChartRows = useMemo(() => {
+    const ssTools = summary?.toolsByCategorySs?.length
+      ? summary.toolsByCategorySs
+      : objects.flatMap((o) => o.toolsSs?.categories ?? []);
+    const eomTools = summary?.toolsByCategoryEom?.length
+      ? summary.toolsByCategoryEom
+      : objects.flatMap((o) => o.toolsEom?.categories ?? []);
+    const sumBlock = (items: HomeToolCategory[]) =>
+      items.reduce(
+        (acc, c) => ({
+          inStock: acc.inStock + c.inStock,
+          issued: acc.issued + c.issued,
+          inRepair: acc.inRepair + c.inRepair
+        }),
+        { inStock: 0, issued: 0, inRepair: 0 }
+      );
+    const ss = sumBlock(ssTools);
+    const eom = sumBlock(eomTools);
+    if (!ss.inStock && !ss.issued && !ss.inRepair && !eom.inStock && !eom.issued && !eom.inRepair) {
+      const inStock = summary?.toolsInStock ?? totals.toolsInStock;
+      const issued = summary?.toolsIssued ?? totals.toolsIssued;
+      const inRepair = summary?.toolsInRepair ?? totals.toolsInRepair;
+      return [
+        { name: "На складе", ss: inStock, eom: 0 },
+        { name: "Выдано", ss: issued, eom: 0 },
+        { name: "В ремонте", ss: inRepair, eom: 0 }
+      ].filter((r) => r.ss > 0 || r.eom > 0);
+    }
     return [
-      { name: "На складе", value: inStock, key: "stock" },
-      { name: "Выдано", value: issued, key: "issued" },
-      { name: "В ремонте", value: inRepair, key: "repair" }
-    ].filter((s) => s.value > 0);
-  }, [summary, totals]);
+      { name: "На складе", ss: ss.inStock, eom: eom.inStock },
+      { name: "Выдано", ss: ss.issued, eom: eom.issued },
+      { name: "В ремонте", ss: ss.inRepair, eom: eom.inRepair }
+    ].filter((r) => r.ss > 0 || r.eom > 0);
+  }, [objects, summary, totals]);
 
   const movementChartRows = useMemo(() => {
     const src = summary?.movementTrend30d;
@@ -523,6 +613,35 @@ export function HomeOverview({
   }, [summary?.movementTrend30d]);
 
   const topToolsRows = useMemo(() => {
+    const mergeCats = (ss: HomeToolCategory[], eom: HomeToolCategory[]) => {
+      const map = new Map<string, { fullName: string; ss: number; eom: number }>();
+      for (const c of ss) {
+        const fullName = c.icon ? `${c.icon} ${c.label}` : c.label;
+        map.set(c.key, { fullName, ss: c.count, eom: 0 });
+      }
+      for (const c of eom) {
+        const fullName = c.icon ? `${c.icon} ${c.label}` : c.label;
+        const prev = map.get(c.key);
+        if (prev) prev.eom = c.count;
+        else map.set(c.key, { fullName, ss: 0, eom: c.count });
+      }
+      return [...map.values()]
+        .sort((a, b) => b.ss + b.eom - (a.ss + a.eom))
+        .map((r) => ({
+          name: shortName(r.fullName, 18),
+          fullName: r.fullName,
+          ss: r.ss,
+          eom: r.eom,
+          count: r.ss + r.eom
+        }));
+    };
+    const ssSrc = summary?.toolsByCategorySs?.length
+      ? summary.toolsByCategorySs
+      : objects.flatMap((o) => o.toolsSs?.categories ?? []);
+    const eomSrc = summary?.toolsByCategoryEom?.length
+      ? summary.toolsByCategoryEom
+      : objects.flatMap((o) => o.toolsEom?.categories ?? []);
+    if (ssSrc.length || eomSrc.length) return mergeCats(ssSrc, eomSrc);
     const src = summary?.toolsByCategory?.length
       ? summary.toolsByCategory
       : objects.flatMap((o) => o.tools.categories);
@@ -531,11 +650,42 @@ export function HomeOverview({
       .map((c) => ({
         name: shortName(c.icon ? `${c.icon} ${c.label}` : c.label, 18),
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
+        ss: c.count,
+        eom: 0,
         count: c.count
       }));
   }, [objects, summary]);
 
   const topCampRows = useMemo(() => {
+    const mergeCats = (ss: HomeCampCategory[], eom: HomeCampCategory[]) => {
+      const map = new Map<string, { fullName: string; ss: number; eom: number }>();
+      for (const c of ss) {
+        const fullName = c.icon ? `${c.icon} ${c.label}` : c.label;
+        map.set(c.key, { fullName, ss: c.count, eom: 0 });
+      }
+      for (const c of eom) {
+        const fullName = c.icon ? `${c.icon} ${c.label}` : c.label;
+        const prev = map.get(c.key);
+        if (prev) prev.eom = c.count;
+        else map.set(c.key, { fullName, ss: 0, eom: c.count });
+      }
+      return [...map.values()]
+        .sort((a, b) => b.ss + b.eom - (a.ss + a.eom))
+        .map((r) => ({
+          name: shortName(r.fullName, 18),
+          fullName: r.fullName,
+          ss: r.ss,
+          eom: r.eom,
+          count: r.ss + r.eom
+        }));
+    };
+    const ssSrc = summary?.campByCategorySs?.length
+      ? summary.campByCategorySs
+      : objects.flatMap((o) => o.camp.categoriesSs ?? []);
+    const eomSrc = summary?.campByCategoryEom?.length
+      ? summary.campByCategoryEom
+      : objects.flatMap((o) => o.camp.categoriesEom ?? []);
+    if (ssSrc.length || eomSrc.length) return mergeCats(ssSrc, eomSrc);
     const src = summary?.campByCategory?.length
       ? summary.campByCategory
       : objects.flatMap((o) => o.camp?.categories ?? []);
@@ -544,6 +694,8 @@ export function HomeOverview({
       .map((c) => ({
         name: shortName(c.icon ? `${c.icon} ${c.label}` : c.label, 18),
         fullName: c.icon ? `${c.icon} ${c.label}` : c.label,
+        ss: c.count,
+        eom: 0,
         count: c.count
       }));
   }, [objects, summary]);
@@ -551,15 +703,27 @@ export function HomeOverview({
   const toolsByObjectRows = useMemo(
     () =>
       objects
-        .map((o) => ({
-          id: o.warehouseId,
-          name: shortName(o.name, 14),
-          fullName: o.name,
-          inStock: o.tools.inStock,
-          issued: o.tools.issued,
-          inRepair: o.tools.inRepair,
-          total: o.tools.total
-        }))
+        .map((o) => {
+          const ss = o.toolsSs ?? o.tools;
+          const eom = o.toolsEom ?? { total: 0, inStock: 0, issued: 0, inRepair: 0, categories: [] };
+          return {
+            id: o.warehouseId,
+            name: shortName(o.name, 14),
+            fullName: o.name,
+            inStockSs: ss.inStock,
+            issuedSs: ss.issued,
+            inRepairSs: ss.inRepair,
+            totalSs: ss.total,
+            inStockEom: eom.inStock,
+            issuedEom: eom.issued,
+            inRepairEom: eom.inRepair,
+            totalEom: eom.total,
+            inStock: ss.inStock + eom.inStock,
+            issued: ss.issued + eom.issued,
+            inRepair: ss.inRepair + eom.inRepair,
+            total: ss.total + eom.total
+          };
+        })
         .filter((r) => r.total > 0)
         .sort((a, b) => b.total - a.total || a.fullName.localeCompare(b.fullName, "ru")),
     [objects]
@@ -663,7 +827,7 @@ export function HomeOverview({
     </ResponsiveContainer>
   );
 
-  const renderToolsByObjectChart = (height: number, yWidth: number, useFullNames: boolean) => (
+  const renderToolsByObjectChart = (height: number, yWidth: number, useFullNames: boolean, sectionFilter?: HomeSection) => (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart
         data={useFullNames ? toolsByObjectRows.map((r) => ({ ...r, name: r.fullName })) : toolsByObjectRows}
@@ -680,14 +844,51 @@ export function HomeOverview({
           }
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="inStock" name="На складе" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={8} />
-        <Bar dataKey="issued" name="Выдано" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={8} />
-        <Bar dataKey="inRepair" name="В ремонте" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={8} />
+        {sectionFilter ? (
+          <>
+            <Bar
+              dataKey={sectionFilter === "SS" ? "inStockSs" : "inStockEom"}
+              name="На складе"
+              fill="#4f46e5"
+              radius={[0, 4, 4, 0]}
+              barSize={8}
+            />
+            <Bar
+              dataKey={sectionFilter === "SS" ? "issuedSs" : "issuedEom"}
+              name="Выдано"
+              fill="#0ea5e9"
+              radius={[0, 4, 4, 0]}
+              barSize={8}
+            />
+            <Bar
+              dataKey={sectionFilter === "SS" ? "inRepairSs" : "inRepairEom"}
+              name="В ремонте"
+              fill="#f59e0b"
+              radius={[0, 4, 4, 0]}
+              barSize={8}
+            />
+          </>
+        ) : (
+          <>
+            <Bar dataKey="inStockSs" name="На складе СС" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={8} />
+            <Bar dataKey="inStockEom" name="На складе ЭОМ" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={8} />
+            <Bar dataKey="issuedSs" name="Выдано СС" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={8} />
+            <Bar dataKey="issuedEom" name="Выдано ЭОМ" fill="#38bdf8" radius={[0, 4, 4, 0]} barSize={8} />
+            <Bar dataKey="inRepairSs" name="В ремонте СС" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={8} />
+            <Bar dataKey="inRepairEom" name="В ремонте ЭОМ" fill="#fbbf24" radius={[0, 4, 4, 0]} barSize={8} />
+          </>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
 
-  const renderCategoriesChart = (height: number, yWidth: number, useFullNames: boolean, rows = topToolsRows) => (
+  const renderCategoriesChart = (
+    height: number,
+    yWidth: number,
+    useFullNames: boolean,
+    rows = topToolsRows,
+    sectionFilter?: HomeSection
+  ) => (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart
         data={useFullNames ? rows.map((r) => ({ ...r, name: r.fullName })) : rows}
@@ -703,12 +904,26 @@ export function HomeOverview({
             payload?.[0]?.payload?.fullName ? String(payload[0].payload.fullName) : ""
           }
         />
-        <Bar dataKey="count" name="Штук" fill="#6366f1" radius={[0, 6, 6, 0]} barSize={14} />
+        {sectionFilter ? (
+          <Bar
+            dataKey={sectionFilter === "SS" ? "ss" : "eom"}
+            name={sectionLabel(sectionFilter)}
+            fill={sectionFilter === "SS" ? LIMIT_SS_COLOR : LIMIT_EOM_COLOR}
+            radius={[0, 6, 6, 0]}
+            barSize={14}
+          />
+        ) : (
+          <>
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="ss" name="СС" fill={LIMIT_SS_COLOR} radius={[0, 6, 6, 0]} barSize={12} />
+            <Bar dataKey="eom" name="ЭОМ" fill={LIMIT_EOM_COLOR} radius={[0, 6, 6, 0]} barSize={12} />
+          </>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
 
-  const renderCampChart = (_width: number, height: number) => (
+  const renderCampChart = (_width: number, height: number, sectionFilter?: HomeSection) => (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={campChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 6" vertical={false} stroke="#e8edf5" />
@@ -721,12 +936,24 @@ export function HomeOverview({
           }
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="camp" name="Городок" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+        {sectionFilter ? (
+          <Bar
+            dataKey={sectionFilter === "SS" ? "campSs" : "campEom"}
+            name={`Городок ${sectionLabel(sectionFilter)}`}
+            fill={sectionFilter === "SS" ? LIMIT_SS_COLOR : LIMIT_EOM_COLOR}
+            radius={[6, 6, 0, 0]}
+          />
+        ) : (
+          <>
+            <Bar dataKey="campSs" name="Городок СС" fill={LIMIT_SS_COLOR} radius={[6, 6, 0, 0]} />
+            <Bar dataKey="campEom" name="Городок ЭОМ" fill={LIMIT_EOM_COLOR} radius={[6, 6, 0, 0]} />
+          </>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
 
-  const renderMovementChart = (height: number) => (
+  const renderMovementChart = (height: number, sectionFilter?: HomeSection) => (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={movementChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e8edf3" />
@@ -734,33 +961,56 @@ export function HomeOverview({
         <YAxis tick={{ fontSize: 11 }} />
         <Tooltip formatter={chartTooltipQty} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="income" name="Приход" fill="#22c55e" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="outcome" name="Расход" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+        {sectionFilter ? (
+          <>
+            <Bar
+              dataKey={sectionFilter === "SS" ? "incomeSs" : "incomeEom"}
+              name="Приход"
+              fill="#22c55e"
+              radius={[4, 4, 0, 0]}
+            />
+            <Bar
+              dataKey={sectionFilter === "SS" ? "outcomeSs" : "outcomeEom"}
+              name="Расход"
+              fill="#f59e0b"
+              radius={[4, 4, 0, 0]}
+            />
+          </>
+        ) : (
+          <>
+            <Bar dataKey="incomeSs" name="Приход СС" fill="#22c55e" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="outcomeSs" name="Расход СС" fill="#86efac" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="incomeEom" name="Приход ЭОМ" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="outcomeEom" name="Расход ЭОМ" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+          </>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
 
-  const renderToolsPie = (height: number) =>
-    toolsPieData.length ? (
+  const renderToolsStatusChart = (height: number, sectionFilter?: HomeSection) =>
+    toolsStatusChartRows.length ? (
       <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie
-            data={toolsPieData}
-            dataKey="value"
-            nameKey="name"
-            cx="50%"
-            cy="50%"
-            innerRadius={52}
-            outerRadius={78}
-            paddingAngle={2}
-          >
-            {toolsPieData.map((entry, i) => (
-              <Cell key={entry.key} fill={TOOL_PIE_COLORS[i % TOOL_PIE_COLORS.length]} />
-            ))}
-          </Pie>
+        <BarChart data={toolsStatusChartRows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 6" vertical={false} stroke="#e8edf5" />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
+          <YAxis width={36} tick={{ fontSize: 11, fill: "#64748b" }} allowDecimals={false} />
           <Tooltip formatter={chartTooltipQty} />
-          <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-        </PieChart>
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {sectionFilter ? (
+            <Bar
+              dataKey={sectionFilter === "SS" ? "ss" : "eom"}
+              name={sectionLabel(sectionFilter)}
+              fill={sectionFilter === "SS" ? LIMIT_SS_COLOR : LIMIT_EOM_COLOR}
+              radius={[6, 6, 0, 0]}
+            />
+          ) : (
+            <>
+              <Bar dataKey="ss" name="СС" fill={LIMIT_SS_COLOR} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="eom" name="ЭОМ" fill={LIMIT_EOM_COLOR} radius={[6, 6, 0, 0]} />
+            </>
+          )}
+        </BarChart>
       </ResponsiveContainer>
     ) : (
       <p className="muted homeChartEmpty">Инструменты не заведены.</p>
@@ -774,7 +1024,8 @@ export function HomeOverview({
         warehouseId: o.warehouseId,
         objectName: o.name,
         drillKind: drill.kind,
-        drillKey: drill.key
+        drillKey: drill.key,
+        drillSection
       });
       if (drill.kind === "stat" && drill.key === "tools" && renderToolsStatDrillContent) {
         return (
@@ -782,7 +1033,7 @@ export function HomeOverview({
             <section className="homeDrillObjectBlock">
               <header className="homeDrillObjectBlockHead">
                 <strong>{o.name}</strong>
-                <span className="muted">инструменты объекта</span>
+                <span className="muted">инструменты объекта · {sectionLabel(drillSection)}</span>
               </header>
               {canTools ? (
                 <div className="erpCellActions" style={{ marginBottom: 10 }}>
@@ -791,7 +1042,7 @@ export function HomeOverview({
                   </button>
                 </div>
               ) : null}
-              {renderToolsStatDrillContent(o.warehouseId)}
+              {renderToolsStatDrillContent(o.warehouseId, drillSection)}
             </section>
           </div>
         );
@@ -802,7 +1053,7 @@ export function HomeOverview({
             <section className="homeDrillObjectBlock">
               <header className="homeDrillObjectBlockHead">
                 <strong>{o.name}</strong>
-                <span className="muted">городок объекта</span>
+                <span className="muted">городок объекта · {sectionLabel(drillSection)}</span>
               </header>
               {canCamp ? (
                 <div className="erpCellActions" style={{ marginBottom: 10 }}>
@@ -811,67 +1062,71 @@ export function HomeOverview({
                   </button>
                 </div>
               ) : null}
-              {renderCampStatDrillContent(o.warehouseId)}
+              {renderCampStatDrillContent(o.warehouseId, drillSection)}
             </section>
           </div>
         );
       }
+      const tools = objectToolsBlock(o, drillSection);
+      const limits = objectLimitSlice(o, drillSection);
       const miniRows = (() => {
         if (drill.kind === "stat") {
-          if (drill.key === "limitsSs") {
-            const s = o.limitsSs;
+          if (drill.key === "limitsSs" || drill.key === "limitsEom") {
             return [
-              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
-              { key: "arr", cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"] },
-              { key: "ord", cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"] },
-              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
+              { key: "exec", cells: ["Выполнение", limits.hasTemplate ? `${limits.percent}%` : "отсутствует"] },
+              {
+                key: "arr",
+                cells: ["Приход", limits.hasTemplate ? limitQtyPercent(limits.arrivedQty, limits.plannedQty) : "отсутствует"]
+              },
+              {
+                key: "ord",
+                cells: ["В закупке", limits.hasTemplate ? limitQtyPercent(limits.onOrderQty, limits.plannedQty) : "отсутствует"]
+              },
+              { key: "over", cells: ["Перерасход", limits.overCount > 0 ? limits.overCount : "отсутствует"] }
             ];
           }
-          if (drill.key === "limitsEom") {
-            const s = o.limitsEom;
-            return [
-              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
-              { key: "arr", cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"] },
-              { key: "ord", cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"] },
-              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
-            ];
+          if (drill.key === "stock") {
+            return [{ key: "stock", cells: [`ТМЦ на складе (${sectionLabel(drillSection)})`, fmtQty(objectStockLines(o, drillSection))] }];
           }
-          if (drill.key === "stock") return [{ key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] }];
           if (drill.key === "camp") {
-            return [{ key: "camp", cells: ["Городок", o.camp?.total ?? o.campSs + o.campEom] }];
+            return [{ key: "camp", cells: [`Городок (${sectionLabel(drillSection)})`, objectCampCount(o, drillSection)] }];
           }
-          if (drill.key === "tools") return [{ key: "tools", cells: ["Инструменты", o.tools.total] }];
-          if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["Инструменты на складе", o.tools.inStock] }];
-          if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Инструменты выданы", o.tools.issued] }];
-          if (drill.key === "toolsRepair") return [{ key: "tools-repair", cells: ["Инструменты в ремонте", o.tools.inRepair] }];
-          if (drill.key === "receipts") return [{ key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }];
+          if (drill.key === "tools") return [{ key: "tools", cells: [`Инструменты (${sectionLabel(drillSection)})`, tools.total] }];
+          if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["На складе", tools.inStock] }];
+          if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Выдано", tools.issued] }];
+          if (drill.key === "toolsRepair") return [{ key: "tools-repair", cells: ["В ремонте", tools.inRepair] }];
+          if (drill.key === "receipts") {
+            return [{ key: "receipt", cells: [`Приёмки (${sectionLabel(drillSection)})`, objectReceiptOpen(o, drillSection)] }];
+          }
         }
         if (drill.kind === "chart") {
           if (drill.key === "limits") {
             return [
-              { key: "ss", cells: ["Лимиты СС", o.limitsSs.hasTemplate ? `${o.limitsSs.percent}%` : "отсутствует"] },
-              { key: "eom", cells: ["Лимиты ЭОМ", o.limitsEom.hasTemplate ? `${o.limitsEom.percent}%` : "отсутствует"] }
+              {
+                key: "limits",
+                cells: [`Лимиты ${sectionLabel(drillSection)}`, limits.hasTemplate ? `${limits.percent}%` : "отсутствует"]
+              }
             ];
           }
           if (drill.key === "toolsByObject" || drill.key === "toolsStatus") {
             return [
-              { key: "tools", cells: ["Инструменты", o.tools.total] },
-              { key: "tools-stock", cells: ["На складе", o.tools.inStock] },
-              { key: "tools-issued", cells: ["Выдано", o.tools.issued] },
-              { key: "tools-repair", cells: ["В ремонте", o.tools.inRepair] }
+              { key: "tools", cells: ["Инструменты", tools.total] },
+              { key: "tools-stock", cells: ["На складе", tools.inStock] },
+              { key: "tools-issued", cells: ["Выдано", tools.issued] },
+              { key: "tools-repair", cells: ["В ремонте", tools.inRepair] }
             ];
           }
           if (drill.key === "movement") {
             return [
-              { key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] },
-              { key: "receipt", cells: ["Приемки в работе", o.receiptOpen] }
+              { key: "stock", cells: [`ТМЦ (${sectionLabel(drillSection)})`, fmtQty(objectStockLines(o, drillSection))] },
+              { key: "receipt", cells: [`Приёмки (${sectionLabel(drillSection)})`, objectReceiptOpen(o, drillSection)] }
             ];
           }
           if (drill.key === "camp") {
-            return [{ key: "camp", cells: ["Городок", o.camp?.total ?? o.campSs + o.campEom] }];
+            return [{ key: "camp", cells: [`Городок (${sectionLabel(drillSection)})`, objectCampCount(o, drillSection)] }];
           }
           if (drill.key === "campCategories") {
-            const cats = o.camp?.categories ?? [];
+            const cats = objectCampCategories(o, drillSection);
             return cats.length
               ? cats.map((c) => ({
                   key: `camp-${c.key}`,
@@ -880,8 +1135,8 @@ export function HomeOverview({
               : [{ key: "camp-empty", cells: ["Категории", "отсутствует"] }];
           }
           if (drill.key === "categories") {
-            return o.tools.categories.length
-              ? o.tools.categories.map((c) => ({
+            return tools.categories.length
+              ? tools.categories.map((c) => ({
                   key: `cat-${c.key}`,
                   cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
                 }))
@@ -962,26 +1217,14 @@ export function HomeOverview({
       );
     }
     if (drill.kind === "stat") {
-      if (drill.key === "limitsSs") {
+      if (drill.key === "limitsSs" || drill.key === "limitsEom") {
         return (
           <ObjectDrillTable
             columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, ...limitDrillCells(o.limitsSs)]
-            }))}
-          />
-        );
-      }
-      if (drill.key === "limitsEom") {
-        return (
-          <ObjectDrillTable
-            columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
-            onRowClick={openObjectMini}
-            rows={objects.map((o) => ({
-              key: o.warehouseId,
-              cells: [o.name, ...limitDrillCells(o.limitsEom)]
+              cells: [o.name, ...limitDrillCells(objectLimitSlice(o, drillSection))]
             }))}
           />
         );
@@ -989,11 +1232,11 @@ export function HomeOverview({
       if (drill.key === "stock") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "ТМЦ на складе"]}
+            columns={["Объект", `ТМЦ (${sectionLabel(drillSection)})`]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, fmtQty(o.stockLines)]
+              cells: [o.name, fmtQty(objectStockLines(o, drillSection))]
             }))}
           />
         );
@@ -1001,16 +1244,11 @@ export function HomeOverview({
       if (drill.key === "camp") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Городок", "СС", "ЭОМ"]}
+            columns={["Объект", `Городок (${sectionLabel(drillSection)})`]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [
-                o.name,
-                o.camp?.total ?? o.campSs + o.campEom,
-                o.campSs,
-                o.campEom
-              ]
+              cells: [o.name, objectCampCount(o, drillSection)]
             }))}
           />
         );
@@ -1020,10 +1258,13 @@ export function HomeOverview({
           <ObjectDrillTable
             columns={["Объект", "Всего", "На складе", "Выдано", "В ремонте"]}
             onRowClick={openObjectMini}
-            rows={objects.map((o) => ({
-              key: o.warehouseId,
-              cells: [o.name, o.tools.total, o.tools.inStock, o.tools.issued, o.tools.inRepair]
-            }))}
+            rows={objects.map((o) => {
+              const t = objectToolsBlock(o, drillSection);
+              return {
+                key: o.warehouseId,
+                cells: [o.name, t.total, t.inStock, t.issued, t.inRepair]
+              };
+            })}
           />
         );
       }
@@ -1034,7 +1275,7 @@ export function HomeOverview({
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.inStock]
+              cells: [o.name, objectToolsBlock(o, drillSection).inStock]
             }))}
           />
         );
@@ -1046,7 +1287,7 @@ export function HomeOverview({
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.issued]
+              cells: [o.name, objectToolsBlock(o, drillSection).issued]
             }))}
           />
         );
@@ -1058,7 +1299,7 @@ export function HomeOverview({
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.tools.inRepair]
+              cells: [o.name, objectToolsBlock(o, drillSection).inRepair]
             }))}
           />
         );
@@ -1066,11 +1307,11 @@ export function HomeOverview({
       if (drill.key === "receipts") {
         return (
           <ObjectDrillTable
-            columns={["Объект", "Приёмки в работе"]}
+            columns={["Объект", `Приёмки (${sectionLabel(drillSection)})`]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, o.receiptOpen]
+              cells: [o.name, objectReceiptOpen(o, drillSection)]
             }))}
           />
         );
@@ -1084,18 +1325,18 @@ export function HomeOverview({
             chart={
               movementChartRows.length ? (
                 <HomeScrollChart height={220} maxPreview={CHART_MODAL_H}>
-                  {renderMovementChart(220)}
+                  {renderMovementChart(220, drillSection)}
                 </HomeScrollChart>
               ) : undefined
             }
-            note="График — суммарное движение по всем складам за 30 дней. Ниже — показатели по каждому объекту."
+            note={`График — движение (${sectionLabel(drillSection)}) за 30 дней. Ниже — показатели по каждому объекту.`}
           >
             <ObjectDrillTable
-              columns={["Объект", "ТМЦ на складе", "Приёмки"]}
+              columns={["Объект", `ТМЦ (${sectionLabel(drillSection)})`, `Приёмки (${sectionLabel(drillSection)})`]}
               onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
+                cells: [o.name, fmtQty(objectStockLines(o, drillSection)), objectReceiptOpen(o, drillSection)]
               }))}
             />
           </HomeDrillByObjects>
@@ -1105,17 +1346,19 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
-              columns={["Объект", "Лимиты СС", "Лимиты ЭОМ", "Перерасход"]}
+              columns={["Объект", `Лимиты ${sectionLabel(drillSection)}`, "Перерасход"]}
               onRowClick={openObjectMini}
-              rows={objects.map((o) => ({
-                key: o.warehouseId,
-                cells: [
-                  o.name,
-                  pctCell(o.limitsSs.hasTemplate, o.limitsSs.percent, o.limitsSs.overCount),
-                  pctCell(o.limitsEom.hasTemplate, o.limitsEom.percent, o.limitsEom.overCount),
-                  o.limitsSs.overCount + o.limitsEom.overCount || "отсутствует"
-                ]
-              }))}
+              rows={objects.map((o) => {
+                const s = objectLimitSlice(o, drillSection);
+                return {
+                  key: o.warehouseId,
+                  cells: [
+                    o.name,
+                    pctCell(s.hasTemplate, s.percent, s.overCount),
+                    s.overCount > 0 ? s.overCount : "отсутствует"
+                  ]
+                };
+              })}
             />
           </HomeDrillByObjects>
         );
@@ -1126,10 +1369,13 @@ export function HomeOverview({
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               onRowClick={openObjectMini}
-              rows={objects.map((o) => ({
-                key: o.warehouseId,
-                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
-              }))}
+              rows={objects.map((o) => {
+                const t = objectToolsBlock(o, drillSection);
+                return {
+                  key: o.warehouseId,
+                  cells: [o.name, t.inStock, t.issued, t.inRepair, t.total]
+                };
+              })}
             />
           </HomeDrillByObjects>
         );
@@ -1138,16 +1384,19 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects
             objectCount={objects.length}
-            chart={toolsPieData.length ? renderToolsPie(240) : undefined}
-            note="Круговая диаграмма — сводка по всем объектам. Таблица — разбивка по каждому объекту."
+            chart={toolsStatusChartRows.length ? renderToolsStatusChart(240, drillSection) : undefined}
+            note={`Статусы инструментов (${sectionLabel(drillSection)}). Таблица — разбивка по каждому объекту.`}
           >
             <ObjectDrillTable
               columns={["Объект", "На складе", "Выдано", "В ремонте", "Всего"]}
               onRowClick={openObjectMini}
-              rows={objects.map((o) => ({
-                key: o.warehouseId,
-                cells: [o.name, o.tools.inStock, o.tools.issued, o.tools.inRepair, o.tools.total]
-              }))}
+              rows={objects.map((o) => {
+                const t = objectToolsBlock(o, drillSection);
+                return {
+                  key: o.warehouseId,
+                  cells: [o.name, t.inStock, t.issued, t.inRepair, t.total]
+                };
+              })}
             />
           </HomeDrillByObjects>
         );
@@ -1156,16 +1405,11 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
-              columns={["Объект", "Городок", "СС", "ЭОМ"]}
+              columns={["Объект", `Городок (${sectionLabel(drillSection)})`]}
               onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [
-                  o.name,
-                  o.camp?.total ?? o.campSs + o.campEom,
-                  o.campSs,
-                  o.campEom
-                ]
+                cells: [o.name, objectCampCount(o, drillSection)]
               }))}
             />
           </HomeDrillByObjects>
@@ -1173,18 +1417,21 @@ export function HomeOverview({
       }
       if (drill.key === "campCategories") {
         return (
-          <HomeDrillByObjects objectCount={objects.length} note="Категории имущества городка по объектам.">
+          <HomeDrillByObjects
+            objectCount={objects.length}
+            note={`Категории имущества городка (${sectionLabel(drillSection)}) по объектам.`}
+          >
             <div className="homeDrillObjectList">
               {objects.map((o) => (
                 <section key={o.warehouseId} className="homeDrillObjectBlock">
                   <header className="homeDrillObjectBlockHead">
                     <strong>{o.name}</strong>
-                    <span className="muted">{o.camp?.total ?? o.campSs + o.campEom} поз.</span>
+                    <span className="muted">{objectCampCount(o, drillSection)} поз.</span>
                   </header>
-                  {(o.camp?.categories ?? []).length ? (
+                  {objectCampCategories(o, drillSection).length ? (
                     <ObjectDrillTable
                       columns={["Категория", "Штук"]}
-                      rows={(o.camp?.categories ?? []).map((c) => ({
+                      rows={objectCampCategories(o, drillSection).map((c) => ({
                         key: `${o.warehouseId}-${c.key}`,
                         cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
                       }))}
@@ -1198,14 +1445,16 @@ export function HomeOverview({
             {topCampRows.length > 0 ? (
               <>
                 <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
-                  Сводно по всем объектам
+                  Сводно · {sectionLabel(drillSection)}
                 </h4>
                 <ObjectDrillTable
                   columns={["Категория", "Штук"]}
-                  rows={topCampRows.map((r) => ({
-                    key: r.fullName,
-                    cells: [r.fullName, r.count]
-                  }))}
+                  rows={topCampRows
+                    .filter((r) => (drillSection === "SS" ? r.ss : r.eom) > 0)
+                    .map((r) => ({
+                      key: r.fullName,
+                      cells: [r.fullName, drillSection === "SS" ? r.ss : r.eom]
+                    }))}
                 />
               </>
             ) : null}
@@ -1216,46 +1465,51 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects
             objectCount={objects.length}
-            note="Категории инструментов внутри каждого объекта."
+            note={`Категории инструментов (${sectionLabel(drillSection)}) внутри каждого объекта.`}
           >
             <div className="homeDrillObjectList">
-              {objects.map((o) => (
-                <section key={o.warehouseId} className="homeDrillObjectBlock">
-                  <header className="homeDrillObjectBlockHead">
-                    <strong>{o.name}</strong>
-                    <span className="muted">{o.tools.total} инстр.</span>
-                  </header>
-                  {o.tools.categories.length ? (
-                    <ObjectDrillTable
-                      columns={["Категория", "Всего", "На складе", "Выдано", "В ремонте"]}
-                      rows={o.tools.categories.map((c) => ({
-                        key: `${o.warehouseId}-${c.key}`,
-                        cells: [
-                          c.icon ? `${c.icon} ${c.label}` : c.label,
-                          c.count,
-                          c.inStock,
-                          c.issued,
-                          c.inRepair
-                        ]
-                      }))}
-                    />
-                  ) : (
-                    <p className="muted homeChartEmpty">Инструменты не заведены.</p>
-                  )}
-                </section>
-              ))}
+              {objects.map((o) => {
+                const t = objectToolsBlock(o, drillSection);
+                return (
+                  <section key={o.warehouseId} className="homeDrillObjectBlock">
+                    <header className="homeDrillObjectBlockHead">
+                      <strong>{o.name}</strong>
+                      <span className="muted">{t.total} инстр.</span>
+                    </header>
+                    {t.categories.length ? (
+                      <ObjectDrillTable
+                        columns={["Категория", "Всего", "На складе", "Выдано", "В ремонте"]}
+                        rows={t.categories.map((c) => ({
+                          key: `${o.warehouseId}-${c.key}`,
+                          cells: [
+                            c.icon ? `${c.icon} ${c.label}` : c.label,
+                            c.count,
+                            c.inStock,
+                            c.issued,
+                            c.inRepair
+                          ]
+                        }))}
+                      />
+                    ) : (
+                      <p className="muted homeChartEmpty">Инструменты не заведены.</p>
+                    )}
+                  </section>
+                );
+              })}
             </div>
             {topToolsRows.length > 0 ? (
               <>
                 <h4 className="homeDrillSectionTitle" style={{ marginTop: 16 }}>
-                  Сводно по всем объектам
+                  Сводно · {sectionLabel(drillSection)}
                 </h4>
                 <ObjectDrillTable
                   columns={["Категория", "Штук"]}
-                  rows={topToolsRows.map((r) => ({
-                    key: r.fullName,
-                    cells: [r.fullName, r.count]
-                  }))}
+                  rows={topToolsRows
+                    .filter((r) => (drillSection === "SS" ? r.ss : r.eom) > 0)
+                    .map((r) => ({
+                      key: r.fullName,
+                      cells: [r.fullName, drillSection === "SS" ? r.ss : r.eom]
+                    }))}
                 />
               </>
             ) : null}
@@ -1399,7 +1653,7 @@ export function HomeOverview({
             >
               <ChartCardHead
                 title="Движение за 30 дней"
-                hint="приход и расход по складам"
+                hint="приход и расход · СС и ЭОМ"
                 count={movementChartRows.length}
                 onExpand={() => openChartDrill("movement")}
               />
@@ -1436,7 +1690,7 @@ export function HomeOverview({
           >
             <ChartCardHead
               title="Инструменты"
-              hint="по всем объектам"
+              hint="по объектам · СС и ЭОМ"
               count={toolsByObjectRows.length}
               onExpand={() => openChartDrill("toolsByObject")}
             />
@@ -1451,15 +1705,16 @@ export function HomeOverview({
 
           <section
             className="homeChartCard homeChartCardClickable"
-            onClick={() => toolsPieData.length && openChartDrill("toolsStatus")}
+            onClick={() => toolsStatusChartRows.length && openChartDrill("toolsStatus")}
             role="presentation"
           >
             <ChartCardHead
               title="Статусы инструментов"
-              hint="сводно по всем объектам"
+              hint="сводно · СС и ЭОМ"
+              count={toolsStatusChartRows.length}
               onExpand={() => openChartDrill("toolsStatus")}
             />
-            {renderToolsPie(220)}
+            {renderToolsStatusChart(220)}
           </section>
 
           <section
@@ -1469,7 +1724,7 @@ export function HomeOverview({
           >
             <ChartCardHead
               title="Городок"
-              hint="по объектам"
+              hint="по объектам · СС и ЭОМ"
               count={campChartRows.length}
               onExpand={() => openChartDrill("camp")}
             />
@@ -1490,7 +1745,7 @@ export function HomeOverview({
             >
               <ChartCardHead
                 title="Категории городка"
-                hint="суммарно по всем объектам"
+                hint="суммарно · СС и ЭОМ"
                 count={topCampRows.length}
                 onExpand={() => openChartDrill("campCategories")}
               />
@@ -1508,7 +1763,7 @@ export function HomeOverview({
             >
               <ChartCardHead
                 title="Категории инструментов"
-                hint="суммарно по всем объектам"
+                hint="суммарно · СС и ЭОМ"
                 count={topToolsRows.length}
                 onExpand={() => openChartDrill("categories")}
               />
@@ -1551,6 +1806,8 @@ export function HomeOverview({
           canBack={drillHistoryIndex > 0}
           canForward={drillHistoryIndex < drillHistory.length - 1}
           onDetails={drillDetails()}
+          drillSection={drillSection}
+          onDrillSectionChange={selectDrillSection}
         >
           {renderDrillBody()}
         </HomeDrillModal>

@@ -45,8 +45,20 @@ export type HomeLimitSlice = {
 
 export type HomeMovementTrendRow = {
   day: string;
+  incomeSs: number;
+  outcomeSs: number;
+  incomeEom: number;
+  outcomeEom: number;
   income: number;
   outcome: number;
+};
+
+export type HomeToolsBlock = {
+  total: number;
+  inStock: number;
+  issued: number;
+  inRepair: number;
+  categories: HomeToolCategory[];
 };
 
 export type HomeOverviewSummary = {
@@ -63,7 +75,11 @@ export type HomeOverviewSummary = {
   stockLines: number;
   receiptOpen: number;
   toolsByCategory: HomeToolCategory[];
+  toolsByCategorySs: HomeToolCategory[];
+  toolsByCategoryEom: HomeToolCategory[];
   campByCategory: HomeCampCategory[];
+  campByCategorySs: HomeCampCategory[];
+  campByCategoryEom: HomeCampCategory[];
   movementTrend30d: HomeMovementTrendRow[];
 };
 
@@ -73,20 +89,22 @@ export type HomeObjectOverview = {
   campSs: number;
   campEom: number;
   stockLines: number;
+  stockLinesSs: number;
+  stockLinesEom: number;
   receiptOpen: number;
+  receiptOpenSs: number;
+  receiptOpenEom: number;
   limitsSs: HomeLimitSlice;
   limitsEom: HomeLimitSlice;
   camp: {
     total: number;
     categories: HomeCampCategory[];
+    categoriesSs: HomeCampCategory[];
+    categoriesEom: HomeCampCategory[];
   };
-  tools: {
-    total: number;
-    inStock: number;
-    issued: number;
-    inRepair: number;
-    categories: HomeToolCategory[];
-  };
+  tools: HomeToolsBlock;
+  toolsSs: HomeToolsBlock;
+  toolsEom: HomeToolsBlock;
 };
 
 function movementScopeWhere(scope: DataScope): Prisma.StockMovementWhereInput {
@@ -162,6 +180,28 @@ function buildToolCategories(
   return [...cards.values()]
     .filter((c) => c.count > 0)
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
+}
+
+function buildToolsBlock(
+  tools: Array<{ name: string; categoryId: string | null; status: ToolStatus }>,
+  categories: Array<{ id: string; name: string; icon: string | null }>,
+  categoryLimit = 8
+): HomeToolsBlock {
+  const cats = buildToolCategories(tools, categories);
+  return {
+    total: tools.length,
+    inStock: tools.filter((t) => t.status === ToolStatus.IN_STOCK).length,
+    issued: tools.filter((t) => t.status === ToolStatus.ISSUED).length,
+    inRepair: tools.filter((t) => t.status === ToolStatus.IN_REPAIR).length,
+    categories: cats.slice(0, categoryLimit)
+  };
+}
+
+function movementRowSection(m: {
+  operation: { section: "SS" | "EOM" } | null;
+  issueRequest: { section: "SS" | "EOM" } | null;
+}): "SS" | "EOM" | null {
+  return m.operation?.section ?? m.issueRequest?.section ?? null;
 }
 
 function buildCampCategories(
@@ -273,13 +313,16 @@ const emptySummary = (): HomeOverviewSummary => ({
   stockLines: 0,
   receiptOpen: 0,
   toolsByCategory: [],
+  toolsByCategorySs: [],
+  toolsByCategoryEom: [],
   campByCategory: [],
+  campByCategorySs: [],
+  campByCategoryEom: [],
   movementTrend30d: []
 });
 
 export async function buildHomeOverview(
-  scope: DataScope,
-  section?: "SS" | "EOM"
+  scope: DataScope
 ): Promise<{ objects: HomeObjectOverview[]; summary: HomeOverviewSummary }> {
   const whWhere = warehouseWhereFromScope(scope);
   const warehouses = await prisma.warehouse.findMany({
@@ -299,18 +342,14 @@ export async function buildHomeOverview(
   };
 
   const toolWhere: Prisma.ToolWhereInput = {
-    AND: [
-      toolWhereFromScope(scope),
-      { warehouseId: { in: warehouseIds } },
-      ...(section ? [{ section }] : [])
-    ]
+    AND: [toolWhereFromScope(scope), { warehouseId: { in: warehouseIds } }]
   };
 
   const stockScoped = stockWhereFromScope(scope);
   const stockWhere: Prisma.StockWhereInput = {
     ...(Object.keys(stockScoped).length ? { AND: [stockScoped] } : {}),
     warehouseId: { in: warehouseIds },
-    ...(section ? { section } : { section: { in: ["SS", "EOM"] } })
+    section: { in: ["SS", "EOM"] }
   };
 
   const campWhere: Prisma.CampItemWhereInput =
@@ -395,19 +434,25 @@ export async function buildHomeOverview(
         ...movementScopeWhere(scope),
         createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
       },
-      select: { createdAt: true, direction: true, quantity: true }
+      select: {
+        createdAt: true,
+        direction: true,
+        quantity: true,
+        operation: { select: { section: true } },
+        issueRequest: { select: { section: true } }
+      }
     }),
     prisma.toolCategory.findMany({ orderBy: [{ order: "asc" }, { name: "asc" }] }),
     prisma.stock.groupBy({
-      by: ["warehouseId"],
+      by: ["warehouseId", "section"],
       where: stockWhere,
       _count: { materialId: true }
     }),
     prisma.receiptRequest.groupBy({
-      by: ["warehouseId"],
+      by: ["warehouseId", "section"],
       where: {
         warehouseId: { in: warehouseIds },
-        ...(section ? { section } : { section: { in: ["SS", "EOM"] } }),
+        section: { in: ["SS", "EOM"] },
         status: { in: [ReceiptRequestStatus.NEW, ReceiptRequestStatus.IN_PROGRESS] }
       },
       _count: { id: true }
@@ -500,17 +545,29 @@ export async function buildHomeOverview(
   }
 
   const campCatByWh = new Map<string, Partial<Record<CampItemCategory, number>>>();
+  const campCatByWhSec = new Map<string, Partial<Record<CampItemCategory, number>>>();
   for (const g of campCatGroups) {
     if (!g.warehouseId) continue;
     const key = g.warehouseId;
     const bucket = campCatByWh.get(key) || {};
     bucket[g.category] = (bucket[g.category] ?? 0) + g._count._all;
     campCatByWh.set(key, bucket);
+    const secKey = `${g.warehouseId}:${g.section}`;
+    const secBucket = campCatByWhSec.get(secKey) || {};
+    secBucket[g.category] = (secBucket[g.category] ?? 0) + g._count._all;
+    campCatByWhSec.set(secKey, secBucket);
   }
 
   const globalCampCounts: Partial<Record<CampItemCategory, number>> = {};
+  const globalCampCountsSs: Partial<Record<CampItemCategory, number>> = {};
+  const globalCampCountsEom: Partial<Record<CampItemCategory, number>> = {};
   for (const g of campCatGroups) {
     globalCampCounts[g.category] = (globalCampCounts[g.category] ?? 0) + g._count._all;
+    if (g.section === "SS") {
+      globalCampCountsSs[g.category] = (globalCampCountsSs[g.category] ?? 0) + g._count._all;
+    } else if (g.section === "EOM") {
+      globalCampCountsEom[g.category] = (globalCampCountsEom[g.category] ?? 0) + g._count._all;
+    }
   }
 
   const toolsByWh = new Map<string, typeof toolRows>();
@@ -521,21 +578,38 @@ export async function buildHomeOverview(
     toolsByWh.set(t.warehouseId, list);
   }
 
-  const stockByWh = new Map(stockGroups.map((g) => [g.warehouseId, g._count.materialId]));
-  const receiptByWh = new Map(receiptGroups.map((g) => [g.warehouseId, g._count.id]));
+  const stockByWhSec = new Map<string, number>();
+  for (const g of stockGroups) {
+    if (!g.warehouseId) continue;
+    stockByWhSec.set(`${g.warehouseId}:${g.section}`, g._count.materialId);
+  }
+  const receiptByWhSec = new Map<string, number>();
+  for (const g of receiptGroups) {
+    if (!g.warehouseId) continue;
+    receiptByWhSec.set(`${g.warehouseId}:${g.section}`, g._count.id);
+  }
 
   const objects: HomeObjectOverview[] = warehouses.map((wh) => {
     const whTools = toolsByWh.get(wh.id) || [];
-    const cats = buildToolCategories(whTools, categories);
+    const whToolsSs = whTools.filter((t) => t.section === "SS");
+    const whToolsEom = whTools.filter((t) => t.section === "EOM");
     const campSs = campByWhSec.get(`${wh.id}:SS`) ?? 0;
     const campEom = campByWhSec.get(`${wh.id}:EOM`) ?? 0;
+    const stockLinesSs = stockByWhSec.get(`${wh.id}:SS`) ?? 0;
+    const stockLinesEom = stockByWhSec.get(`${wh.id}:EOM`) ?? 0;
+    const receiptOpenSs = receiptByWhSec.get(`${wh.id}:SS`) ?? 0;
+    const receiptOpenEom = receiptByWhSec.get(`${wh.id}:EOM`) ?? 0;
     return {
       warehouseId: wh.id,
       name: wh.name,
       campSs,
       campEom,
-      stockLines: stockByWh.get(wh.id) ?? 0,
-      receiptOpen: receiptByWh.get(wh.id) ?? 0,
+      stockLines: stockLinesSs + stockLinesEom,
+      stockLinesSs,
+      stockLinesEom,
+      receiptOpen: receiptOpenSs + receiptOpenEom,
+      receiptOpenSs,
+      receiptOpenEom,
       limitsSs: computeLimitSlice(
         wh.id,
         "SS",
@@ -558,44 +632,70 @@ export async function buildHomeOverview(
       ),
       camp: {
         total: campSs + campEom,
-        categories: buildCampCategories(campCatByWh.get(wh.id) || {})
+        categories: buildCampCategories(campCatByWh.get(wh.id) || {}),
+        categoriesSs: buildCampCategories(campCatByWhSec.get(`${wh.id}:SS`) || {}),
+        categoriesEom: buildCampCategories(campCatByWhSec.get(`${wh.id}:EOM`) || {})
       },
-      tools: {
-        total: whTools.length,
-        inStock: whTools.filter((t) => t.status === ToolStatus.IN_STOCK).length,
-        issued: whTools.filter((t) => t.status === ToolStatus.ISSUED).length,
-        inRepair: whTools.filter((t) => t.status === ToolStatus.IN_REPAIR).length,
-        categories: cats.slice(0, 8)
-      }
+      tools: buildToolsBlock(whTools, categories),
+      toolsSs: buildToolsBlock(whToolsSs, categories),
+      toolsEom: buildToolsBlock(whToolsEom, categories)
     };
   });
 
   const toolsByCategory = buildToolCategories(toolRows, categories);
+  const toolsByCategorySs = buildToolCategories(
+    toolRows.filter((t) => t.section === "SS"),
+    categories
+  );
+  const toolsByCategoryEom = buildToolCategories(
+    toolRows.filter((t) => t.section === "EOM"),
+    categories
+  );
   const toolsTotal = toolRows.length;
   const toolsInStock = toolRows.filter((t) => t.status === ToolStatus.IN_STOCK).length;
   const toolsIssued = toolRows.filter((t) => t.status === ToolStatus.ISSUED).length;
   const toolsInRepair = toolRows.filter((t) => t.status === ToolStatus.IN_REPAIR).length;
 
-  const trendMap = new Map<string, { income: number; outcome: number }>();
+  const trendMap = new Map<
+    string,
+    { incomeSs: number; outcomeSs: number; incomeEom: number; outcomeEom: number }
+  >();
   for (let i = 29; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
-    trendMap.set(key, { income: 0, outcome: 0 });
+    trendMap.set(key, { incomeSs: 0, outcomeSs: 0, incomeEom: 0, outcomeEom: 0 });
   }
   for (const m of movementRows) {
+    const sec = movementRowSection(m);
+    if (sec !== "SS" && sec !== "EOM") continue;
     const key = new Date(m.createdAt).toISOString().slice(0, 10);
     const bucket = trendMap.get(key);
     if (!bucket) continue;
     const q = Math.abs(Number(m.quantity) || 0);
-    if (m.direction === "IN") bucket.income += q;
-    else bucket.outcome += q;
+    if (m.direction === "IN") {
+      if (sec === "SS") bucket.incomeSs += q;
+      else bucket.incomeEom += q;
+    } else {
+      if (sec === "SS") bucket.outcomeSs += q;
+      else bucket.outcomeEom += q;
+    }
   }
-  const movementTrend30d = Array.from(trendMap.entries()).map(([day, v]) => ({
-    day,
-    income: Math.round(v.income * 1000) / 1000,
-    outcome: Math.round(v.outcome * 1000) / 1000
-  }));
+  const movementTrend30d = Array.from(trendMap.entries()).map(([day, v]) => {
+    const incomeSs = Math.round(v.incomeSs * 1000) / 1000;
+    const outcomeSs = Math.round(v.outcomeSs * 1000) / 1000;
+    const incomeEom = Math.round(v.incomeEom * 1000) / 1000;
+    const outcomeEom = Math.round(v.outcomeEom * 1000) / 1000;
+    return {
+      day,
+      incomeSs,
+      outcomeSs,
+      incomeEom,
+      outcomeEom,
+      income: incomeSs + incomeEom,
+      outcome: outcomeSs + outcomeEom
+    };
+  });
 
   let limitsOverLines = 0;
   let objectsWithoutTemplate = 0;
@@ -624,7 +724,11 @@ export async function buildHomeOverview(
       stockLines,
       receiptOpen,
       toolsByCategory,
+      toolsByCategorySs,
+      toolsByCategoryEom,
       campByCategory: buildCampCategories(globalCampCounts),
+      campByCategorySs: buildCampCategories(globalCampCountsSs),
+      campByCategoryEom: buildCampCategories(globalCampCountsEom),
       movementTrend30d
     }
   };

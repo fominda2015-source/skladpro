@@ -269,10 +269,7 @@ dashboardRouter.get("/summary", async (req: AuthedRequest, res) => {
 
 dashboardRouter.get("/home-overview", async (req: AuthedRequest, res) => {
   const scope = await getHomeOverviewDataScope(req);
-  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const section: "SS" | "EOM" | undefined =
-    sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
-  const { objects, summary } = await buildHomeOverview(scope, section);
+  const { objects, summary } = await buildHomeOverview(scope);
   return res.json({
     generatedAt: new Date().toISOString(),
     summary,

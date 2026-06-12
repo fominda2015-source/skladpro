@@ -1088,6 +1088,7 @@ function App() {
   const [toolListWarehouseId, setToolListWarehouseId] = useState("");
   /** Объект в drill «Инструменты» на главной — отдельно от фильтра вкладки. */
   const [homeToolsDrillWarehouseId, setHomeToolsDrillWarehouseId] = useState<string | null>(null);
+  const [homeDrillSection, setHomeDrillSection] = useState<"SS" | "EOM">("SS");
   const [toolManualModalOpen, setToolManualModalOpen] = useState(false);
   const [toolMaterialQty, setToolMaterialQty] = useState("1");
   const [toolMaterialUnit, setToolMaterialUnit] = useState("шт");
@@ -2345,8 +2346,7 @@ function App() {
     setHomeOverviewError("");
     setHomeOverviewLoading(true);
     try {
-      const q = new URLSearchParams({ section: objectSectionFilter });
-      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview?${q}`, {
+      const r = await fetchWithSession(`${API_URL}/api/dashboard/home-overview`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -4675,13 +4675,15 @@ function App() {
   async function fetchToolsPage(
     categorySlug: string | null | undefined,
     groupFilter?: { categoryId?: string; nameGroup?: string },
-    warehouseIdOverride?: string
+    warehouseIdOverride?: string,
+    sectionOverride?: "SS" | "EOM"
   ) {
     const warehouseId = warehouseIdOverride ?? toolListWarehouseId;
+    const section = sectionOverride ?? objectSectionFilter;
     const queryParts = [
       toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
       toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
-      `section=${encodeURIComponent(objectSectionFilter)}`,
+      `section=${encodeURIComponent(section)}`,
       warehouseId ? `warehouseId=${encodeURIComponent(warehouseId)}` : "",
       ...(groupFilter?.nameGroup
         ? [
@@ -4708,7 +4710,7 @@ function App() {
     return { items, total };
   }
 
-  async function loadTools(warehouseIdOverride?: string) {
+  async function loadTools(warehouseIdOverride?: string, sectionOverride?: "SS" | "EOM") {
     if (!token) return;
     setToolsError("");
     setToolsLoading(true);
@@ -4729,11 +4731,11 @@ function App() {
       let total = 0;
 
       if (groupFilter?.nameGroup) {
-        const r = await fetchToolsPage(null, groupFilter, warehouseIdOverride);
+        const r = await fetchToolsPage(null, groupFilter, warehouseIdOverride, sectionOverride);
         items = r.items;
         total = r.total;
       } else if (slug) {
-        const r = await fetchToolsPage(slug, undefined, warehouseIdOverride);
+        const r = await fetchToolsPage(slug, undefined, warehouseIdOverride, sectionOverride);
         items = r.items;
         total = r.total;
       }
@@ -4796,7 +4798,8 @@ function App() {
     }
   }
 
-  const handleHomeToolsObjectDrill = useCallback((warehouseId: string) => {
+  const handleHomeToolsObjectDrill = useCallback((warehouseId: string, section: "SS" | "EOM") => {
+    setHomeDrillSection(section);
     setHomeToolsDrillWarehouseId((prev) => (prev === warehouseId ? prev : warehouseId));
     setToolsNavPath((prev) => (prev.length === 1 && prev[0] === "hub" ? prev : ["hub"]));
     setToolsListGroupFilter((prev) => (prev === null ? prev : null));
@@ -5323,16 +5326,17 @@ function App() {
     );
   }
 
-  function renderToolsInventoryBlock(embed?: boolean, drillWarehouseId?: string) {
+  function renderToolsInventoryBlock(embed?: boolean, drillWarehouseId?: string, sectionOverride?: "SS" | "EOM") {
     const warehouseId =
       drillWarehouseId ||
       (activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : toolListWarehouseId);
+    const sectionFilter = sectionOverride ?? objectSectionFilter;
     return (
       <ToolsInventoryBlock
         navPath={toolsNavPath}
         onNavPathChange={setToolsNavPath}
         warehouseId={warehouseId}
-        sectionFilter={objectSectionFilter}
+        sectionFilter={sectionFilter}
         token={token}
         apiUrl={API_URL}
         fetchWithSession={fetchWithSession}
@@ -5626,7 +5630,7 @@ function App() {
       return;
     }
     void loadHomeOverview();
-  }, [token, canDashboard, activeTab, objectSectionFilter]);
+  }, [token, canDashboard, activeTab]);
 
   // Подсказки «куда пихать» для раскрытых заявок, привязанных к шаблону лимита.
   useEffect(() => {
@@ -6126,18 +6130,18 @@ function App() {
 
   useEffect(() => {
     if (!token || activeTab !== "stocks" || !homeToolsDrillWarehouseId) return;
-    void loadTools(homeToolsDrillWarehouseId);
+    void loadTools(homeToolsDrillWarehouseId, homeDrillSection);
   }, [
     token,
     activeTab,
     homeToolsDrillWarehouseId,
+    homeDrillSection,
     toolSearch,
     toolStatusFilter,
     toolCategoryFilter,
     toolsSort,
     toolsPage,
     toolsPageSize,
-    objectSectionFilter,
     toolsNavPath,
     toolsListGroupFilter
   ]);
@@ -6665,17 +6669,20 @@ function App() {
                 : undefined
             }
             renderToolsStatDrillContent={
-              canReadTools ? (warehouseId) => renderToolsInventoryBlock(true, warehouseId) : undefined
+              canReadTools
+                ? (warehouseId, section) => renderToolsInventoryBlock(true, warehouseId, section)
+                : undefined
             }
             onToolsObjectDrill={handleHomeToolsObjectDrill}
-            renderCampStatDrillContent={(warehouseId) => (
+            onDrillSectionChange={setHomeDrillSection}
+            renderCampStatDrillContent={(warehouseId, section) => (
               <CampTab
                 compact
                 token={token}
                 apiUrl={API_URL}
                 fetchWithSession={fetchWithSession}
                 warehouseId={warehouseId}
-                sectionFilter={objectSectionFilter}
+                sectionFilter={section}
                 warehouses={warehouses}
                 canWrite={canWriteMaterialCards}
                 objectFilterSlot={null}
@@ -6715,7 +6722,7 @@ function App() {
                   }
                 : undefined
             }
-            renderObjectDrillContent={({ warehouseId, objectName, drillKind, drillKey }) => (
+            renderObjectDrillContent={({ warehouseId, objectName, drillKind, drillKey, drillSection }) => (
               <HomeDrillContent
                 warehouseId={warehouseId}
                 objectName={objectName}
@@ -6724,6 +6731,7 @@ function App() {
                 token={token}
                 fetchWithSession={fetchWithSession}
                 defaultSection={objectSectionFilter}
+                drillSection={drillSection}
                 safeName={safeName}
               />
             )}

@@ -79,10 +79,12 @@ type Props = {
   token: string | null;
   fetchWithSession: typeof fetch;
   defaultSection: Section;
+  drillSection?: Section;
   safeName: (v: string) => string;
 };
 
-function drillSection(drillKey: string, defaultSection: Section): Section {
+function resolveDrillSection(drillKey: string, drillSection: Section | undefined, defaultSection: Section): Section {
+  if (drillSection) return drillSection;
   if (drillKey === "limitsEom") return "EOM";
   if (drillKey === "limitsSs" || drillKey === "limits") return "SS";
   return defaultSection;
@@ -482,11 +484,13 @@ function HomeDrillStockPanel({
 
 function HomeDrillReceiptsPanel({
   warehouseId,
+  section,
   token,
   fetchWithSession,
   safeName
 }: {
   warehouseId: string;
+  section: Section;
   token: string | null;
   fetchWithSession: typeof fetch;
   safeName: (v: string) => string;
@@ -498,13 +502,13 @@ function HomeDrillReceiptsPanel({
 
   useEffect(() => {
     setExpanded({});
-  }, [warehouseId]);
+  }, [warehouseId, section]);
 
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ warehouseId });
+    const params = new URLSearchParams({ warehouseId, section });
     try {
       const res = await fetchWithSession(`${API_URL}/api/receipt-requests?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -517,7 +521,7 @@ function HomeDrillReceiptsPanel({
     } finally {
       setLoading(false);
     }
-  }, [token, fetchWithSession, warehouseId]);
+  }, [token, fetchWithSession, warehouseId, section]);
 
   useEffect(() => {
     void load();
@@ -631,6 +635,7 @@ export function HomeDrillContent({
   token,
   fetchWithSession,
   defaultSection,
+  drillSection,
   safeName
 }: Props) {
   const isStock = drillKind === "stat" && drillKey === "stock";
@@ -638,13 +643,13 @@ export function HomeDrillContent({
     (drillKind === "stat" && (drillKey === "limitsSs" || drillKey === "limitsEom")) ||
     (drillKind === "chart" && drillKey === "limits");
   const isReceipts = drillKind === "stat" && drillKey === "receipts";
-  const section = drillSection(drillKey, defaultSection);
+  const section = resolveDrillSection(drillKey, drillSection, defaultSection);
 
   if (isStock) {
     return (
       <HomeDrillStockPanel
         warehouseId={warehouseId}
-        section={defaultSection}
+        section={section}
         token={token}
         fetchWithSession={fetchWithSession}
         safeName={safeName}
@@ -666,6 +671,7 @@ export function HomeDrillContent({
     return (
       <HomeDrillReceiptsPanel
         warehouseId={warehouseId}
+        section={section}
         token={token}
         fetchWithSession={fetchWithSession}
         safeName={safeName}
