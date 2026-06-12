@@ -2223,6 +2223,7 @@ function App() {
         onSelectObject={(id) => void selectTopObject(id)}
         onSelectSection={(next) => setSection(next)}
         hideObjectSelect={activeTab === "stocks"}
+        combinedSections={activeTab === "stocks"}
         layout="inline"
       />
     );

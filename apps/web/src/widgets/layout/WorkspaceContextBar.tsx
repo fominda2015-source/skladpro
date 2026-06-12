@@ -20,6 +20,8 @@ type Props = {
   hideObjectSelect?: boolean;
   hideObjectControls?: boolean;
   hideSection?: boolean;
+  /** На главной: оба раздела выглядят выбранными, переключение отключено */
+  combinedSections?: boolean;
   tabFilter?: TabFilterProps;
   layout?: "stacked" | "inline";
   middleSlot?: ReactNode;
@@ -36,10 +38,14 @@ export function WorkspaceContextBar(props: Props) {
     hideObjectSelect = false,
     hideObjectControls = false,
     hideSection = false,
+    combinedSections = false,
     tabFilter,
     layout = "inline",
     middleSlot
   } = props;
+
+  const ssActive = combinedSections || section === "SS";
+  const eomActive = combinedSections || section === "EOM";
 
   return (
     <div
@@ -92,20 +98,24 @@ export function WorkspaceContextBar(props: Props) {
       <div className="workspaceContextSection workspaceContextSection--accent">
         <span className="workspaceContextLabel">Раздел</span>
         <div
-          className="sectionToggle sectionToggle--accent workspaceContextSectionToggle"
-          aria-label="Раздел СС/ЭОМ"
+          className={`sectionToggle sectionToggle--accent workspaceContextSectionToggle${combinedSections ? " sectionToggle--combined" : ""}`}
+          aria-label={combinedSections ? "Разделы СС и ЭОМ — сводка" : "Раздел СС/ЭОМ"}
         >
           <button
             type="button"
-            className={`sectionToggleBtn ${section === "SS" ? "active" : ""}`}
+            className={`sectionToggleBtn ${ssActive ? "active" : ""}`}
             onClick={() => onSelectSection("SS")}
+            disabled={combinedSections}
+            aria-pressed={ssActive}
           >
             СС
           </button>
           <button
             type="button"
-            className={`sectionToggleBtn ${section === "EOM" ? "active" : ""}`}
+            className={`sectionToggleBtn ${eomActive ? "active" : ""}`}
             onClick={() => onSelectSection("EOM")}
+            disabled={combinedSections}
+            aria-pressed={eomActive}
           >
             ЭОМ
           </button>
