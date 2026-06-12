@@ -52,6 +52,7 @@ import {
   type LimitImportDiffView
 } from "./widgets/limits/limitImportDiffUtils";
 import { LimitImportHistoryButton, LimitImportHistoryModal } from "./widgets/limits/LimitImportHistoryModal";
+import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { AdminMaintenancePanel } from "./widgets/admin/AdminMaintenancePanel";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
