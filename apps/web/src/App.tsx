@@ -6604,7 +6604,6 @@ function App() {
                 onProfile={() => setActiveTab("profile")}
                 onSettings={() => setActiveTab("settings")}
                 onLogout={onLogout}
-                showName={false}
               />
             ) : null}
           </div>
