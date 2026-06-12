@@ -151,7 +151,7 @@ type Props = {
     objectName: string;
     drillKind: "stat" | "chart";
     drillKey: string;
-    drillSection: HomeSection;
+    drillSection?: HomeSection;
   }) => ReactNode;
   onOpenQr?: () => void;
   onOpenIssues?: () => void;
@@ -179,6 +179,33 @@ type HomeChartKey = "movement" | "limits" | "toolsByObject" | "toolsStatus" | "c
 type HomeDrill =
   | { kind: "stat"; key: HomeStatKey }
   | { kind: "chart"; key: HomeChartKey };
+
+function statDrillUsesSectionToggle(key: HomeStatKey): boolean {
+  return (
+    key === "stock" ||
+    key === "camp" ||
+    key === "tools" ||
+    key === "toolsStock" ||
+    key === "toolsIssued" ||
+    key === "toolsRepair"
+  );
+}
+
+function chartDrillUsesSectionToggle(key: HomeChartKey): boolean {
+  return (
+    key === "camp" ||
+    key === "campCategories" ||
+    key === "toolsByObject" ||
+    key === "toolsStatus" ||
+    key === "categories"
+  );
+}
+
+function drillUsesSectionToggle(drill: HomeDrill): boolean {
+  return drill.kind === "stat"
+    ? statDrillUsesSectionToggle(drill.key)
+    : chartDrillUsesSectionToggle(drill.key);
+}
 
 type DrillView =
   | { mode: "list" }
@@ -337,20 +364,10 @@ function objectToolsBlock(o: HomeObjectRow, section: HomeSection): HomeToolsBloc
   return o.tools;
 }
 
-function objectLimitSlice(o: HomeObjectRow, section: HomeSection): HomeLimitSlice {
-  return section === "SS" ? o.limitsSs : o.limitsEom;
-}
-
 function objectStockLines(o: HomeObjectRow, section: HomeSection): number {
   if (section === "SS" && o.stockLinesSs != null) return o.stockLinesSs;
   if (section === "EOM" && o.stockLinesEom != null) return o.stockLinesEom;
   return o.stockLines;
-}
-
-function objectReceiptOpen(o: HomeObjectRow, section: HomeSection): number {
-  if (section === "SS" && o.receiptOpenSs != null) return o.receiptOpenSs;
-  if (section === "EOM" && o.receiptOpenEom != null) return o.receiptOpenEom;
-  return o.receiptOpen;
 }
 
 function objectCampCount(o: HomeObjectRow, section: HomeSection): number {
@@ -420,15 +437,19 @@ export function HomeOverview({
   };
 
   const openStatDrill = (key: HomeStatKey) => {
-    setDrillSection(key === "limitsEom" ? "EOM" : "SS");
-    onDrillSectionChange?.(key === "limitsEom" ? "EOM" : "SS");
+    if (statDrillUsesSectionToggle(key)) {
+      setDrillSection("SS");
+      onDrillSectionChange?.("SS");
+    }
     setDrill({ kind: "stat", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
   };
   const openChartDrill = (key: HomeChartKey) => {
-    setDrillSection("SS");
-    onDrillSectionChange?.("SS");
+    if (chartDrillUsesSectionToggle(key)) {
+      setDrillSection("SS");
+      onDrillSectionChange?.("SS");
+    }
     setDrill({ kind: "chart", key });
     setDrillHistory([{ mode: "list" }]);
     setDrillHistoryIndex(0);
@@ -446,9 +467,9 @@ export function HomeOverview({
   onToolsObjectDrillRef.current = onToolsObjectDrill;
 
   useEffect(() => {
-    if (!drillToolsWarehouseId) return;
+    if (!drillToolsWarehouseId || !drill || drill.kind !== "stat" || drill.key !== "tools") return;
     onToolsObjectDrillRef.current?.(drillToolsWarehouseId, drillSection);
-  }, [drillToolsWarehouseId, drillSection]);
+  }, [drillToolsWarehouseId, drillSection, drill]);
 
   const openObjectMini = (warehouseId: string) => {
     if (drill?.kind === "stat" && drill.key === "camp") {
@@ -1018,6 +1039,7 @@ export function HomeOverview({
 
   const renderDrillBody = () => {
     if (!drill) return null;
+    const sectionToggle = drillUsesSectionToggle(drill);
     if (selectedObject) {
       const o = selectedObject;
       const customObjectDrill = renderObjectDrillContent?.({
@@ -1025,7 +1047,7 @@ export function HomeOverview({
         objectName: o.name,
         drillKind: drill.kind,
         drillKey: drill.key,
-        drillSection
+        drillSection: sectionToggle && drill.kind === "stat" && drill.key === "stock" ? drillSection : undefined
       });
       if (drill.kind === "stat" && drill.key === "tools" && renderToolsStatDrillContent) {
         return (
@@ -1067,59 +1089,80 @@ export function HomeOverview({
           </div>
         );
       }
-      const tools = objectToolsBlock(o, drillSection);
-      const limits = objectLimitSlice(o, drillSection);
+      const tools = sectionToggle ? objectToolsBlock(o, drillSection) : o.tools;
+      const limitsSs = o.limitsSs;
+      const limitsEom = o.limitsEom;
       const miniRows = (() => {
         if (drill.kind === "stat") {
-          if (drill.key === "limitsSs" || drill.key === "limitsEom") {
+          if (drill.key === "limitsSs") {
+            const s = limitsSs;
             return [
-              { key: "exec", cells: ["Выполнение", limits.hasTemplate ? `${limits.percent}%` : "отсутствует"] },
+              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
               {
                 key: "arr",
-                cells: ["Приход", limits.hasTemplate ? limitQtyPercent(limits.arrivedQty, limits.plannedQty) : "отсутствует"]
+                cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"]
               },
               {
                 key: "ord",
-                cells: ["В закупке", limits.hasTemplate ? limitQtyPercent(limits.onOrderQty, limits.plannedQty) : "отсутствует"]
+                cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"]
               },
-              { key: "over", cells: ["Перерасход", limits.overCount > 0 ? limits.overCount : "отсутствует"] }
+              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
+            ];
+          }
+          if (drill.key === "limitsEom") {
+            const s = limitsEom;
+            return [
+              { key: "exec", cells: ["Выполнение", s.hasTemplate ? `${s.percent}%` : "отсутствует"] },
+              {
+                key: "arr",
+                cells: ["Приход", s.hasTemplate ? limitQtyPercent(s.arrivedQty, s.plannedQty) : "отсутствует"]
+              },
+              {
+                key: "ord",
+                cells: ["В закупке", s.hasTemplate ? limitQtyPercent(s.onOrderQty, s.plannedQty) : "отсутствует"]
+              },
+              { key: "over", cells: ["Перерасход", s.overCount > 0 ? s.overCount : "отсутствует"] }
             ];
           }
           if (drill.key === "stock") {
-            return [{ key: "stock", cells: [`ТМЦ на складе (${sectionLabel(drillSection)})`, fmtQty(objectStockLines(o, drillSection))] }];
+            return [
+              {
+                key: "stock",
+                cells: [`ТМЦ на складе (${sectionLabel(drillSection)})`, fmtQty(objectStockLines(o, drillSection))]
+              }
+            ];
           }
           if (drill.key === "camp") {
             return [{ key: "camp", cells: [`Городок (${sectionLabel(drillSection)})`, objectCampCount(o, drillSection)] }];
           }
-          if (drill.key === "tools") return [{ key: "tools", cells: [`Инструменты (${sectionLabel(drillSection)})`, tools.total] }];
+          if (drill.key === "tools") {
+            return [{ key: "tools", cells: [`Инструменты (${sectionLabel(drillSection)})`, tools.total] }];
+          }
           if (drill.key === "toolsStock") return [{ key: "tools-stock", cells: ["На складе", tools.inStock] }];
           if (drill.key === "toolsIssued") return [{ key: "tools-issued", cells: ["Выдано", tools.issued] }];
           if (drill.key === "toolsRepair") return [{ key: "tools-repair", cells: ["В ремонте", tools.inRepair] }];
-          if (drill.key === "receipts") {
-            return [{ key: "receipt", cells: [`Приёмки (${sectionLabel(drillSection)})`, objectReceiptOpen(o, drillSection)] }];
-          }
+          if (drill.key === "receipts") return [{ key: "receipt", cells: ["Приёмки в работе", o.receiptOpen] }];
         }
         if (drill.kind === "chart") {
           if (drill.key === "limits") {
             return [
-              {
-                key: "limits",
-                cells: [`Лимиты ${sectionLabel(drillSection)}`, limits.hasTemplate ? `${limits.percent}%` : "отсутствует"]
-              }
+              { key: "ss", cells: ["Лимиты СС", limitsSs.hasTemplate ? `${limitsSs.percent}%` : "отсутствует"] },
+              { key: "eom", cells: ["Лимиты ЭОМ", limitsEom.hasTemplate ? `${limitsEom.percent}%` : "отсутствует"] }
             ];
           }
           if (drill.key === "toolsByObject" || drill.key === "toolsStatus") {
+            const t = sectionToggle ? tools : o.tools;
             return [
-              { key: "tools", cells: ["Инструменты", tools.total] },
-              { key: "tools-stock", cells: ["На складе", tools.inStock] },
-              { key: "tools-issued", cells: ["Выдано", tools.issued] },
-              { key: "tools-repair", cells: ["В ремонте", tools.inRepair] }
+              { key: "tools", cells: ["Инструменты", t.total] },
+              { key: "tools-stock", cells: ["На складе", t.inStock] },
+              { key: "tools-issued", cells: ["Выдано", t.issued] },
+              { key: "tools-repair", cells: ["В ремонте", t.inRepair] }
             ];
           }
           if (drill.key === "movement") {
             return [
-              { key: "stock", cells: [`ТМЦ (${sectionLabel(drillSection)})`, fmtQty(objectStockLines(o, drillSection))] },
-              { key: "receipt", cells: [`Приёмки (${sectionLabel(drillSection)})`, objectReceiptOpen(o, drillSection)] }
+              { key: "stock", cells: ["ТМЦ на складе", fmtQty(o.stockLines)] },
+              { key: "receipt", cells: ["Приёмки в работе", o.receiptOpen] }
             ];
           }
           if (drill.key === "camp") {
@@ -1135,8 +1178,9 @@ export function HomeOverview({
               : [{ key: "camp-empty", cells: ["Категории", "отсутствует"] }];
           }
           if (drill.key === "categories") {
-            return tools.categories.length
-              ? tools.categories.map((c) => ({
+            const t = sectionToggle ? tools : o.tools;
+            return t.categories.length
+              ? t.categories.map((c) => ({
                   key: `cat-${c.key}`,
                   cells: [c.icon ? `${c.icon} ${c.label}` : c.label, c.count]
                 }))
@@ -1217,14 +1261,26 @@ export function HomeOverview({
       );
     }
     if (drill.kind === "stat") {
-      if (drill.key === "limitsSs" || drill.key === "limitsEom") {
+      if (drill.key === "limitsSs") {
         return (
           <ObjectDrillTable
             columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, ...limitDrillCells(objectLimitSlice(o, drillSection))]
+              cells: [o.name, ...limitDrillCells(o.limitsSs)]
+            }))}
+          />
+        );
+      }
+      if (drill.key === "limitsEom") {
+        return (
+          <ObjectDrillTable
+            columns={["Объект", "Выполнение", "Приход", "В закупке", "Перерасход"]}
+            onRowClick={openObjectMini}
+            rows={objects.map((o) => ({
+              key: o.warehouseId,
+              cells: [o.name, ...limitDrillCells(o.limitsEom)]
             }))}
           />
         );
@@ -1307,11 +1363,11 @@ export function HomeOverview({
       if (drill.key === "receipts") {
         return (
           <ObjectDrillTable
-            columns={["Объект", `Приёмки (${sectionLabel(drillSection)})`]}
+            columns={["Объект", "Приёмки в работе"]}
             onRowClick={openObjectMini}
             rows={objects.map((o) => ({
               key: o.warehouseId,
-              cells: [o.name, objectReceiptOpen(o, drillSection)]
+              cells: [o.name, o.receiptOpen]
             }))}
           />
         );
@@ -1325,18 +1381,18 @@ export function HomeOverview({
             chart={
               movementChartRows.length ? (
                 <HomeScrollChart height={220} maxPreview={CHART_MODAL_H}>
-                  {renderMovementChart(220, drillSection)}
+                  {renderMovementChart(220)}
                 </HomeScrollChart>
               ) : undefined
             }
-            note={`График — движение (${sectionLabel(drillSection)}) за 30 дней. Ниже — показатели по каждому объекту.`}
+            note="График — суммарное движение по всем складам за 30 дней. Ниже — показатели по каждому объекту."
           >
             <ObjectDrillTable
-              columns={["Объект", `ТМЦ (${sectionLabel(drillSection)})`, `Приёмки (${sectionLabel(drillSection)})`]}
+              columns={["Объект", "ТМЦ на складе", "Приёмки"]}
               onRowClick={openObjectMini}
               rows={objects.map((o) => ({
                 key: o.warehouseId,
-                cells: [o.name, fmtQty(objectStockLines(o, drillSection)), objectReceiptOpen(o, drillSection)]
+                cells: [o.name, fmtQty(o.stockLines), o.receiptOpen]
               }))}
             />
           </HomeDrillByObjects>
@@ -1346,19 +1402,17 @@ export function HomeOverview({
         return (
           <HomeDrillByObjects objectCount={objects.length}>
             <ObjectDrillTable
-              columns={["Объект", `Лимиты ${sectionLabel(drillSection)}`, "Перерасход"]}
+              columns={["Объект", "Лимиты СС", "Лимиты ЭОМ", "Перерасход"]}
               onRowClick={openObjectMini}
-              rows={objects.map((o) => {
-                const s = objectLimitSlice(o, drillSection);
-                return {
-                  key: o.warehouseId,
-                  cells: [
-                    o.name,
-                    pctCell(s.hasTemplate, s.percent, s.overCount),
-                    s.overCount > 0 ? s.overCount : "отсутствует"
-                  ]
-                };
-              })}
+              rows={objects.map((o) => ({
+                key: o.warehouseId,
+                cells: [
+                  o.name,
+                  pctCell(o.limitsSs.hasTemplate, o.limitsSs.percent, o.limitsSs.overCount),
+                  pctCell(o.limitsEom.hasTemplate, o.limitsEom.percent, o.limitsEom.overCount),
+                  o.limitsSs.overCount + o.limitsEom.overCount || "отсутствует"
+                ]
+              }))}
             />
           </HomeDrillByObjects>
         );
@@ -1806,8 +1860,8 @@ export function HomeOverview({
           canBack={drillHistoryIndex > 0}
           canForward={drillHistoryIndex < drillHistory.length - 1}
           onDetails={drillDetails()}
-          drillSection={drillSection}
-          onDrillSectionChange={selectDrillSection}
+          drillSection={drill && drillUsesSectionToggle(drill) ? drillSection : undefined}
+          onDrillSectionChange={drill && drillUsesSectionToggle(drill) ? selectDrillSection : undefined}
         >
           {renderDrillBody()}
         </HomeDrillModal>
