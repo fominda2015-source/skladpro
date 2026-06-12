@@ -1,4 +1,4 @@
-import { prisma } from "../prisma.js";
+import { prisma } from "./prisma.js";
 
 const BATCH_SIZE = 200;
 
@@ -32,12 +32,15 @@ export async function backfillIssueResponsibleNames() {
     cursorId = rows[rows.length - 1]!.id;
 
     const updates = rows
-      .map((row) => ({ id: row.id, responsibleName: extractResponsibleName(row.note) }))
-      .filter((row) => row.responsibleName);
+      .map((row: { id: string; note: string | null }) => ({
+        id: row.id,
+        responsibleName: extractResponsibleName(row.note)
+      }))
+      .filter((row): row is { id: string; responsibleName: string } => Boolean(row.responsibleName));
 
     if (updates.length) {
       await prisma.$transaction(
-        updates.map((row) =>
+        updates.map((row: { id: string; responsibleName: string }) =>
           prisma.issueRequest.update({
             where: { id: row.id },
             data: { responsibleName: row.responsibleName! }

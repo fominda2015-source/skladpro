@@ -817,7 +817,7 @@ adminRouter.post("/data-jobs/:jobId/run", async (req: AuthedRequest, res) => {
       after: { jobId, status: result.status, summary: result.summary, error: result.error }
     });
     if (result.status === "FAIL") {
-      return res.status(500).json({ error: result.error || "Ошибка выполнения", ...result });
+      return res.status(500).json({ ...result, error: result.error || "Ошибка выполнения" });
     }
     return res.json(result);
   } catch (e) {
