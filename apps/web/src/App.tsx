@@ -2159,20 +2159,22 @@ function App() {
 
   async function applyWorkspaceSection(next: "SS" | "EOM") {
     if (next === objectSectionFilter) return;
-    const reloadSeq = ++sectionReloadSeq.current;
+    ++sectionReloadSeq.current;
     receiptRequestsLoadSeq.current += 1;
-    setObjectSectionFilter(next);
-    if (!token) return;
+    if (!token) {
+      setObjectSectionFilter(next);
+      return;
+    }
     try {
       if (activeObjectId === ALL_OBJECTS_ID) {
         await clearAuthContextWarehouse(next);
       } else if (activeObjectId) {
         await updateAuthContext({ warehouseId: activeObjectId, section: next });
+      } else {
+        setObjectSectionFilter(next);
       }
-      if (reloadSeq !== sectionReloadSeq.current) return;
-      await reloadWorkspaceData(next, activeTab, reloadSeq);
     } catch {
-      // сеть / контекст — не очищаем уже загруженные списки
+      setOpsMessage("Не удалось переключить раздел — попробуйте ещё раз");
     }
   }
 
@@ -5587,7 +5589,7 @@ function App() {
     void loadConversations();
   }, [token]);
 
-  // Перезагрузка при смене объекта / вкладки / фильтра склада. Раздел СС/ЭОМ — через applyWorkspaceSection.
+  // Перезагрузка при смене объекта, раздела СС/ЭОМ, вкладки или фильтра склада.
   useEffect(() => {
     if (!token || mustPickObject || !activeObjectId) return;
     void reloadWorkspaceData(objectSectionFilter, activeTab);

@@ -12,6 +12,7 @@ import {
   assertWarehouseInScope,
   getRequestDataScope,
   resolveReadScope,
+  toolWhereForQuery,
   toolWhereFromScope,
   warehouseWhereFromScope
 } from "../lib/dataScope.js";
@@ -233,7 +234,6 @@ toolsRouter.delete("/categories/:id", requirePermission("tools.write"), async (r
 toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
   const warehouseIdParam = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
   const scope = await resolveReadScope(req, { warehouseId: warehouseIdParam || undefined });
-  const scopedToolFilter = toolWhereFromScope(scope);
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
   const section: "SS" | "EOM" | undefined = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   try {
@@ -243,15 +243,10 @@ toolsRouter.get("/by-category", async (req: AuthedRequest, res) => {
     if (err.status === 403) return res.status(403).json({ error: err.message });
     throw e;
   }
-  const baseWhere: Prisma.ToolWhereInput = {
-    AND: [
-      scopedToolFilter,
-      {
-        ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
-        ...(section ? { section } : {})
-      }
-    ]
-  };
+  const baseWhere: Prisma.ToolWhereInput = toolWhereForQuery(scope, {
+    warehouseId: warehouseIdParam || undefined,
+    section
+  });
   const [tools, categories] = await Promise.all([
     prisma.tool.findMany({
       where: baseWhere,
@@ -374,10 +369,12 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     const cats = await prisma.toolCategory.findMany({ where: { slug: { in: slugs } }, select: { id: true } });
     categorySlugIds = cats.map((c) => c.id);
   }
+  const scopedToolWhere = toolWhereForQuery(scope, {
+    warehouseId: warehouseIdParam || undefined,
+    section
+  });
   const baseScopeWhere: Prisma.ToolWhereInput = {
-    ...(warehouseIdParam ? { warehouseId: warehouseIdParam } : {}),
     ...(status ? { status } : {}),
-    ...(section ? { section } : {}),
     ...(categoryIdParam ? { categoryId: categoryIdParam } : {}),
     ...(categorySlugIds !== undefined
       ? categorySlugIds.length > 0
@@ -401,7 +398,7 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
     const groupKey = normalizeToolNameForGroup(nameGroupParam).toLowerCase();
     const candidates = await prisma.tool.findMany({
       where: {
-        AND: [toolWhereFromScope(scope), baseScopeWhere]
+        AND: [scopedToolWhere, baseScopeWhere]
       },
       select: { id: true, name: true }
     });
@@ -412,7 +409,7 @@ toolsRouter.get("/", async (req: AuthedRequest, res) => {
 
   const where = {
     AND: [
-      toolWhereFromScope(scope),
+      scopedToolWhere,
       baseScopeWhere,
       ...(nameGroupIds !== undefined
         ? [{ id: { in: nameGroupIds.length ? nameGroupIds : ["__none__"] } }]

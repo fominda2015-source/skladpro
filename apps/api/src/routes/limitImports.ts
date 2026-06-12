@@ -7,6 +7,7 @@ import {
   assertObjectSectionInScope,
   assertWarehouseInScope,
   getRequestDataScope,
+  objectLimitTemplateWhereForQuery,
   objectLimitTemplateWhereFromScope,
   resolveReadScope
 } from "../lib/dataScope.js";
@@ -815,13 +816,9 @@ limitImportsRouter.get("/", async (req: AuthedRequest, res) => {
       throw e;
     }
   }
-  const scopedWhere = objectLimitTemplateWhereFromScope(scope);
+  const scopedWhere = objectLimitTemplateWhereForQuery(scope, { warehouseId, section });
   const rows = await prisma.objectLimitTemplate.findMany({
-    where: {
-      ...(Object.keys(scopedWhere).length ? { AND: [scopedWhere] } : {}),
-      ...(warehouseId ? { warehouseId } : {}),
-      ...(section ? { section } : {})
-    },
+    where: scopedWhere,
     include: {
       nodes: {
         orderBy: { orderNo: "asc" }

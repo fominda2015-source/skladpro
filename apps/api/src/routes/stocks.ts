@@ -8,7 +8,7 @@ import {
   assertWarehouseInScope,
   getRequestDataScope,
   resolveReadScope,
-  stockWhereFromScope
+  stockWhereForQuery
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtyCoerceSchema, qtyFromDb } from "../lib/quantity.js";
@@ -154,8 +154,7 @@ stocksRouter.get("/peer-summaries", async (req: AuthedRequest, res) => {
     by: ["warehouseId"],
     where: {
       warehouseId: { in: filtered },
-      ...(section ? { section } : {}),
-      ...stockWhereFromScope(scope)
+      ...stockWhereForQuery(scope, { section })
     },
     _sum: { quantity: true },
     _count: { _all: true }
@@ -214,11 +213,9 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
   const rows = await prisma.stock.findMany({
     where: {
       AND: [
-        stockWhereFromScope(scope),
+        stockWhereForQuery(scope, { warehouseId, section }),
         {
-          ...(warehouseId ? { warehouseId } : {}),
           ...(materialId ? { materialId } : {}),
-          ...(section ? { section } : {}),
           ...kindFilter,
       ...(q
         ? {

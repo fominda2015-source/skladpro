@@ -6,7 +6,7 @@ import {
   assertProjectInScope,
   assertWarehouseInScope,
   getRequestDataScope,
-  operationWhereFromScope
+  operationWhereForQuery
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtySchema } from "../lib/quantity.js";
@@ -50,12 +50,8 @@ operationsRouter.get("/", async (req: AuthedRequest, res) => {
   const rows = await prisma.operation.findMany({
     where: {
       AND: [
-        operationWhereFromScope(scope),
-        {
-          ...(type ? { type: type as OperationType } : {}),
-          ...(warehouseId ? { warehouseId } : {}),
-          ...(section ? { section } : {})
-        }
+        operationWhereForQuery(scope, { warehouseId, section }),
+        ...(type ? [{ type: type as OperationType }] : [])
       ]
     },
     include: {

@@ -4,15 +4,31 @@ import type { AuthedRequest } from "../middleware/auth.js";
 
 const scopeCache = new WeakMap<AuthedRequest, Promise<DataScope>>();
 
+type SectionPair = { warehouseId: string; section: "SS" | "EOM" };
+
 export type DataScope = {
   unrestricted: boolean;
   /** Если непустой — пользователь видит только эти склады. Пусто в БД = без ограничения по складу. */
   warehouseIds: string[] | null;
   /** Если непустой — ограничение по проектам (заявки, лимиты, проекты в списке). */
   projectIds: string[] | null;
-  /** Доступы по секциям внутри объекта (склада). */
-  sectionScopes: Array<{ warehouseId: string; section: "SS" | "EOM" }>;
+  /** Текущий активный раздел (для списков без ?section=). */
+  sectionScopes: SectionPair[];
+  /** Все разрешённые пары объект+раздел (без фильтра activeSection). */
+  allowedSectionPairs: SectionPair[];
 };
+
+export type QuerySectionContext = {
+  warehouseId?: string;
+  section?: "SS" | "EOM";
+};
+
+function bothSectionsForWarehouse(warehouseId: string): SectionPair[] {
+  return [
+    { warehouseId, section: "SS" },
+    { warehouseId, section: "EOM" }
+  ];
+}
 
 export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope> {
   if (!req.user) {
@@ -33,7 +49,13 @@ export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<Data
   }
   const { userId, permissions } = req.user;
   if (permissions.includes("*")) {
-    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
+    return {
+      unrestricted: true,
+      warehouseIds: null,
+      projectIds: null,
+      sectionScopes: [],
+      allowedSectionPairs: []
+    };
   }
   const [whRows, pjRows, sectionRows] = await Promise.all([
     prisma.userWarehouseScope.findMany({ where: { userId }, select: { warehouseId: true } }),
@@ -45,6 +67,10 @@ export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<Data
     warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : null,
     projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
     sectionScopes: sectionRows.map((s) => ({
+      warehouseId: s.warehouseId,
+      section: s.section
+    })),
+    allowedSectionPairs: sectionRows.map((s) => ({
       warehouseId: s.warehouseId,
       section: s.section
     }))
@@ -63,16 +89,24 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
   ]);
   if (permissions.includes("*")) {
     if (userRow?.activeWarehouseId) {
+      const whId = userRow.activeWarehouseId;
       return {
         unrestricted: false,
-        warehouseIds: [userRow.activeWarehouseId],
+        warehouseIds: [whId],
         projectIds: null,
         sectionScopes: userRow.activeSection
-          ? [{ warehouseId: userRow.activeWarehouseId, section: userRow.activeSection }]
-          : []
+          ? [{ warehouseId: whId, section: userRow.activeSection }]
+          : [],
+        allowedSectionPairs: bothSectionsForWarehouse(whId)
       };
     }
-    return { unrestricted: true, warehouseIds: null, projectIds: null, sectionScopes: [] };
+    return {
+      unrestricted: true,
+      warehouseIds: null,
+      projectIds: null,
+      sectionScopes: [],
+      allowedSectionPairs: []
+    };
   }
   const activeWarehouseId = userRow?.activeWarehouseId || null;
   const activeSection = userRow?.activeSection || null;
@@ -82,17 +116,140 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
   const filteredSections = sectionRows.filter((s) =>
     activeWarehouseId ? s.warehouseId === activeWarehouseId : true
   );
+  const allowedSectionPairs = filteredSections.map((s) => ({
+    warehouseId: s.warehouseId,
+    section: s.section
+  }));
   const sectionScopes = activeSection
-    ? filteredSections
-        .filter((s) => s.section === activeSection)
-        .map((s) => ({ warehouseId: s.warehouseId, section: s.section }))
-    : filteredSections.map((s) => ({ warehouseId: s.warehouseId, section: s.section }));
+    ? allowedSectionPairs.filter((s) => s.section === activeSection)
+    : allowedSectionPairs;
   return {
     unrestricted: false,
     warehouseIds: warehouseIds.length ? warehouseIds : null,
     projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
-    sectionScopes
+    sectionScopes,
+    allowedSectionPairs
   };
+}
+
+/** Явный ?section= в запросе — не смешивать с устаревшим activeSection в scope. */
+export function assertQuerySectionAllowed(scope: DataScope, query: QuerySectionContext) {
+  if (!query.section) return;
+  if (scope.unrestricted && !scope.allowedSectionPairs.length) {
+    return;
+  }
+  const pairs = scope.allowedSectionPairs.length ? scope.allowedSectionPairs : scope.sectionScopes;
+  if (!pairs.length) {
+    return;
+  }
+  if (query.warehouseId) {
+    assertWarehouseInScope(scope, query.warehouseId);
+    if (!pairs.some((p) => p.warehouseId === query.warehouseId && p.section === query.section)) {
+      const err = new Error("FORBIDDEN_SECTION");
+      (err as Error & { status: number }).status = 403;
+      throw err;
+    }
+    return;
+  }
+  if (!pairs.some((p) => p.section === query.section)) {
+    const err = new Error("FORBIDDEN_SECTION");
+    (err as Error & { status: number }).status = 403;
+    throw err;
+  }
+}
+
+function explicitSectionWhere(
+  scope: DataScope,
+  query: QuerySectionContext
+): { warehouseId?: string; section: "SS" | "EOM" } | null {
+  if (!query.section) return null;
+  assertQuerySectionAllowed(scope, query);
+  if (query.warehouseId) {
+    return { warehouseId: query.warehouseId, section: query.section };
+  }
+  return { section: query.section };
+}
+
+export function stockWhereForQuery(
+  scope: DataScope,
+  query: QuerySectionContext
+): Prisma.StockWhereInput {
+  const explicit = explicitSectionWhere(scope, query);
+  if (!explicit) return stockWhereFromScope(scope);
+  if (explicit.warehouseId) {
+    return { warehouseId: explicit.warehouseId, section: explicit.section };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds }, section: explicit.section };
+  }
+  return { section: explicit.section };
+}
+
+export function toolWhereForQuery(
+  scope: DataScope,
+  query: QuerySectionContext
+): Prisma.ToolWhereInput {
+  const explicit = explicitSectionWhere(scope, query);
+  if (!explicit) return toolWhereFromScope(scope);
+  if (explicit.warehouseId) {
+    return { warehouseId: explicit.warehouseId, section: explicit.section };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds }, section: explicit.section };
+  }
+  return { section: explicit.section };
+}
+
+export function operationWhereForQuery(
+  scope: DataScope,
+  query: QuerySectionContext
+): Prisma.OperationWhereInput {
+  const explicit = explicitSectionWhere(scope, query);
+  if (!explicit) return operationWhereFromScope(scope);
+  if (explicit.warehouseId) {
+    return { warehouseId: explicit.warehouseId, section: explicit.section };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds }, section: explicit.section };
+  }
+  return { section: explicit.section };
+}
+
+export function issueWhereForQuery(
+  scope: DataScope,
+  query: QuerySectionContext
+): Prisma.IssueRequestWhereInput {
+  const explicit = explicitSectionWhere(scope, query);
+  if (!explicit) return issueWhereFromScope(scope);
+  let base: Prisma.IssueRequestWhereInput;
+  if (explicit.warehouseId) {
+    base = { warehouseId: explicit.warehouseId, section: explicit.section };
+  } else if (scope.warehouseIds?.length) {
+    base = { warehouseId: { in: scope.warehouseIds }, section: explicit.section };
+  } else {
+    base = { section: explicit.section };
+  }
+  if (!scope.unrestricted && scope.projectIds?.length) {
+    return {
+      AND: [base, { OR: [{ projectId: null }, { projectId: { in: scope.projectIds } }] }]
+    };
+  }
+  return base;
+}
+
+export function objectLimitTemplateWhereForQuery(
+  scope: DataScope,
+  query: QuerySectionContext
+): Prisma.ObjectLimitTemplateWhereInput {
+  const explicit = explicitSectionWhere(scope, query);
+  if (!explicit) return objectLimitTemplateWhereFromScope(scope);
+  if (explicit.warehouseId) {
+    return { warehouseId: explicit.warehouseId, section: explicit.section };
+  }
+  if (scope.warehouseIds?.length) {
+    return { warehouseId: { in: scope.warehouseIds }, section: explicit.section };
+  }
+  return { section: explicit.section };
 }
 
 export function stockMovementWhereFromScope(scope: DataScope): Prisma.StockMovementWhereInput {
@@ -284,10 +441,14 @@ export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {
 
 export function assertObjectSectionInScope(scope: DataScope, warehouseId: string, section: "SS" | "EOM") {
   assertWarehouseInScope(scope, warehouseId);
-  if (scope.unrestricted || !scope.sectionScopes.length) {
+  if (scope.unrestricted && !scope.allowedSectionPairs.length) {
     return;
   }
-  if (!scope.sectionScopes.some((s) => s.warehouseId === warehouseId && s.section === section)) {
+  const pairs = scope.allowedSectionPairs.length ? scope.allowedSectionPairs : scope.sectionScopes;
+  if (!pairs.length) {
+    return;
+  }
+  if (!pairs.some((s) => s.warehouseId === warehouseId && s.section === section)) {
     const err = new Error("FORBIDDEN_SECTION");
     (err as Error & { status: number }).status = 403;
     throw err;
@@ -308,8 +469,12 @@ export function assertProjectInScope(scope: DataScope, projectId: string | null 
   }
 }
 
-export function mergeIssueWhere(scope: DataScope, extra: Prisma.IssueRequestWhereInput): Prisma.IssueRequestWhereInput {
-  const s = issueWhereFromScope(scope);
+export function mergeIssueWhere(
+  scope: DataScope,
+  extra: Prisma.IssueRequestWhereInput,
+  query?: QuerySectionContext
+): Prisma.IssueRequestWhereInput {
+  const s = query?.section ? issueWhereForQuery(scope, query) : issueWhereFromScope(scope);
   if (!Object.keys(s).length) {
     return extra;
   }

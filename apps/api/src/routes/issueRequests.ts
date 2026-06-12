@@ -497,7 +497,7 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
       }
     : {};
   const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
-  const sectionFilter = sectionParam === "SS" || sectionParam === "EOM" ? { section: sectionParam } : {};
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
   const domainParam = typeof req.query.domain === "string" ? req.query.domain.toUpperCase() : "";
   const domainFilter =
     domainParam === "MATERIALS" ||
@@ -506,14 +506,17 @@ issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
     domainParam === "WORKWEAR"
       ? { domain: domainParam as IssueRequestDomain }
       : {};
-  const where = mergeIssueWhere(scope, {
-    ...statusFilter,
-    ...basisFilter,
-    ...flowFilter,
-    ...sectionFilter,
-    ...searchFilter,
-    ...domainFilter
-  } as any);
+  const where = mergeIssueWhere(
+    scope,
+    {
+      ...statusFilter,
+      ...basisFilter,
+      ...flowFilter,
+      ...searchFilter,
+      ...domainFilter
+    } as any,
+    { section }
+  );
   const [total, rows] = await prisma.$transaction([
     prisma.issueRequest.count({ where }),
     prisma.issueRequest.findMany({
