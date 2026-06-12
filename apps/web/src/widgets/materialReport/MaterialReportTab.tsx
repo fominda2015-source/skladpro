@@ -7,13 +7,23 @@ import { UserAvatar } from "../chat/UserAvatar";
 import { MaterialReportWriteoffModal, type WriteoffLine } from "./MaterialReportWriteoffModal";
 import { formatMaterialQty } from "../../shared/quantity";
 
+export type MaterialReportLine = {
+  materialId: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice?: number | null;
+  totalAmount?: number | null;
+};
+
 export type MaterialReportIssueGroup = {
   issueId: string;
   issueNumber: string;
   issuedAt: string;
   warehouseId: string;
   section: "SS" | "EOM";
-  lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
+  totalAmount?: number | null;
+  lines: MaterialReportLine[];
 };
 
 export type MaterialReportHolder = {
@@ -23,8 +33,11 @@ export type MaterialReportHolder = {
   isWarehouseBalance?: boolean;
   issueNumbers?: string[];
   lastIssueAt?: string | null;
+  totalAmount?: number | null;
+  pricedLineCount?: number;
+  unpricedLineCount?: number;
   issues: MaterialReportIssueGroup[];
-  lines: Array<{ materialId: string; name: string; unit: string; quantity: number }>;
+  lines: MaterialReportLine[];
 };
 
 export type MaterialWriteoffHistoryRow = {
@@ -73,6 +86,32 @@ function lineKey(holderKey: string, materialId: string) {
 
 function formatQty(n: number) {
   return formatMaterialQty(n);
+}
+
+function formatMoney(n: number) {
+  return n.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatMoneyOrDash(value?: number | null) {
+  return value != null && Number.isFinite(value) ? `${formatMoney(value)} ₽` : "—";
+}
+
+function MaterialLineAmounts({ line }: { line: MaterialReportLine }) {
+  return (
+    <span className="materialReportBubbleQty">
+      <span>
+        {formatQty(Number(line.quantity))} {line.unit}
+      </span>
+      {line.unitPrice != null && Number.isFinite(Number(line.unitPrice)) ? (
+        <span className="materialReportBubbleMoney">
+          <span className="muted">{formatMoney(Number(line.unitPrice))} ₽/ед.</span>
+          <strong>{formatMoneyOrDash(line.totalAmount)}</strong>
+        </span>
+      ) : (
+        <span className="materialReportBubbleMoney muted">цена не указана</span>
+      )}
+    </span>
+  );
 }
 
 function formatDate(iso?: string | null) {
@@ -325,19 +364,43 @@ export function MaterialReportTab({
   const showThread = Boolean(selectedKey);
   const showList = !isMobile || !showThread;
   const posCount = holders.reduce((n, h) => n + h.lines.length, 0);
+  const reportTotalAmount = useMemo(() => {
+    let sum = 0;
+    let hasAny = false;
+    for (const h of holders) {
+      if (h.totalAmount != null && Number.isFinite(h.totalAmount)) {
+        sum += h.totalAmount;
+        hasAny = true;
+      }
+    }
+    return hasAny ? sum : null;
+  }, [holders]);
+  const unpricedCount = useMemo(
+    () => holders.reduce((n, h) => n + (h.unpricedLineCount ?? 0), 0),
+    [holders]
+  );
   const selectedUserId = selectedUser?.id;
 
-  function holderPreview(h: MaterialReportHolder) {
-    if (h.lines.length === 1) {
-      return `${safeName(h.lines[0]!.name)} · ${formatQty(Number(h.lines[0]!.quantity))}`;
+  function holderMoneyPreview(h: MaterialReportHolder) {
+    const parts: string[] = [];
+    if (h.totalAmount != null && Number.isFinite(h.totalAmount)) {
+      parts.push(formatMoneyOrDash(h.totalAmount));
     }
-    return `${h.lines.length} поз. · ${formatQty(h.lines.reduce((n, x) => n + Number(x.quantity), 0))}`;
+    if (h.lines.length === 1) {
+      parts.push(`${safeName(h.lines[0]!.name)} · ${formatQty(Number(h.lines[0]!.quantity))}`);
+    } else {
+      parts.push(`${h.lines.length} поз. · ${formatQty(h.lines.reduce((n, x) => n + Number(x.quantity), 0))}`);
+    }
+    if (!h.totalAmount && (h.unpricedLineCount ?? 0) > 0) {
+      parts.push("без цены");
+    }
+    return parts.join(" · ");
   }
 
   function userBalancePreview(userId: string) {
     const h = holdersByKey.get(userHolderKey(userId));
     if (!h?.lines.length) return "нет подотчёта";
-    return holderPreview(h);
+    return holderMoneyPreview(h);
   }
 
   return (
@@ -350,7 +413,12 @@ export function MaterialReportTab({
         stats={[
           { label: "МОЛ", value: molUsers.length, tone: "neutral" },
           { label: "С подотчётом", value: holders.filter((h) => h.lines.length > 0).length, tone: "ok" },
-          { label: "Позиций", value: posCount, tone: posCount > 0 ? "ok" : "neutral" }
+          { label: "Позиций", value: posCount, tone: posCount > 0 ? "ok" : "neutral" },
+          {
+            label: "На подотчёте",
+            value: reportTotalAmount != null ? formatMoneyOrDash(reportTotalAmount) : "—",
+            tone: reportTotalAmount != null && reportTotalAmount > 0 ? "ok" : "neutral"
+          }
         ]}
         actions={
           <>
@@ -401,6 +469,12 @@ export function MaterialReportTab({
           История списаний
         </button>
       </nav>
+
+      {unpricedCount > 0 ? (
+        <p className="muted materialReportPriceHint">
+          У {unpricedCount} поз. не указана цена в карточке материала — сумма по ним не учтена.
+        </p>
+      ) : null}
 
       {message ? (
         <ResultBanner text={message} tone={/ошиб|403|502|недостат/i.test(message) ? "error" : "neutral"} />
@@ -561,7 +635,7 @@ export function MaterialReportTab({
                                     : (
                                         <>
                                           {h.isWarehouseBalance ? "склад · " : ""}
-                                          {holderPreview(h)}
+                                          {holderMoneyPreview(h)}
                                         </>
                                       )}
                                 </span>
@@ -597,7 +671,14 @@ export function MaterialReportTab({
                     />
                     <div className="chatThreadHeadText">
                       <strong>{safeName(threadTitle)}</strong>
-                      <span className="muted">{threadSubtitle}</span>
+                      <span className="muted">
+                        {threadSubtitle}
+                        {selectedHolder?.totalAmount != null && Number.isFinite(selectedHolder.totalAmount)
+                          ? ` · ${formatMoneyOrDash(selectedHolder.totalAmount)} на подотчёте`
+                          : selectedHolder?.lines.length
+                            ? " · сумма не рассчитана"
+                            : ""}
+                      </span>
                     </div>
                     {selectedUserId && onOpenChat ? (
                       <button
@@ -667,6 +748,9 @@ export function MaterialReportTab({
                                   <span className="muted">
                                     {formatDate(iss.issuedAt)}
                                     {sectionFilter === "ALL" ? ` · ${iss.section}` : ""}
+                                    {iss.totalAmount != null && Number.isFinite(iss.totalAmount)
+                                      ? ` · ${formatMoneyOrDash(iss.totalAmount)}`
+                                      : ""}
                                   </span>
                                 </button>
                                 {open ? (
@@ -675,9 +759,7 @@ export function MaterialReportTab({
                                       <div key={`${iss.issueId}-${ln.materialId}`} className="chatBubble theirs materialReportBubble">
                                         <div className="materialReportBubbleBody">
                                           <p className="chatBubbleText">{safeName(ln.name)}</p>
-                                          <span className="chatBubbleTime materialReportBubbleQty">
-                                            {formatQty(Number(ln.quantity))} {ln.unit}
-                                          </span>
+                                          <MaterialLineAmounts line={ln} />
                                         </div>
                                       </div>
                                     ))}
@@ -713,9 +795,7 @@ export function MaterialReportTab({
                                   ) : null}
                                   <div className="materialReportBubbleBody">
                                     <p className="chatBubbleText">{safeName(ln.name)}</p>
-                                    <span className="chatBubbleTime materialReportBubbleQty">
-                                      {formatQty(Number(ln.quantity))} {ln.unit}
-                                    </span>
+                                    <MaterialLineAmounts line={ln} />
                                   </div>
                                 </div>
                               );

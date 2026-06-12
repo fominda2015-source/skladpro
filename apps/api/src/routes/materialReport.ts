@@ -141,7 +141,14 @@ function issueResponsibleLabel(issue: {
   return recipient || null;
 }
 
-type BalanceLine = { materialId: string; name: string; unit: string; quantity: number };
+type BalanceLine = {
+  materialId: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice?: number | null;
+  totalAmount?: number | null;
+};
 
 const WAREHOUSE_STOCK_ISSUE_ID = "__warehouse_stock__";
 
@@ -156,7 +163,7 @@ type IssueGroupMeta = {
 type BalanceMaps = {
   qtyByKey: Map<string, number>;
   holderLabels: Map<string, string>;
-  materialMeta: Map<string, { name: string; unit: string }>;
+  materialMeta: Map<string, { name: string; unit: string; unitPrice?: number | null }>;
   warehouseStockHolderKey: string;
   holderIssueMeta: Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>;
   /** holderKey → issueId → lines (выдано по заявкам) */
@@ -456,11 +463,85 @@ async function buildMaterialReportBalances(
   };
 }
 
-function balancesToPayload(maps: BalanceMaps) {
+function enrichBalanceLine(line: BalanceLine, unitPrice: number | null | undefined): BalanceLine {
+  const up =
+    unitPrice != null && Number.isFinite(Number(unitPrice)) && Number(unitPrice) >= 0
+      ? Number(unitPrice)
+      : null;
+  const qty = Number(line.quantity) || 0;
+  return {
+    ...line,
+    unitPrice: up,
+    totalAmount: up != null && qty > 0 ? qty * up : null
+  };
+}
+
+function sumLineAmounts(lines: BalanceLine[]): number | null {
+  let sum = 0;
+  let hasAny = false;
+  for (const ln of lines) {
+    if (ln.totalAmount != null && Number.isFinite(ln.totalAmount)) {
+      sum += ln.totalAmount;
+      hasAny = true;
+    }
+  }
+  return hasAny ? sum : null;
+}
+
+async function loadMaterialUnitPrices(materialIds: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!materialIds.length) return result;
+
+  const materials = await prisma.material.findMany({
+    where: { id: { in: materialIds } },
+    select: { id: true, unitPrice: true }
+  });
+  const needFallback: string[] = [];
+  for (const m of materials) {
+    const p = m.unitPrice != null ? Number(m.unitPrice) : Number.NaN;
+    if (Number.isFinite(p) && p >= 0) result.set(m.id, p);
+    else needFallback.push(m.id);
+  }
+
+  if (needFallback.length) {
+    const items = await prisma.receiptRequestItem.findMany({
+      where: {
+        mappedMaterialId: { in: needFallback },
+        unitPrice: { not: null }
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        mappedMaterialId: true,
+        unitPrice: true,
+        quantity: true,
+        acceptedQty: true
+      }
+    });
+    const seen = new Set<string>();
+    for (const it of items) {
+      const materialId = it.mappedMaterialId;
+      if (!materialId || seen.has(materialId) || result.has(materialId)) continue;
+      seen.add(materialId);
+      const lineTotal = Number(it.unitPrice);
+      const qty = Number(it.acceptedQty ?? it.quantity) || 0;
+      if (!Number.isFinite(lineTotal) || lineTotal < 0 || qty <= 0) continue;
+      result.set(materialId, lineTotal / qty);
+    }
+  }
+
+  return result;
+}
+
+async function balancesToPayload(maps: BalanceMaps) {
   const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey, holderIssueMeta, holderIssueLines } =
     maps;
   type Line = BalanceLine;
   const holders = new Map<string, Line[]>();
+
+  const unitPrices = await loadMaterialUnitPrices([...materialMeta.keys()]);
+  for (const [materialId, meta] of materialMeta) {
+    meta.unitPrice = unitPrices.get(materialId) ?? null;
+  }
 
   for (const [key, qty] of qtyByKey.entries()) {
     if (qty < 1e-9) continue;
@@ -469,26 +550,41 @@ function balancesToPayload(maps: BalanceMaps) {
     const materialId = key.slice(sep + 1);
     const meta = materialMeta.get(materialId) || {
       name: materialId.slice(0, 8),
-      unit: "шт"
+      unit: "шт",
+      unitPrice: unitPrices.get(materialId) ?? null
     };
     const arr = holders.get(holderKey) || [];
-    arr.push({ materialId, name: meta.name, unit: meta.unit, quantity: qty });
+    arr.push(
+      enrichBalanceLine(
+        { materialId, name: meta.name, unit: meta.unit, quantity: qty },
+        meta.unitPrice ?? unitPrices.get(materialId)
+      )
+    );
     holders.set(holderKey, arr);
   }
 
   const payload = [...holders.entries()].map(([holderKey, lines]) => {
     const meta = holderIssueMeta.get(holderKey);
     const issueMap = holderIssueLines.get(holderKey);
+    const pricedLines = lines.sort((a, b) => a.name.localeCompare(b.name, "ru"));
     const issues = issueMap
       ? [...issueMap.values()]
-          .map((grp) => ({
-            issueId: grp.meta.issueId,
-            issueNumber: grp.meta.issueNumber,
-            issuedAt: grp.meta.issuedAt,
-            warehouseId: grp.meta.warehouseId,
-            section: grp.meta.section,
-            lines: [...grp.lines.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"))
-          }))
+          .map((grp) => {
+            const issueLines = [...grp.lines.values()]
+              .map((ln) =>
+                enrichBalanceLine(ln, materialMeta.get(ln.materialId)?.unitPrice ?? unitPrices.get(ln.materialId))
+              )
+              .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+            return {
+              issueId: grp.meta.issueId,
+              issueNumber: grp.meta.issueNumber,
+              issuedAt: grp.meta.issuedAt,
+              warehouseId: grp.meta.warehouseId,
+              section: grp.meta.section,
+              totalAmount: sumLineAmounts(issueLines),
+              lines: issueLines
+            };
+          })
           .filter((g) => g.lines.length > 0)
           .sort((a, b) => {
             if (a.issueId === WAREHOUSE_STOCK_ISSUE_ID) return -1;
@@ -503,8 +599,11 @@ function balancesToPayload(maps: BalanceMaps) {
       isWarehouseBalance: Boolean(warehouseStockHolderKey) && holderKey === warehouseStockHolderKey,
       issueNumbers: meta?.issueNumbers ?? [],
       lastIssueAt: meta?.lastIssueAt ?? null,
+      totalAmount: sumLineAmounts(pricedLines),
+      pricedLineCount: pricedLines.filter((ln) => ln.totalAmount != null).length,
+      unpricedLineCount: pricedLines.filter((ln) => ln.totalAmount == null).length,
       issues,
-      lines: lines.sort((a, b) => a.name.localeCompare(b.name, "ru"))
+      lines: pricedLines
     };
   });
 
@@ -590,7 +689,7 @@ materialReportRouter.get("/balances", requirePermission("materialReport.read"), 
   }
 
   const maps = await buildAggregatedMaterialReportBalances(scope, warehouseId, sectionFilter);
-  return res.json(balancesToPayload(maps));
+  return res.json(await balancesToPayload(maps));
 });
 
 materialReportRouter.get("/writeoffs/history", requirePermission("materialReport.read"), async (req: AuthedRequest, res) => {

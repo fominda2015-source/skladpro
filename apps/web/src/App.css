@@ -8640,6 +8640,28 @@ button.whMenuItem:hover,
   text-align: left;
   font-weight: 700;
   color: #1d4ed8;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.materialReportBubbleMoney {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+}
+.materialReportBubbleMoney strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+.materialReportPriceHint {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  font-size: 12px;
 }
 .materialReportHistoryPane {
   flex: 1;
