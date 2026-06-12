@@ -12,6 +12,7 @@ export type ToolListRow = {
   toolType?: string | null;
   category?: { id: string; name: string } | null;
   warehouse?: { id: string; name: string } | null;
+  purchasePrice?: number | null;
 };
 
 type Props = {
@@ -47,6 +48,7 @@ export function ToolsListTable({
             <th style={{ width: 120 }}>Инв. №</th>
             <th style={{ width: 120 }}>Серийный</th>
             <th>Объект</th>
+            <th style={{ width: 110 }}>Стоимость</th>
             <th style={{ width: 110 }}>Статус</th>
             <th style={{ width: 88 }}>QR</th>
           </tr>
@@ -84,6 +86,11 @@ export function ToolsListTable({
               <td className="muted">{t.inventoryNumber}</td>
               <td className="muted">{t.serialNumber || "—"}</td>
               <td className="muted">{t.warehouse?.name ? safeName(t.warehouse.name) : "—"}</td>
+              <td className="muted">
+                {t.purchasePrice != null && Number.isFinite(Number(t.purchasePrice))
+                  ? `${Number(t.purchasePrice).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽`
+                  : "—"}
+              </td>
               <td>
                 <StatusBadge tone={statusTone(t.status)}>{statusLabel(t.status)}</StatusBadge>
               </td>

@@ -202,6 +202,7 @@ model User {
   announcementsCreated Announcement[] @relation("AnnouncementAuthor")
   materialWriteoffsHeld   MaterialHolderWriteoff[] @relation("MaterialWriteoffHolder")
   materialWriteoffsActed  MaterialHolderWriteoff[] @relation("MaterialWriteoffActor")
+  dataJobRuns             DataJobRun[]             @relation("DataJobRunTriggeredBy")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 }
@@ -293,6 +294,8 @@ model Material {
   unit            String
   kind            MaterialKind        @default(MATERIAL)
   unitPrice       Decimal?            @db.Decimal(14, 2)
+  /// Кол-во единиц, за которое указана сумма в unitPrice (из прихода или карточки).
+  priceBasisQty   Decimal?            @db.Decimal(14, 3)
   category        String?
   toolCatalogSection ToolCatalogSection?
   mergedIntoId    String?
@@ -314,6 +317,31 @@ model Material {
   toolCatalogConsumableEvents ToolCatalogConsumableEvent[]
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+}
+
+/// Журнал одноразовых переформирований данных (при смене правил — новый id, скрипт выполняется снова).
+model DataMigration {
+  id        String   @id
+  summary   String?
+  appliedAt DateTime @default(now())
+}
+
+/// История запусков задач обслуживания БД (админка + деплой).
+model DataJobRun {
+  id            String    @id @default(cuid())
+  jobId         String
+  deployVersion String?
+  status        String
+  summary       String?
+  error         String?
+  forced        Boolean   @default(false)
+  triggeredById String?
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  triggeredBy   User?     @relation("DataJobRunTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@index([jobId, startedAt])
+  @@index([jobId, deployVersion, status])
 }
 
 model StockMovement {
@@ -627,6 +655,8 @@ model Tool {
   categoryId      String?
   kitComplete     Boolean    @default(true)
   kitMissingNote  String?
+  /// Стоимость учётной единицы (сумма за 1 инструмент/СИЗ), ₽
+  purchasePrice   Decimal?   @db.Decimal(14, 2)
   warehouse       Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   category        ToolCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)

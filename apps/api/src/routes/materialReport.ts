@@ -17,6 +17,11 @@ import {
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtySchema } from "../lib/quantity.js";
+import {
+  loadMaterialPriceBasisMap,
+  materialAmountsForQty,
+  type MaterialPriceBasis
+} from "../lib/materialPricing.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
@@ -146,7 +151,9 @@ type BalanceLine = {
   name: string;
   unit: string;
   quantity: number;
-  unitPrice?: number | null;
+  catalogLineTotal?: number | null;
+  priceBasisQty?: number | null;
+  unitCost?: number | null;
   totalAmount?: number | null;
 };
 
@@ -163,7 +170,7 @@ type IssueGroupMeta = {
 type BalanceMaps = {
   qtyByKey: Map<string, number>;
   holderLabels: Map<string, string>;
-  materialMeta: Map<string, { name: string; unit: string; unitPrice?: number | null }>;
+  materialMeta: Map<string, { name: string; unit: string }>;
   warehouseStockHolderKey: string;
   holderIssueMeta: Map<string, { issueNumbers: string[]; lastIssueAt: string | null }>;
   /** holderKey → issueId → lines (выдано по заявкам) */
@@ -463,17 +470,9 @@ async function buildMaterialReportBalances(
   };
 }
 
-function enrichBalanceLine(line: BalanceLine, unitPrice: number | null | undefined): BalanceLine {
-  const up =
-    unitPrice != null && Number.isFinite(Number(unitPrice)) && Number(unitPrice) >= 0
-      ? Number(unitPrice)
-      : null;
-  const qty = Number(line.quantity) || 0;
-  return {
-    ...line,
-    unitPrice: up,
-    totalAmount: up != null && qty > 0 ? qty * up : null
-  };
+function enrichBalanceLine(line: BalanceLine, basis: MaterialPriceBasis | undefined): BalanceLine {
+  const amounts = materialAmountsForQty(basis, Number(line.quantity) || 0);
+  return { ...line, ...amounts };
 }
 
 function sumLineAmounts(lines: BalanceLine[]): number | null {
@@ -488,60 +487,13 @@ function sumLineAmounts(lines: BalanceLine[]): number | null {
   return hasAny ? sum : null;
 }
 
-async function loadMaterialUnitPrices(materialIds: string[]): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-  if (!materialIds.length) return result;
-
-  const materials = await prisma.material.findMany({
-    where: { id: { in: materialIds } },
-    select: { id: true, unitPrice: true }
-  });
-  const needFallback: string[] = [];
-  for (const m of materials) {
-    const p = m.unitPrice != null ? Number(m.unitPrice) : Number.NaN;
-    if (Number.isFinite(p) && p >= 0) result.set(m.id, p);
-    else needFallback.push(m.id);
-  }
-
-  if (needFallback.length) {
-    const items = await prisma.receiptRequestItem.findMany({
-      where: {
-        mappedMaterialId: { in: needFallback },
-        unitPrice: { not: null }
-      },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        mappedMaterialId: true,
-        unitPrice: true,
-        quantity: true,
-        acceptedQty: true
-      }
-    });
-    const seen = new Set<string>();
-    for (const it of items) {
-      const materialId = it.mappedMaterialId;
-      if (!materialId || seen.has(materialId) || result.has(materialId)) continue;
-      seen.add(materialId);
-      const lineTotal = Number(it.unitPrice);
-      const qty = Number(it.acceptedQty ?? it.quantity) || 0;
-      if (!Number.isFinite(lineTotal) || lineTotal < 0 || qty <= 0) continue;
-      result.set(materialId, lineTotal / qty);
-    }
-  }
-
-  return result;
-}
-
 async function balancesToPayload(maps: BalanceMaps) {
   const { qtyByKey, holderLabels, materialMeta, warehouseStockHolderKey, holderIssueMeta, holderIssueLines } =
     maps;
   type Line = BalanceLine;
   const holders = new Map<string, Line[]>();
 
-  const unitPrices = await loadMaterialUnitPrices([...materialMeta.keys()]);
-  for (const [materialId, meta] of materialMeta) {
-    meta.unitPrice = unitPrices.get(materialId) ?? null;
-  }
+  const priceBasisMap = await loadMaterialPriceBasisMap([...materialMeta.keys()]);
 
   for (const [key, qty] of qtyByKey.entries()) {
     if (qty < 1e-9) continue;
@@ -550,14 +502,13 @@ async function balancesToPayload(maps: BalanceMaps) {
     const materialId = key.slice(sep + 1);
     const meta = materialMeta.get(materialId) || {
       name: materialId.slice(0, 8),
-      unit: "шт",
-      unitPrice: unitPrices.get(materialId) ?? null
+      unit: "шт"
     };
     const arr = holders.get(holderKey) || [];
     arr.push(
       enrichBalanceLine(
         { materialId, name: meta.name, unit: meta.unit, quantity: qty },
-        meta.unitPrice ?? unitPrices.get(materialId)
+        priceBasisMap.get(materialId)
       )
     );
     holders.set(holderKey, arr);
@@ -571,9 +522,7 @@ async function balancesToPayload(maps: BalanceMaps) {
       ? [...issueMap.values()]
           .map((grp) => {
             const issueLines = [...grp.lines.values()]
-              .map((ln) =>
-                enrichBalanceLine(ln, materialMeta.get(ln.materialId)?.unitPrice ?? unitPrices.get(ln.materialId))
-              )
+              .map((ln) => enrichBalanceLine(ln, priceBasisMap.get(ln.materialId)))
               .sort((a, b) => a.name.localeCompare(b.name, "ru"));
             return {
               issueId: grp.meta.issueId,

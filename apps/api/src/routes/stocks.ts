@@ -12,6 +12,7 @@ import {
 } from "../lib/dataScope.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtyCoerceSchema, qtyFromDb } from "../lib/quantity.js";
+import { loadMaterialPriceBasisMap, materialAmountsForQty } from "../lib/materialPricing.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 
 export const stocksRouter = Router();
@@ -50,7 +51,8 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
           unit,
           kind,
           category: category ?? undefined,
-          unitPrice: parsed.data.unitPrice ?? undefined
+          unitPrice: parsed.data.unitPrice ?? undefined,
+          ...(parsed.data.unitPrice != null && qty > 0 ? { priceBasisQty: qty } : {})
         },
         select: { id: true }
       });
@@ -241,10 +243,17 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
     take: 500
   });
 
+  const materialIds = [...new Set(rows.map((row) => row.materialId))];
+  const priceBasisMap = await loadMaterialPriceBasisMap(materialIds);
+
   const mapped = rows.map((row) => {
     const qty = qtyFromDb(row.quantity);
     const reserved = qtyFromDb(row.reserved);
     const available = qty - reserved;
+    const lineTotal = row.material.unitPrice != null ? Number(row.material.unitPrice) : null;
+    const priceBasisQty =
+      row.material.priceBasisQty != null ? Number(row.material.priceBasisQty) : null;
+    const amounts = materialAmountsForQty(priceBasisMap.get(row.materialId), qty);
     return {
       id: row.id,
       warehouseId: row.warehouseId,
@@ -257,7 +266,11 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       materialKind: row.material.kind,
       materialCategory: row.material.category,
       materialToolCatalogSection: row.material.toolCatalogSection,
-      unitPrice: row.material.unitPrice != null ? Number(row.material.unitPrice) : null,
+      unitPrice: lineTotal,
+      lineTotal,
+      priceBasisQty: amounts.priceBasisQty ?? priceBasisQty,
+      unitCost: amounts.unitCost,
+      stockAmount: amounts.totalAmount,
       quantity: qty,
       reserved,
       storageRoom: row.storageRoom,

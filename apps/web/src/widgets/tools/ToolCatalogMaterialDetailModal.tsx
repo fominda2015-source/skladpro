@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { formatMaterialQty } from "../../shared/quantity";
+import { formatMoneyOrDash } from "../../shared/pricing";
 import {
   CATALOG_MATERIAL_SECTIONS,
   catalogMaterialSectionLabel,
@@ -80,6 +81,23 @@ export function ToolCatalogMaterialDetailModal({
             <dt>Ед. изм.</dt>
             <dd>{row.unit}</dd>
           </div>
+          {row.stockAmount != null && Number.isFinite(Number(row.stockAmount)) ? (
+            <div>
+              <dt>Сумма остатка</dt>
+              <dd>{formatMoneyOrDash(row.stockAmount)}</dd>
+            </div>
+          ) : null}
+          {row.lineTotal != null &&
+          Number.isFinite(Number(row.lineTotal)) &&
+          row.priceBasisQty != null &&
+          Number(row.priceBasisQty) > 0 ? (
+            <div>
+              <dt>Сумма в карточке</dt>
+              <dd>
+                {formatMoneyOrDash(row.lineTotal)} за {formatMaterialQty(row.priceBasisQty)} {row.unit}
+              </dd>
+            </div>
+          ) : null}
         </dl>
 
         {canWrite && onChangeSection ? (

@@ -18,6 +18,7 @@ import {
 } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import { amountForQuantity, loadMaterialPriceBasisMap } from "../lib/materialPricing.js";
 import { materialQtyAcceptedCoerceSchema, materialQtyCoerceSchema, materialQtySchema, qtyFromDb } from "../lib/quantity.js";
 import { buildMaterialCreateFromReceiptItem } from "../lib/receiptMaterialApply.js";
 import {
@@ -78,7 +79,8 @@ const updateToolSchema = z.object({
   status: z.nativeEnum(ToolStatus).optional(),
   categoryId: z.string().nullable().optional(),
   kitComplete: z.boolean().optional(),
-  kitMissingNote: z.string().max(2000).nullable().optional()
+  kitMissingNote: z.string().max(2000).nullable().optional(),
+  purchasePrice: z.coerce.number().nonnegative().nullable().optional()
 });
 
 function toolPatchValidationMessage(error: z.ZodError): string {
@@ -1170,7 +1172,18 @@ toolsRouter.get("/catalog/materials", async (req: AuthedRequest, res) => {
       });
     }
   }
-  return res.json(Array.from(byKey.values()));
+  const catalogRows = Array.from(byKey.values());
+  const priceBasisMap = await loadMaterialPriceBasisMap(catalogRows.map((r) => r.materialId));
+  return res.json(
+    catalogRows.map((row) => {
+      const totalQty = row.qtyNew + row.qtyUsed;
+      const basis = priceBasisMap.get(row.materialId);
+      const lineTotal = basis?.lineTotal ?? null;
+      const priceBasisQty = basis?.basisQty ?? null;
+      const stockAmount = basis && totalQty > 0 ? amountForQuantity(basis, totalQty) : null;
+      return { ...row, lineTotal, priceBasisQty, stockAmount };
+    })
+  );
 });
 
 const catalogMaterialSectionPatchSchema = z.object({

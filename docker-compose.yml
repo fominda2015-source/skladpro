@@ -30,7 +30,7 @@ services:
       SEED_ADMIN_NAME: System Admin
     depends_on:
       - db
-    command: sh -c "(npm run prisma:migrate:deploy || echo 'migrate:deploy failed, trying db push' && npx prisma db push --skip-generate || echo 'db push failed, continuing'); node dist/index.js"
+    command: sh -c "(npm run prisma:migrate:deploy || echo 'migrate:deploy failed, trying db push' && npx prisma db push --skip-generate || echo 'db push failed, continuing'); node dist/scripts/runDataMigrations.js || echo 'data:migrate failed, continuing'; node dist/index.js"
     volumes:
       - uploads_data:/app/uploads
     networks:

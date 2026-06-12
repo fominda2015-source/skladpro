@@ -17,6 +17,10 @@ export type WarehouseStockRow = {
   materialKind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
   materialCategory?: string | null;
   unitPrice?: number | null;
+  lineTotal?: number | null;
+  priceBasisQty?: number | null;
+  unitCost?: number | null;
+  stockAmount?: number | null;
   quantity: number;
   reserved: number;
   storageRoom?: string | null;
@@ -304,7 +308,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
           </label>
           <label className="whCheck">
             <input type="checkbox" checked={showPrice} onChange={(e) => onShowPriceChange(e.target.checked)} />
-            Цена
+            Сумма
           </label>
         </div>
       ) : null}
@@ -330,7 +334,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                 <th className="whColNum whHideSm">Остаток</th>
                 {showReserve ? <th className="whColNum whHideSm">Резерв</th> : null}
                 <th className="whColLoc">Место</th>
-                <th className="whColNum">Цена</th>
+                <th className="whColNum">Сумма</th>
                 <th className="whColAct" aria-label="Действия" />
               </tr>
             </thead>
@@ -392,10 +396,10 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                               {" "}
                               · {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
                             </span>
-                            {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                            {row.unitCost != null && Number.isFinite(Number(row.unitCost)) ? (
                               <span className="muted whHideMd">
                                 {" "}
-                                · {fmtQty(Number(row.unitPrice), 2)} ₽/ед.
+                                · {fmtQty(Number(row.unitCost), 2)} ₽/ед.
                               </span>
                             ) : null}
                           </span>
@@ -418,8 +422,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                         {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
                       </td>
                       <td className="whColNum muted">
-                        {row.unitPrice != null && Number.isFinite(Number(row.unitPrice))
-                          ? `${fmtQty(Number(row.unitPrice), 2)} ₽`
+                        {row.stockAmount != null && Number.isFinite(Number(row.stockAmount))
+                          ? `${fmtQty(Number(row.stockAmount), 2)} ₽`
                           : "—"}
                       </td>
                       <td className="whColAct" onClick={(e) => e.stopPropagation()}>
@@ -543,9 +547,21 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                 <strong>Место:</strong>{" "}
                                 {[row.storageRoom, row.storageCell].filter(Boolean).join(" / ") || "—"}
                               </span>
-                              {row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? (
+                              {row.lineTotal != null &&
+                              Number.isFinite(Number(row.lineTotal)) &&
+                              row.priceBasisQty != null &&
+                              Number(row.priceBasisQty) > 0 ? (
                                 <span style={{ gridColumn: "1 / -1" }}>
-                                  <strong>Цена за ед.:</strong> {fmtQty(Number(row.unitPrice), 2)} ₽
+                                  <strong>Сумма в карточке:</strong> {fmtQty(Number(row.lineTotal), 2)} ₽ за{" "}
+                                  {fmtQty(Number(row.priceBasisQty))} {row.materialUnit}
+                                  {row.unitCost != null && Number.isFinite(Number(row.unitCost))
+                                    ? ` · ${fmtQty(Number(row.unitCost), 2)} ₽/ед.`
+                                    : ""}
+                                </span>
+                              ) : null}
+                              {row.stockAmount != null && Number.isFinite(Number(row.stockAmount)) ? (
+                                <span style={{ gridColumn: "1 / -1" }}>
+                                  <strong>Сумма остатка:</strong> {fmtQty(Number(row.stockAmount), 2)} ₽
                                 </span>
                               ) : null}
                             </div>

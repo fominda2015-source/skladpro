@@ -22,6 +22,7 @@ import {
   type ReportMetaRow,
   type ReportSheetDef
 } from "../lib/xlsxReport.js";
+import { amountForQuantity, loadMaterialPriceBasisMap } from "../lib/materialPricing.js";
 
 export const exportsRouter = Router();
 exportsRouter.use(requireAuth);
@@ -364,6 +365,8 @@ exportsRouter.get(
       take: EXPORT_ROW_LIMIT
     });
 
+    const priceBasisMap = await loadMaterialPriceBasisMap([...new Set(stocks.map((s) => s.materialId))]);
+
     const stockCols: ReportColumn[] = [
       { header: "Объект", key: "warehouse", width: 22 },
       { header: "Раздел", key: "section", width: 8 },
@@ -374,8 +377,9 @@ exportsRouter.get(
       { header: "Количество", key: "qty", width: 12, numFmt: "#,##0.###" },
       { header: "Резерв", key: "reserved", width: 10, numFmt: "#,##0.###" },
       { header: "Доступно", key: "available", width: 12, numFmt: "#,##0.###" },
-      { header: "Цена, ₽", key: "price", width: 12, numFmt: "#,##0.00" },
-      { header: "Сумма, ₽", key: "sum", width: 14, numFmt: "#,##0.00" },
+      { header: "Сумма в карточке, ₽", key: "price", width: 14, numFmt: "#,##0.00" },
+      { header: "За кол-во", key: "priceQty", width: 10, numFmt: "#,##0.###" },
+      { header: "Сумма остатка, ₽", key: "sum", width: 14, numFmt: "#,##0.00" },
       { header: "Комната", key: "room", width: 14 },
       { header: "Ячейка", key: "cell", width: 14 },
       { header: "Артикул", key: "sku", width: 14 },
@@ -409,7 +413,10 @@ exportsRouter.get(
           columns: stockCols,
           rows: stocks.map((s) => {
             const qty = num(s.quantity);
-            const price = s.material.unitPrice != null ? num(s.material.unitPrice) : null;
+            const basis = priceBasisMap.get(s.materialId);
+            const price = basis?.lineTotal ?? (s.material.unitPrice != null ? num(s.material.unitPrice) : null);
+            const priceQty = basis?.basisQty ?? "";
+            const sum = basis ? amountForQuantity(basis, qty) : "";
             return {
               warehouse: s.warehouse.name,
               section: labelSection(s.section),
@@ -421,7 +428,8 @@ exportsRouter.get(
               reserved: num(s.reserved),
               available: qty - num(s.reserved),
               price: price ?? "",
-              sum: price != null ? qty * price : "",
+              priceQty,
+              sum,
               room: s.storageRoom || "",
               cell: s.storageCell || "",
               sku: s.material.sku || "",
@@ -738,6 +746,7 @@ exportsRouter.get(
             { header: "Раздел", key: "section", width: 8 },
             { header: "Проект", key: "project", width: 20 },
             { header: "Ответственный", key: "responsible", width: 20 },
+            { header: "Стоимость, ₽", key: "purchasePrice", width: 14, numFmt: "#,##0.00" },
             { header: "Примечание", key: "note", width: 24 }
           ],
           rows: tools.map((t) => ({
@@ -752,6 +761,7 @@ exportsRouter.get(
             section: labelSection(t.section),
             project: t.project?.name || "",
             responsible: t.responsible || "",
+            purchasePrice: t.purchasePrice != null ? num(t.purchasePrice) : "",
             note: t.note || ""
           }))
         },

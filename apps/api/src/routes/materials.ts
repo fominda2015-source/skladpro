@@ -20,6 +20,7 @@ const createMaterialSchema = z.object({
   unit: z.string().min(1),
   kind: z.nativeEnum(MaterialKind).optional(),
   unitPrice: z.coerce.number().nonnegative().optional().nullable(),
+  priceBasisQty: z.coerce.number().positive().optional().nullable(),
   category: z.string().min(1).optional(),
   synonyms: z.array(z.string().min(1)).optional()
 });
@@ -30,6 +31,7 @@ const updateMaterialSchema = z.object({
   unit: z.string().min(1).optional(),
   kind: z.nativeEnum(MaterialKind).optional(),
   unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+  priceBasisQty: z.coerce.number().positive().nullable().optional(),
   category: z.string().min(1).nullable().optional()
 });
 
@@ -102,6 +104,7 @@ materialsRouter.post("/", requirePermission("materials.write"), async (req, res)
         unit: data.unit,
         kind: data.kind ?? MaterialKind.MATERIAL,
         unitPrice: data.unitPrice ?? undefined,
+        priceBasisQty: data.priceBasisQty ?? undefined,
         category: data.category,
         synonyms: data.synonyms?.length
           ? { create: data.synonyms.map((value) => ({ value: value.trim() })) }

@@ -750,3 +750,79 @@ adminRouter.delete("/demo-data", async (req, res) => {
   const result = await deleteDemoData({ force });
   return res.json(result);
 });
+
+adminRouter.get("/data-jobs", async (_req, res) => {
+  const { listDataJobs } = await import("../lib/dataJobs/runner.js");
+  return res.json(await listDataJobs());
+});
+
+adminRouter.get("/data-jobs/runs", async (req, res) => {
+  const takeRaw = Number(req.query.take);
+  const take = Number.isFinite(takeRaw) ? takeRaw : 50;
+  const { listDataJobRuns } = await import("../lib/dataJobs/runner.js");
+  return res.json(await listDataJobRuns(take));
+});
+
+adminRouter.post("/data-jobs/run-pending", async (req: AuthedRequest, res) => {
+  const { listDataJobs, runDataJob } = await import("../lib/dataJobs/runner.js");
+  const jobs = await listDataJobs();
+  const pending = jobs.filter((j) => j.pendingDeploy);
+  const results = [];
+  for (const job of pending) {
+    results.push(
+      await runDataJob(job.id, {
+        triggeredById: req.user!.userId,
+        source: "admin"
+      })
+    );
+  }
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "ADMIN_DATA_JOBS_RUN_PENDING",
+    entityType: "DataJobRun",
+    entityId: "batch",
+    summary: `Обслуживание БД: выполнено ожидающих задач ${results.length}`,
+    after: { results: results.map((r) => ({ jobId: r.jobId, status: r.status })) }
+  });
+  return res.json({ count: results.length, results });
+});
+
+const runDataJobSchema = z.object({
+  force: z.boolean().optional()
+});
+
+adminRouter.post("/data-jobs/:jobId/run", async (req: AuthedRequest, res) => {
+  const parsed = runDataJobSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const jobId = String(req.params.jobId);
+  const { getDataRebuildJob } = await import("../lib/dataJobs/catalog.js");
+  const { runDataJob } = await import("../lib/dataJobs/runner.js");
+  if (!getDataRebuildJob(jobId)) {
+    return res.status(404).json({ error: "Задача не найдена" });
+  }
+  try {
+    const result = await runDataJob(jobId, {
+      force: parsed.data.force,
+      triggeredById: req.user!.userId,
+      source: "admin"
+    });
+    await recordAudit({
+      userId: req.user!.userId,
+      action: "ADMIN_DATA_JOB_RUN",
+      entityType: "DataJobRun",
+      entityId: result.runId || jobId,
+      summary: `Обслуживание БД · ${jobId} · ${result.status}${parsed.data.force ? " (принудительно)" : ""}`,
+      after: { jobId, status: result.status, summary: result.summary, error: result.error }
+    });
+    if (result.status === "FAIL") {
+      return res.status(500).json({ error: result.error || "Ошибка выполнения", ...result });
+    }
+    return res.json(result);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 409) return res.status(409).json({ error: err.message });
+    throw e;
+  }
+});

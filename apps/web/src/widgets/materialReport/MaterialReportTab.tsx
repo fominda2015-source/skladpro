@@ -6,13 +6,16 @@ import { PageHero } from "../ui/PageHero";
 import { UserAvatar } from "../chat/UserAvatar";
 import { MaterialReportWriteoffModal, type WriteoffLine } from "./MaterialReportWriteoffModal";
 import { formatMaterialQty } from "../../shared/quantity";
+import { formatMoney, formatMoneyOrDash } from "../../shared/pricing";
 
 export type MaterialReportLine = {
   materialId: string;
   name: string;
   unit: string;
   quantity: number;
-  unitPrice?: number | null;
+  catalogLineTotal?: number | null;
+  priceBasisQty?: number | null;
+  unitCost?: number | null;
   totalAmount?: number | null;
 };
 
@@ -88,27 +91,21 @@ function formatQty(n: number) {
   return formatMaterialQty(n);
 }
 
-function formatMoney(n: number) {
-  return n.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-function formatMoneyOrDash(value?: number | null) {
-  return value != null && Number.isFinite(value) ? `${formatMoney(value)} ₽` : "—";
-}
-
 function MaterialLineAmounts({ line }: { line: MaterialReportLine }) {
   return (
     <span className="materialReportBubbleQty">
       <span>
         {formatQty(Number(line.quantity))} {line.unit}
       </span>
-      {line.unitPrice != null && Number.isFinite(Number(line.unitPrice)) ? (
+      {line.totalAmount != null && Number.isFinite(Number(line.totalAmount)) ? (
         <span className="materialReportBubbleMoney">
-          <span className="muted">{formatMoney(Number(line.unitPrice))} ₽/ед.</span>
+          {line.unitCost != null && Number.isFinite(Number(line.unitCost)) ? (
+            <span className="muted">{formatMoney(Number(line.unitCost))} ₽/ед.</span>
+          ) : null}
           <strong>{formatMoneyOrDash(line.totalAmount)}</strong>
         </span>
       ) : (
-        <span className="materialReportBubbleMoney muted">цена не указана</span>
+        <span className="materialReportBubbleMoney muted">сумма не указана</span>
       )}
     </span>
   );
@@ -472,7 +469,7 @@ export function MaterialReportTab({
 
       {unpricedCount > 0 ? (
         <p className="muted materialReportPriceHint">
-          У {unpricedCount} поз. не указана цена в карточке материала — сумма по ним не учтена.
+          У {unpricedCount} поз. не указана сумма в приходе или карточке — стоимость по ним не рассчитана.
         </p>
       ) : null}
 

@@ -30,6 +30,7 @@ export type ToolDrawerRecord = {
   note?: string | null;
   kitComplete?: boolean;
   kitMissingNote?: string | null;
+  purchasePrice?: number | null;
 };
 
 export type ToolCategoryOption = {
@@ -54,6 +55,7 @@ export type ToolEditPatch = {
   note: string;
   kitComplete: boolean;
   kitMissingNote: string;
+  purchasePrice: string;
 };
 
 export type ToolEventRow = {
@@ -106,7 +108,8 @@ function buildDraft(tool: ToolDrawerRecord): ToolEditPatch {
     responsible: tool.responsible || "",
     note: tool.note || "",
     kitComplete: tool.kitComplete !== false,
-    kitMissingNote: tool.kitMissingNote || ""
+    kitMissingNote: tool.kitMissingNote || "",
+    purchasePrice: tool.purchasePrice != null ? String(tool.purchasePrice) : ""
   };
 }
 
@@ -318,6 +321,17 @@ export function ToolDetailDrawer({
               />
             </label>
             <label>
+              Стоимость, ₽
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={draft.purchasePrice}
+                placeholder="Сумма за единицу"
+                onChange={(e) => setDraft((prev) => (prev ? { ...prev, purchasePrice: e.target.value } : prev))}
+              />
+            </label>
+            <label>
               Примечание
               <input
                 value={draft.note}
@@ -391,6 +405,18 @@ export function ToolDetailDrawer({
               {tool.brand ? `Марка: ${tool.brand}` : ""}
               {tool.brand && tool.toolType ? " · " : ""}
               {tool.toolType ? `Вид: ${tool.toolType}` : ""}
+            </p>
+          ) : null}
+          {tool.purchasePrice != null && Number.isFinite(Number(tool.purchasePrice)) ? (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Стоимость:{" "}
+              <strong>
+                {Number(tool.purchasePrice).toLocaleString("ru-RU", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2
+                })}{" "}
+                ₽
+              </strong>
             </p>
           ) : null}
           {tool.note ? (

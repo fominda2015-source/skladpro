@@ -1,4 +1,5 @@
 import { MATERIAL_QTY_STEP, formatMaterialQty } from "../../shared/quantity";
+import { formatMoneyOrDash } from "../../shared/pricing";
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
 
 type ViewProps = {
@@ -44,6 +45,9 @@ export function ToolCatalogMaterialCards(props: Props) {
               <p className="toolCatalogMaterialCardQtyHint muted">
                 новые · {r.unit}
                 {r.qtyUsed > 0 ? ` · б/у ${formatMaterialQty(r.qtyUsed)}` : ""}
+                {r.stockAmount != null && Number.isFinite(Number(r.stockAmount))
+                  ? ` · ${formatMoneyOrDash(r.stockAmount)}`
+                  : ""}
               </p>
             </div>
             <label className="toolCatalogMaterialCardPick">
@@ -87,6 +91,9 @@ export function ToolCatalogMaterialCards(props: Props) {
               {r.qtyUsed > 0
                 ? `новые ${formatMaterialQty(r.qtyNew)} · б/у ${formatMaterialQty(r.qtyUsed)}`
                 : `новые · ${r.unit}`}
+              {r.stockAmount != null && Number.isFinite(Number(r.stockAmount))
+                ? ` · ${formatMoneyOrDash(r.stockAmount)}`
+                : ""}
             </span>
             <span className="toolCatalogMaterialCardMeta muted">{r.warehouseName}</span>
           </button>

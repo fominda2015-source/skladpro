@@ -1592,7 +1592,8 @@ receiptRequestsRouter.post(
             section: row.section,
             qty: r.stockQty,
             userId: req.user!.userId,
-            storagePlace: storagePlaceRaw
+            storagePlace: storagePlaceRaw,
+            lineTotal: unitPrice
           });
           continue;
         }
@@ -1602,6 +1603,9 @@ receiptRequestsRouter.post(
 
         const toolSection = receiptCategoryToToolSection(itemCategory);
         const materialPatch = buildMaterialUpdatesFromReceiptItem(itemCategory, toolSection, unitPrice);
+        if (unitPrice != null && r.stockQty > 0) {
+          (materialPatch as { priceBasisQty?: number }).priceBasisQty = r.stockQty;
+        }
         if (Object.keys(materialPatch).length > 0) {
           await tx.material.update({
             where: { id: materialId },

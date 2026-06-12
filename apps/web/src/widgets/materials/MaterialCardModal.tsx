@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { parseMaterialQty, sanitizeMaterialQtyInput } from "../../shared/quantity";
+import { formatMoneyOrDash } from "../../shared/pricing";
 
 type MaterialDetail = {
   id: string;
@@ -8,6 +9,7 @@ type MaterialDetail = {
   unit: string;
   kind?: "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
   unitPrice?: number | null;
+  priceBasisQty?: number | null;
   category?: string | null;
   synonyms?: Array<{ id: string; value: string }>;
 };
@@ -57,6 +59,7 @@ export function MaterialCardModal(props: Props) {
   const [unit, setUnit] = useState("шт");
   const [kind, setKind] = useState<"MATERIAL" | "CONSUMABLE" | "WORKWEAR">("MATERIAL");
   const [unitPrice, setUnitPrice] = useState("");
+  const [priceBasisQty, setPriceBasisQty] = useState("");
   const [category, setCategory] = useState("");
   const [newSynonym, setNewSynonym] = useState("");
   const [synonyms, setSynonyms] = useState<Array<{ id: string; value: string }>>([]);
@@ -86,6 +89,7 @@ export function MaterialCardModal(props: Props) {
         setUnit(m.unit || "шт");
         setKind(m.kind || "MATERIAL");
         setUnitPrice(m.unitPrice != null ? String(m.unitPrice) : "");
+        setPriceBasisQty(m.priceBasisQty != null ? String(m.priceBasisQty) : "");
         setCategory(m.category || "");
         setSynonyms(m.synonyms || []);
       } catch {
@@ -153,12 +157,24 @@ export function MaterialCardModal(props: Props) {
       if (priceRaw) {
         const p = Number(priceRaw);
         if (!Number.isFinite(p) || p < 0) {
-          setMessage("Цена должна быть числом ≥ 0");
+          setMessage("Сумма должна быть числом ≥ 0");
           return;
         }
         body.unitPrice = p;
+        const basisRaw = priceBasisQty.trim().replace(",", ".");
+        if (basisRaw) {
+          const b = Number(basisRaw);
+          if (!Number.isFinite(b) || b <= 0) {
+            setMessage("Кол-во для суммы должно быть числом > 0");
+            return;
+          }
+          body.priceBasisQty = b;
+        } else {
+          body.priceBasisQty = null;
+        }
       } else {
         body.unitPrice = null;
+        body.priceBasisQty = null;
       }
       const res = await fetchWithSession(`${apiUrl}/api/materials/${materialId}`, {
         method: "PATCH",
@@ -332,16 +348,35 @@ export function MaterialCardModal(props: Props) {
                   </select>
                 </label>
                 <label>
-                  Цена за ед., ₽
+                  Сумма, ₽
                   <input
                     type="number"
                     min={0}
                     step={0.01}
                     value={unitPrice}
                     disabled={!canWrite}
+                    placeholder="Общая стоимость"
                     onChange={(e) => setUnitPrice(e.target.value)}
                   />
                 </label>
+                <label>
+                  За кол-во
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={priceBasisQty}
+                    disabled={!canWrite}
+                    placeholder="шт"
+                    onChange={(e) => setPriceBasisQty(e.target.value)}
+                  />
+                </label>
+                {unitPrice.trim() && priceBasisQty.trim() ? (
+                  <p className="muted" style={{ margin: 0, gridColumn: "1 / -1", fontSize: 12 }}>
+                    ≈ {formatMoneyOrDash(Number(unitPrice.replace(",", ".")) / Number(priceBasisQty.replace(",", ".")))}{" "}
+                    / ед.
+                  </p>
+                ) : null}
                 <label>
                   Категория
                   <input value={category} disabled={!canWrite} onChange={(e) => setCategory(e.target.value)} />

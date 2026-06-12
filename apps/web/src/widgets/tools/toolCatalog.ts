@@ -67,6 +67,9 @@ export type ToolCatalogMaterialRow = {
   section: string;
   qtyNew: number;
   qtyUsed: number;
+  lineTotal?: number | null;
+  priceBasisQty?: number | null;
+  stockAmount?: number | null;
 };
 
 /** Строка расходника в каталоге (отдельно новые и б/у). */

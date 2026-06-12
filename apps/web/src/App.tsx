@@ -52,7 +52,7 @@ import {
   type LimitImportDiffView
 } from "./widgets/limits/limitImportDiffUtils";
 import { LimitImportHistoryButton, LimitImportHistoryModal } from "./widgets/limits/LimitImportHistoryModal";
-import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
+import { AdminMaintenancePanel } from "./widgets/admin/AdminMaintenancePanel";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
@@ -215,6 +215,10 @@ type StockRow = {
   materialCategory?: string | null;
   materialToolCatalogSection?: string | null;
   unitPrice?: number | null;
+  lineTotal?: number | null;
+  priceBasisQty?: number | null;
+  unitCost?: number | null;
+  stockAmount?: number | null;
   quantity: number;
   reserved: number;
   storageRoom?: string | null;
@@ -413,6 +417,7 @@ type ToolItem = {
   category?: { id: string; name: string; icon?: string | null; slug?: string | null } | null;
   kitComplete?: boolean;
   kitMissingNote?: string | null;
+  purchasePrice?: number | null;
   createdAt: string;
 };
 type ToolWarehouseSummaryRow = {
@@ -819,7 +824,7 @@ function App() {
   const [selectedStatus, setSelectedStatus] = useState<"ACTIVE" | "BLOCKED">("ACTIVE");
   const [newPassword, setNewPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
-  const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects" | "demo">("users");
+  const [adminWorkspaceTab, setAdminWorkspaceTab] = useState<"users" | "objects" | "demo" | "maintenance">("users");
   const [demoDataStatus, setDemoDataStatus] = useState<{
     ready: boolean;
     warehouse?: { id: string; name: string; address?: string | null } | null;
@@ -2407,7 +2412,13 @@ function App() {
           responsible: patch.responsible.trim() || null,
           note: patch.note.trim() || null,
           kitComplete: patch.kitComplete,
-          kitMissingNote: patch.kitComplete ? null : patch.kitMissingNote.trim() || null
+          kitMissingNote: patch.kitComplete ? null : patch.kitMissingNote.trim() || null,
+          purchasePrice: patch.purchasePrice.trim()
+            ? (() => {
+                const p = Number(patch.purchasePrice.trim().replace(",", "."));
+                return Number.isFinite(p) && p >= 0 ? p : null;
+              })()
+            : null
         })
       });
       if (!res.ok) {
@@ -7677,7 +7688,7 @@ function App() {
                                   </th>
                                   <th>Принять сейчас</th>
                                   <th>Категория</th>
-                                  <th>Цена, ₽</th>
+                                  <th>Сумма, ₽</th>
                                   <th>Место хранения</th>
                                   {row.objectLimitTemplateId ? <th>Узел лимита</th> : null}
                                 </tr>
@@ -11100,7 +11111,7 @@ function App() {
                         />
                       </label>
                       <label>
-                        Цена за ед., ₽ (необязательно)
+                        Сумма, ₽ (за всё кол-во, необязательно)
                         <input
                           type="text"
                           inputMode="decimal"
@@ -11988,8 +11999,20 @@ function App() {
               >
                 Тестовые данные
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={adminWorkspaceTab === "maintenance"}
+                className={`adminTabBtn${adminWorkspaceTab === "maintenance" ? " adminTabBtnActive" : ""}`}
+                onClick={() => setAdminWorkspaceTab("maintenance")}
+              >
+                Обслуживание БД
+              </button>
             </div>
           </div>
+          {adminWorkspaceTab === "maintenance" && (
+            <AdminMaintenancePanel token={token} apiUrl={API_URL} fetchWithSession={fetchWithSession} />
+          )}
           {adminWorkspaceTab === "demo" && (
             <div className="card adminInsetCard">
               <h4>Изолированный sandbox для проверки</h4>
@@ -13016,7 +13039,7 @@ function App() {
                 </select>
               </label>
               <label>
-                Цена за ед., ₽ (необязательно)
+                Сумма, ₽ (за всё кол-во, необязательно)
                 <input
                   type="text"
                   inputMode="decimal"

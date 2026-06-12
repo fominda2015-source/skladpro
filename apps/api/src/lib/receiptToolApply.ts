@@ -93,9 +93,15 @@ export async function createToolsFromReceiptAccept(
     qty: number;
     userId: string;
     storagePlace?: string | null;
+    /** Общая сумма за всё кол-во строки прихода */
+    lineTotal?: number | null;
   }
 ): Promise<number> {
   const count = Math.max(1, Math.round(opts.qty));
+  const perUnitPrice =
+    opts.lineTotal != null && Number.isFinite(opts.lineTotal) && opts.lineTotal >= 0 && count > 0
+      ? opts.lineTotal / count
+      : null;
   const noteParts = [`Принято по заявке ${opts.receiptNumber}`];
   if (opts.storagePlace?.trim()) noteParts.push(`Место: ${opts.storagePlace.trim()}`);
   const note = noteParts.join(". ");
@@ -114,7 +120,8 @@ export async function createToolsFromReceiptAccept(
         categoryId: opts.categoryId,
         note,
         kitComplete: true,
-        kitMissingNote: null
+        kitMissingNote: null,
+        ...(perUnitPrice != null ? { purchasePrice: perUnitPrice } : {})
       }
     });
     await tx.toolEvent.create({
