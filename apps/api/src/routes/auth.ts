@@ -28,9 +28,19 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(4)
 });
 
+/** Внутренние адреса вида *@*.local проходят; z.string().email() их отклоняет. */
+const profileEmailSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(200)
+  .refine((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), {
+    message: "Некорректный email"
+  });
+
 const updateProfileSchema = z.object({
-  fullName: z.string().min(2).max(120).optional(),
-  email: z.string().email().max(200).optional(),
+  fullName: z.string().trim().min(2, "Имя должно быть не короче 2 символов").max(120).optional(),
+  email: profileEmailSchema.optional(),
   phone: z.string().max(32).nullable().optional(),
   /** Поддержка небольших data URL вручную; для обычных фото см. POST /auth/me/avatar */
   avatarUrl: z.string().max(900_000).nullable().optional()
@@ -289,14 +299,24 @@ authRouter.post("/change-password", requireAuth, async (req: AuthedRequest, res)
 authRouter.patch("/me/profile", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = updateProfileSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    const msg =
+      parsed.error.issues.map((issue) => issue.message).filter(Boolean).join(". ") || "Invalid body";
+    return res.status(400).json({ error: msg, details: parsed.error.flatten() });
+  }
+  if (
+    parsed.data.fullName === undefined &&
+    parsed.data.email === undefined &&
+    !Object.prototype.hasOwnProperty.call(parsed.data, "phone") &&
+    !Object.prototype.hasOwnProperty.call(parsed.data, "avatarUrl")
+  ) {
+    return res.status(400).json({ error: "Нет данных для обновления" });
   }
   try {
     const updated = await prisma.user.update({
       where: { id: req.user!.userId },
       data: {
-        ...(typeof parsed.data.fullName === "string" ? { fullName: parsed.data.fullName.trim() } : {}),
-        ...(typeof parsed.data.email === "string" ? { email: parsed.data.email.trim().toLowerCase() } : {}),
+        ...(parsed.data.fullName !== undefined ? { fullName: parsed.data.fullName } : {}),
+        ...(parsed.data.email !== undefined ? { email: parsed.data.email.toLowerCase() } : {}),
         ...(Object.prototype.hasOwnProperty.call(parsed.data, "phone")
           ? { phone: parsed.data.phone?.trim() || null }
           : {}),

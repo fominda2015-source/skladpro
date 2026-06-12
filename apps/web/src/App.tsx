@@ -2271,7 +2271,7 @@ function App() {
       throw new Error(typeof body.error === "string" ? body.error : "Не удалось загрузить аватар");
     }
     const data = (await res.json()) as MeResponse;
-    setMe(data);
+    setMe((prev) => (prev ? { ...prev, ...data } : data));
     setProfileFullName(data.fullName);
     setProfileEmail(data.email);
     setProfilePhone(data.phone || "");
@@ -2283,24 +2283,31 @@ function App() {
     phone?: string | null;
     avatarUrl?: string | null;
   }) {
-    if (!token) return;
+    if (!token) throw new Error("Требуется авторизация");
+    const payload: typeof next = {};
+    if (next.fullName !== undefined) payload.fullName = next.fullName.trim();
+    if (next.email !== undefined) payload.email = next.email.trim();
+    if (Object.prototype.hasOwnProperty.call(next, "phone")) payload.phone = next.phone?.trim() || null;
+    if (Object.prototype.hasOwnProperty.call(next, "avatarUrl")) payload.avatarUrl = next.avatarUrl ?? null;
     const res = await fetchWithSession(`${API_URL}/api/auth/me/profile`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(next)
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(typeof body.error === "string" ? body.error : "Не удалось обновить профиль");
     }
     const data = (await res.json()) as MeResponse;
-    setMe(data);
+    setMe((prev) => (prev ? { ...prev, ...data } : data));
     setProfileFullName(data.fullName);
     setProfileEmail(data.email);
     setProfilePhone(data.phone || "");
+    await loadMe();
+    await loadChatUsers();
   }
 
   function patchConversationRead(conversationId: string, lastReadAt: string) {
@@ -5566,6 +5573,13 @@ function App() {
     toolDetailModalId,
     requestMaterialsModal
   ]);
+
+  useEffect(() => {
+    if (activeTab !== "profile" || !me) return;
+    setProfileFullName(me.fullName);
+    setProfileEmail(me.email);
+    setProfilePhone(me.phone || "");
+  }, [activeTab, me?.id, me?.fullName, me?.email, me?.phone]);
 
   useEffect(() => {
     if (!token || !canReadNotifications) return;
@@ -12655,16 +12669,23 @@ function App() {
           </div>
           <div className="toolbar">
             <button
+              type="button"
               onClick={async () => {
+                setProfileMessage("");
+                const name = profileFullName.trim();
+                if (name.length < 2) {
+                  setProfileMessage("Имя должно быть не короче 2 символов");
+                  return;
+                }
                 try {
                   await updateProfile({
-                    fullName: profileFullName,
+                    fullName: name,
                     email: profileEmail.trim(),
                     phone: profilePhone.trim() || null
                   });
-                  setProfileMessage("Профиль обновлен");
-                } catch {
-                  setProfileMessage("Не удалось обновить профиль");
+                  setProfileMessage("Профиль обновлён");
+                } catch (e) {
+                  setProfileMessage(e instanceof Error ? e.message : "Не удалось обновить профиль");
                 }
               }}
             >
@@ -12676,8 +12697,8 @@ function App() {
                 try {
                   await updateProfile({ avatarUrl: null });
                   setProfileMessage("Аватар удален");
-                } catch {
-                  setProfileMessage("Не удалось удалить аватар");
+                } catch (e) {
+                  setProfileMessage(e instanceof Error ? e.message : "Не удалось удалить аватар");
                 }
               }}
             >
