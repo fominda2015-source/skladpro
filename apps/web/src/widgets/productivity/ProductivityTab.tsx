@@ -201,7 +201,7 @@ export function ProductivityTab({
     return (
       <EmptyState
         title="Выберите объект"
-        description="Для выработки нужен конкретный объект вверху экрана (не «Все объекты»)."
+        hint="Для выработки нужен конкретный объект вверху экрана (не «Все объекты»)."
       />
     );
   }
@@ -248,13 +248,13 @@ export function ProductivityTab({
         }
       />
 
-      {message ? <ResultBanner tone="bad" text={message} /> : null}
+      {message ? <ResultBanner tone="error" text={message} /> : null}
       {saving ? <p className="muted productivitySaving">Сохранение…</p> : null}
 
       {!sheet ? (
         <EmptyState
           title="Шаблон не загружен"
-          description={
+          hint={
             canWrite
               ? "Перетащите Excel-файл выработки на страницу или нажмите «Загрузить шаблон». После заполнения можно скачать тот же файл с вашими данными."
               : "Попросите ответственного загрузить шаблон выработки для этого объекта."
