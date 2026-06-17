@@ -13,6 +13,8 @@ export type ProductivityRowPreview = {
   unit?: string;
   totalQty?: number | null;
   editable: boolean;
+  nodeType: "GROUP" | "MATERIAL";
+  level: number;
 };
 
 export type ProductivitySheetMeta = {
@@ -118,6 +120,12 @@ function findHeaderRow(ws: xlsx.WorkSheet): number {
   return 1;
 }
 
+function groupLevelFromIndex(indexLabel?: string): number {
+  if (!indexLabel?.trim()) return 0;
+  const parts = indexLabel.trim().split(".").filter(Boolean);
+  return Math.max(0, parts.length - 1);
+}
+
 export function parseProductivityBuffer(buffer: Buffer): ProductivitySheetMeta {
   const wb = xlsx.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = wb.SheetNames[0];
@@ -163,7 +171,24 @@ export function parseProductivityBuffer(buffer: Buffer): ProductivitySheetMeta {
 
     const name = nameCol || descCol;
     if (!name && !unit && !indexLabel && !workCode) continue;
-    if (!name && !unit) continue;
+
+    if (!unit) {
+      if (!name && !indexLabel && !workCode) continue;
+      rows.push({
+        rowIndex: r,
+        indexLabel,
+        workCode,
+        name: name || indexLabel || workCode || `Раздел ${r + 1}`,
+        unit,
+        totalQty,
+        editable: false,
+        nodeType: "GROUP",
+        level: groupLevelFromIndex(indexLabel)
+      });
+      continue;
+    }
+
+    if (!name) continue;
 
     rows.push({
       rowIndex: r,
@@ -172,7 +197,9 @@ export function parseProductivityBuffer(buffer: Buffer): ProductivitySheetMeta {
       name: name || descCol || indexLabel || `Строка ${r + 1}`,
       unit,
       totalQty,
-      editable: Boolean(unit)
+      editable: true,
+      nodeType: "MATERIAL",
+      level: 0
     });
   }
 

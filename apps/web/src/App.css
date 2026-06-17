@@ -9579,6 +9579,27 @@ button.whMenuItem:hover,
   margin-bottom: 8px;
 }
 
+.productivityControlBar {
+  margin-bottom: 8px;
+}
+
+.productivityMonthLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.productivityMonthLabel select {
+  height: 34px;
+  padding: 4px 8px;
+  border: 1px solid #d8dde7;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+}
+
 .productivityInfoCard {
   display: flex;
   align-items: flex-start;
@@ -9687,5 +9708,56 @@ button.whMenuItem:hover,
 
 .productivityTable tbody tr.productivityRowMatch:hover td.productivitySticky {
   background: #f0f9ff;
+}
+
+.productivityGroupRow td {
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0;
+}
+
+.productivityGroupCell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.productivityGroupRowInner {
+  padding: 6px 8px;
+  min-height: 40px;
+}
+
+.productivityGroupToggle {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.productivityGroupTitle {
+  color: #243656;
+  font-size: 13px;
+}
+
+.productivityGroupCode {
+  font-size: 12px;
+}
+
+.productivityGroupMeta {
+  font-size: 12px;
+}
+
+.productivityMaterialRow:hover td {
+  background: #fafcff;
+}
+
+.productivityMaterialRow:hover td.productivitySticky {
+  background: #f8fafc;
+}
+
+.productivityTreeBody .productivityGroupRow:first-child td {
+  border-top: none;
 }
 

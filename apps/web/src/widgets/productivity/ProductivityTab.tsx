@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
+import { useDebouncedValue } from "../../shared/hooks/useDebouncedValue";
 import { repairUploadedFileName } from "../../shared/fileName";
-import { matchesSearchFields } from "../../shared/searchText";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
-import { FilterStrip, PageHero } from "../ui/PageHero";
+import { PageHero } from "../ui/PageHero";
 import { ResponsiveTableShell } from "../layout/MobileCardParts";
+import {
+  buildProductivityTree,
+  collapseProductivitySubtree,
+  countAllProductivityMaterials,
+  countProductivityMaterials,
+  filterProductivityTree,
+  productivityTreeIndentPx,
+  type ProductivityRow,
+  type ProductivityTreeNode
+} from "./productivityTree";
 
 type DateColumn = { col: number; date: string };
-
-type ProductivityRow = {
-  rowIndex: number;
-  indexLabel?: string;
-  workCode?: string;
-  name: string;
-  unit?: string;
-  totalQty?: number | null;
-  editable: boolean;
-};
 
 type SheetPayload = {
   id: string;
@@ -58,6 +58,10 @@ function formatMonthLabel(ym: string) {
   return new Date(y, (m || 1) - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
 }
 
+function nodeId(node: ProductivityTreeNode) {
+  return String(node.row.rowIndex);
+}
+
 export function ProductivityTab({
   token,
   apiUrl,
@@ -73,7 +77,9 @@ export function ProductivityTab({
   const [message, setMessage] = useState("");
   const [sheet, setSheet] = useState<SheetPayload | null>(null);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [searchQuery, setSearchQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 280);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const pendingRef = useRef<Map<string, string | number | null>>(new Map());
   const saveTimerRef = useRef<number | null>(null);
@@ -107,6 +113,11 @@ export function ProductivityTab({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setExpanded({});
+    setSearch("");
+  }, [warehouseId, section, sheet?.id]);
+
   const availableMonths = useMemo(() => {
     if (!sheet?.dateColumns.length) return [month];
     const set = new Set(sheet.dateColumns.map((d) => monthKey(d.date)));
@@ -129,16 +140,25 @@ export function ProductivityTab({
     [sheet]
   );
 
-  const filteredRows = useMemo(() => {
-    if (!sheet) return [];
-    const q = searchQuery.trim();
-    if (!q) return sheet.rows;
-    return sheet.rows.filter((row) =>
-      matchesSearchFields(q, row.name, row.workCode, row.indexLabel, row.unit)
-    );
-  }, [sheet, searchQuery]);
+  const fullTree = useMemo(() => (sheet ? buildProductivityTree(sheet.rows) : []), [sheet]);
 
-  const searchActive = searchQuery.trim().length > 0;
+  const { nodes: visibleTree, expandIds } = useMemo(
+    () => filterProductivityTree(fullTree, debouncedSearch),
+    [fullTree, debouncedSearch]
+  );
+
+  const searchActive = debouncedSearch.trim().length > 0;
+  const totalMaterials = useMemo(() => countAllProductivityMaterials(fullTree), [fullTree]);
+  const visibleMaterials = useMemo(() => countAllProductivityMaterials(visibleTree), [visibleTree]);
+
+  useEffect(() => {
+    if (!searchActive || !expandIds.size) return;
+    setExpanded((prev) => {
+      const next = { ...prev };
+      for (const id of expandIds) next[id] = true;
+      return next;
+    });
+  }, [searchActive, expandIds]);
 
   const flushSaves = useCallback(async () => {
     if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID || pendingRef.current.size === 0) return;
@@ -191,6 +211,29 @@ export function ProductivityTab({
     queueSave(rowIndex, col, nextVal);
   };
 
+  const toggleGroup = (node: ProductivityTreeNode) => {
+    const id = nodeId(node);
+    const siblings = findSiblingGroups(node, fullTree);
+    setExpanded((prev) => {
+      const willExpand = !prev[id];
+      let next = { ...prev };
+
+      if (willExpand) {
+        for (const s of siblings) {
+          if (nodeId(s) !== id) {
+            next = collapseProductivitySubtree(next, nodeId(s), fullTree);
+          }
+        }
+      }
+
+      next[id] = willExpand;
+      if (!willExpand) {
+        next = collapseProductivitySubtree(next, id, fullTree);
+      }
+      return next;
+    });
+  };
+
   const download = async () => {
     if (!token) return;
     setMessage("");
@@ -217,6 +260,91 @@ export function ProductivityTab({
     }
   };
 
+  const renderMaterialRow = (row: ProductivityRow, depth: number) => {
+    const indent = productivityTreeIndentPx(depth);
+    return (
+      <tr key={row.rowIndex} className="productivityMaterialRow">
+        <td className="productivitySticky muted" style={{ paddingLeft: indent + 8 }}>
+          {row.workCode || row.indexLabel || "—"}
+        </td>
+        <td className="productivitySticky productivityNameCol" title={row.name} style={{ paddingLeft: indent + 8 }}>
+          {row.name}
+        </td>
+        <td>{row.unit || "—"}</td>
+        {visibleDates.map((d) => {
+          const key = cellKey(row.rowIndex, d.col);
+          const val = sheet?.cellValues[key];
+          return (
+            <td key={d.col} className="productivityDayCol">
+              {canWrite ? (
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="productivityCellInput"
+                  value={val == null ? "" : String(val)}
+                  onChange={(e) => onCellChange(row.rowIndex, d.col, e.target.value)}
+                />
+              ) : (
+                <span>{val == null ? "" : String(val)}</span>
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
+
+  const renderTree = (nodes: ProductivityTreeNode[], depth: number): ReactNode[] => {
+    const out: ReactNode[] = [];
+    const colSpan = 3 + visibleDates.length;
+
+    for (const node of nodes) {
+      if (node.type === "GROUP") {
+        const id = nodeId(node);
+        const isExpanded = Boolean(expanded[id]);
+        const matCount = countProductivityMaterials(node);
+        const subCount = node.children.filter((c) => c.type === "GROUP").length;
+        const indent = productivityTreeIndentPx(depth);
+
+        out.push(
+          <tr key={`group-${id}`} className="productivityGroupRow">
+            <td colSpan={colSpan} className="productivityGroupCell">
+              <div className="limitGroupRow productivityGroupRowInner" style={{ paddingLeft: indent }}>
+                <button
+                  type="button"
+                  className="ghostBtn productivityGroupToggle"
+                  aria-label={isExpanded ? "Свернуть раздел" : "Раскрыть раздел"}
+                  onClick={() => toggleGroup(node)}
+                  disabled={!node.children.length}
+                >
+                  {node.children.length ? (isExpanded ? "▾" : "▸") : "•"}
+                </button>
+                <div className="limitGroupRowMain">
+                  <strong className="productivityGroupTitle">{node.row.name}</strong>
+                  {node.row.indexLabel ? <span className="muted productivityGroupCode">{node.row.indexLabel}</span> : null}
+                  {node.row.workCode ? <span className="muted productivityGroupCode">{node.row.workCode}</span> : null}
+                  <span className="muted productivityGroupMeta">
+                    {matCount ? `${matCount} поз.` : null}
+                    {subCount ? `${matCount ? " · " : ""}${subCount} подразд.` : null}
+                  </span>
+                </div>
+              </div>
+            </td>
+          </tr>
+        );
+
+        if (isExpanded) {
+          out.push(...renderTree(node.children, depth + 1));
+        }
+        continue;
+      }
+
+      out.push(renderMaterialRow(node.row, depth));
+    }
+
+    return out;
+  };
+
   if (!warehouseId || warehouseId === ALL_OBJECTS_ID) {
     return (
       <EmptyState
@@ -238,8 +366,9 @@ export function ProductivityTab({
             ? [
                 {
                   label: searchActive ? "Найдено" : "Позиций",
-                  value: searchActive ? `${filteredRows.length} из ${sheet.rows.length}` : sheet.rows.length
+                  value: searchActive ? `${visibleMaterials} из ${totalMaterials}` : totalMaterials
                 },
+                { label: "Разделов", value: sheet.rows.filter((r) => r.nodeType === "GROUP").length },
                 { label: "Дней", value: visibleDates.length }
               ]
             : undefined
@@ -307,44 +436,46 @@ export function ProductivityTab({
             </div>
           </div>
 
-          <FilterStrip
-            search={
+          <div className="whControlBar productivityControlBar">
+            <div className="whSearchRow">
               <input
                 type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск по наименованию, коду или единице…"
-                aria-label="Поиск по наименованию"
+                className="whSearchInput"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Поиск: наименование, код, единица…"
+                aria-label="Поиск по выработке"
               />
-            }
-            actions={
-              searchActive ? (
-                <button type="button" className="ghostBtn" onClick={() => setSearchQuery("")}>
+            </div>
+            <div className="whToolbar">
+              <label className="productivityMonthLabel">
+                Месяц
+                <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Месяц">
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {formatMonthLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {search.trim() ? (
+                <button type="button" className="ghostBtn" onClick={() => setSearch("")}>
                   Сбросить
                 </button>
-              ) : null
-            }
-          >
-            <label>
-              Месяц
-              <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Месяц">
-                {availableMonths.map((m) => (
-                  <option key={m} value={m}>
-                    {formatMonthLabel(m)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </FilterStrip>
+              ) : null}
+            </div>
+          </div>
 
-          {!filteredRows.length ? (
+          {!visibleTree.length || visibleMaterials === 0 ? (
             <EmptyState
               title="Ничего не нашлось"
               hint="Попробуйте другой запрос или сбросьте поиск."
               action={
-                <button type="button" className="ghostBtn" onClick={() => setSearchQuery("")}>
-                  Сбросить поиск
-                </button>
+                search.trim() ? (
+                  <button type="button" className="ghostBtn" onClick={() => setSearch("")}>
+                    Сбросить поиск
+                  </button>
+                ) : undefined
               }
             />
           ) : (
@@ -363,36 +494,7 @@ export function ProductivityTab({
                       ))}
                     </tr>
                   </thead>
-                  <tbody>
-                    {filteredRows.map((row) => (
-                      <tr key={row.rowIndex} className={searchActive ? "productivityRowMatch" : undefined}>
-                        <td className="productivitySticky muted">{row.workCode || row.indexLabel || "—"}</td>
-                        <td className="productivitySticky productivityNameCol" title={row.name}>
-                          {row.name}
-                        </td>
-                        <td>{row.unit || "—"}</td>
-                        {visibleDates.map((d) => {
-                          const key = cellKey(row.rowIndex, d.col);
-                          const val = sheet.cellValues[key];
-                          return (
-                            <td key={d.col} className="productivityDayCol">
-                              {canWrite ? (
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  className="productivityCellInput"
-                                  value={val == null ? "" : String(val)}
-                                  onChange={(e) => onCellChange(row.rowIndex, d.col, e.target.value)}
-                                />
-                              ) : (
-                                <span>{val == null ? "" : String(val)}</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
+                  <tbody className="productivityTreeBody">{renderTree(visibleTree, 0)}</tbody>
                 </table>
               </div>
             </ResponsiveTableShell>
@@ -401,4 +503,18 @@ export function ProductivityTab({
       )}
     </div>
   );
+}
+
+function findSiblingGroups(node: ProductivityTreeNode, roots: ProductivityTreeNode[]): ProductivityTreeNode[] {
+  const walk = (nodes: ProductivityTreeNode[], parent: ProductivityTreeNode | null): ProductivityTreeNode[] | null => {
+    for (const n of nodes) {
+      if (n === node) {
+        return parent ? parent.children.filter((c) => c.type === "GROUP") : roots.filter((c) => c.type === "GROUP");
+      }
+      const found = walk(n.children, n);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(roots, null) || [];
 }

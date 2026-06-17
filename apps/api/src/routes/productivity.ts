@@ -137,7 +137,7 @@ productivityRouter.get("/", async (req, res) => {
 
   return res.json({
     ...sheetToJson({ ...sheet, dateColumns: extended }),
-    rows: parsedMeta.rows.filter((r) => r.editable)
+    rows: parsedMeta.rows
   });
 });
 
@@ -246,7 +246,7 @@ productivityRouter.post(
 
     return res.status(existing ? 200 : 201).json({
       ...sheetToJson(sheet),
-      rows: meta.rows.filter((r) => r.editable)
+      rows: meta.rows
     });
   }
 );
