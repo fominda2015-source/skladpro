@@ -140,7 +140,10 @@ export function ProductivityTab({
     [sheet]
   );
 
-  const fullTree = useMemo(() => (sheet ? buildProductivityTree(sheet.rows) : []), [sheet]);
+  const fullTree = useMemo(
+    () => (sheet?.rows?.length ? buildProductivityTree(sheet.rows) : []),
+    [sheet]
+  );
 
   const { nodes: visibleTree, expandIds } = useMemo(
     () => filterProductivityTree(fullTree, debouncedSearch),
@@ -299,11 +302,13 @@ export function ProductivityTab({
     const colSpan = 3 + visibleDates.length;
 
     for (const node of nodes) {
+      if (!node) continue;
       if (node.type === "GROUP") {
         const id = nodeId(node);
         const isExpanded = Boolean(expanded[id]);
         const matCount = countProductivityMaterials(node);
-        const subCount = node.children.filter((c) => c.type === "GROUP").length;
+        const childList = node.children || [];
+        const subCount = childList.filter((c) => c?.type === "GROUP").length;
         const indent = productivityTreeIndentPx(depth);
 
         out.push(
@@ -315,9 +320,9 @@ export function ProductivityTab({
                   className="ghostBtn productivityGroupToggle"
                   aria-label={isExpanded ? "Свернуть раздел" : "Раскрыть раздел"}
                   onClick={() => toggleGroup(node)}
-                  disabled={!node.children.length}
+                  disabled={!childList.length}
                 >
-                  {node.children.length ? (isExpanded ? "▾" : "▸") : "•"}
+                  {childList.length ? (isExpanded ? "▾" : "▸") : "•"}
                 </button>
                 <div className="limitGroupRowMain">
                   <strong className="productivityGroupTitle">{node.row.name}</strong>
@@ -334,7 +339,7 @@ export function ProductivityTab({
         );
 
         if (isExpanded) {
-          out.push(...renderTree(node.children, depth + 1));
+          out.push(...renderTree(childList, depth + 1));
         }
         continue;
       }
@@ -368,7 +373,7 @@ export function ProductivityTab({
                   label: searchActive ? "Найдено" : "Позиций",
                   value: searchActive ? `${visibleMaterials} из ${totalMaterials}` : totalMaterials
                 },
-                { label: "Разделов", value: sheet.rows.filter((r) => r.nodeType === "GROUP").length },
+                { label: "Разделов", value: sheet.rows.filter((r) => r?.nodeType === "GROUP").length },
                 { label: "Дней", value: visibleDates.length }
               ]
             : undefined

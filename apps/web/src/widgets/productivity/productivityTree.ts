@@ -24,6 +24,7 @@ export function buildProductivityTree(rows: ProductivityRow[]): ProductivityTree
   const stack: ProductivityTreeNode[] = [];
 
   for (const row of rows) {
+    if (!row) continue;
     const type: ProductivityTreeNode["type"] =
       row.nodeType || (row.editable ? "MATERIAL" : "GROUP");
     const node: ProductivityTreeNode = {
@@ -33,19 +34,24 @@ export function buildProductivityTree(rows: ProductivityRow[]): ProductivityTree
     };
 
     if (type === "GROUP") {
-      const level = row.level ?? 0;
+      const level = Math.max(0, row.level ?? 0);
       while (stack.length > level) stack.pop();
-      if (level === 0 || stack.length === 0) {
-        roots.push(node);
+
+      const parent = level > 0 ? stack[level - 1] : undefined;
+      if (parent) {
+        parent.children.push(node);
       } else {
-        stack[level - 1]!.children.push(node);
+        roots.push(node);
       }
+
       stack[level] = node;
+      stack.length = level + 1;
       continue;
     }
 
-    if (stack.length > 0) {
-      stack[stack.length - 1]!.children.push(node);
+    const parent = stack.length > 0 ? stack[stack.length - 1] : undefined;
+    if (parent) {
+      parent.children.push(node);
     } else {
       roots.push(node);
     }
@@ -55,8 +61,9 @@ export function buildProductivityTree(rows: ProductivityRow[]): ProductivityTree
 }
 
 export function countProductivityMaterials(node: ProductivityTreeNode): number {
+  if (!node) return 0;
   if (node.type === "MATERIAL") return 1;
-  return node.children.reduce((sum, child) => sum + countProductivityMaterials(child), 0);
+  return (node.children || []).reduce((sum, child) => sum + countProductivityMaterials(child), 0);
 }
 
 export function countAllProductivityMaterials(nodes: ProductivityTreeNode[]): number {
@@ -95,12 +102,13 @@ export function filterProductivityTree(
   if (!q) return { nodes, expandIds: new Set() };
 
   const walk = (node: ProductivityTreeNode): ProductivityTreeNode | null => {
+    if (!node) return null;
     if (node.type === "MATERIAL") {
       return matchesSearchFields(q, node.row.name, node.row.workCode, node.row.indexLabel, node.row.unit) ? node : null;
     }
     const selfMatch = matchesSearchFields(q, node.row.name, node.row.workCode, node.row.indexLabel);
     if (selfMatch) return node;
-    const children = node.children.map(walk).filter(Boolean) as ProductivityTreeNode[];
+    const children = (node.children || []).map(walk).filter(Boolean) as ProductivityTreeNode[];
     if (!children.length) return null;
     return { ...node, children };
   };
