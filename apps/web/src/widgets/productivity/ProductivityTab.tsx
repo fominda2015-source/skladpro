@@ -53,6 +53,30 @@ function formatDay(iso: string) {
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
 }
 
+function dayHeaderMeta(iso: string) {
+  const d = new Date(iso + "T12:00:00");
+  const weekday = d.toLocaleDateString("ru-RU", { weekday: "short" });
+  const dayNum = d.getDay();
+  const todayIso = new Date().toISOString().slice(0, 10);
+  return {
+    weekday,
+    isWeekend: dayNum === 0 || dayNum === 6,
+    isToday: iso === todayIso
+  };
+}
+
+function dayColClass(iso: string, extra = "") {
+  const meta = dayHeaderMeta(iso);
+  return [
+    "productivityDayCol",
+    meta.isWeekend ? "productivityDayCol--weekend" : "",
+    meta.isToday ? "productivityDayCol--today" : "",
+    extra
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function formatMonthLabel(ym: string) {
   const [y, m] = ym.split("-").map(Number);
   return new Date(y, (m || 1) - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
@@ -265,30 +289,37 @@ export function ProductivityTab({
 
   const renderMaterialRow = (row: ProductivityRow, depth: number) => {
     const indent = productivityTreeIndentPx(depth);
+    const code = row.workCode || row.indexLabel || "—";
     return (
-      <tr key={row.rowIndex} className="productivityMaterialRow">
-        <td className="productivitySticky muted" style={{ paddingLeft: indent + 8 }}>
-          {row.workCode || row.indexLabel || "—"}
+      <tr key={row.rowIndex} className={`productivityMaterialRow productivityMaterialRow--depth-${Math.min(depth, 3)}`}>
+        <td className="productivitySticky productivityCodeCol" style={{ paddingLeft: indent + 10 }}>
+          <span className="productivityCode">{code}</span>
         </td>
-        <td className="productivitySticky productivityNameCol" title={row.name} style={{ paddingLeft: indent + 8 }}>
-          {row.name}
+        <td className="productivitySticky productivityNameCol" title={row.name} style={{ paddingLeft: indent + 10 }}>
+          <span className="productivityMatName">{row.name}</span>
         </td>
-        <td>{row.unit || "—"}</td>
+        <td className="productivityUnitCol">
+          <span className="productivityUnitBadge">{row.unit || "—"}</span>
+        </td>
         {visibleDates.map((d) => {
           const key = cellKey(row.rowIndex, d.col);
           const val = sheet?.cellValues[key];
+          const filled = val != null && val !== "";
           return (
-            <td key={d.col} className="productivityDayCol">
+            <td key={d.col} className={dayColClass(d.date, filled ? "productivityDayCol--filled" : "")}>
               {canWrite ? (
                 <input
                   type="text"
                   inputMode="decimal"
-                  className="productivityCellInput"
+                  className={`productivityCellInput ${filled ? "productivityCellInput--filled" : ""}`}
                   value={val == null ? "" : String(val)}
                   onChange={(e) => onCellChange(row.rowIndex, d.col, e.target.value)}
+                  aria-label={`${row.name}, ${formatDay(d.date)}`}
                 />
               ) : (
-                <span>{val == null ? "" : String(val)}</span>
+                <span className={`productivityCellValue ${filled ? "productivityCellValue--filled" : ""}`}>
+                  {val == null ? "" : String(val)}
+                </span>
               )}
             </td>
           );
@@ -312,26 +343,30 @@ export function ProductivityTab({
         const indent = productivityTreeIndentPx(depth);
 
         out.push(
-          <tr key={`group-${id}`} className="productivityGroupRow">
+          <tr key={`group-${id}`} className={`productivityGroupRow productivityGroupRow--depth-${Math.min(depth, 3)}`}>
             <td colSpan={colSpan} className="productivityGroupCell">
-              <div className="limitGroupRow productivityGroupRowInner" style={{ paddingLeft: indent }}>
+              <div className="productivityGroupRowInner" style={{ paddingLeft: indent + 6 }}>
                 <button
                   type="button"
-                  className="ghostBtn productivityGroupToggle"
+                  className={`ghostBtn productivityGroupToggle ${isExpanded ? "productivityGroupToggle--open" : ""}`}
                   aria-label={isExpanded ? "Свернуть раздел" : "Раскрыть раздел"}
                   onClick={() => toggleGroup(node)}
                   disabled={!childList.length}
                 >
                   {childList.length ? (isExpanded ? "▾" : "▸") : "•"}
                 </button>
-                <div className="limitGroupRowMain">
+                <div className="productivityGroupMain">
+                  {node.row.indexLabel ? (
+                    <span className="productivityGroupIndex">{node.row.indexLabel}</span>
+                  ) : null}
                   <strong className="productivityGroupTitle">{node.row.name}</strong>
-                  {node.row.indexLabel ? <span className="muted productivityGroupCode">{node.row.indexLabel}</span> : null}
-                  {node.row.workCode ? <span className="muted productivityGroupCode">{node.row.workCode}</span> : null}
-                  <span className="muted productivityGroupMeta">
-                    {matCount ? `${matCount} поз.` : null}
-                    {subCount ? `${matCount ? " · " : ""}${subCount} подразд.` : null}
-                  </span>
+                  {node.row.workCode && node.row.workCode !== node.row.indexLabel ? (
+                    <span className="productivityGroupCode">{node.row.workCode}</span>
+                  ) : null}
+                </div>
+                <div className="productivityGroupBadges">
+                  {matCount ? <span className="productivityGroupBadge">{matCount} поз.</span> : null}
+                  {subCount ? <span className="productivityGroupBadge productivityGroupBadge--sub">{subCount} подразд.</span> : null}
                 </div>
               </div>
             </td>
@@ -484,25 +519,57 @@ export function ProductivityTab({
               }
             />
           ) : (
-            <ResponsiveTableShell>
-              <div className="erpTableWrap productivityTableWrap">
-                <table className="erpTable desktopTable productivityTable">
-                  <thead>
-                    <tr>
-                      <th className="productivitySticky">Код</th>
-                      <th className="productivitySticky productivityNameCol">Наименование</th>
-                      <th>Ед.</th>
-                      {visibleDates.map((d) => (
-                        <th key={d.col} className="productivityDayCol">
-                          {formatDay(d.date)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="productivityTreeBody">{renderTree(visibleTree, 0)}</tbody>
-                </table>
+            <>
+              <div className="productivityLegend" aria-hidden>
+                <span className="productivityLegendItem">
+                  <i className="productivityLegendSwatch productivityLegendSwatch--filled" />
+                  заполнено
+                </span>
+                <span className="productivityLegendItem">
+                  <i className="productivityLegendSwatch productivityLegendSwatch--weekend" />
+                  выходной
+                </span>
+                <span className="productivityLegendItem">
+                  <i className="productivityLegendSwatch productivityLegendSwatch--today" />
+                  сегодня
+                </span>
               </div>
-            </ResponsiveTableShell>
+
+              <ResponsiveTableShell>
+                <div className="productivityTableCard">
+                  <div className="erpTableWrap productivityTableWrap">
+                    <table className="erpTable desktopTable productivityTable">
+                      <thead>
+                        <tr>
+                          <th className="productivitySticky productivityCodeCol" rowSpan={1}>
+                            Код
+                          </th>
+                          <th className="productivitySticky productivityNameCol">Наименование</th>
+                          <th className="productivityUnitCol">Ед.</th>
+                          {visibleDates.map((d) => {
+                            const meta = dayHeaderMeta(d.date);
+                            return (
+                              <th
+                                key={d.col}
+                                className={dayColClass(
+                                  d.date,
+                                  meta.isToday ? "productivityDayHead--today" : "productivityDayHead"
+                                )}
+                                title={meta.isToday ? "Сегодня" : meta.isWeekend ? "Выходной" : undefined}
+                              >
+                                <span className="productivityDayNum">{formatDay(d.date)}</span>
+                                <span className="productivityDayWeek">{meta.weekday}</span>
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody className="productivityTreeBody">{renderTree(visibleTree, 0)}</tbody>
+                    </table>
+                  </div>
+                </div>
+              </ResponsiveTableShell>
+            </>
           )}
         </>
       )}
