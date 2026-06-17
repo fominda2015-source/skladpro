@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { ReceiptInvoiceAttachBar } from "../receipts/ReceiptInvoiceAttachBar";
+import { IssueItemReturnModal } from "../issues/IssueItemReturnModal";
 import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
 import { formatMaterialQty } from "../../shared/quantity";
 
 type MaterialRow = {
+  itemId?: string;
   num: number;
   name: string;
   sku?: string;
   unit?: string;
   quantity: number;
+  returnedQty?: number;
   acceptedQty?: number;
   factLabel?: string;
 };
@@ -35,6 +38,7 @@ type IssueLike = {
   items?: Array<{
     id: string;
     quantity: string | number;
+    returnedQty?: string | number | null;
     factLabel?: string | null;
     material?: { name: string; sku?: string | null; unit?: string | null } | null;
   }>;
@@ -70,6 +74,8 @@ type PropsBase = {
   token: string;
   fetchWithSession: FetchFn;
   onOpenDocumentsTab?: () => void;
+  onIssueRefresh?: () => void | Promise<void>;
+  onOpenDocument?: (filePath: string, fileName?: string) => void;
   /** Приход: загрузить файл счёта (привязка к заявке) */
   onUploadInvoiceFile?: (file: File) => void;
   /** Приход: открыть последний приложенный счёт */
@@ -118,6 +124,8 @@ export function RequestMaterialsModal(props: Props) {
     token,
     fetchWithSession,
     onOpenDocumentsTab,
+    onIssueRefresh,
+    onOpenDocument,
     onUploadInvoiceFile,
     onOpenInvoice,
     canWrite = true,
@@ -128,6 +136,9 @@ export function RequestMaterialsModal(props: Props) {
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
   const [docsRefresh, setDocsRefresh] = useState(0);
+  const [returnItem, setReturnItem] = useState<MaterialRow | null>(null);
+  const [actionMessage, setActionMessage] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
 
   const entityType = props.kind === "issue" ? "issue" : "receipt";
   const entityId = props.row.id;
@@ -167,11 +178,13 @@ export function RequestMaterialsModal(props: Props) {
     if (props.kind === "issue") {
       const items = props.row.items ?? [];
       return items.map((it, idx) => ({
+        itemId: it.id,
         num: idx + 1,
         name: it.factLabel || it.material?.name || "—",
         sku: it.material?.sku || "",
         unit: it.material?.unit || "шт",
         quantity: num(it.quantity),
+        returnedQty: num(it.returnedQty),
         factLabel: it.factLabel || undefined
       }));
     }
@@ -197,8 +210,45 @@ export function RequestMaterialsModal(props: Props) {
       : [];
 
   const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
+  const totalReturned = rows.reduce((s, r) => s + (r.returnedQty || 0), 0);
+  const totalNet = Math.max(0, totalQty - totalReturned);
   const totalAccepted = rows.reduce((s, r) => s + (r.acceptedQty || 0), 0);
   const totalPct = totalQty > 0 ? Math.round((totalAccepted / totalQty) * 1000) / 10 : 0;
+
+  const isIssuedMaterialIssue =
+    props.kind === "issue" &&
+    props.row.status === "ISSUED" &&
+    rows.length > 0 &&
+    !(props.row.toolItems && props.row.toolItems.length > 0);
+  const hasReturns = isIssuedMaterialIssue && totalReturned > 0;
+
+  async function regenerateAct() {
+    if (props.kind !== "issue" || !canWrite) return;
+    setRegenerating(true);
+    setActionMessage("");
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/issues/${encodeURIComponent(props.row.id)}/regenerate-act`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        setActionMessage(typeof err.error === "string" ? err.error : "Не удалось переформировать документ");
+        return;
+      }
+      const data = (await res.json()) as { document?: { filePath?: string; fileName?: string } };
+      setDocsRefresh((v) => v + 1);
+      setActionMessage("Передаточный документ переформирован");
+      if (data.document?.filePath) {
+        onOpenDocument?.(data.document.filePath, data.document.fileName);
+      }
+      await onIssueRefresh?.();
+    } catch {
+      setActionMessage("Ошибка сети");
+    } finally {
+      setRegenerating(false);
+    }
+  }
 
   const docsSorted = useMemo(() => sortAndDedupeDocs(docs), [docs]);
   const invoiceDoc = useMemo(
@@ -265,6 +315,16 @@ export function RequestMaterialsModal(props: Props) {
             </p>
           </div>
           <div className="toolbar" style={{ flexWrap: "wrap", gap: 6 }}>
+            {hasReturns ? (
+              <button
+                type="button"
+                className="primaryBtn"
+                disabled={regenerating}
+                onClick={() => void regenerateAct()}
+              >
+                {regenerating ? "Формирование…" : "Переформировать передаточный документ"}
+              </button>
+            ) : null}
             <button type="button" className="ghostBtn" onClick={copyAsTsv}>
               Копировать (TSV)
             </button>
@@ -285,6 +345,11 @@ export function RequestMaterialsModal(props: Props) {
         {highlight ? (
           <p className="muted" style={{ margin: "0 0 6px", color: "#16a34a" }}>
             {highlight}
+          </p>
+        ) : null}
+        {actionMessage ? (
+          <p className="muted" style={{ margin: "0 0 6px" }}>
+            {actionMessage}
           </p>
         ) : null}
 
@@ -314,13 +379,25 @@ export function RequestMaterialsModal(props: Props) {
                   {props.kind === "issue" ? <th>Артикул</th> : null}
                   <th className="num">Ед.</th>
                   <th className="num">Количество</th>
+                  {props.kind === "issue" && isIssuedMaterialIssue ? (
+                    <>
+                      <th className="num">Возвращено</th>
+                      <th className="num">Остаток</th>
+                      <th style={{ width: 110 }} />
+                    </>
+                  ) : null}
                   {props.kind === "receipt" ? <th className="num">Принято</th> : null}
                   {props.kind === "receipt" ? <th>Исходное название</th> : null}
                   {props.kind === "issue" ? <th>Фактич. название</th> : null}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {rows.map((r) => {
+                  const returned = r.returnedQty || 0;
+                  const net = Math.max(0, r.quantity - returned);
+                  const canReturnRow =
+                    isIssuedMaterialIssue && canWrite && Boolean(r.itemId) && net > 0;
+                  return (
                   <tr key={`${props.kind}-row-${r.num}`}>
                     <td className="num">{r.num}</td>
                     <td className="requestMaterialsMatCell" title={r.name}>{r.name}</td>
@@ -329,6 +406,25 @@ export function RequestMaterialsModal(props: Props) {
                     <td className="num">
                       {formatMaterialQty(r.quantity)}
                     </td>
+                    {props.kind === "issue" && isIssuedMaterialIssue ? (
+                      <>
+                        <td className="num">{formatMaterialQty(returned)}</td>
+                        <td className="num">{formatMaterialQty(net)}</td>
+                        <td>
+                          {canReturnRow ? (
+                            <button
+                              type="button"
+                              className="ghostBtn"
+                              onClick={() => setReturnItem(r)}
+                            >
+                              Вернуть
+                            </button>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      </>
+                    ) : null}
                     {props.kind === "receipt" ? (
                       <td className="num">
                         {formatMaterialQty(r.acceptedQty || 0)}
@@ -345,7 +441,8 @@ export function RequestMaterialsModal(props: Props) {
                       </td>
                     ) : null}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>
@@ -355,6 +452,17 @@ export function RequestMaterialsModal(props: Props) {
                   <td className="num" style={{ fontWeight: 700 }}>
                     {formatMaterialQty(totalQty)}
                   </td>
+                  {props.kind === "issue" && isIssuedMaterialIssue ? (
+                    <>
+                      <td className="num" style={{ fontWeight: 700 }}>
+                        {formatMaterialQty(totalReturned)}
+                      </td>
+                      <td className="num" style={{ fontWeight: 700 }}>
+                        {formatMaterialQty(totalNet)}
+                      </td>
+                      <td />
+                    </>
+                  ) : null}
                   {props.kind === "receipt" ? (
                     <>
                       <td className="num" style={{ fontWeight: 700 }}>
@@ -445,12 +553,56 @@ export function RequestMaterialsModal(props: Props) {
   );
 
   if (embedded) {
-    return card;
+    return (
+      <>
+        {card}
+        {props.kind === "issue" && returnItem?.itemId ? (
+          <IssueItemReturnModal
+            open
+            issueId={props.row.id}
+            issueNumber={props.row.number}
+            item={{
+              id: returnItem.itemId,
+              name: returnItem.name,
+              unit: returnItem.unit || "шт",
+              quantity: returnItem.quantity,
+              returnedQty: returnItem.returnedQty || 0
+            }}
+            token={token}
+            apiUrl={apiUrl}
+            fetchWithSession={fetchWithSession}
+            onClose={() => setReturnItem(null)}
+            onDone={() => void onIssueRefresh?.()}
+          />
+        ) : null}
+      </>
+    );
   }
 
   return (
+    <>
     <div role="dialog" aria-modal="true" className="requestMaterialsModalBackdrop" onClick={onClose}>
       {card}
     </div>
+    {props.kind === "issue" && returnItem?.itemId ? (
+      <IssueItemReturnModal
+        open
+        issueId={props.row.id}
+        issueNumber={props.row.number}
+        item={{
+          id: returnItem.itemId,
+          name: returnItem.name,
+          unit: returnItem.unit || "шт",
+          quantity: returnItem.quantity,
+          returnedQty: returnItem.returnedQty || 0
+        }}
+        token={token}
+        apiUrl={apiUrl}
+        fetchWithSession={fetchWithSession}
+        onClose={() => setReturnItem(null)}
+        onDone={() => void onIssueRefresh?.()}
+      />
+    ) : null}
+    </>
   );
 }

@@ -360,6 +360,7 @@ type IssueRequest = {
     id: string;
     materialId: string;
     quantity: string | number;
+    returnedQty?: string | number | null;
     factLabel?: string | null;
     material?: { name: string; sku?: string | null };
   }>;
@@ -1856,6 +1857,7 @@ function App() {
   );
   const canReadStocks = useMemo(() => hasPermission("stocks.read"), [me]);
   const canReadIssues = useMemo(() => hasPermission("issues.read"), [me]);
+  const canWriteIssues = useMemo(() => hasPermission("issues.write"), [me]);
   const canReadOperations = useMemo(() => hasPermission("operations.read"), [me]);
   const canReadLimits = useMemo(() => hasPermission("limits.read"), [me]);
   const canMaterialReport = useMemo(() => hasPermission("materialReport.read"), [me]);
@@ -8819,6 +8821,13 @@ function App() {
                             <button
                               type="button"
                               className="ghostBtn"
+                              onClick={() => openRequestMaterialsTable({ kind: "issue", row: i })}
+                            >
+                              Открыть
+                            </button>
+                            <button
+                              type="button"
+                              className="ghostBtn"
                               onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}
                             >
                               Детали
@@ -8852,6 +8861,7 @@ function App() {
                       <p><strong>Получил:</strong> {i.actualRecipientName || "—"}</p>
                       <p><strong>Дата:</strong> {new Date(i.createdAt).toLocaleString()}</p>
                       <div className="toolbar">
+                        <button type="button" onClick={() => openRequestMaterialsTable({ kind: "issue", row: i })}>Открыть</button>
                         <button type="button" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                         <button type="button" onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
                       </div>
@@ -13406,6 +13416,11 @@ function App() {
               openDocumentsForEntity("issue", requestMaterialsModal.row.id);
               closeRequestMaterialsTable();
             }}
+            canWrite={canWriteIssues}
+            onIssueRefresh={async () => {
+              await Promise.all([loadIssues(), loadApprovalQueue(), loadStocks(q)]);
+            }}
+            onOpenDocument={(filePath, fileName) => openUploadedDocument(filePath, fileName)}
             onClose={closeRequestMaterialsTable}
           />
         ) : (

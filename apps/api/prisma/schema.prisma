@@ -1073,6 +1073,8 @@ model IssueRequestItem {
   /** Подраздел лимита, в который относится выдача (приход может быть в другом узле) */
   limitNodeId    String?
   quantity       Decimal      @db.Decimal(14, 3)
+  /** Возвращено на склад после выдачи */
+  returnedQty    Decimal      @default(0) @db.Decimal(14, 3)
   issueRequest   IssueRequest @relation(fields: [issueRequestId], references: [id], onDelete: Cascade)
   material       Material     @relation(fields: [materialId], references: [id], onDelete: Restrict)
   limitNode      ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)

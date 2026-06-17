@@ -7095,6 +7095,49 @@ button.homeInsightPill:hover:not(:disabled) {
   min-height: 0;
 }
 
+.issueReturnModal {
+  width: min(420px, 94vw);
+  margin: auto;
+  position: relative;
+  top: 18vh;
+}
+
+.issueReturnStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.issueReturnStats div {
+  padding: 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.issueReturnStats dt {
+  margin: 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.issueReturnStats dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.issueReturnQtyField {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.issueReturnQtyField input {
+  width: 100%;
+}
+
 .requestMaterialsTable {
   width: 100%;
   table-layout: auto;

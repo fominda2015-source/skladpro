@@ -265,12 +265,21 @@ async function createIssueActDocument(params: {
   doc.fontSize(9);
   doc.text("№ | Материал | Ед. | Количество");
   doc.moveDown(0.2);
-  issue.items.forEach((item, idx) => {
+  let rowNum = 0;
+  const hasReturns = issue.items.some((it) => Number(it.returnedQty || 0) > 0);
+  issue.items.forEach((item) => {
+    const netQty = Number(item.quantity) - Number(item.returnedQty || 0);
+    if (netQty <= 0) return;
+    rowNum += 1;
     const label = item.factLabel?.trim() || item.material.name;
-    doc.text(`${idx + 1} | ${label} | ${item.material.unit} | ${String(item.quantity)}`);
+    doc.text(`${rowNum} | ${label} | ${item.material.unit} | ${String(netQty)}`);
   });
 
   doc.moveDown(1.2);
+  if (hasReturns) {
+    doc.fontSize(10).text("Количество указано с учётом возвратов на склад.");
+    doc.moveDown(0.6);
+  }
   if (issue.note) {
     doc.fontSize(10).text(`Примечание: ${issue.note}`);
     doc.moveDown(0.8);
@@ -1511,3 +1520,232 @@ issueRequestsRouter.patch(
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+const returnIssueItemSchema = z.object({
+  quantity: materialQtySchema
+});
+
+issueRequestsRouter.post(
+  "/:issueId/items/:itemId/return",
+  requirePermission("issues.write"),
+  async (req: AuthedRequest, res) => {
+    const parsed = returnIssueItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const returnQty = parsed.data.quantity;
+    if (returnQty <= 0) {
+      return res.status(400).json({ error: "RETURN_QTY_REQUIRED" });
+    }
+
+    const issueId = String(req.params.issueId ?? "");
+    const itemId = String(req.params.itemId ?? "");
+
+    try {
+      const scope = await getRequestDataScope(req);
+      const issue = await prisma.issueRequest.findUnique({
+        where: { id: issueId },
+        include: { items: true }
+      });
+      if (!issue) {
+        return res.status(404).json({ error: "Issue request not found" });
+      }
+      assertWarehouseInScope(scope, issue.warehouseId);
+      assertObjectSectionInScope(scope, issue.warehouseId, issue.section);
+
+      if (issue.status !== IssueRequestStatus.ISSUED) {
+        return res.status(409).json({ error: "Return allowed only for ISSUED issues" });
+      }
+      if (issue.domain === IssueRequestDomain.TOOLS) {
+        return res.status(409).json({ error: "Material return is not applicable to tool issues" });
+      }
+
+      const item = issue.items.find((x) => x.id === itemId);
+      if (!item) {
+        return res.status(404).json({ error: "Issue item not found" });
+      }
+
+      const pending = Number(item.quantity) - Number(item.returnedQty || 0);
+      if (returnQty > pending + 1e-9) {
+        return res.status(409).json({
+          error: "RETURN_EXCEEDS_PENDING",
+          pending: Math.max(0, pending)
+        });
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const operation = await tx.operation.findFirst({
+          where: { issueRequestId: issue.id },
+          select: { id: true }
+        });
+
+        await tx.issueRequestItem.update({
+          where: { id: item.id },
+          data: { returnedQty: { increment: returnQty } }
+        });
+
+        const stockKey = {
+          warehouseId_materialId_section_condition: {
+            warehouseId: issue.warehouseId,
+            materialId: item.materialId,
+            section: issue.section,
+            condition: StockCondition.NEW
+          }
+        } as const;
+
+        const stock = await tx.stock.findUnique({ where: stockKey });
+        if (stock) {
+          await tx.stock.update({
+            where: stockKey,
+            data: { quantity: { increment: returnQty } }
+          });
+        } else {
+          await tx.stock.create({
+            data: {
+              warehouseId: issue.warehouseId,
+              materialId: item.materialId,
+              section: issue.section,
+              condition: StockCondition.NEW,
+              quantity: returnQty
+            }
+          });
+        }
+
+        if (item.limitNodeId) {
+          await tx.objectLimitNode.update({
+            where: { id: item.limitNodeId },
+            data: { issuedQty: { decrement: returnQty } }
+          });
+        }
+
+        await tx.stockMovement.create({
+          data: {
+            warehouseId: issue.warehouseId,
+            materialId: item.materialId,
+            quantity: returnQty,
+            direction: StockMovementDirection.IN,
+            sourceDocumentType: "ISSUE_RETURN",
+            sourceDocumentId: item.id,
+            operationId: operation?.id ?? null,
+            issueRequestId: issue.id,
+            note: `Возврат по заявке ${issue.number}`,
+            createdById: req.user!.userId
+          }
+        });
+
+        return tx.issueRequest.findUnique({
+          where: { id: issue.id },
+          include: {
+            items: { include: { material: true } },
+            toolItems: { include: { tool: true } },
+            warehouse: true,
+            project: true,
+            requestedBy: true,
+            approvedBy: true
+          }
+        });
+      });
+
+      await recordAudit({
+        userId: req.user!.userId,
+        action: "ISSUE_ITEM_RETURN",
+        entityType: "IssueRequest",
+        entityId: issue.id,
+        summary: `Возврат ${returnQty} по позиции заявки ${issue.number}`,
+        before: {
+          itemId: item.id,
+          materialId: item.materialId,
+          returnedQty: Number(item.returnedQty || 0)
+        },
+        after: {
+          itemId: item.id,
+          materialId: item.materialId,
+          returnedQty: Number(item.returnedQty || 0) + returnQty,
+          returnQty
+        }
+      });
+
+      return res.json({ issue: updated });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) {
+        return res.status(403).json({ error: err.message });
+      }
+      throw e;
+    }
+  }
+);
+
+issueRequestsRouter.post(
+  "/:id/regenerate-act",
+  requirePermission("issues.write"),
+  async (req: AuthedRequest, res) => {
+    const issueId = String(req.params.id ?? "");
+
+    try {
+      const scope = await getRequestDataScope(req);
+      const issue = await prisma.issueRequest.findUnique({
+        where: { id: issueId },
+        include: { items: true }
+      });
+      if (!issue) {
+        return res.status(404).json({ error: "Issue request not found" });
+      }
+      assertWarehouseInScope(scope, issue.warehouseId);
+      assertObjectSectionInScope(scope, issue.warehouseId, issue.section);
+
+      if (issue.status !== IssueRequestStatus.ISSUED) {
+        return res.status(409).json({ error: "Act regeneration allowed only for ISSUED issues" });
+      }
+      if (issue.domain === IssueRequestDomain.TOOLS) {
+        return res.status(409).json({ error: "Use tool issue flow for tool acts" });
+      }
+
+      const hasNetQty = issue.items.some(
+        (it) => Number(it.quantity) - Number(it.returnedQty || 0) > 1e-9
+      );
+      if (!hasNetQty) {
+        return res.status(409).json({ error: "All items were fully returned — nothing to print" });
+      }
+
+      const operation = await prisma.operation.findFirst({
+        where: { issueRequestId: issue.id },
+        select: { id: true }
+      });
+      if (!operation) {
+        return res.status(404).json({ error: "Linked operation not found" });
+      }
+
+      const actualRecipientName =
+        issue.actualRecipientName?.trim() || issue.responsibleName?.trim() || "";
+      if (!actualRecipientName) {
+        return res.status(400).json({ error: "actualRecipientName is required on issue" });
+      }
+
+      const document = await createIssueActDocument({
+        issueId: issue.id,
+        operationId: operation.id,
+        storekeeperId: req.user!.userId,
+        actualRecipientName
+      });
+
+      await recordAudit({
+        userId: req.user!.userId,
+        action: "ISSUE_ACT_REGENERATE",
+        entityType: "IssueRequest",
+        entityId: issue.id,
+        summary: `Переформирован передаточный документ по заявке ${issue.number}`,
+        after: { documentId: document.id, filePath: document.filePath }
+      });
+
+      return res.json({ document, issue });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) {
+        return res.status(403).json({ error: err.message });
+      }
+      console.error("Failed to regenerate issue act", e);
+      return res.status(500).json({ error: "Failed to regenerate act" });
+    }
+  }
+);

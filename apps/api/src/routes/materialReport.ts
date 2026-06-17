@@ -387,6 +387,7 @@ async function buildMaterialReportBalances(
         select: {
           materialId: true,
           quantity: true,
+          returnedQty: true,
           material: { select: { id: true, name: true, unit: true } }
         }
       }
@@ -430,7 +431,7 @@ async function buildMaterialReportBalances(
       section: sectionEnum
     };
     for (const it of iss.items) {
-      const qty = Number(it.quantity) || 0;
+      const qty = Math.max(0, (Number(it.quantity) || 0) - (Number(it.returnedQty) || 0));
       if (qty <= 0) continue;
       rememberMaterial(it.material.id, it.material.name, it.material.unit);
       addQty(holderKey, holderName, it.materialId, qty);
