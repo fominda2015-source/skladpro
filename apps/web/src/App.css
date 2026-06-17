@@ -9574,3 +9574,73 @@ button.whMenuItem:hover,
   align-items: center;
   justify-content: space-between;
 }
+
+.productivityTab .productivityToolbar {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.productivityMeta {
+  font-size: 12px;
+}
+
+.productivitySaving {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.productivityTableWrap {
+  max-height: min(72vh, 900px);
+  overflow: auto;
+}
+
+.productivityTable th,
+.productivityTable td {
+  vertical-align: middle;
+}
+
+.productivityTable .productivitySticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.productivityTable thead .productivitySticky {
+  z-index: 3;
+  background: #f8fafc;
+}
+
+.productivityNameCol {
+  left: 88px;
+  min-width: 220px;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.productivityDayCol {
+  min-width: 64px;
+  text-align: center;
+}
+
+.productivityCellInput {
+  width: 56px;
+  height: 30px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.productivityCellInput:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+

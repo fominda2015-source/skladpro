@@ -202,6 +202,7 @@ model User {
   announcementsCreated Announcement[] @relation("AnnouncementAuthor")
   materialWriteoffsHeld   MaterialHolderWriteoff[] @relation("MaterialWriteoffHolder")
   materialWriteoffsActed  MaterialHolderWriteoff[] @relation("MaterialWriteoffActor")
+  productivitySheetsCreated ProductivitySheet[] @relation("ProductivitySheetCreator")
   dataJobRuns             DataJobRun[]             @relation("DataJobRunTriggeredBy")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
@@ -283,6 +284,7 @@ model Warehouse {
   transferRequestsTo   TransferRequest[] @relation("TransferToWh")
   materialHolderWriteoffs MaterialHolderWriteoff[]
   toolConsumableIssues ToolConsumableIssue[]
+  productivitySheets ProductivitySheet[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -1162,4 +1164,27 @@ model CampItem {
 
   @@index([warehouseId, section])
   @@index([inventoryNumber])
+}
+
+/// Таблица выработки (Excel) по объекту и разделу СС/ЭОМ.
+model ProductivitySheet {
+  id             String        @id @default(cuid())
+  warehouseId    String
+  section        ObjectSection
+  title          String
+  sourceFileName String
+  storagePath    String
+  headerRow      Int           @default(1)
+  dataStartRow   Int           @default(5)
+  fixedColCount  Int           @default(7)
+  dateColumns    Json
+  cellValues     Json          @default("{}")
+  createdById    String?
+  warehouse      Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy      User?         @relation("ProductivitySheetCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([warehouseId, section])
+  @@index([warehouseId, section, updatedAt])
 }

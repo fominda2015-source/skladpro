@@ -32,6 +32,8 @@ const baseWarehouseOps = [
   "materialReport.read"
 ] as const;
 
+const productivityPerms = ["productivity.read", "productivity.write"] as const;
+
 const warehouseDeskExtras = [
   "feedback.manage",
   "announcements.write",
@@ -40,12 +42,14 @@ const warehouseDeskExtras = [
   "materialReport.write"
 ] as const;
 
+const warehouseDeskExtrasWithProductivity = [...warehouseDeskExtras, ...productivityPerms] as const;
+
 const defaultRoles = [
   { name: "ADMIN", permissions: ["*"] },
-  { name: "WAREHOUSE_MANAGER", permissions: [...baseWarehouseOps, ...warehouseDeskExtras] },
+  { name: "WAREHOUSE_MANAGER", permissions: [...baseWarehouseOps, ...warehouseDeskExtrasWithProductivity] },
   {
     name: "CHIEF_WAREHOUSE",
-    permissions: [...baseWarehouseOps, ...warehouseDeskExtras]
+    permissions: [...baseWarehouseOps, ...warehouseDeskExtrasWithProductivity]
   },
   {
     name: "STOREKEEPER",
@@ -72,7 +76,9 @@ const defaultRoles = [
       "notifications.read",
       "notifications.write",
       "materialReport.read",
-      "materialReport.write"
+      "materialReport.write",
+      "productivity.read",
+      "productivity.write"
     ]
   },
   {
@@ -84,6 +90,8 @@ const defaultRoles = [
       "stocks.read",
       "limits.read",
       "materialReport.read",
+      "productivity.read",
+      "productivity.write",
       "issues.read",
       "issues.write",
       "documents.read",
@@ -108,6 +116,8 @@ const defaultRoles = [
       "tools.read",
       "waybills.read",
       "materialReport.read",
+      "productivity.read",
+      "productivity.write",
       "notifications.read",
       "notifications.write"
     ]

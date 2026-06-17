@@ -57,6 +57,7 @@ import { LimitImportHistoryButton, LimitImportHistoryModal } from "./widgets/lim
 import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { AdminMaintenancePanel } from "./widgets/admin/AdminMaintenancePanel";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
+import { ProductivityTab } from "./widgets/productivity/ProductivityTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFields";
@@ -805,6 +806,7 @@ function App() {
     | "chat"
     | "feedback"
     | "materialReport"
+    | "productivity"
     | "reports"
     | "acts"
   >("stocks");
@@ -926,6 +928,8 @@ function App() {
   const [limitsMessage, setLimitsMessage] = useState("");
   const [limitImportFile, setLimitImportFile] = useState<File | null>(null);
   const [limitImportBusy, setLimitImportBusy] = useState(false);
+  const [productivityUploadBusy, setProductivityUploadBusy] = useState(false);
+  const [productivityReloadKey, setProductivityReloadKey] = useState(0);
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
   const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
@@ -1270,6 +1274,8 @@ function App() {
           me.permissions?.includes(permission) ||
           (permission === "limits.edit" && Boolean(me.permissions?.includes("limits.write"))) ||
           (permission === "limits.write" && Boolean(me.permissions?.includes("limits.edit"))) ||
+          (permission === "productivity.write" && Boolean(me.permissions?.includes("productivity.edit"))) ||
+          (permission === "productivity.edit" && Boolean(me.permissions?.includes("productivity.write"))) ||
           (permission === "announcements.edit" && Boolean(me.permissions?.includes("announcements.write"))) ||
           (permission === "announcements.delete" && Boolean(me.permissions?.includes("announcements.write"))))
     );
@@ -1747,6 +1753,7 @@ function App() {
     limits: "Лимиты проекта",
     approvals: "Заявки",
     materialReport: "Материальный отчёт",
+    productivity: "Выработка",
     documents: "Документы",
     acts: "Акты",
     waybills: "Транспортные накладные",
@@ -1870,6 +1877,8 @@ function App() {
   const canReadLimits = useMemo(() => hasPermission("limits.read"), [me]);
   const canMaterialReport = useMemo(() => hasPermission("materialReport.read"), [me]);
   const canMaterialWriteoff = useMemo(() => hasPermission("materialReport.write"), [me]);
+  const canReadProductivity = useMemo(() => hasPermission("productivity.read"), [me]);
+  const canWriteProductivity = useMemo(() => hasPermission("productivity.write"), [me]);
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
   const canWriteDocuments = useMemo(
     () => hasPermission("documents.write") || hasPermission("documents.upload"),
@@ -3250,6 +3259,41 @@ function App() {
       setLimitsMessage(`Не удалось загрузить лимиты: ${String(e)}`);
     } finally {
       setLimitImportBusy(false);
+    }
+  }
+
+  async function uploadProductivityTemplate(file: File) {
+    if (!token) return;
+    if (!activeObjectId || activeObjectId === ALL_OBJECTS_ID) {
+      window.alert("Выберите конкретный объект в шапке (не «Все объекты»).");
+      return;
+    }
+    if (!canWriteProductivity) {
+      window.alert("Недостаточно прав для загрузки выработки");
+      return;
+    }
+    setProductivityUploadBusy(true);
+    const form = new FormData();
+    form.append("file", file);
+    form.append("warehouseId", activeObjectId);
+    form.append("section", objectSectionFilter);
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/productivity/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        window.alert(errBody.message || errBody.error || "Не удалось загрузить файл выработки");
+        return;
+      }
+      if (activeTab !== "productivity") setActiveTab("productivity");
+      setProductivityReloadKey((k) => k + 1);
+    } catch (e) {
+      window.alert(`Не удалось загрузить выработку: ${String(e)}`);
+    } finally {
+      setProductivityUploadBusy(false);
     }
   }
 
@@ -5794,6 +5838,7 @@ function App() {
     }
     if (canReadLimits) visibleTabs.add("limits");
     if (canMaterialReport) visibleTabs.add("materialReport");
+    if (canReadProductivity) visibleTabs.add("productivity");
     visibleTabs.add("camp");
     if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
     if (canReadNotifications) visibleTabs.add("notifications");
@@ -5819,6 +5864,8 @@ function App() {
     canReadDocuments,
     canReadTools,
     canReadLimits,
+    canMaterialReport,
+    canReadProductivity,
     canReadIntegrations,
     canReadNotifications,
     canReadAudit,
@@ -6587,6 +6634,7 @@ function App() {
             canReadStocks={canReadStocks}
             canReadLimits={canReadLimits}
             canMaterialReport={canMaterialReport}
+            canReadProductivity={canReadProductivity}
             canReadTools={canReadTools}
             canReadIssues={canReadIssues}
             canReadOperations={canReadOperations}
@@ -9923,6 +9971,36 @@ function App() {
             />
           }
         />
+      )}
+
+      {canReadProductivity && activeTab === "productivity" && (
+        <PageFileDropZone
+          className="productivityWorkspace"
+          enabled={canWriteProductivity}
+          overlayLabel="Отпустите Excel-файл выработки"
+          overlayHint=".xlsx или .xls"
+          acceptFile={(file) => /\.(xlsx|xls)$/i.test(file.name)}
+          onFiles={(files) => {
+            const file = files[0];
+            if (file) void uploadProductivityTemplate(file);
+          }}
+        >
+          <ProductivityTab
+            key={productivityReloadKey}
+            token={token}
+            apiUrl={API_URL}
+            fetchWithSession={fetchWithSession}
+            warehouseId={activeObjectId}
+            section={objectSectionFilter}
+            warehouseName={safeName(
+              warehouses.find((w) => w.id === activeObjectId)?.name ||
+                availableObjects.find((o) => o.id === activeObjectId)?.name
+            )}
+            canWrite={canWriteProductivity}
+            uploadBusy={productivityUploadBusy}
+            onUploadFile={uploadProductivityTemplate}
+          />
+        </PageFileDropZone>
       )}
 
       {activeTab === "approvals" && (

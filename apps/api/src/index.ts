@@ -35,6 +35,7 @@ import { campItemsRouter } from "./routes/campItems.js";
 import { warehousesRouter } from "./routes/warehouses.js";
 import { limitImportsRouter } from "./routes/limitImports.js";
 import { materialReportRouter } from "./routes/materialReport.js";
+import { productivityRouter } from "./routes/productivity.js";
 import { seedBaseData } from "./seed.js";
 import { requireAuth, requirePermission } from "./middleware/auth.js";
 
@@ -95,6 +96,7 @@ app.use("/api/waybills", transportWaybillsRouter);
 app.use("/api/material-mappings", materialMappingsRouter);
 app.use("/api/limit-imports", limitImportsRouter);
 app.use("/api/material-report", materialReportRouter);
+app.use("/api/productivity", productivityRouter);
 app.use("/api/receipt-requests", receiptRequestsRouter);
 app.use("/api/camp-items", campItemsRouter);
 app.use("/api/audit", auditRouter);

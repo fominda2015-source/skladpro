@@ -7,6 +7,7 @@ type Props = {
   canReadStocks: boolean;
   canReadLimits: boolean;
   canMaterialReport: boolean;
+  canReadProductivity: boolean;
   canReadTools: boolean;
   canReadIssues: boolean;
   canReadOperations: boolean;
@@ -58,6 +59,7 @@ export function SidebarNav(props: Props) {
     canReadStocks,
     canReadLimits,
     canMaterialReport,
+    canReadProductivity,
     canReadTools,
     canReadIssues,
     canReadOperations,
@@ -91,6 +93,9 @@ export function SidebarNav(props: Props) {
           label="Материальный отчёт"
           onSelect={onSelectTab}
         />
+      ) : null}
+      {canReadProductivity ? (
+        <SidebarNavItem tab="productivity" activeTab={activeTab} icon="▦" label="Выработка" onSelect={onSelectTab} />
       ) : null}
       <SidebarNavItem tab="camp" activeTab={activeTab} icon="▣" label="Городок" onSelect={onSelectTab} />
       {canReadTools ? (
