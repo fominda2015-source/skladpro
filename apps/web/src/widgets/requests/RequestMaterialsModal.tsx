@@ -3,6 +3,7 @@ import { ReceiptInvoiceAttachBar } from "../receipts/ReceiptInvoiceAttachBar";
 import { IssueItemReturnModal } from "../issues/IssueItemReturnModal";
 import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
 import { formatMaterialQty } from "../../shared/quantity";
+import { receiptItemMatchesSearch } from "../receipts/receiptItemSearch";
 
 type MaterialRow = {
   itemId?: string;
@@ -62,6 +63,12 @@ type ReceiptLike = {
     sourceUnit?: string | null;
     quantity: string | number;
     acceptedQty?: string | number | null;
+    factLabel?: string | null;
+    limitSectionPath?: string | null;
+    limitCatalogNameN?: string | null;
+    limitCatalogNameO?: string | null;
+    externalComment?: string | null;
+    storagePlace?: string | null;
     mappedMaterial?: { name: string; unit: string } | null;
   }>;
 };
@@ -139,6 +146,7 @@ export function RequestMaterialsModal(props: Props) {
   const [returnItem, setReturnItem] = useState<MaterialRow | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [regenerating, setRegenerating] = useState(false);
+  const [materialSearch, setMaterialSearch] = useState("");
 
   const entityType = props.kind === "issue" ? "issue" : "receipt";
   const entityId = props.row.id;
@@ -190,6 +198,7 @@ export function RequestMaterialsModal(props: Props) {
     }
     const items = props.row.items ?? [];
     return items.map((it, idx) => ({
+      itemId: it.id,
       num: idx + 1,
       name: it.mappedMaterial?.name || it.sourceName,
       unit: it.mappedMaterial?.unit || it.sourceUnit || "шт",
@@ -198,6 +207,17 @@ export function RequestMaterialsModal(props: Props) {
       factLabel: it.sourceName
     }));
   }, [props]);
+
+  const materialSearchQ = materialSearch.trim();
+  const visibleRows = useMemo(() => {
+    if (props.kind !== "receipt" || !materialSearchQ) return rows;
+    const visibleIds = new Set(
+      (props.row.items ?? [])
+        .filter((it) => receiptItemMatchesSearch(it, materialSearchQ))
+        .map((it) => it.id)
+    );
+    return rows.filter((r) => r.itemId && visibleIds.has(r.itemId));
+  }, [rows, props, materialSearchQ]);
 
   const tools =
     props.kind === "issue"
@@ -209,10 +229,10 @@ export function RequestMaterialsModal(props: Props) {
         }))
       : [];
 
-  const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
-  const totalReturned = rows.reduce((s, r) => s + (r.returnedQty || 0), 0);
+  const totalQty = visibleRows.reduce((s, r) => s + r.quantity, 0);
+  const totalReturned = visibleRows.reduce((s, r) => s + (r.returnedQty || 0), 0);
   const totalNet = Math.max(0, totalQty - totalReturned);
-  const totalAccepted = rows.reduce((s, r) => s + (r.acceptedQty || 0), 0);
+  const totalAccepted = visibleRows.reduce((s, r) => s + (r.acceptedQty || 0), 0);
   const totalPct = totalQty > 0 ? Math.round((totalAccepted / totalQty) * 1000) / 10 : 0;
 
   const isIssuedMaterialIssue =
@@ -262,7 +282,7 @@ export function RequestMaterialsModal(props: Props) {
         ? ["№", "Материал", "Ед.", "Количество", "Принято", "Исходное название"]
         : ["№", "Материал", "Артикул", "Ед.", "Количество", "Фактическое название"];
     const lines: string[] = [headerCells.join("\t")];
-    for (const r of rows) {
+    for (const r of visibleRows) {
       if (props.kind === "receipt") {
         lines.push(
           [r.num, r.name, r.unit ?? "", r.quantity, r.acceptedQty ?? 0, r.factLabel || ""].join("\t")
@@ -370,7 +390,25 @@ export function RequestMaterialsModal(props: Props) {
         ) : null}
 
         <div className="requestMaterialsModalBody">
+          {props.kind === "receipt" && rows.length > 0 ? (
+            <div className="toolbar" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+              <input
+                type="search"
+                value={materialSearch}
+                onChange={(e) => setMaterialSearch(e.target.value)}
+                placeholder="Поиск по материалу…"
+                aria-label="Поиск по материалу в заявке"
+                style={{ minWidth: 220, flex: "1 1 240px", maxWidth: 420 }}
+              />
+              {materialSearchQ ? (
+                <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+                  {visibleRows.length} из {rows.length}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {rows.length ? (
+            visibleRows.length ? (
             <table className="erpTable desktopTable requestMaterialsTable">
               <thead>
                 <tr>
@@ -392,7 +430,7 @@ export function RequestMaterialsModal(props: Props) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
+                {visibleRows.map((r) => {
                   const returned = r.returnedQty || 0;
                   const net = Math.max(0, r.quantity - returned);
                   const canReturnRow =
@@ -478,6 +516,9 @@ export function RequestMaterialsModal(props: Props) {
                 </tr>
               </tfoot>
             </table>
+            ) : (
+              <p className="muted">Нет позиций по запросу.</p>
+            )
           ) : (
             <p className="muted">В заявке нет позиций.</p>
           )}

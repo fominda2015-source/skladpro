@@ -99,6 +99,7 @@ import {
   writeReceiptExpandedIds
 } from "./widgets/receipts/receiptRequestState";
 import { receiptItemUsesPackUnit, receiptStockQtyPreview } from "./widgets/receipts/receiptUnits";
+import { receiptItemMatchesSearch } from "./widgets/receipts/receiptItemSearch";
 import { RequestMaterialsModal } from "./widgets/requests/RequestMaterialsModal";
 import { TransfersTab } from "./widgets/transfers/TransfersTab";
 import { ChatPanel } from "./widgets/chat/ChatPanel";
@@ -993,6 +994,7 @@ function App() {
   const [acceptanceSubmitting, setAcceptanceSubmitting] = useState<Record<string, boolean>>({});
   const [acceptanceErrors, setAcceptanceErrors] = useState<Record<string, string>>({});
   const [expandedReceiptIds, setExpandedReceiptIds] = useState<Record<string, boolean>>({});
+  const [receiptItemSearch, setReceiptItemSearch] = useState<Record<string, string>>({});
   const [receiptAdminQtyDrafts, setReceiptAdminQtyDrafts] = useState<
     Record<string, Record<string, { acceptedQty: string; quantity: string }>>
   >({});
@@ -7529,17 +7531,24 @@ function App() {
 
                     {(() => {
                       const { itemsOpen, itemsDone } = splitReceiptItems(row.items);
+                      const searchQ = (receiptItemSearch[row.id] || "").trim();
+                      const itemsOpenView = searchQ
+                        ? itemsOpen.filter((it) => receiptItemMatchesSearch(it, searchQ))
+                        : itemsOpen;
+                      const itemsDoneView = searchQ
+                        ? itemsDone.filter((it) => receiptItemMatchesSearch(it, searchQ))
+                        : itemsDone;
                       const tableColSpan = row.objectLimitTemplateId ? 11 : 10;
-                      const selectedCount = itemsOpen.filter((it) => {
+                      const selectedCount = itemsOpenView.filter((it) => {
                         const q = parseMaterialQty(drafts[it.id]?.qty ?? "");
                         return Number.isFinite(q) && q > 0;
                       }).length;
-                      const allSelected = itemsOpen.length > 0 && selectedCount === itemsOpen.length;
+                      const allSelected = itemsOpenView.length > 0 && selectedCount === itemsOpenView.length;
                       const someSelected = selectedCount > 0;
                       const setSelectAll = (checked: boolean) => {
                         setAcceptanceDrafts((prev) => {
                           const next: typeof prev = { ...prev, [row.id]: { ...(prev[row.id] || {}) } };
-                          for (const it of itemsOpen) {
+                          for (const it of itemsOpenView) {
                             const remaining = receiptItemRemainingQty(it);
                             const existing = next[row.id][it.id] || { newName: "", newUnit: "", qty: "" };
                             next[row.id][it.id] = checked
@@ -7649,7 +7658,22 @@ function App() {
                             </label>
                           </div>
 
-                          <div className="toolbar" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                          <div className="toolbar" style={{ marginTop: 6, flexWrap: "wrap", gap: 8 }}>
+                            <input
+                              type="search"
+                              value={receiptItemSearch[row.id] || ""}
+                              onChange={(e) =>
+                                setReceiptItemSearch((prev) => ({ ...prev, [row.id]: e.target.value }))
+                              }
+                              placeholder="Поиск по материалу в заявке…"
+                              aria-label="Поиск по материалу в заявке"
+                              style={{ minWidth: 220, flex: "1 1 240px", maxWidth: 420 }}
+                            />
+                            {searchQ ? (
+                              <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+                                {itemsOpenView.length + itemsDoneView.length} из {itemsOpen.length + itemsDone.length}
+                              </span>
+                            ) : null}
                             <label
                               className="toolbar"
                               style={{ gap: 6, alignItems: "center", padding: 0, cursor: "pointer" }}
@@ -7661,22 +7685,26 @@ function App() {
                                   if (el) el.indeterminate = !allSelected && someSelected;
                                 }}
                                 onChange={(e) => setSelectAll(e.target.checked)}
-                                disabled={finished || !itemsOpen.length}
+                                disabled={finished || !itemsOpenView.length}
                               />
                               <span>
                                 {allSelected
                                   ? "Снять все"
                                   : someSelected
-                                  ? `Выбрано ${selectedCount} из ${itemsOpen.length}`
-                                  : "Выбрать все оставшиеся"}
+                                  ? `Выбрано ${selectedCount} из ${itemsOpenView.length}`
+                                  : searchQ
+                                    ? `Выбрать все в выдаче (${itemsOpenView.length})`
+                                    : "Выбрать все оставшиеся"}
                               </span>
                             </label>
                           </div>
 
                           <div className="erpTableWrap" style={{ marginTop: 8 }}>
-                            {itemsOpen.length === 0 && itemsDone.length === 0 ? (
+                            {itemsOpenView.length === 0 && itemsDoneView.length === 0 ? (
                               <p className="muted" style={{ padding: "8px 0" }}>
-                                Все позиции по этой заявке уже приняты.
+                                {searchQ
+                                  ? "Нет позиций по запросу. Смените поиск или очистите поле."
+                                  : "Все позиции по этой заявке уже приняты."}
                               </p>
                             ) : (
                             <table className="erpTable desktopTable">
@@ -7698,18 +7726,22 @@ function App() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {itemsDone.length > 0 && itemsOpen.length > 0 ? (
+                                {itemsDoneView.length > 0 && itemsOpenView.length > 0 ? (
                                   <tr className="receiptRow--section">
                                     <td
                                       colSpan={tableColSpan}
                                       className="muted"
                                       style={{ fontSize: 12, fontWeight: 600, paddingTop: 12 }}
                                     >
-                                      Уже принято ({itemsDone.length})
+                                      Уже принято ({itemsDoneView.length}
+                                      {searchQ && itemsDoneView.length !== itemsDone.length
+                                        ? ` из ${itemsDone.length}`
+                                        : ""}
+                                      )
                                     </td>
                                   </tr>
                                 ) : null}
-                                {itemsDone.map((it) => {
+                                {itemsDoneView.map((it) => {
                                   const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
                                   const updName = (it.factLabel || "").trim();
                                   const legacyUpd =
@@ -7753,18 +7785,22 @@ function App() {
                                     </tr>
                                   );
                                 })}
-                                {itemsOpen.length > 0 && itemsDone.length > 0 ? (
+                                {itemsOpenView.length > 0 && itemsDoneView.length > 0 ? (
                                   <tr className="receiptRow--section">
                                     <td
                                       colSpan={tableColSpan}
                                       className="muted"
                                       style={{ fontSize: 12, fontWeight: 600, paddingTop: 12 }}
                                     >
-                                      Осталось принять ({itemsOpen.length})
+                                      Осталось принять ({itemsOpenView.length}
+                                      {searchQ && itemsOpenView.length !== itemsOpen.length
+                                        ? ` из ${itemsOpen.length}`
+                                        : ""}
+                                      )
                                     </td>
                                   </tr>
                                 ) : null}
-                                {itemsOpen.map((it) => {
+                                {itemsOpenView.map((it) => {
                                   const accepted = parseMaterialQty(it.acceptedQty);
                                   const remaining = receiptItemRemainingQty(it);
                                   const hasPartialAccept = accepted > 0;
