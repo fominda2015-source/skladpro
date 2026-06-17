@@ -24,15 +24,27 @@
   gap: 8px;
   align-items: center;
 }
+.tabToolbarPrimary .primaryBtn,
+.tabToolbarPrimary .ghostBtn {
+  min-height: 38px;
+  font-weight: 700;
+}
+
+.tabToolbarPrimary .ghostBtn {
+  border: 2px solid #93c5fd;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  color: #1d4ed8;
+}
 
 .erpQuickActions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 2px solid #bfdbfe;
   border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.08);
 }
 .erpQuickActions .primaryBtn,
 .erpQuickActions .ghostBtn {
@@ -41,6 +53,22 @@
   font-size: 16px;
   font-weight: 700;
   padding: 0 20px;
+}
+.erpQuickActions .ghostBtn {
+  border: 2px solid #93c5fd;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  color: #1d4ed8;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.12);
+}
+.erpQuickActions .ghostBtn:hover:not(:disabled) {
+  border-color: #3b82f6;
+  background: #dbeafe;
+  color: #1e3a8a;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.2);
+}
+.erpQuickActions .primaryBtn {
+  border: 2px solid #1e3a8a;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.32);
 }
 
 .erpStatus {
@@ -158,20 +186,22 @@
   align-items: center;
 }
 .erpRowToggle {
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
   padding: 0;
-  border: 1px solid #e2e8f0;
+  border: 2px solid #93c5fd;
   border-radius: 8px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
   cursor: pointer;
   font-size: 12px;
-  color: #475569;
+  font-weight: 700;
+  color: #1d4ed8;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.12);
 }
 .erpRowToggle:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
+  border-color: #3b82f6;
+  background: #bfdbfe;
 }
 .erpCellActions {
   display: flex;
@@ -179,9 +209,18 @@
   gap: 6px;
 }
 .erpCellActions .ghostBtn {
-  height: 28px;
+  height: 30px;
   font-size: 12px;
-  padding: 0 10px;
+  font-weight: 600;
+  padding: 0 12px;
+  border: 1px solid #93c5fd;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f9ff 100%);
+  color: #1d4ed8;
+}
+.erpCellActions .ghostBtn:hover:not(:disabled) {
+  border-color: #3b82f6;
+  background: #dbeafe;
+  color: #1e3a8a;
 }
 
 /* Главная — одна колонка на всю ширину */
