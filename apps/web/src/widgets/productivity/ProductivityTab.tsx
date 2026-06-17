@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
+import { repairUploadedFileName } from "../../shared/fileName";
+import { matchesSearchFields } from "../../shared/searchText";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
-import { PageHero } from "../ui/PageHero";
+import { FilterStrip, PageHero } from "../ui/PageHero";
 import { ResponsiveTableShell } from "../layout/MobileCardParts";
 
 type DateColumn = { col: number; date: string };
@@ -71,6 +73,7 @@ export function ProductivityTab({
   const [message, setMessage] = useState("");
   const [sheet, setSheet] = useState<SheetPayload | null>(null);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const pendingRef = useRef<Map<string, string | number | null>>(new Map());
   const saveTimerRef = useRef<number | null>(null);
@@ -120,6 +123,22 @@ export function ProductivityTab({
     if (!sheet) return [];
     return sheet.dateColumns.filter((d) => monthKey(d.date) === month);
   }, [sheet, month]);
+
+  const displayFileName = useMemo(
+    () => (sheet ? repairUploadedFileName(sheet.sourceFileName) : ""),
+    [sheet]
+  );
+
+  const filteredRows = useMemo(() => {
+    if (!sheet) return [];
+    const q = searchQuery.trim();
+    if (!q) return sheet.rows;
+    return sheet.rows.filter((row) =>
+      matchesSearchFields(q, row.name, row.workCode, row.indexLabel, row.unit)
+    );
+  }, [sheet, searchQuery]);
+
+  const searchActive = searchQuery.trim().length > 0;
 
   const flushSaves = useCallback(async () => {
     if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID || pendingRef.current.size === 0) return;
@@ -184,6 +203,7 @@ export function ProductivityTab({
       const blob = await res.blob();
       const name =
         res.headers.get("Content-Disposition")?.match(/filename\*?=(?:UTF-8'')?\"?([^\";]+)/)?.[1] ||
+        displayFileName ||
         sheet?.sourceFileName ||
         "vyrobotka.xlsx";
       const url = URL.createObjectURL(blob);
@@ -213,6 +233,17 @@ export function ProductivityTab({
       <PageHero
         title="Выработка"
         subtitle={`${warehouseName} · раздел ${section === "SS" ? "СС" : "ЭОМ"}`}
+        stats={
+          sheet
+            ? [
+                {
+                  label: searchActive ? "Найдено" : "Позиций",
+                  value: searchActive ? `${filteredRows.length} из ${sheet.rows.length}` : sheet.rows.length
+                },
+                { label: "Дней", value: visibleDates.length }
+              ]
+            : undefined
+        }
         actions={
           <>
             <button type="button" className="ghostBtn" onClick={() => void load()}>
@@ -249,7 +280,6 @@ export function ProductivityTab({
       />
 
       {message ? <ResultBanner tone="error" text={message} /> : null}
-      {saving ? <p className="muted productivitySaving">Сохранение…</p> : null}
 
       {!sheet ? (
         <EmptyState
@@ -262,10 +292,42 @@ export function ProductivityTab({
         />
       ) : (
         <>
-          <div className="toolbar productivityToolbar">
+          <div className="productivityInfoCard">
+            <span className="productivityInfoIcon" aria-hidden>
+              📊
+            </span>
+            <div className="productivityInfoBody">
+              <p className="productivityInfoTitle" title={displayFileName}>
+                {displayFileName}
+              </p>
+              <p className="productivityInfoMeta muted">
+                Обновлено {new Date(sheet.updatedAt).toLocaleString("ru-RU")}
+                {saving ? " · сохранение…" : " · изменения сохраняются автоматически"}
+              </p>
+            </div>
+          </div>
+
+          <FilterStrip
+            search={
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Поиск по наименованию, коду или единице…"
+                aria-label="Поиск по наименованию"
+              />
+            }
+            actions={
+              searchActive ? (
+                <button type="button" className="ghostBtn" onClick={() => setSearchQuery("")}>
+                  Сбросить
+                </button>
+              ) : null
+            }
+          >
             <label>
               Месяц
-              <select value={month} onChange={(e) => setMonth(e.target.value)}>
+              <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Месяц">
                 {availableMonths.map((m) => (
                   <option key={m} value={m}>
                     {formatMonthLabel(m)}
@@ -273,59 +335,68 @@ export function ProductivityTab({
                 ))}
               </select>
             </label>
-            <span className="muted productivityMeta">
-              Файл: {sheet.sourceFileName} · обновлено {new Date(sheet.updatedAt).toLocaleString("ru-RU")}
-            </span>
-          </div>
+          </FilterStrip>
 
-          <ResponsiveTableShell>
-            <div className="erpTableWrap productivityTableWrap">
-              <table className="erpTable desktopTable productivityTable">
-                <thead>
-                  <tr>
-                    <th className="productivitySticky">Код</th>
-                    <th className="productivitySticky productivityNameCol">Наименование</th>
-                    <th>Ед.</th>
-                    {visibleDates.map((d) => (
-                      <th key={d.col} className="productivityDayCol">
-                        {formatDay(d.date)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sheet.rows.map((row) => (
-                    <tr key={row.rowIndex}>
-                      <td className="productivitySticky muted">{row.workCode || row.indexLabel || "—"}</td>
-                      <td className="productivitySticky productivityNameCol" title={row.name}>
-                        {row.name}
-                      </td>
-                      <td>{row.unit || "—"}</td>
-                      {visibleDates.map((d) => {
-                        const key = cellKey(row.rowIndex, d.col);
-                        const val = sheet.cellValues[key];
-                        return (
-                          <td key={d.col} className="productivityDayCol">
-                            {canWrite ? (
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                className="productivityCellInput"
-                                value={val == null ? "" : String(val)}
-                                onChange={(e) => onCellChange(row.rowIndex, d.col, e.target.value)}
-                              />
-                            ) : (
-                              <span>{val == null ? "" : String(val)}</span>
-                            )}
-                          </td>
-                        );
-                      })}
+          {!filteredRows.length ? (
+            <EmptyState
+              title="Ничего не нашлось"
+              hint="Попробуйте другой запрос или сбросьте поиск."
+              action={
+                <button type="button" className="ghostBtn" onClick={() => setSearchQuery("")}>
+                  Сбросить поиск
+                </button>
+              }
+            />
+          ) : (
+            <ResponsiveTableShell>
+              <div className="erpTableWrap productivityTableWrap">
+                <table className="erpTable desktopTable productivityTable">
+                  <thead>
+                    <tr>
+                      <th className="productivitySticky">Код</th>
+                      <th className="productivitySticky productivityNameCol">Наименование</th>
+                      <th>Ед.</th>
+                      {visibleDates.map((d) => (
+                        <th key={d.col} className="productivityDayCol">
+                          {formatDay(d.date)}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </ResponsiveTableShell>
+                  </thead>
+                  <tbody>
+                    {filteredRows.map((row) => (
+                      <tr key={row.rowIndex} className={searchActive ? "productivityRowMatch" : undefined}>
+                        <td className="productivitySticky muted">{row.workCode || row.indexLabel || "—"}</td>
+                        <td className="productivitySticky productivityNameCol" title={row.name}>
+                          {row.name}
+                        </td>
+                        <td>{row.unit || "—"}</td>
+                        {visibleDates.map((d) => {
+                          const key = cellKey(row.rowIndex, d.col);
+                          const val = sheet.cellValues[key];
+                          return (
+                            <td key={d.col} className="productivityDayCol">
+                              {canWrite ? (
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="productivityCellInput"
+                                  value={val == null ? "" : String(val)}
+                                  onChange={(e) => onCellChange(row.rowIndex, d.col, e.target.value)}
+                                />
+                              ) : (
+                                <span>{val == null ? "" : String(val)}</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </ResponsiveTableShell>
+          )}
         </>
       )}
     </div>

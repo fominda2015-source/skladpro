@@ -9,6 +9,7 @@ import {
   getRequestDataScope
 } from "../lib/dataScope.js";
 import { contentDispositionAttachment } from "../lib/xlsxReport.js";
+import { decodeUploadedOriginalName, repairStoredFileName } from "../lib/uploadFileName.js";
 import { prisma } from "../lib/prisma.js";
 import {
   buildProductivityDownloadBuffer,
@@ -84,7 +85,7 @@ function sheetToJson(sheet: {
     warehouseId: sheet.warehouseId,
     section: sheet.section,
     title: sheet.title,
-    sourceFileName: sheet.sourceFileName,
+    sourceFileName: repairStoredFileName(sheet.sourceFileName),
     headerRow: sheet.headerRow,
     dataStartRow: sheet.dataStartRow,
     fixedColCount: sheet.fixedColCount,
@@ -204,9 +205,10 @@ productivityRouter.post(
     const relPath = `${config.uploadsDir}/productivity/${stored}`.replace(/\\/g, "/");
     await fs.writeFile(path.join(uploadDirAbs, stored), file.buffer);
 
+    const sourceFileName = decodeUploadedOriginalName(file.originalname);
     const title =
       body.data.title?.trim() ||
-      file.originalname.replace(/\.(xlsx|xls)$/i, "").trim() ||
+      sourceFileName.replace(/\.(xlsx|xls)$/i, "").trim() ||
       "Выработка";
 
     const sheet = await prisma.productivitySheet.upsert({
@@ -220,7 +222,7 @@ productivityRouter.post(
         warehouseId: body.data.warehouseId,
         section: body.data.section,
         title,
-        sourceFileName: file.originalname,
+        sourceFileName,
         storagePath: relPath,
         headerRow: meta.headerRow,
         dataStartRow: meta.dataStartRow,
@@ -231,7 +233,7 @@ productivityRouter.post(
       },
       update: {
         title,
-        sourceFileName: file.originalname,
+        sourceFileName,
         storagePath: relPath,
         headerRow: meta.headerRow,
         dataStartRow: meta.dataStartRow,
@@ -334,9 +336,9 @@ productivityRouter.get("/download", async (req, res) => {
     cellValues: parseCellValues(sheet.cellValues)
   });
 
-  const fileName = sheet.sourceFileName.endsWith(".xlsx")
-    ? sheet.sourceFileName
-    : `${sheet.sourceFileName}.xlsx`;
+  const fileName = repairStoredFileName(
+    sheet.sourceFileName.endsWith(".xlsx") ? sheet.sourceFileName : `${sheet.sourceFileName}.xlsx`
+  );
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", contentDispositionAttachment(fileName));
   return res.send(buffer);
