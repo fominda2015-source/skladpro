@@ -13387,6 +13387,8 @@ function App() {
               token={token}
               fetchWithSession={fetchWithSession}
               canWrite={canWriteMaterialCards}
+              canUploadDocuments={canWriteMaterialCards || canWriteDocuments}
+              canDeleteDocuments={canWriteMaterialCards || canWriteDocuments}
               canAdjustStock={canWriteOperations}
               onAdjustStockQuantity={adjustWarehouseStockQuantity}
               onClose={() => setMaterialEditModal(null)}

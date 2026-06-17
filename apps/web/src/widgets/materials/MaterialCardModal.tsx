@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseMaterialQty, sanitizeMaterialQtyInput } from "../../shared/quantity";
 import { formatMoneyOrDash } from "../../shared/pricing";
+import { MaterialDocumentsSection } from "./MaterialDocumentsSection";
 
 type MaterialDetail = {
   id: string;
@@ -31,6 +32,8 @@ type Props = {
   token: string;
   fetchWithSession: typeof fetch;
   canWrite: boolean;
+  canUploadDocuments?: boolean;
+  canDeleteDocuments?: boolean;
   canAdjustStock?: boolean;
   onAdjustStockQuantity?: (stockId: string, quantity: number) => Promise<boolean>;
   onClose: () => void;
@@ -46,6 +49,8 @@ export function MaterialCardModal(props: Props) {
     token,
     fetchWithSession,
     canWrite,
+    canUploadDocuments = false,
+    canDeleteDocuments = false,
     canAdjustStock = false,
     onAdjustStockQuantity,
     onClose,
@@ -411,6 +416,15 @@ export function MaterialCardModal(props: Props) {
                   </div>
                 ) : null}
               </section>
+
+              <MaterialDocumentsSection
+                materialId={materialId}
+                apiUrl={apiUrl}
+                token={token}
+                fetchWithSession={fetchWithSession}
+                canUpload={canUploadDocuments}
+                canDelete={canDeleteDocuments}
+              />
 
               <div className="toolbar" style={{ marginTop: 16 }}>
                 {canWrite ? (

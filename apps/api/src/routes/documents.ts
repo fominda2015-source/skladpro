@@ -10,7 +10,8 @@ import { assertWarehouseInScope, getRequestDataScope } from "../lib/dataScope.js
 import { sha256File } from "../lib/fileHash.js";
 import { prisma } from "../lib/prisma.js";
 import { decodeUploadedOriginalName, withRepairedFileName } from "../lib/uploadFileName.js";
-import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requirePermission, loadUserPermissions, type AuthedRequest } from "../middleware/auth.js";
+import { hasPermission } from "../lib/permissions.js";
 
 const uploadDirAbs = path.resolve(process.cwd(), config.uploadsDir);
 if (!fs.existsSync(uploadDirAbs)) {
@@ -35,7 +36,47 @@ const createLinkSchema = z.object({
 
 export const documentsRouter = Router();
 documentsRouter.use(requireAuth);
-documentsRouter.use(requirePermission("documents.read"));
+
+function canReadMaterialDocuments(permissions: string[]) {
+  return (
+    hasPermission(permissions, "documents.read") ||
+    hasPermission(permissions, "materials.read") ||
+    hasPermission(permissions, "materials.write")
+  );
+}
+
+function canWriteEntityDocument(permissions: string[], entityType: string) {
+  if (hasPermission(permissions, "documents.write") || hasPermission(permissions, "documents.upload")) {
+    return true;
+  }
+  return entityType === "material" && hasPermission(permissions, "materials.write");
+}
+
+documentsRouter.use(async (req: AuthedRequest, res, next) => {
+  try {
+    const permissions = await loadUserPermissions(req.user!.userId);
+    req.user!.permissions = permissions;
+
+    const entityTypeQuery = typeof req.query.entityType === "string" ? req.query.entityType : "";
+    const entityIdQuery = typeof req.query.entityId === "string" ? req.query.entityId : "";
+    const entityTypeBody = typeof req.body?.entityType === "string" ? req.body.entityType : "";
+
+    if (req.method === "GET" && entityTypeQuery === "material" && entityIdQuery) {
+      if (canReadMaterialDocuments(permissions)) return next();
+    }
+    if (req.method === "POST" && req.path === "/upload" && entityTypeBody === "material") {
+      if (canWriteEntityDocument(permissions, "material")) return next();
+    }
+
+    if (!hasPermission(permissions, "documents.read")) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    return next();
+  } catch (e) {
+    console.error("documents access check failed:", e);
+    return res.status(500).json({ error: "Ошибка проверки доступа" });
+  }
+});
 
 type EntityIdBatch = { entityType: string; ids: string[] };
 
@@ -192,7 +233,6 @@ documentsRouter.get("/", async (req: AuthedRequest, res) => {
 
 documentsRouter.post(
   "/upload",
-  requirePermission("documents.write"),
   upload.single("file"),
   async (req: AuthedRequest, res) => {
     const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
@@ -206,6 +246,11 @@ documentsRouter.post(
 
     if (!entityType || !entityId) {
       return res.status(400).json({ error: "entityType and entityId are required" });
+    }
+
+    const permissions = req.user!.permissions ?? (await loadUserPermissions(req.user!.userId));
+    if (!canWriteEntityDocument(permissions, entityType)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const absPath = path.join(uploadDirAbs, file.filename);
@@ -342,11 +387,15 @@ documentsRouter.post(
   }
 );
 
-documentsRouter.delete("/:id", requirePermission("documents.write"), async (req, res) => {
+documentsRouter.delete("/:id", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
   const row = await prisma.documentFile.findUnique({ where: { id } });
   if (!row) {
     return res.status(404).json({ error: "Document not found" });
+  }
+  const permissions = req.user!.permissions ?? (await loadUserPermissions(req.user!.userId));
+  if (!canWriteEntityDocument(permissions, row.entityType)) {
+    return res.status(403).json({ error: "Forbidden" });
   }
   const [, updated] = await prisma.$transaction([
     prisma.documentLink.deleteMany({ where: { documentFileId: id } }),

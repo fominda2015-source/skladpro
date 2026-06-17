@@ -34,6 +34,10 @@ export function docTypeLabel(type: string): string {
     "issue-act": "Акт выдачи",
     "issue-act-tools": "Акт выдачи (инструмент)",
     "issue-signed-attachment": "Подписанный документ",
+    passport: "Паспорт",
+    certificate: "Сертификат",
+    datasheet: "Тех. документация",
+    material: "Материал",
     other: "Прочее"
   };
   return map[type] || type;
