@@ -26,6 +26,7 @@ import {
   resolvePublicFileUrl
 } from "./app/constants";
 import { displayDocumentFileName } from "./shared/fileName";
+import { useDebouncedValue } from "./shared/hooks/useDebouncedValue";
 import { isAdminEquivalent, OPEN_ACCESS_ALL } from "./shared/openAccess";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
@@ -1218,6 +1219,11 @@ function App() {
   const [auditFilterTo, setAuditFilterTo] = useState("");
   const [auditShowReverted, setAuditShowReverted] = useState(false);
   const [auditReverting, setAuditReverting] = useState<Record<string, boolean>>({});
+  const debouncedQ = useDebouncedValue(q, 280);
+  const debouncedToolSearch = useDebouncedValue(toolSearch, 280);
+  const debouncedIssueSearch = useDebouncedValue(issueSearch, 280);
+  const debouncedIssueToolSearch = useDebouncedValue(issueToolSearch, 280);
+  const debouncedAuditFilterQuery = useDebouncedValue(auditFilterQuery, 280);
   const [integrationJobs, setIntegrationJobs] = useState<IntegrationJobRow[]>([]);
   const [integrationKind, setIntegrationKind] = useState("erp-sync");
   const [integrationPayload, setIntegrationPayload] = useState("{\"batch\":1}");
@@ -2195,26 +2201,21 @@ function App() {
   }
 
   function renderAppChromeSearch() {
+    const applySearch = (value: string) => {
+      setGlobalSearch(value);
+      setQ(value);
+      setToolSearch(value);
+    };
     return (
       <div className="appChromeSearch">
         <input
+          type="search"
           className="globalSearchInput"
           placeholder="Поиск…"
           value={globalSearch}
-          onChange={(e) => setGlobalSearch(e.target.value)}
+          onChange={(e) => applySearch(e.target.value)}
           aria-label="Глобальный поиск"
         />
-        <button
-          type="button"
-          className="appChromeSearchBtn"
-          onClick={() => {
-            setQ(globalSearch);
-            setToolSearch(globalSearch);
-            setActiveTab("warehouse");
-          }}
-        >
-          Найти
-        </button>
         {canReadTools ? (
           <button type="button" className="appChromeSearchBtn appChromeSearchBtnSecondary" onClick={() => setActiveTab("qr")}>
             QR
@@ -2551,7 +2552,7 @@ function App() {
     if (auditFilterUserId) parts.push(`userId=${encodeURIComponent(auditFilterUserId)}`);
     if (auditFilterEntityType) parts.push(`entityType=${encodeURIComponent(auditFilterEntityType)}`);
     if (auditFilterEntityId.trim()) parts.push(`entityId=${encodeURIComponent(auditFilterEntityId.trim())}`);
-    if (auditFilterQuery.trim()) parts.push(`q=${encodeURIComponent(auditFilterQuery.trim())}`);
+    if (debouncedAuditFilterQuery.trim()) parts.push(`q=${encodeURIComponent(debouncedAuditFilterQuery.trim())}`);
     if (auditFilterFrom) parts.push(`dateFrom=${encodeURIComponent(new Date(auditFilterFrom).toISOString())}`);
     if (auditFilterTo) parts.push(`dateTo=${encodeURIComponent(new Date(auditFilterTo).toISOString())}`);
     if (auditShowReverted) parts.push("showReverted=1");
@@ -4059,7 +4060,7 @@ function App() {
       if (activeTab === "issues") {
         params.set("domain", issueIssuesDomain);
       }
-      if (issueSearch.trim()) params.set("q", issueSearch.trim());
+      if (debouncedIssueSearch.trim()) params.set("q", debouncedIssueSearch.trim());
       params.set("sort", issuesSort);
       params.set("page", String(issuesPage));
       params.set("pageSize", String(issuesPageSize));
@@ -4706,7 +4707,7 @@ function App() {
     const warehouseId = warehouseIdOverride ?? toolListWarehouseId;
     const section = sectionOverride ?? objectSectionFilter;
     const queryParts = [
-      toolSearch ? `q=${encodeURIComponent(toolSearch)}` : "",
+      debouncedToolSearch ? `q=${encodeURIComponent(debouncedToolSearch)}` : "",
       toolStatusFilter ? `status=${encodeURIComponent(toolStatusFilter)}` : "",
       `section=${encodeURIComponent(section)}`,
       warehouseId ? `warehouseId=${encodeURIComponent(warehouseId)}` : "",
@@ -5688,7 +5689,7 @@ function App() {
     auditFilterUserId,
     auditFilterEntityType,
     auditFilterEntityId,
-    auditFilterQuery,
+    debouncedAuditFilterQuery,
     auditFilterFrom,
     auditFilterTo,
     auditShowReverted
@@ -5841,7 +5842,7 @@ function App() {
     if (token && (activeTab === "catalog" || activeTab === "operations")) {
       void loadCatalogData();
     }
-  }, [token, activeTab, toolSearch, toolStatusFilter]);
+  }, [token, activeTab, debouncedToolSearch, toolStatusFilter]);
 
   useEffect(() => {
     if (token && activeTab === "issues") {
@@ -5859,12 +5860,17 @@ function App() {
     issueStatusFilter,
     issueBasisFilter,
     issueFlowFilter,
-    issueSearch,
+    debouncedIssueSearch,
     issueIssuesDomain,
     issuesSort,
     issuesPage,
     issuesPageSize
   ]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "warehouse" || mustPickObject || !activeObjectId) return;
+    void loadStocks(debouncedQ, objectSectionFilter);
+  }, [token, activeTab, mustPickObject, activeObjectId, objectSectionFilter, debouncedQ]);
 
   useEffect(() => {
     if (!token || activeTab !== "issues" || issueIssuesDomain !== "TOOLS" || !activeObjectId) {
@@ -5882,7 +5888,7 @@ function App() {
           page: "1",
           pageSize: "150"
         });
-        if (issueToolSearch.trim()) params.set("q", issueToolSearch.trim());
+        if (debouncedIssueToolSearch.trim()) params.set("q", debouncedIssueToolSearch.trim());
         const res = await fetchWithSession(`${API_URL}/api/tools?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -5899,7 +5905,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [token, activeTab, issueIssuesDomain, activeObjectId, objectSectionFilter, issueToolSearch]);
+  }, [token, activeTab, issueIssuesDomain, activeObjectId, objectSectionFilter, debouncedIssueToolSearch]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -6148,7 +6154,7 @@ function App() {
   }, [
     token,
     activeTab,
-    toolSearch,
+    debouncedToolSearch,
     toolStatusFilter,
     toolCategoryFilter,
     toolsSort,
@@ -6168,7 +6174,7 @@ function App() {
     activeTab,
     homeToolsDrillWarehouseId,
     homeDrillSection,
-    toolSearch,
+    debouncedToolSearch,
     toolStatusFilter,
     toolCategoryFilter,
     toolsSort,
@@ -6788,8 +6794,10 @@ function App() {
             }
             manualMessage={manualStockMessage && !manualStockModalOpen ? manualStockMessage : undefined}
             search={q}
-            onSearchChange={setQ}
-            onSearchSubmit={() => void loadStocks(q)}
+            onSearchChange={(v) => {
+              setQ(v);
+              setGlobalSearch(v);
+            }}
             kindTab={stockShelfKindTab}
             onKindTabChange={setStockShelfKindTab}
             warehouseFilterId={stockFilterWarehouseId}

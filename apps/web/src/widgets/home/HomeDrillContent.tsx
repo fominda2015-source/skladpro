@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { API_URL } from "../../app/constants";
+import { matchesSearchFields } from "../../shared/searchText";
 import { LoadingState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { LimitStructureBars } from "../limits/LimitStructureBars";
@@ -380,7 +381,6 @@ function HomeDrillStockPanel({
     setLoading(true);
     setError("");
     const params = new URLSearchParams({ warehouseId, section });
-    if (search.trim()) params.set("q", search.trim());
     try {
       const res = await fetchWithSession(`${API_URL}/api/stocks?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -393,23 +393,16 @@ function HomeDrillStockPanel({
     } finally {
       setLoading(false);
     }
-  }, [token, fetchWithSession, warehouseId, section, search]);
+  }, [token, fetchWithSession, warehouseId, section]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return rows
       .filter((r) => !r.materialToolCatalogSection)
-      .filter((r) => {
-        if (!q) return true;
-        return (
-          r.materialName.toLowerCase().includes(q) ||
-          String(r.materialSku || "").toLowerCase().includes(q)
-        );
-      })
+      .filter((r) => matchesSearchFields(search, r.materialName, r.materialSku))
       .sort((a, b) => b.available - a.available || a.materialName.localeCompare(b.materialName, "ru"));
   }, [rows, search]);
 
@@ -420,12 +413,11 @@ function HomeDrillStockPanel({
     <div className="homeDrillStack">
       <div className="toolbar" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <input
+          type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void load();
-          }}
           placeholder="Поиск ТМЦ (название, SKU)…"
+          aria-label="Поиск остатков"
           style={{ minWidth: 260 }}
         />
         <button type="button" className="ghostBtn" onClick={() => void load()}>

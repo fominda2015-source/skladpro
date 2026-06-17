@@ -53,7 +53,6 @@ export type WarehouseStockViewProps = {
   manualMessage?: string;
   search: string;
   onSearchChange: (value: string) => void;
-  onSearchSubmit: () => void;
   kindTab: KindTab;
   onKindTabChange: (tab: KindTab) => void;
   warehouseFilterId: string;
@@ -113,7 +112,6 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     manualMessage,
     search,
     onSearchChange,
-    onSearchSubmit,
     kindTab,
     onKindTabChange,
     warehouseFilterId,
@@ -228,17 +226,13 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
       <div className="whControlBar">
         <div className="whSearchRow">
           <input
+            type="search"
             className="whSearchInput"
             placeholder="Поиск: название, SKU, синоним…"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onSearchSubmit();
-            }}
+            aria-label="Поиск по складу"
           />
-          <button type="button" className="ghostBtn whBtnFind" onClick={onSearchSubmit}>
-            Найти
-          </button>
         </div>
         <div className="whToolbar">
           <div className="whChips" role="tablist" aria-label="Вид номенклатуры">

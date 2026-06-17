@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDebouncedValue } from "../../shared/hooks/useDebouncedValue";
 import { useViewportContext } from "../layout/ViewportRoot";
 import { TabObjectFilter } from "../layout/TabObjectFilter";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
@@ -152,6 +153,7 @@ export function MaterialReportTab({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [historySearch, setHistorySearch] = useState("");
+  const debouncedHistorySearch = useDebouncedValue(historySearch, 280);
   const [expandedIssues, setExpandedIssues] = useState<Record<string, boolean>>({});
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const [checked, setChecked] = useState<Record<string, boolean>>({});
@@ -203,7 +205,7 @@ export function MaterialReportTab({
     if (!token) return;
     const params = reportQuery();
     params.set("take", "500");
-    if (historySearch.trim()) params.set("q", historySearch.trim());
+    if (debouncedHistorySearch.trim()) params.set("q", debouncedHistorySearch.trim());
     if (dateFrom) params.set("from", dateFrom);
     if (dateTo) params.set("to", dateTo);
     if (selectedKey && subTab === "history") params.set("holderKey", selectedKey);
@@ -215,7 +217,7 @@ export function MaterialReportTab({
       throw new Error(typeof err.error === "string" ? err.error : `Ошибка ${res.status}`);
     }
     setHistory((await res.json()) as MaterialWriteoffHistoryRow[]);
-  }, [token, apiUrl, fetchWithSession, reportQuery, historySearch, dateFrom, dateTo, selectedKey, subTab]);
+  }, [token, apiUrl, fetchWithSession, reportQuery, debouncedHistorySearch, dateFrom, dateTo, selectedKey, subTab]);
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -531,9 +533,6 @@ export function MaterialReportTab({
                       <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
                     </label>
                   </div>
-                  <button type="button" className="ghostBtn" onClick={() => void loadHistory()}>
-                    Применить фильтры
-                  </button>
                 </div>
               )}
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDebouncedValue } from "../../shared/hooks/useDebouncedValue";
 import { EmptyState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import {
@@ -86,6 +87,7 @@ export function CampTab({
   const [summary, setSummary] = useState<CampSummary | null>(null);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 280);
   const [statusFilter, setStatusFilter] = useState<"" | CampItemStatus>("");
   const [selected, setSelected] = useState<CampItemRow | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -120,7 +122,7 @@ export function CampTab({
     if (warehouseId) parts.push(`warehouseId=${encodeURIComponent(warehouseId)}`);
     if (categoryFilter) parts.push(`category=${encodeURIComponent(categoryFilter)}`);
     if (statusFilter) parts.push(`status=${encodeURIComponent(statusFilter)}`);
-    if (search.trim()) parts.push(`q=${encodeURIComponent(search.trim())}`);
+    if (debouncedSearch.trim()) parts.push(`q=${encodeURIComponent(debouncedSearch.trim())}`);
     const query = parts.length ? `?${parts.join("&")}` : "";
     try {
       const res = await fetchWithSession(`${apiUrl}/api/camp-items${query}`, {
@@ -142,7 +144,7 @@ export function CampTab({
       setItems([]);
       setMessage(`Сеть: ${(err as Error).message || "ошибка"}`);
     }
-  }, [token, apiUrl, fetchWithSession, warehouseId, sectionFilter, categoryFilter, statusFilter, search]);
+  }, [token, apiUrl, fetchWithSession, warehouseId, sectionFilter, categoryFilter, statusFilter, debouncedSearch]);
 
   const loadSummary = useCallback(async () => {
     if (!token) return;
@@ -424,9 +426,11 @@ export function CampTab({
           <label>
             Поиск
             <input
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="название, инв.№, серийный…"
+              aria-label="Поиск по городку"
             />
           </label>
           <label>
