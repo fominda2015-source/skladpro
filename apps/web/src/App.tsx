@@ -29,6 +29,7 @@ import { displayDocumentFileName } from "./shared/fileName";
 import { isAdminEquivalent, OPEN_ACCESS_ALL } from "./shared/openAccess";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
+import { PageFileDropZone } from "./shared/ui/PageFileDropZone";
 import {
   IntegrationJobsTable,
   type IntegrationJobRow
@@ -8892,7 +8893,23 @@ function App() {
 
 
       {activeTab === "limits" && (
-        <div className="limitsWorkspace">
+        <PageFileDropZone
+          className="limitsWorkspace"
+          enabled={canWriteLimits}
+          overlayLabel="Отпустите Excel-файл"
+          overlayHint=".xlsx или .xls"
+          acceptFile={(file) => /\.(xlsx|xls)$/i.test(file.name)}
+          onFiles={(files) => {
+            const file = files[0];
+            if (!file) return;
+            if (!canWriteLimits) {
+              setLimitsMessage("Недостаточно прав для импорта лимитов");
+              return;
+            }
+            setLimitImportFile(file);
+          }}
+          onReject={() => setLimitsMessage("Выберите Excel-файл .xlsx или .xls")}
+        >
           <PageHero
             icon="▧"
             title="Лимиты"
@@ -8944,30 +8961,11 @@ function App() {
             />
           )}
 
-          <div
-            className="card limitImportCard"
-            onDragOver={(e) => {
-              if (canWriteLimits) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (!canWriteLimits) {
-                setLimitsMessage("Недостаточно прав для импорта лимитов");
-                return;
-              }
-              const file = e.dataTransfer.files?.[0];
-              if (!file) return;
-              if (!/\.(xlsx|xls)$/i.test(file.name)) {
-                setLimitsMessage("Выберите Excel-файл .xlsx или .xls");
-                return;
-              }
-              setLimitImportFile(file);
-            }}
-          >
+          <div className="card limitImportCard">
             <div className="rightCardHeader" style={{ gap: 12 }}>
               <div>
                 <h3>Загрузить Excel</h3>
-                <p className="muted">Перетащите файл сюда или выберите вручную (.xlsx, .xls).</p>
+                <p className="muted">Перетащите файл на страницу или выберите вручную (.xlsx, .xls).</p>
                 <details className="uploadHintDetails">
                   <summary>Требования к формату файла</summary>
                   <p className="muted">
@@ -9842,7 +9840,7 @@ function App() {
             </>
           );
         })()}
-        </div>
+        </PageFileDropZone>
       )}
 
       {canMaterialReport && activeTab === "materialReport" && (
@@ -9874,6 +9872,17 @@ function App() {
       )}
 
       {activeTab === "approvals" && (
+        <PageFileDropZone
+          overlayLabel="Отпустите Excel-заявку"
+          overlayHint=".xlsx или .xls"
+          acceptFile={(file) => /\.(xlsx|xls)$/i.test(file.name)}
+          onFiles={(files) => {
+            const file = files[0];
+            if (!file) return;
+            setReceiptRequestFile(file);
+          }}
+          onReject={() => setOpsMessage("Выберите Excel-файл (.xlsx/.xls)")}
+        >
         <div>
           <PageHero
             icon="☑"
@@ -9905,24 +9914,10 @@ function App() {
           />
           {issuesMessage && <ResultBanner text={issuesMessage} tone={issuesTone} />}
 
-          <div
-            className="card"
-            style={{ marginTop: 12 }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const file = e.dataTransfer.files?.[0];
-              if (!file) return;
-              if (!/\.(xlsx|xls)$/i.test(file.name)) {
-                setOpsMessage("Выберите Excel-файл (.xlsx/.xls)");
-                return;
-              }
-              setReceiptRequestFile(file);
-            }}
-          >
+          <div className="card" style={{ marginTop: 12 }}>
             <h3 style={{ marginTop: 0 }}>Загрузить заявку из Excel</h3>
             <p className="muted">
-              Новый формат Excel: колонка M — раздел/подраздел лимита, L — комментарий, N/O — сверка
+              Перетащите файл на страницу или выберите вручную. Новый формат Excel: колонка M — раздел/подраздел лимита, L — комментарий, N/O — сверка
               наименования с C/D/E. К заявке можно приложить счёт. Повторная загрузка того же файла или
               номера заявки на этом объекте не допускается.
             </p>
@@ -10048,6 +10043,7 @@ function App() {
             }}
           />
         </div>
+        </PageFileDropZone>
       )}
 
       {activeTab === "documents" && (() => {

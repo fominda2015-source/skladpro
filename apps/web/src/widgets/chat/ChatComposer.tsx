@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CHAT_FILE_ACCEPT,
-  isChatFileAllowed,
-  mergeChatFiles,
-  pickFilesFromClipboard
-} from "./chatFiles";
+import { appendChatFiles, CHAT_FILE_ACCEPT, pickFilesFromClipboard } from "./chatFiles";
 import { ChatEmojiPicker } from "./ChatEmojiPicker";
 
 type Props = {
@@ -28,7 +23,6 @@ export function ChatComposer({
   onSend,
   onFileReject
 }: Props) {
-  const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -51,15 +45,7 @@ export function ChatComposer({
 
   const addFiles = useCallback(
     (incoming: File[]) => {
-      const allowed = incoming.filter(isChatFileAllowed);
-      if (!allowed.length) {
-        onFileReject?.("Поддерживаются изображения и PDF");
-        return;
-      }
-      if (allowed.length < incoming.length) {
-        onFileReject?.("Часть файлов пропущена — только изображения и PDF");
-      }
-      onAttachmentsChange(mergeChatFiles(attachments, allowed));
+      appendChatFiles(attachments, incoming, onAttachmentsChange, onFileReject);
     },
     [attachments, onAttachmentsChange, onFileReject]
   );
@@ -73,13 +59,6 @@ export function ChatComposer({
     if (!files.length) return;
     e.preventDefault();
     addFiles(files);
-  };
-
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    if (e.dataTransfer.files?.length) addFiles(Array.from(e.dataTransfer.files));
   };
 
   const insertEmoji = (emoji: string) => {
@@ -100,28 +79,7 @@ export function ChatComposer({
   };
 
   return (
-    <footer
-      className={`chatThreadComposer ${dragOver ? "chatThreadComposer--drag" : ""}`}
-      onDragEnter={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-        setDragOver(false);
-      }}
-      onDrop={onDrop}
-    >
-      {dragOver ? (
-        <div className="chatDropOverlay" aria-hidden>
-          Отпустите файлы — добавим во вложения
-        </div>
-      ) : null}
-
+    <footer className="chatThreadComposer">
       <div className="chatQuickReplies">
         {quickReplies.map((q) => (
           <button key={q} type="button" className="ghostBtn" onClick={() => onTextChange(q)}>
@@ -231,7 +189,7 @@ export function ChatComposer({
           </svg>
         </button>
       </div>
-      <p className="chatComposerHint muted">Перетащите файлы сюда или вставьте скриншот из буфера (Ctrl+V)</p>
+      <p className="chatComposerHint muted">Перетащите файлы на страницу или вставьте скриншот из буфера (Ctrl+V)</p>
     </footer>
   );
 }

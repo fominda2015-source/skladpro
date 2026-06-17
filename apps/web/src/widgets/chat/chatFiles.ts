@@ -55,6 +55,23 @@ export function pickFilesFromClipboard(clipboard: DataTransfer | null): File[] {
   return out;
 }
 
+export function appendChatFiles(
+  current: File[],
+  incoming: File[],
+  onChange: (files: File[]) => void,
+  onReject?: (reason: string) => void
+): void {
+  const allowed = incoming.filter(isChatFileAllowed);
+  if (!allowed.length) {
+    onReject?.("Поддерживаются изображения и PDF");
+    return;
+  }
+  if (allowed.length < incoming.length) {
+    onReject?.("Часть файлов пропущена — только изображения и PDF");
+  }
+  onChange(mergeChatFiles(current, allowed));
+}
+
 export function mergeChatFiles(current: File[], incoming: File[]): File[] {
   const seen = new Set(current.map((f) => `${f.name}:${f.size}:${f.lastModified}`));
   const next = [...current];

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../shared/ui/StateViews";
+import { PageFileDropZone } from "../../shared/ui/PageFileDropZone";
 import { useViewportContext } from "../layout/ViewportRoot";
 import { UserAvatar } from "./UserAvatar";
 import { ChatComposer } from "./ChatComposer";
 import { ChatImageLightbox } from "./ChatImageLightbox";
-import { isImageAttachment } from "./chatFiles";
+import { appendChatFiles, isImageAttachment } from "./chatFiles";
 
 export type ChatUser = {
   id: string;
@@ -229,6 +230,14 @@ export function ChatPanel({
         </div>
       ) : null}
 
+      <PageFileDropZone
+        className="chatPageDropZone"
+        enabled={showThread && Boolean(peer)}
+        multiple
+        overlayLabel="Отпустите файлы — добавим во вложения"
+        overlayHint="Изображения и PDF"
+        onFiles={(files) => appendChatFiles(attachments, files, onAttachmentsChange, onFileReject)}
+      >
       <div className={`chatLayout${threadFocus ? " chatLayout--threadFocus" : ""}`}>
         {showList ? (
           <aside className="chatSidebar" aria-label="Список диалогов">
@@ -466,6 +475,7 @@ export function ChatPanel({
           </section>
         )}
       </div>
+      </PageFileDropZone>
 
       {imageLightbox ? (
         <ChatImageLightbox

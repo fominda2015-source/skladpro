@@ -2187,6 +2187,57 @@ tr.low {
   gap: 14px;
 }
 
+.pageFileDropZone {
+  position: relative;
+  min-height: min(100%, calc(100dvh - 180px));
+}
+
+.pageFileDropZone--active {
+  outline: none;
+}
+
+.pageFileDropOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: rgba(239, 246, 255, 0.9);
+  border: 3px dashed #2563eb;
+  color: #1d4ed8;
+  pointer-events: none;
+  text-align: center;
+}
+
+.pageFileDropOverlayTitle {
+  margin: 0;
+  font-size: clamp(18px, 3vw, 24px);
+  font-weight: 700;
+}
+
+.pageFileDropOverlayHint {
+  margin: 0;
+  font-size: 14px;
+  color: #475569;
+}
+
+.chatPageDropZone {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.chatPageDropZone > .chatLayout {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
 .limitImportCard {
   border-style: dashed;
   border-color: #cbd5e1;
