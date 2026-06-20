@@ -816,6 +816,9 @@ function App() {
   const [adminObjects, setAdminObjects] = useState<AdminObject[]>([]);
   const [newObjectName, setNewObjectName] = useState("");
   const [newObjectAddress, setNewObjectAddress] = useState("");
+  const [firstSetupName, setFirstSetupName] = useState("");
+  const [firstSetupAddress, setFirstSetupAddress] = useState("");
+  const [firstSetupBusy, setFirstSetupBusy] = useState(false);
   const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
   const [selectedObjectSection, setSelectedObjectSection] = useState<"SS" | "EOM">("SS");
   const [bindObjectSectionUserIds, setBindObjectSectionUserIds] = useState<string[]>([]);
@@ -2132,6 +2135,48 @@ function App() {
     setObjectSectionFilter(section);
     setMustPickObject(false);
     return true;
+  }
+
+  async function createFirstObjectAndEnter() {
+    if (!token || !firstSetupName.trim() || firstSetupBusy) return;
+    setFirstSetupBusy(true);
+    setAuthError("");
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/admin/objects`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: firstSetupName.trim(),
+          address: firstSetupAddress.trim() || undefined,
+          userIds: me?.id ? [me.id] : []
+        })
+      });
+      if (!res.ok) {
+        let msg = "Не удалось создать объект";
+        try {
+          const body = await res.json();
+          if (typeof body?.error === "string") msg = body.error;
+        } catch {
+          // ignore
+        }
+        setAuthError(msg);
+        return;
+      }
+      const created = (await res.json()) as { id: string; name: string; address?: string | null };
+      setAvailableObjects([{ id: created.id, name: created.name, address: created.address }]);
+      setFirstSetupName("");
+      setFirstSetupAddress("");
+      const ok = await updateAuthContext({ warehouseId: created.id, section: objectSectionFilter });
+      if (!ok) {
+        setAuthError("Объект создан. Выберите его в списке и нажмите «Войти в объект».");
+        setActiveObjectId(created.id);
+        await loadMe();
+      }
+    } catch (e) {
+      setAuthError(String(e));
+    } finally {
+      setFirstSetupBusy(false);
+    }
   }
 
   async function selectTopObject(warehouseId: string) {
@@ -6412,63 +6457,126 @@ function App() {
   }
 
   if (mustPickObject) {
+    const noObjects = availableObjects.length === 0;
+    const showFirstSetup = noObjects && isAdmin;
+
     return (
       <main className="loginShell">
         <div className="loginCard card">
-          <h2>Выберите объект</h2>
-          <p className="muted">После выбора вы войдете в контур объекта. Сменить можно в верхней панели.</p>
+          <h2>{showFirstSetup ? "Первоначальная настройка" : "Выберите объект"}</h2>
+          <p className="muted">
+            {showFirstSetup
+              ? "Объектов пока нет. Создайте первый объект (дом/стройку), затем войдите в систему."
+              : "После выбора вы войдете в контур объекта. Сменить можно в верхней панели."}
+          </p>
           <div className="form">
-            <label className="objectFieldAccent">
-              Объект
-              <select
-                className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
-                value={activeObjectId}
-                onChange={(e) => setActiveObjectId(e.target.value)}
-              >
-                <option value="">— выберите —</option>
-                {canViewAllObjects ? (
-                  <option value={ALL_OBJECTS_ID}>Все объекты</option>
-                ) : null}
-                {availableObjects.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {safeName(o.name)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Раздел
-              <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
+            {showFirstSetup ? (
+              <>
+                <label className="objectFieldAccent">
+                  Название объекта
+                  <input
+                    value={firstSetupName}
+                    onChange={(e) => setFirstSetupName(e.target.value)}
+                    placeholder="Например: ЖК Центральный, корпус 1"
+                    autoFocus
+                  />
+                </label>
+                <label>
+                  Адрес <span className="muted">(необязательно)</span>
+                  <input
+                    value={firstSetupAddress}
+                    onChange={(e) => setFirstSetupAddress(e.target.value)}
+                    placeholder="Город, улица"
+                  />
+                </label>
+                <label>
+                  Раздел
+                  <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
+                    <button
+                      type="button"
+                      className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                      onClick={() => setSection("SS")}
+                    >
+                      СС
+                    </button>
+                    <button
+                      type="button"
+                      className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                      onClick={() => setSection("EOM")}
+                    >
+                      ЭОМ
+                    </button>
+                  </div>
+                </label>
                 <button
                   type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                  onClick={() => setSection("SS")}
+                  className="primaryBtn"
+                  disabled={!firstSetupName.trim() || firstSetupBusy}
+                  onClick={() => void createFirstObjectAndEnter()}
                 >
-                  СС
+                  {firstSetupBusy ? "Создание…" : "Создать объект и войти"}
                 </button>
+              </>
+            ) : noObjects ? (
+              <p className="muted firstSetupHint">
+                Нет доступных объектов. Обратитесь к администратору — он должен создать объект и назначить вам
+                доступ.
+              </p>
+            ) : (
+              <>
+                <label className="objectFieldAccent">
+                  Объект
+                  <select
+                    className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
+                    value={activeObjectId}
+                    onChange={(e) => setActiveObjectId(e.target.value)}
+                  >
+                    <option value="">— выберите —</option>
+                    {canViewAllObjects ? (
+                      <option value={ALL_OBJECTS_ID}>Все объекты</option>
+                    ) : null}
+                    {availableObjects.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {safeName(o.name)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Раздел
+                  <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
+                    <button
+                      type="button"
+                      className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
+                      onClick={() => setSection("SS")}
+                    >
+                      СС
+                    </button>
+                    <button
+                      type="button"
+                      className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
+                      onClick={() => setSection("EOM")}
+                    >
+                      ЭОМ
+                    </button>
+                  </div>
+                </label>
                 <button
                   type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                  onClick={() => setSection("EOM")}
+                  disabled={!activeObjectId}
+                  onClick={async () => {
+                    if (!activeObjectId) return;
+                    const ok =
+                      activeObjectId === ALL_OBJECTS_ID
+                        ? await clearAuthContextWarehouse(objectSectionFilter)
+                        : await updateAuthContext({ warehouseId: activeObjectId, section: objectSectionFilter });
+                    if (!ok) setAuthError("Не удалось сохранить выбор объекта");
+                  }}
                 >
-                  ЭОМ
+                  Войти в объект
                 </button>
-              </div>
-            </label>
-            <button
-              type="button"
-              disabled={!activeObjectId}
-              onClick={async () => {
-                if (!activeObjectId) return;
-                const ok =
-                  activeObjectId === ALL_OBJECTS_ID
-                    ? await clearAuthContextWarehouse(objectSectionFilter)
-                    : await updateAuthContext({ warehouseId: activeObjectId, section: objectSectionFilter });
-                if (!ok) setAuthError("Не удалось сохранить выбор объекта");
-              }}
-            >
-              Войти в объект
-            </button>
+              </>
+            )}
             {authError && <p className="error">{authError}</p>}
             <button type="button" className="ghostBtn" style={{ marginTop: 12 }} onClick={onLogout}>
               Выйти из аккаунта

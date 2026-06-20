@@ -1055,6 +1055,17 @@ button:hover {
   max-width: 100%;
 }
 
+.firstSetupHint {
+  margin: 8px 0 4px;
+  line-height: 1.45;
+}
+
+.loginCard .form input[type="text"],
+.loginCard .form input:not([type]) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .warehouseMode .workspaceContextObject--accent {
   background: linear-gradient(90deg, rgba(255, 247, 237, 0.98) 0%, rgba(255, 247, 237, 0.2) 80%, transparent 100%);
 }
