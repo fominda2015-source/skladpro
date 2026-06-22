@@ -73,7 +73,7 @@ type Props = {
   waybillsSlot?: React.ReactNode;
 };
 
-type SubTab = "request" | "outgoing" | "incoming" | "waybills";
+type SubTab = "request" | "send" | "approve" | "incoming" | "waybills";
 type MaterialKindFilter = "" | "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
 
 const KIND_LABEL: Record<string, string> = {
@@ -129,6 +129,18 @@ export function TransfersTab({
   const [receiveDocs, setReceiveDocs] = useState<DocFile[]>([]);
   const [uploading, setUploading] = useState(false);
 
+  const [ownStocks, setOwnStocks] = useState<PeerStockRow[]>([]);
+  const [ownLoading, setOwnLoading] = useState(false);
+  const [ownError, setOwnError] = useState("");
+  const [sendSearch, setSendSearch] = useState("");
+  const [sendKind, setSendKind] = useState<MaterialKindFilter>("");
+  const [sendOnlyAvailable, setSendOnlyAvailable] = useState(true);
+  const [sendSelected, setSendSelected] = useState<Record<string, { qty: number; limitNodeId: string | null }>>({});
+  const [sendNote, setSendNote] = useState("");
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [sendDestinationId, setSendDestinationId] = useState("");
+  const [sendSubmitting, setSendSubmitting] = useState(false);
+
   const loadTransfers = useCallback(async () => {
     if (!token) return;
     setTransfersLoading(true);
@@ -159,12 +171,36 @@ export function TransfersTab({
       const body = (await res.json()) as { warehouses: PeerWarehouse[] };
       setPeerData(body.warehouses ?? []);
       if (body.warehouses?.length) {
-        setExpandedWh((prev) => prev ?? body.warehouses![0].warehouseId);
+        setFilterWarehouseId((prev) => prev || body.warehouses![0].warehouseId);
+        setExpandedWh(body.warehouses![0].warehouseId);
       }
     } catch {
       setPeerError("Ошибка сети");
     } finally {
       setPeerLoading(false);
+    }
+  }, [token, fetchWithSession, toWarehouseId, section]);
+
+  const loadOwn = useCallback(async () => {
+    if (!token || !toWarehouseId) return;
+    setOwnLoading(true);
+    setOwnError("");
+    try {
+      const res = await fetchWithSession(
+        `${API_URL}/api/transfer-requests/own-inventory?fromWarehouseId=${encodeURIComponent(toWarehouseId)}&section=${section}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) {
+        setOwnError("Не удалось загрузить остатки вашего объекта");
+        setOwnStocks([]);
+        return;
+      }
+      const body = (await res.json()) as { stocks: PeerStockRow[] };
+      setOwnStocks(body.stocks ?? []);
+    } catch {
+      setOwnError("Ошибка сети");
+    } finally {
+      setOwnLoading(false);
     }
   }, [token, fetchWithSession, toWarehouseId, section]);
 
@@ -176,9 +212,22 @@ export function TransfersTab({
     if (subTab === "request") void loadPeer();
   }, [subTab, loadPeer]);
 
+  useEffect(() => {
+    if (subTab === "send") void loadOwn();
+  }, [subTab, loadOwn]);
+
+  const destinationWarehouses = useMemo(
+    () => warehouses.filter((w) => w.id !== toWarehouseId),
+    [warehouses, toWarehouseId]
+  );
+
   const outgoingRows = useMemo(
-    () => transfers.filter((t) => t.status === "NEW" || t.status === "APPROVED"),
-    [transfers]
+    () =>
+      transfers.filter(
+        (t) =>
+          t.fromWarehouseId === toWarehouseId && (t.status === "NEW" || t.status === "APPROVED")
+      ),
+    [transfers, toWarehouseId]
   );
   const incoming = useMemo(
     () => transfers.filter((t) => t.toWarehouseId === toWarehouseId),
@@ -192,9 +241,10 @@ export function TransfersTab({
   const filteredPeerData = useMemo(() => {
     const q = requestSearch.trim().toLowerCase();
     const hasStockFilters = Boolean(q || filterKind || onlyAvailable);
+    const sourceId = filterWarehouseId;
 
     return peerData
-      .filter((wh) => !filterWarehouseId || wh.warehouseId === filterWarehouseId)
+      .filter((wh) => !sourceId || wh.warehouseId === sourceId)
       .map((wh) => {
         const stocks = wh.stocks.filter((row) => {
           if (filterKind && row.kind !== filterKind) return false;
@@ -210,10 +260,36 @@ export function TransfersTab({
       })
       .filter((wh) => {
         if (wh.stocks.length > 0) return true;
-        if (filterWarehouseId && wh.warehouseId === filterWarehouseId) return true;
+        if (sourceId && wh.warehouseId === sourceId) return true;
         return !hasStockFilters;
       });
   }, [peerData, requestSearch, filterWarehouseId, filterKind, onlyAvailable]);
+
+  const filteredSendStocks = useMemo(() => {
+    const q = sendSearch.trim().toLowerCase();
+    return ownStocks.filter((row) => {
+      if (sendKind && row.kind !== sendKind) return false;
+      if (sendOnlyAvailable && row.available <= 0) return false;
+      if (!q) return true;
+      return row.materialName.toLowerCase().includes(q) || row.unit.toLowerCase().includes(q);
+    });
+  }, [ownStocks, sendSearch, sendKind, sendOnlyAvailable]);
+
+  const sendSelectedLines = useMemo(() => {
+    const lines: Array<{ materialId: string; quantity: number; limitNodeId: string | null; label: string }> = [];
+    for (const [materialId, v] of Object.entries(sendSelected)) {
+      if (v.qty <= 0) continue;
+      const row = ownStocks.find((s) => s.materialId === materialId);
+      if (!row) continue;
+      lines.push({
+        materialId,
+        quantity: v.qty,
+        limitNodeId: v.limitNodeId,
+        label: `${row.materialName} · ${v.qty} ${row.unit}`
+      });
+    }
+    return lines;
+  }, [sendSelected, ownStocks]);
 
   const filteredStockCount = useMemo(
     () => filteredPeerData.reduce((n, wh) => n + wh.stocks.length, 0),
@@ -221,10 +297,9 @@ export function TransfersTab({
   );
 
   useEffect(() => {
-    if (!requestSearch.trim() && !filterWarehouseId) return;
-    const first = filteredPeerData.find((w) => w.stocks.length > 0);
-    if (first) setExpandedWh(first.warehouseId);
-  }, [requestSearch, filterWarehouseId, filterKind, onlyAvailable, filteredPeerData]);
+    if (subTab !== "request") return;
+    if (filterWarehouseId) setFromWarehouseId(filterWarehouseId);
+  }, [subTab, filterWarehouseId]);
 
   const selectedLines = useMemo(() => {
     const lines: Array<{ materialId: string; quantity: number; limitNodeId: string | null; label: string }> = [];
@@ -276,8 +351,9 @@ export function TransfersTab({
 
   async function submitRequest() {
     if (!token || !canWrite || submitting) return;
-    if (!fromWarehouseId || fromWarehouseId === toWarehouseId) {
-      setMessage("Выберите склад-отправитель (не текущий объект)");
+    const senderId = filterWarehouseId || fromWarehouseId;
+    if (!senderId || senderId === toWarehouseId) {
+      setMessage("Выберите объект-отправитель (другой объект, не текущий)");
       return;
     }
     const lines = selectedLines.map((l) => ({
@@ -296,7 +372,7 @@ export function TransfersTab({
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          fromWarehouseId,
+          fromWarehouseId: senderId,
           toWarehouseId,
           section,
           note: note.trim() || undefined,
@@ -317,6 +393,80 @@ export function TransfersTab({
       setSubmitting(false);
     }
   }
+
+  async function submitSend() {
+    if (!token || !canWrite || sendSubmitting || !toWarehouseId) return;
+    if (!sendDestinationId || sendDestinationId === toWarehouseId) {
+      setMessage("Выберите объект-получатель");
+      return;
+    }
+    const lines = sendSelectedLines.map((l) => ({
+      materialId: l.materialId,
+      quantity: l.quantity,
+      limitNodeId: l.limitNodeId ?? undefined
+    }));
+    if (!lines.length) {
+      setMessage("Отметьте позиции для отправки");
+      return;
+    }
+    setSendSubmitting(true);
+    setMessage("");
+    try {
+      const res = await fetchWithSession(`${API_URL}/api/transfer-requests`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromWarehouseId: toWarehouseId,
+          toWarehouseId: sendDestinationId,
+          section,
+          note: sendNote.trim() || undefined,
+          lines
+        })
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage(typeof body.error === "string" ? body.error : "Не удалось создать перемещение");
+        return;
+      }
+      setMessage("Перемещение создано. Согласуйте на вкладке «Согласование» или дождитесь приёмки на объекте-получателе.");
+      setSendSelected({});
+      setSendNote("");
+      setSendModalOpen(false);
+      setSendDestinationId("");
+      await loadTransfers();
+      await loadOwn();
+    } finally {
+      setSendSubmitting(false);
+    }
+  }
+
+  const toggleSendRow = (row: PeerStockRow, checked: boolean) => {
+    const key = row.materialId;
+    setSendSelected((prev) => {
+      const next = { ...prev };
+      if (!checked) {
+        delete next[key];
+        return next;
+      }
+      next[key] = {
+        qty: Math.min(row.available, prev[key]?.qty ?? row.available) || row.available,
+        limitNodeId: row.limitNodeId
+      };
+      return next;
+    });
+  };
+
+  const setSendRowQty = (materialId: string, qty: number, limitNodeId: string | null, max: number) => {
+    const safe = Math.max(0, Math.min(max, Math.round(qty)));
+    setSendSelected((prev) => {
+      if (safe <= 0) {
+        const next = { ...prev };
+        delete next[materialId];
+        return next;
+      }
+      return { ...prev, [materialId]: { qty: safe, limitNodeId } };
+    });
+  };
 
   async function patchStatus(id: string, status: string) {
     if (!token || !canWrite) return;
@@ -380,7 +530,7 @@ export function TransfersTab({
         variant="compact"
         icon="↔"
         title="Перемещения"
-        subtitle="Запрос с других объектов · согласование · приём с актом"
+        subtitle="Запрос с других объектов · отправка со своего · приём с актом"
         stats={[
           { label: "Заявок", value: transfers.length, tone: "neutral" },
           {
@@ -400,7 +550,10 @@ export function TransfersTab({
         <button type="button" className={subTab === "request" ? "active" : ""} onClick={() => setSubTab("request")}>
           Запросить
         </button>
-        <button type="button" className={subTab === "outgoing" ? "active" : ""} onClick={() => setSubTab("outgoing")}>
+        <button type="button" className={subTab === "send" ? "active" : ""} onClick={() => setSubTab("send")}>
+          Отправить
+        </button>
+        <button type="button" className={subTab === "approve" ? "active" : ""} onClick={() => setSubTab("approve")}>
           Согласование
         </button>
         <button type="button" className={subTab === "incoming" ? "active" : ""} onClick={() => setSubTab("incoming")}>
@@ -422,25 +575,33 @@ export function TransfersTab({
           ) : (
             <>
               <p className="muted transfersHint">
-                Раздел {section === "SS" ? "СС" : "ЭОМ"} · получатель:{" "}
-                <strong>{safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}</strong>. Отметьте
-                позиции на других складах и укажите количество не больше доступного (остаток минус резерв).
+                Раздел {section === "SS" ? "СС" : "ЭОМ"} · ваш объект (получатель):{" "}
+                <strong>{safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}</strong>.
+                Выберите объект-отправитель и отметьте нужные позиции с его склада.
               </p>
 
               <ToolsListToolbar
                 search={requestSearch}
                 onSearchChange={setRequestSearch}
-                searchPlaceholder="Поиск: материал, склад, единица…"
+                searchPlaceholder="Поиск: материал, единица…"
                 filters={
                   <>
                     <label>
-                      Объект-отправитель
+                      С какого объекта смотрим остатки
                       <select
                         value={filterWarehouseId}
-                        onChange={(e) => setFilterWarehouseId(e.target.value)}
-                        aria-label="Фильтр по объекту"
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setFilterWarehouseId(id);
+                          setSelected({});
+                          setExpandedWh(id || null);
+                        }}
+                        aria-label="Объект-отправитель"
+                        required
                       >
-                        <option value="">Все объекты</option>
+                        <option value="" disabled>
+                          — выберите объект —
+                        </option>
                         {peerData.map((w) => (
                           <option key={w.warehouseId} value={w.warehouseId}>
                             {safeName(w.warehouseName)}
@@ -477,7 +638,6 @@ export function TransfersTab({
                     className="ghostBtn"
                     onClick={() => {
                       setRequestSearch("");
-                      setFilterWarehouseId("");
                       setFilterKind("");
                       setOnlyAvailable(true);
                     }}
@@ -487,16 +647,21 @@ export function TransfersTab({
                 }
               />
 
-              {!peerLoading && !peerError ? (
+              {!peerLoading && !peerError && filterWarehouseId ? (
                 <p className="muted transfersFilterSummary">
-                  Показано {filteredStockCount} позиций на {filteredPeerData.length} объектах
-                  {peerData.length !== filteredPeerData.length ? ` (всего объектов ${peerData.length})` : ""}
+                  Показано {filteredStockCount} позиций
+                  {filterWarehouseId
+                    ? ` · ${safeName(peerData.find((w) => w.warehouseId === filterWarehouseId)?.warehouseName ?? "")}`
+                    : ""}
                 </p>
               ) : null}
 
               {peerLoading ? <LoadingState text="Загружаем остатки…" /> : null}
               {peerError ? <ErrorState text={peerError} /> : null}
-              {!peerLoading && !peerError && filteredPeerData.length === 0 ? (
+              {!peerLoading && !peerError && !filterWarehouseId ? (
+                <p className="muted">Выберите объект-отправитель в списке выше.</p>
+              ) : null}
+              {!peerLoading && !peerError && filterWarehouseId && filteredPeerData.length === 0 ? (
                 <p className="muted">По фильтрам ничего не найдено. Измените условия или сбросьте фильтры.</p>
               ) : null}
               {!peerLoading && !peerError && filteredPeerData.length > 0 ? (
@@ -597,21 +762,14 @@ export function TransfersTab({
               {canWrite && selectedLines.length > 0 ? (
                 <footer className="transfersRequestBar card">
                   <label>
-                    Склад-отправитель
-                    <select value={fromWarehouseId} onChange={(e) => setFromWarehouseId(e.target.value)}>
-                      {peerData.map((w) => (
-                        <option key={w.warehouseId} value={w.warehouseId}>
-                          {safeName(w.warehouseName)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
                     Комментарий
                     <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Необязательно" />
                   </label>
                   <div className="transfersRequestSummary">
-                    <span className="muted">Позиций: {selectedLines.length}</span>
+                    <span className="muted">
+                      С {safeName(peerData.find((w) => w.warehouseId === filterWarehouseId)?.warehouseName ?? "")} ·
+                      позиций: {selectedLines.length}
+                    </span>
                     <ul>
                       {selectedLines.map((l) => (
                         <li key={l.materialId}>{l.label}</li>
@@ -628,10 +786,213 @@ export function TransfersTab({
         </div>
       ) : null}
 
-      {subTab === "outgoing" ? (
+      {subTab === "send" ? (
+        <div className="transfersPanel">
+          {!toWarehouseId ? (
+            <p className="muted">Выберите объект в шапке приложения.</p>
+          ) : (
+            <>
+              <p className="muted transfersHint">
+                Раздел {section === "SS" ? "СС" : "ЭОМ"} · отправитель:{" "}
+                <strong>{safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}</strong>. Отметьте
+                позиции со своего склада и нажмите «Отправить» — выберите объект-получатель.
+              </p>
+              <ToolsListToolbar
+                search={sendSearch}
+                onSearchChange={setSendSearch}
+                searchPlaceholder="Поиск: материал, единица…"
+                filters={
+                  <>
+                    <label>
+                      Вид ТМЦ
+                      <select
+                        value={sendKind}
+                        onChange={(e) => setSendKind((e.target.value || "") as MaterialKindFilter)}
+                        aria-label="Вид материала"
+                      >
+                        <option value="">Все виды</option>
+                        <option value="MATERIAL">{KIND_LABEL.MATERIAL}</option>
+                        <option value="CONSUMABLE">{KIND_LABEL.CONSUMABLE}</option>
+                        <option value="WORKWEAR">{KIND_LABEL.WORKWEAR}</option>
+                      </select>
+                    </label>
+                    <label className="transfersFilterCheck">
+                      <input
+                        type="checkbox"
+                        checked={sendOnlyAvailable}
+                        onChange={(e) => setSendOnlyAvailable(e.target.checked)}
+                      />
+                      Только с доступным остатком
+                    </label>
+                  </>
+                }
+                actions={
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    onClick={() => {
+                      setSendSearch("");
+                      setSendKind("");
+                      setSendOnlyAvailable(true);
+                    }}
+                  >
+                    Сбросить
+                  </button>
+                }
+              />
+              {ownLoading ? <LoadingState text="Загружаем остатки…" /> : null}
+              {ownError ? <ErrorState text={ownError} /> : null}
+              {!ownLoading && !ownError ? (
+                <div className="card transfersPeerCardBody" style={{ marginTop: 8 }}>
+                  {filteredSendStocks.length === 0 ? (
+                    <p className="muted">Нет позиций по фильтрам.</p>
+                  ) : (
+                    <div className="erpTableWrap">
+                      <table className="erpTable desktopTable transfersPickTable">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 36 }} />
+                            <th>Материал</th>
+                            <th>Доступно</th>
+                            <th style={{ width: 100 }}>Кол-во</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredSendStocks.map((row) => {
+                            const sel = sendSelected[row.materialId];
+                            return (
+                              <tr key={row.materialId}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(sel)}
+                                    disabled={!canWrite || row.available <= 0}
+                                    onChange={(e) => toggleSendRow(row, e.target.checked)}
+                                  />
+                                </td>
+                                <td>
+                                  {row.materialName}
+                                  <span className="muted">
+                                    {" "}
+                                    · {row.unit}
+                                    {row.kind && row.kind !== "MATERIAL"
+                                      ? ` · ${KIND_LABEL[row.kind] ?? row.kind}`
+                                      : ""}
+                                  </span>
+                                </td>
+                                <td className="muted">
+                                  {row.available.toLocaleString("ru-RU")}
+                                  {row.reserved > 0 ? ` (резерв ${row.reserved})` : ""}
+                                </td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={row.available}
+                                    step={MATERIAL_QTY_STEP}
+                                    disabled={!sel || !canWrite}
+                                    value={sel?.qty ?? ""}
+                                    onChange={(e) =>
+                                      setSendRowQty(
+                                        row.materialId,
+                                        parseMaterialQty(e.target.value),
+                                        row.limitNodeId,
+                                        row.available
+                                      )
+                                    }
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {canWrite && sendSelectedLines.length > 0 ? (
+                <footer className="transfersRequestBar card">
+                  <div className="transfersRequestSummary">
+                    <span className="muted">К отправке: {sendSelectedLines.length} поз.</span>
+                    <ul>
+                      {sendSelectedLines.map((l) => (
+                        <li key={l.materialId}>{l.label}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <button
+                    type="button"
+                    className="primaryBtn"
+                    onClick={() => {
+                      setSendDestinationId(destinationWarehouses[0]?.id ?? "");
+                      setSendModalOpen(true);
+                    }}
+                  >
+                    Отправить…
+                  </button>
+                </footer>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {sendModalOpen ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true" onClick={() => setSendModalOpen(false)}>
+          <div className="modalCard" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Куда отправить</h3>
+            <p className="muted">
+              С объекта «{safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}» · раздел{" "}
+              {section === "SS" ? "СС" : "ЭОМ"}
+            </p>
+            <label>
+              Объект-получатель
+              <select
+                value={sendDestinationId}
+                onChange={(e) => setSendDestinationId(e.target.value)}
+                aria-label="Объект-получатель"
+              >
+                <option value="">— выберите —</option>
+                {destinationWarehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {safeName(w.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Комментарий
+              <input
+                value={sendNote}
+                onChange={(e) => setSendNote(e.target.value)}
+                placeholder="Необязательно"
+              />
+            </label>
+            <div className="toolbar" style={{ marginTop: 12 }}>
+              <button type="button" className="ghostBtn" onClick={() => setSendModalOpen(false)}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="primaryBtn"
+                disabled={sendSubmitting || !sendDestinationId}
+                onClick={() => void submitSend()}
+              >
+                {sendSubmitting ? "Отправка…" : "Отправить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {subTab === "approve" ? (
         <div className="transfersPanel card">
           <h3>Согласование исходящих</h3>
-          <p className="muted">Заявки, где ваш объект — отправитель. При согласовании остаток резервируется.</p>
+          <p className="muted">
+            Заявки, где текущий объект — отправитель ({safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}).
+            При согласовании остаток резервируется; приём — на вкладке «Принять» у получателя.
+          </p>
           {transfersLoading ? <LoadingState text="Загрузка…" /> : null}
           <TransferTable
             rows={outgoingRows}
@@ -649,8 +1010,8 @@ export function TransfersTab({
           <div className="card">
             <h3>Принять перемещение</h3>
             <p className="muted">
-              Согласованные заявки на ваш объект. Прикрепите акт перемещения, затем нажмите «Принять» — остатки
-              переносятся автоматически.
+              Согласованные заявки на ваш объект ({safeName(warehouses.find((w) => w.id === toWarehouseId)?.name ?? "")}).
+              Прикрепите акт перемещения, затем нажмите «Принять» — остатки переносятся автоматически.
             </p>
             {transfersLoading ? <LoadingState text="Загрузка…" /> : null}
             <TransferTable

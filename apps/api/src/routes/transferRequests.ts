@@ -234,6 +234,75 @@ transferRequestsRouter.get("/peer-inventory", async (req: AuthedRequest, res) =>
   return res.json({ section, toWarehouseId, warehouses: warehousesPayload });
 });
 
+/** Остатки текущего объекта (для подвкладки «Отправить»). */
+transferRequestsRouter.get("/own-inventory", async (req: AuthedRequest, res) => {
+  const scope = await getRequestDataScope(req);
+  const fromWarehouseId = typeof req.query.fromWarehouseId === "string" ? req.query.fromWarehouseId : "";
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : "SS";
+
+  if (!fromWarehouseId) {
+    return res.status(400).json({ error: "fromWarehouseId required" });
+  }
+
+  try {
+    assertWarehouseInScope(scope, fromWarehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+
+  const warehouse = await prisma.warehouse.findUnique({
+    where: { id: fromWarehouseId },
+    select: { id: true, name: true }
+  });
+  if (!warehouse) return res.status(404).json({ error: "Warehouse not found" });
+
+  const [stocks, limitNodes] = await Promise.all([
+    prisma.stock.findMany({
+      where: {
+        AND: [
+          stockWhereFromScope(scope),
+          { warehouseId: fromWarehouseId, section, quantity: { gt: 0 } }
+        ]
+      },
+      include: { material: true },
+      orderBy: { material: { name: "asc" } }
+    }),
+    prisma.objectLimitNode.findMany({
+      where: {
+        nodeType: "MATERIAL",
+        materialId: { not: null },
+        template: { warehouseId: fromWarehouseId, section }
+      },
+      select: { id: true, materialId: true }
+    })
+  ]);
+
+  const limitByMat = new Map(limitNodes.map((n) => [n.materialId!, n.id]));
+
+  return res.json({
+    section,
+    fromWarehouseId,
+    warehouseName: warehouse.name,
+    stocks: stocks.map((s) => {
+      const qty = Number(s.quantity);
+      const reserved = Number(s.reserved);
+      return {
+        materialId: s.materialId,
+        materialName: s.material.name,
+        unit: s.material.unit,
+        kind: s.material.kind,
+        quantity: qty,
+        reserved,
+        available: Math.max(0, qty - reserved),
+        limitNodeId: limitByMat.get(s.materialId) ?? null
+      };
+    })
+  });
+});
+
 transferRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const where = transferRequestWhereFromScope(scope, req.user!.userId);
