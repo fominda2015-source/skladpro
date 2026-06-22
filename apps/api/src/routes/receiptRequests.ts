@@ -1477,7 +1477,9 @@ receiptRequestsRouter.post(
             explicitLimitNodeId: mapping?.limitNodeId ?? null,
             materialId: r.materialId,
             materialName: cardName,
-            acceptedQty: r.stockQty
+            acceptedQty: r.stockQty,
+            warehouseId: row.warehouseId,
+            section: row.section
           });
           r.limitNodeId = limitNodeId;
         } else if (

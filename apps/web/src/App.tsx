@@ -153,9 +153,11 @@ import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
 import {
   buildLimitReceiptMetricsFromReceipts,
   limitNodeArrivedQty,
+  mergeBindingStockIntoArrivedMetrics,
   mergeSupplyStockIntoArrivedMetrics
 } from "./widgets/limits/limitReceiptMetrics";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
+import { WarehouseBindLimitModal } from "./widgets/warehouse/WarehouseBindLimitModal";
 import { ReadinessPanel, type ReadinessResponse } from "./widgets/integrations/ReadinessPanel";
 
 /** Recharts 3 Tooltip: value типизируется как ValueType | undefined — параметр unknown безопасен для strict TS. */
@@ -982,6 +984,9 @@ function App() {
   const [productivityReloadKey, setProductivityReloadKey] = useState(0);
   const [limitTemplates, setLimitTemplates] = useState<LimitImportTemplate[]>([]);
   const [limitTemplatesLoading, setLimitTemplatesLoading] = useState(false);
+  const [stockLimitBindings, setStockLimitBindings] = useState<
+    Array<{ limitNodeId: string; materialId: string; quantity: number }>
+  >([]);
   const [limitIssuedTotals, setLimitIssuedTotals] = useState<Record<string, number>>({});
   const [limitSupplyByMaterialId, setLimitSupplyByMaterialId] = useState<
     Record<string, Pick<LimitSupplyMetricRow, "arrivedQty" | "issuedQty" | "onOrderQty" | "stockQty">>
@@ -1076,6 +1081,12 @@ function App() {
   const [showCriticalAssignedModal, setShowCriticalAssignedModal] = useState(false);
   /** Ручной приход на склад — форма только в модалке. */
   const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
+  const [stockBindLimitModal, setStockBindLimitModal] = useState<{
+    materialId: string;
+    warehouseId: string;
+    materialName: string;
+    materialUnit: string;
+  } | null>(null);
   const [requestMaterialsModal, setRequestMaterialsModal] = useState<
     | { kind: "issue"; row: IssueRequest }
     | { kind: "receipt"; row: ReceiptRequestRow }
@@ -1876,9 +1887,13 @@ function App() {
       limitWh,
       objectSectionFilter
     );
-    const arrivedByLimitNodeId = mergeSupplyStockIntoArrivedMetrics(
-      base.arrivedByLimitNodeId,
-      limitMaterialNodes,
+    const arrivedByLimitNodeId = mergeBindingStockIntoArrivedMetrics(
+      mergeSupplyStockIntoArrivedMetrics(
+        base.arrivedByLimitNodeId,
+        limitMaterialNodes,
+        limitSupplyByMaterialId
+      ),
+      stockLimitBindings,
       limitSupplyByMaterialId
     );
     return { arrivedByLimitNodeId, onOrderByLimitNodeId: base.onOrderByLimitNodeId };
@@ -1889,7 +1904,8 @@ function App() {
     activeObjectId,
     limitsWarehouseId,
     objectSectionFilter,
-    limitSupplyByMaterialId
+    limitSupplyByMaterialId,
+    stockLimitBindings
   ]);
 
   const canWriteOperations = hasObjectAccess;
@@ -2254,7 +2270,8 @@ function App() {
       loadStocks(q, section, seq),
       loadIssues(section, seq),
       loadOperations(section, seq),
-      loadApprovalQueue(section, seq)
+      loadApprovalQueue(section, seq),
+      loadStockLimitBindings(activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : undefined, section)
     ];
     const receiptWh =
       activeObjectId === ALL_OBJECTS_ID
@@ -3259,6 +3276,32 @@ function App() {
     } finally {
       setReportsSnapshotLoading(false);
     }
+  }
+
+  async function loadStockLimitBindings(wh?: string, section?: "SS" | "EOM") {
+    if (!token) return;
+    const warehouseId = wh ?? (activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : limitsWarehouseId);
+    if (!warehouseId) {
+      setStockLimitBindings([]);
+      return;
+    }
+    const sec = section ?? objectSectionFilter;
+    const params = new URLSearchParams({ warehouseId, section: sec });
+    const res = await fetchWithSession(`${API_URL}/api/material-limit-bindings?${params}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setStockLimitBindings([]);
+      return;
+    }
+    const rows = (await res.json()) as Array<{ limitNodeId: string; materialId: string; quantity: number }>;
+    setStockLimitBindings(
+      rows.map((r) => ({
+        limitNodeId: r.limitNodeId,
+        materialId: r.materialId,
+        quantity: Number(r.quantity) || 1
+      }))
+    );
   }
 
   async function loadLimitTemplates(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
@@ -4589,14 +4632,53 @@ function App() {
       setIssuesTone("error");
       return;
     }
-    const lines = issuePickCart
+    const draftLines = issuePickCart
       .map((row) => ({
         materialId: row.materialId,
         quantity: parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1) || MATERIAL_QTY_MIN,
         factLabel: row.factLabel?.trim() || "",
-        limitNodeId: row.limitNodeId || undefined
+        limitNodeId: row.limitNodeId || undefined,
+        pickKey: row.pickKey
       }))
       .filter((line) => line.materialId && line.quantity > 0);
+
+    const materialIds = [...new Set(draftLines.filter((l) => !l.limitNodeId).map((l) => l.materialId))];
+    if (materialIds.length) {
+      const bindingMap = new Map<string, Array<{ limitNodeId: string }>>();
+      await Promise.all(
+        materialIds.map(async (materialId) => {
+          const params = new URLSearchParams({
+            warehouseId: activeObjectId,
+            section: objectSectionFilter,
+            materialId
+          });
+          const res = await fetchWithSession(`${API_URL}/api/material-limit-bindings?${params}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            bindingMap.set(materialId, (await res.json()) as Array<{ limitNodeId: string }>);
+          }
+        })
+      );
+      for (const line of draftLines) {
+        if (line.limitNodeId) continue;
+        const bindings = bindingMap.get(line.materialId) ?? [];
+        if (bindings.length === 1) {
+          line.limitNodeId = bindings[0]!.limitNodeId;
+        } else if (bindings.length > 1) {
+          const cartRow = issuePickCart.find((c) => c.pickKey === line.pickKey);
+          if (cartRow) {
+            setIssueLimitPickRow(cartRow);
+            setIssuesMessage("Материал привязан к нескольким строкам лимита — выберите, из какого лимита выдаём");
+            setIssuesTone("neutral");
+            return;
+          }
+        }
+      }
+    }
+
+    const lines = draftLines.map(({ pickKey: _pk, ...rest }) => rest);
+
     if (!lines.length) {
       setIssuesMessage("Добавьте хотя бы один материал в список выдачи");
       setIssuesTone("error");
@@ -7184,6 +7266,9 @@ function App() {
             onOpenMaterialCard={(materialId, warehouseId) => {
               void loadChatUsers();
               setMaterialEditModal({ materialId, warehouseId });
+            }}
+            onBindToLimit={(materialId, warehouseId, materialName, materialUnit) => {
+              setStockBindLimitModal({ materialId, warehouseId, materialName, materialUnit });
             }}
             onDeleteMaterial={deleteWarehouseMaterial}
             movementsByKey={movementSlicesByStockKey}
@@ -13357,6 +13442,23 @@ function App() {
               .filter((n) => !n.isRead && n.eventCode === "CRITICAL_RECIPIENT_ASSIGNED")
               .map((n) => n.id);
             if (ids.length) void markNotificationsRead(ids);
+          }}
+        />
+      ) : null}
+
+      {stockBindLimitModal && activeObjectId ? (
+        <WarehouseBindLimitModal
+          token={token}
+          fetchWithSession={fetchWithSession}
+          warehouseId={stockBindLimitModal.warehouseId}
+          section={objectSectionFilter}
+          materialId={stockBindLimitModal.materialId}
+          materialName={safeName(stockBindLimitModal.materialName)}
+          materialUnit={stockBindLimitModal.materialUnit}
+          canWrite={canWriteOperations}
+          onClose={() => {
+            setStockBindLimitModal(null);
+            void loadStockLimitBindings();
           }}
         />
       ) : null}

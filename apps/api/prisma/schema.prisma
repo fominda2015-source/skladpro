@@ -193,6 +193,7 @@ model User {
   sentMessages     Message[]            @relation("MessageSender")
   limitTemplates   ObjectLimitTemplate[] @relation("LimitTemplateCreator")
   materialMappings MaterialMappingLibrary[]
+  stockLimitBindingsCreated StockMaterialLimitBinding[] @relation("StockLimitBindingCreator")
   receiptRequests  ReceiptRequest[]      @relation("ReceiptRequestCreator")
   campItems        CampItem[]            @relation("CampItemCreator")
   revertedAuditLogs AuditLog[]           @relation("AuditRevertedBy")
@@ -281,6 +282,7 @@ model Warehouse {
   projects    Project[]      @relation("ProjectWarehouseMain")
   limitTemplates ObjectLimitTemplate[]
   materialMappings MaterialMappingLibrary[]
+  stockLimitBindings StockMaterialLimitBinding[]
   receiptRequests ReceiptRequest[]
   campItems   CampItem[]
   transferRequestsFrom TransferRequest[] @relation("TransferFromWh")
@@ -316,6 +318,7 @@ model Material {
   mappingTargets  MaterialMappingLibrary[]
   receiptMappedItems ReceiptRequestItem[]
   transferRequestLines TransferRequestLine[]
+  stockLimitBindings StockMaterialLimitBinding[]
   mergedInto      Material?            @relation("MaterialMergedInto", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom      Material[]           @relation("MaterialMergedInto")
   materialHolderWriteoffs MaterialHolderWriteoff[]
@@ -982,6 +985,7 @@ model ObjectLimitNode {
   receiptRequestItems ReceiptRequestItem[]
   issueRequestItems   IssueRequestItem[]
   transferRequestLines TransferRequestLine[]
+  stockLimitBindings StockMaterialLimitBinding[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -1004,6 +1008,28 @@ model MaterialMappingLibrary {
 
   @@unique([warehouseId, section, sourceName, sourceUnit])
   @@index([warehouseId, section, createdAt])
+}
+
+/** Привязка материала склада к строке лимита (другая номенклатура в лимите). */
+model StockMaterialLimitBinding {
+  id          String        @id @default(cuid())
+  warehouseId String
+  section     ObjectSection
+  materialId  String
+  limitNodeId String
+  /// Коэффициент: 1 ед. склада → N ед. в лимите
+  quantity    Decimal       @default(1) @db.Decimal(14, 3)
+  createdById String?
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  material    Material      @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  limitNode   ObjectLimitNode @relation(fields: [limitNodeId], references: [id], onDelete: Cascade)
+  createdBy   User?         @relation("StockLimitBindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([warehouseId, section, materialId, limitNodeId])
+  @@index([warehouseId, section, materialId])
+  @@index([limitNodeId])
 }
 
 model ReceiptRequest {

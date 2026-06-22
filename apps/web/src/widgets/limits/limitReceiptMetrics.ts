@@ -134,6 +134,26 @@ export function limitNodeArrivedQty(
   return Math.max(base, movementArrived, stockQty);
 }
 
+/** Остаток/приход через явные привязки склада к строкам лимита. */
+export function mergeBindingStockIntoArrivedMetrics(
+  arrivedByLimitNodeId: Record<string, number>,
+  bindings: Array<{ limitNodeId: string; materialId: string; quantity: number }>,
+  supplyByMaterialId: Record<string, SupplyMetricLike>
+): Record<string, number> {
+  const next = { ...arrivedByLimitNodeId };
+  for (const b of bindings) {
+    const supply = supplyByMaterialId[b.materialId];
+    if (!supply) continue;
+    const stockQty = parseMaterialQty(supply.stockQty);
+    const movementArrived = parseMaterialQty(supply.arrivedQty);
+    const factor = b.quantity > 0 ? b.quantity : 1;
+    const extra = Math.max(stockQty, movementArrived) * factor;
+    if (extra <= 0) continue;
+    next[b.limitNodeId] = (next[b.limitNodeId] || 0) + extra;
+  }
+  return next;
+}
+
 /** Остаток/приход из supply-metrics — один раз на materialId (для агрегатов групп). */
 export function mergeSupplyStockIntoArrivedMetrics(
   arrivedByLimitNodeId: Record<string, number>,

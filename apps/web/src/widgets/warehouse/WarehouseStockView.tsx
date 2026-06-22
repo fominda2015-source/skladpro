@@ -82,6 +82,7 @@ export type WarehouseStockViewProps = {
   expandedRowId: string;
   onToggleExpand: (rowId: string) => void;
   onOpenMaterialCard: (materialId: string, warehouseId: string) => void;
+  onBindToLimit?: (materialId: string, warehouseId: string, materialName: string, materialUnit: string) => void;
   onDeleteMaterial: (materialId: string, materialName: string) => void;
   movementsByKey: Map<string, MovementSlice[]>;
   /** Принятые названия по УПД (только factLabel ≠ номенклатура карточки). */
@@ -141,6 +142,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     expandedRowId,
     onToggleExpand,
     onOpenMaterialCard,
+    onBindToLimit,
     onDeleteMaterial,
     movementsByKey,
     updFactsByMaterialId,
@@ -478,6 +480,20 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                     onActivate={() => {
                                       setRowMenu(null);
                                       onOpenMaterialCard(row.materialId, row.warehouseId);
+                                    }}
+                                  />
+                                ) : null}
+                                {onBindToLimit && canWriteOperations ? (
+                                  <WhMenuAction
+                                    label="Привязать к лимиту"
+                                    onActivate={() => {
+                                      setRowMenu(null);
+                                      onBindToLimit(
+                                        row.materialId,
+                                        row.warehouseId,
+                                        row.materialName,
+                                        row.materialUnit
+                                      );
                                     }}
                                   />
                                 ) : null}

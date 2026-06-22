@@ -20,6 +20,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { isAdminEquivalent } from "../lib/openAccess.js";
 import { recordAudit } from "../lib/audit.js";
+import { resolveLimitConsumptionQty } from "../lib/materialLimitBindings.js";
 import {
   assertObjectSectionInScope,
   assertProjectInScope,
@@ -1338,9 +1339,17 @@ issueRequestsRouter.patch(
         });
 
         if (item.limitNodeId) {
+          const limitQty = await resolveLimitConsumptionQty(
+            tx,
+            issueRow.warehouseId,
+            issueRow.section,
+            item.materialId,
+            item.limitNodeId,
+            Number(item.quantity)
+          );
           await tx.objectLimitNode.update({
             where: { id: item.limitNodeId },
-            data: { issuedQty: { increment: item.quantity } }
+            data: { issuedQty: { increment: limitQty } }
           });
         }
 
@@ -1612,9 +1621,17 @@ issueRequestsRouter.post(
         }
 
         if (item.limitNodeId) {
+          const limitQty = await resolveLimitConsumptionQty(
+            tx,
+            issue.warehouseId,
+            issue.section,
+            item.materialId,
+            item.limitNodeId,
+            returnQty
+          );
           await tx.objectLimitNode.update({
             where: { id: item.limitNodeId },
-            data: { issuedQty: { decrement: returnQty } }
+            data: { issuedQty: { decrement: limitQty } }
           });
         }
 

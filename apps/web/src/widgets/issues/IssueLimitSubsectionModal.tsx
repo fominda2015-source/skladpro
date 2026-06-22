@@ -7,6 +7,7 @@ export type LimitNodePickRow = {
   path: string;
   templateTitle?: string;
   plannedQty?: number | null;
+  coefficient?: number;
 };
 
 type Props = {
@@ -71,10 +72,10 @@ export function IssueLimitSubsectionModal({
   return (
     <div className="modalOverlay" role="dialog" aria-modal="true" onClick={onCancel}>
       <div className="modalCard issueLimitSubModal" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0 }}>Выдать из другого подраздела</h3>
+        <h3 style={{ marginTop: 0 }}>Из какого лимита выдаём</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Материал «<strong>{materialLabel}</strong>» может быть в нескольких подразделах лимита. Приход остаётся в том
-          подразделе, куда приняли заявку; выдача и списание по лимиту — в выбранном ниже.
+          Материал «<strong>{materialLabel}</strong>» привязан к нескольким строкам лимита или встречается в
+          нескольких подразделах. Выберите, к какой строке отнести выдачу.
         </p>
 
         {loading ? <LoadingState text="Поиск в лимитах…" /> : null}
@@ -94,6 +95,7 @@ export function IssueLimitSubsectionModal({
                 <option key={p.id} value={p.id}>
                   {p.path}
                   {p.plannedQty != null ? ` · план ${p.plannedQty}` : ""}
+                  {p.coefficient != null && p.coefficient !== 1 ? ` · коэфф. ${p.coefficient}` : ""}
                 </option>
               ))}
             </select>

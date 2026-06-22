@@ -1,6 +1,7 @@
 import type { ObjectSection } from "@prisma/client";
 import { analyzeCatalogNames } from "./parseOrderSheet.js";
 import { syncReceiptItemToLimitTemplate } from "./receiptLimitSync.js";
+import { appendBindingLimitPicks } from "./materialLimitBindings.js";
 import { prisma } from "./prisma.js";
 
 export type LimitNodePick = {
@@ -11,6 +12,9 @@ export type LimitNodePick = {
   path: string;
   title: string;
   plannedQty: number | null;
+  /** Коэффициент привязки склада (1 ед. склада → N в лимите) */
+  coefficient?: number;
+  bindingId?: string;
 };
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -213,7 +217,7 @@ export async function findLimitMaterialNodesInSection(
     });
   }
 
-  return picks.sort((a, b) => a.path.localeCompare(b.path, "ru"));
+  return appendBindingLimitPicks(warehouseId, section, materialId, picks);
 }
 
 type ReceiptLimitItemRef = {
@@ -273,6 +277,8 @@ export async function resolveReceiptAcceptLimitNode(
     materialId: string | null;
     materialName: string;
     acceptedQty: number;
+    warehouseId?: string;
+    section?: ObjectSection;
   }
 ): Promise<string | null> {
   if (opts.explicitLimitNodeId) {
@@ -282,6 +288,20 @@ export async function resolveReceiptAcceptLimitNode(
   if (item.limitNodeId) {
     if (opts.materialId) await attachMaterialToLimitNode(tx, item.limitNodeId, opts.materialId);
     return item.limitNodeId;
+  }
+  if (opts.warehouseId && opts.section && opts.materialId) {
+    const bindings = await tx.stockMaterialLimitBinding.findMany({
+      where: {
+        warehouseId: opts.warehouseId,
+        section: opts.section,
+        materialId: opts.materialId
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    if (bindings.length === 1) {
+      await attachMaterialToLimitNode(tx, bindings[0]!.limitNodeId, opts.materialId);
+      return bindings[0]!.limitNodeId;
+    }
   }
   if (!templateId || !opts.materialId) return null;
 
