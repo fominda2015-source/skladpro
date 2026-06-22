@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { PendingFilesPicker } from "../../shared/PendingFilesPicker";
 import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 import { ToolConsumableListTable } from "./ToolConsumableListTable";
 import type { ToolCatalogConsumableLine } from "./toolCatalog";
@@ -46,14 +47,14 @@ export function ElectricToolIssueWizardModal({
   const [submitting, setSubmitting] = useState(false);
   const [recipient, setRecipient] = useState(initialRecipient);
   const [comment, setComment] = useState(initialComment);
-  const [photo, setPhoto] = useState<File | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
 
   useEffect(() => {
     if (!open) return;
     setStep("consumables");
     setRecipient(initialRecipient);
     setComment(initialComment);
-    setPhoto(null);
+    setPhotos([]);
     setMessage("");
     setPickQty({});
   }, [open, initialRecipient, initialComment]);
@@ -139,7 +140,7 @@ export function ElectricToolIssueWizardModal({
       const ok = await onSubmit({
         recipient: holder,
         comment: comment.trim(),
-        photo,
+        photos,
         consumables: pickedConsumables
       });
       if (ok) onClose();
@@ -282,7 +283,12 @@ export function ElectricToolIssueWizardModal({
               </label>
               <label>
                 Фотофиксация (опционально)
-                <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
+                <PendingFilesPicker
+                  files={photos}
+                  onChange={setPhotos}
+                  accept="image/*"
+                  addLabel="Добавить фото"
+                />
               </label>
             </div>
             {message ? <p className="resultBanner error">{message}</p> : null}

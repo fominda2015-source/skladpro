@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { mergeFiles } from "../../shared/mergeFiles";
 import { useDebouncedValue } from "../../shared/hooks/useDebouncedValue";
 import { EmptyState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
@@ -529,7 +530,10 @@ export function CampTab({
                   type="file"
                   multiple
                   accept="image/*,application/pdf"
-                  onChange={(e) => setCreateFiles(Array.from(e.target.files || []))}
+                  onChange={(e) => {
+                    setCreateFiles((prev) => mergeFiles(prev, Array.from(e.target.files || [])));
+                    e.target.value = "";
+                  }}
                 />
               </label>
               <label style={{ gridColumn: "1 / -1" }}>
@@ -679,6 +683,7 @@ function CampItemDrawer({
   transferBusy,
   moveWarehouseId,
   moveNote,
+  moveFiles,
   moveBusy,
   detailFiles,
   detailUploading,
@@ -845,8 +850,12 @@ function CampItemDrawer({
                 Документ*
                 <input
                   type="file"
+                  multiple
                   accept="image/*,application/pdf"
-                  onChange={(e) => onTransferFilesChange(Array.from(e.target.files || []))}
+                  onChange={(e) => {
+                    onTransferFilesChange(mergeFiles(transferFiles, Array.from(e.target.files || [])));
+                    e.target.value = "";
+                  }}
                 />
               </label>
             </div>
@@ -881,8 +890,12 @@ function CampItemDrawer({
                 Документ (необязательно)
                 <input
                   type="file"
+                  multiple
                   accept="image/*,application/pdf"
-                  onChange={(e) => onMoveFilesChange(Array.from(e.target.files || []))}
+                  onChange={(e) => {
+                    onMoveFilesChange(mergeFiles(moveFiles, Array.from(e.target.files || [])));
+                    e.target.value = "";
+                  }}
                 />
               </label>
             </div>
@@ -923,7 +936,10 @@ function CampItemDrawer({
                 type="file"
                 multiple
                 accept="image/*,application/pdf"
-                onChange={(e) => onDetailFilesChange(Array.from(e.target.files || []))}
+                onChange={(e) => {
+                  onDetailFilesChange(mergeFiles(detailFiles, Array.from(e.target.files || [])));
+                  e.target.value = "";
+                }}
               />
               <button
                 type="button"

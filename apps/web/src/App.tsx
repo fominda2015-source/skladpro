@@ -28,6 +28,8 @@ import {
   resolvePublicFileUrl
 } from "./app/constants";
 import { displayDocumentFileName } from "./shared/fileName";
+import { mergeFiles } from "./shared/mergeFiles";
+import { PendingFilesPicker } from "./shared/PendingFilesPicker";
 import { useDebouncedValue } from "./shared/hooks/useDebouncedValue";
 import { isAdminEquivalent } from "./shared/openAccess";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
@@ -1100,8 +1102,8 @@ function App() {
     domain: "TOOLS" | "WORKWEAR" | "OTHER";
   }>(null);
   const [issueRecipientDraft, setIssueRecipientDraft] = useState("");
-  const [issueRecipientSignedFile, setIssueRecipientSignedFile] = useState<File | null>(null);
-  const [directIssueSignedFile, setDirectIssueSignedFile] = useState<File | null>(null);
+  const [issueRecipientSignedFiles, setIssueRecipientSignedFiles] = useState<File[]>([]);
+  const [directIssueSignedFiles, setDirectIssueSignedFiles] = useState<File[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [inboundDocuments, setInboundDocuments] = useState<InboundDocumentRow[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
@@ -1109,7 +1111,7 @@ function App() {
   const [inboundUploadTitle, setInboundUploadTitle] = useState("");
   const [inboundUploadComment, setInboundUploadComment] = useState("");
   const [inboundUploadDate, setInboundUploadDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [inboundUploadFile, setInboundUploadFile] = useState<File | null>(null);
+  const [inboundUploadFiles, setInboundUploadFiles] = useState<File[]>([]);
   const [inboundUploadBusy, setInboundUploadBusy] = useState(false);
   const [docSearchQuery, setDocSearchQuery] = useState("");
   const [docEntityType, setDocEntityType] = useState<"" | "operation" | "issue" | "receipt">("");
@@ -1216,7 +1218,7 @@ function App() {
   const [toolAction, setToolAction] = useState<{ toolId: string; action: ToolActionKind } | null>(null);
   const [toolActionResponsible, setToolActionResponsible] = useState("");
   const [toolActionComment, setToolActionComment] = useState("");
-  const [toolActionPhoto, setToolActionPhoto] = useState<File | null>(null);
+  const [toolActionPhotos, setToolActionPhotos] = useState<File[]>([]);
   const [toolsNavPath, setToolsNavPath] = useState<ToolsNavId[]>(["hub"]);
   const [toolsListGroupFilter, setToolsListGroupFilter] = useState<{
     categoryId: string;
@@ -1321,7 +1323,7 @@ function App() {
   const [feedbackComposerMode, setFeedbackComposerMode] = useState<"thread" | "new">("thread");
   const [feedbackNewSubject, setFeedbackNewSubject] = useState("");
   const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackAttachment, setFeedbackAttachment] = useState<File | null>(null);
+  const [feedbackAttachments, setFeedbackAttachments] = useState<File[]>([]);
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackListLoading, setFeedbackListLoading] = useState(false);
   const [feedbackDetailLoading, setFeedbackDetailLoading] = useState(false);
@@ -3069,14 +3071,14 @@ function App() {
   async function submitNewFeedbackTicket() {
     if (!token || !feedbackText.trim()) return;
     setFeedbackError("");
-    const attachments = feedbackAttachment
-      ? [
-          {
-            fileName: feedbackAttachment.name,
-            mimeType: feedbackAttachment.type || undefined,
-            dataUrl: await fileToDataUrl(feedbackAttachment)
-          }
-        ]
+    const attachments = feedbackAttachments.length
+      ? await Promise.all(
+          feedbackAttachments.map(async (file) => ({
+            fileName: file.name,
+            mimeType: file.type || undefined,
+            dataUrl: await fileToDataUrl(file)
+          }))
+        )
       : [];
     const res = await fetchWithSession(`${API_URL}/api/feedback/tickets`, {
       method: "POST",
@@ -3091,7 +3093,7 @@ function App() {
     setFeedbackComposerMode("thread");
     setFeedbackNewSubject("");
     setFeedbackText("");
-    setFeedbackAttachment(null);
+    setFeedbackAttachments([]);
     await loadFeedbackTickets();
     if (body.id) {
       setFeedbackSelectedId(body.id);
@@ -3102,14 +3104,14 @@ function App() {
   async function sendFeedbackTicketReply() {
     if (!token || !feedbackSelectedId || !feedbackText.trim()) return;
     setFeedbackError("");
-    const attachments = feedbackAttachment
-      ? [
-          {
-            fileName: feedbackAttachment.name,
-            mimeType: feedbackAttachment.type || undefined,
-            dataUrl: await fileToDataUrl(feedbackAttachment)
-          }
-        ]
+    const attachments = feedbackAttachments.length
+      ? await Promise.all(
+          feedbackAttachments.map(async (file) => ({
+            fileName: file.name,
+            mimeType: file.type || undefined,
+            dataUrl: await fileToDataUrl(file)
+          }))
+        )
       : [];
     const res = await fetchWithSession(`${API_URL}/api/feedback/tickets/${feedbackSelectedId}/messages`, {
       method: "POST",
@@ -3121,7 +3123,7 @@ function App() {
       return;
     }
     setFeedbackText("");
-    setFeedbackAttachment(null);
+    setFeedbackAttachments([]);
     await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(feedbackSelectedId)]);
   }
 
@@ -4310,7 +4312,7 @@ function App() {
       fromApprovals?: boolean;
       closeDrawer?: boolean;
       actualRecipientName?: string;
-      signedFile?: File | null;
+      signedFiles?: File[];
     }
   ): Promise<boolean> {
     if (!token) return false;
@@ -4323,7 +4325,7 @@ function App() {
       const modalDom: "TOOLS" | "WORKWEAR" | "OTHER" =
         dom === "TOOLS" ? "TOOLS" : dom === "WORKWEAR" ? "WORKWEAR" : "OTHER";
       setIssueRecipientDraft(fallback.trim());
-      setIssueRecipientSignedFile(null);
+      setIssueRecipientSignedFiles([]);
       setIssueRecipientModal({
         issueId,
         opts,
@@ -4348,8 +4350,8 @@ function App() {
       const ok = window.confirm(`Подтвердить действие: ${actionText}?`);
       if (!ok) return false;
     }
-    const signed = opts?.signedFile ?? undefined;
-    const useMultipart = Boolean(action === "issue" && signed);
+    const signedFiles = opts?.signedFiles ?? [];
+    const useMultipart = Boolean(action === "issue" && signedFiles.length);
     const res = await fetchWithSession(`${API_URL}/api/issues/${issueId}/${action}`, {
       method: "PATCH",
       headers: {
@@ -4366,7 +4368,7 @@ function App() {
           ? (() => {
               const fd = new FormData();
               fd.append("payload", JSON.stringify({ actualRecipientName }));
-              fd.append("signedFile", signed!);
+              for (const file of signedFiles) fd.append("signedFile", file);
               return { body: fd };
             })()
           : { body: JSON.stringify({ actualRecipientName }) }
@@ -4387,7 +4389,7 @@ function App() {
     if (action === "issue") {
       await loadStocks(q);
       void loadTools().catch(() => undefined);
-      setIssueRecipientSignedFile(null);
+      setIssueRecipientSignedFiles([]);
     }
     return true;
   }
@@ -4724,10 +4726,10 @@ function App() {
       }
       const created = (await createRes.json()) as { id: string; number: string };
       let issueRes: Response;
-      if (directIssueSignedFile) {
+      if (directIssueSignedFiles.length) {
         const fd = new FormData();
         fd.append("payload", JSON.stringify({ actualRecipientName }));
-        fd.append("signedFile", directIssueSignedFile);
+        for (const file of directIssueSignedFiles) fd.append("signedFile", file);
         issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}` },
@@ -4763,7 +4765,7 @@ function App() {
       setIssuePickQtyByKey({});
       setIssueMaterialSearch("");
       setIssueNote("");
-      setDirectIssueSignedFile(null);
+      setDirectIssueSignedFiles([]);
       await loadIssues();
       await loadStocks(q);
       await loadStockMovements();
@@ -4849,10 +4851,10 @@ function App() {
       }
       const created = (await createRes.json()) as { id: string; number: string };
       let issueRes: Response;
-      if (directIssueSignedFile) {
+      if (directIssueSignedFiles.length) {
         const fd = new FormData();
         fd.append("payload", JSON.stringify({ actualRecipientName }));
-        fd.append("signedFile", directIssueSignedFile);
+        for (const file of directIssueSignedFiles) fd.append("signedFile", file);
         issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}` },
@@ -4887,7 +4889,7 @@ function App() {
       setIssueToolPickIds([]);
       setIssueToolSearch("");
       setIssueNote("");
-      setDirectIssueSignedFile(null);
+      setDirectIssueSignedFiles([]);
       await loadIssues();
       void loadTools().catch(() => undefined);
     } catch (e) {
@@ -5225,12 +5227,14 @@ function App() {
           const ok = await doToolAction(toolId, "ISSUE", {
             responsible: data.recipient,
             comment: data.comment || undefined,
-            photo: null
+            photos: []
           });
           if (!ok) return false;
         }
-        if (data.photo && ctx.toolIds[0]) {
-          await uploadToolPhoto(ctx.toolIds[0], data.photo);
+        if (data.photos.length && ctx.toolIds[0]) {
+          for (const photo of data.photos) {
+            await uploadToolPhoto(ctx.toolIds[0], photo);
+          }
         }
         await issueToolConsumables(ctx.electricToolIds, data);
         setToolsMessage("Инструмент и расходники выданы");
@@ -5269,10 +5273,10 @@ function App() {
       }
       const created = (await createRes.json()) as { id: string; number: string };
       let issueRes: Response;
-      if (directIssueSignedFile) {
+      if (directIssueSignedFiles.length) {
         const fd = new FormData();
         fd.append("payload", JSON.stringify({ actualRecipientName }));
-        fd.append("signedFile", directIssueSignedFile);
+        for (const file of directIssueSignedFiles) fd.append("signedFile", file);
         issueRes = await fetchWithSession(`${API_URL}/api/issues/${created.id}/issue`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}` },
@@ -5296,8 +5300,10 @@ function App() {
         await loadIssues();
         return false;
       }
-      if (data.photo && ctx.electricToolIds[0]) {
-        await uploadToolPhoto(ctx.electricToolIds[0], data.photo);
+      if (data.photos.length && ctx.electricToolIds[0]) {
+        for (const photo of data.photos) {
+          await uploadToolPhoto(ctx.electricToolIds[0], photo);
+        }
       }
       await issueToolConsumables(ctx.electricToolIds, data, created.id);
       setIssuesMessage(`Инструмент по заявке ${created.number} выдан${data.consumables.length ? " с расходниками" : ""}.`);
@@ -5305,7 +5311,7 @@ function App() {
       setIssueToolPickIds([]);
       setIssueToolSearch("");
       setIssueNote("");
-      setDirectIssueSignedFile(null);
+      setDirectIssueSignedFiles([]);
       await loadIssues();
       await loadTools().catch(() => undefined);
       return true;
@@ -5344,7 +5350,7 @@ function App() {
   async function doToolAction(
     toolId: string,
     action: ToolActionKind,
-    opts?: { responsible?: string; comment?: string; photo?: File | null }
+    opts?: { responsible?: string; comment?: string; photos?: File[] }
   ): Promise<boolean> {
     if (!token) return false;
     const responsible = opts?.responsible?.trim() || undefined;
@@ -5365,17 +5371,19 @@ function App() {
       return false;
     }
     setToolsTone("success");
-    if (opts?.photo) {
-      const formData = new FormData();
-      formData.append("entityType", "tool");
-      formData.append("entityId", toolId);
-      formData.append("type", "photo");
-      formData.append("file", opts.photo);
-      await fetchWithSession(`${API_URL}/api/documents/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
+    if (opts?.photos?.length) {
+      for (const photo of opts.photos) {
+        const formData = new FormData();
+        formData.append("entityType", "tool");
+        formData.append("entityId", toolId);
+        formData.append("type", "photo");
+        formData.append("file", photo);
+        await fetchWithSession(`${API_URL}/api/documents/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+      }
     }
     await loadTools();
     await loadToolEvents(toolId);
@@ -5398,7 +5406,7 @@ function App() {
     setToolAction({ toolId, action });
     setToolActionResponsible(selected?.responsible || "");
     setToolActionComment("");
-    setToolActionPhoto(null);
+    setToolActionPhotos([]);
   }
 
   async function submitToolActionDialog() {
@@ -5407,7 +5415,7 @@ function App() {
     const ok = await doToolAction(tid, toolAction.action, {
       responsible: toolActionResponsible,
       comment: toolActionComment,
-      photo: toolActionPhoto
+      photos: toolActionPhotos
     });
     if (!ok) return;
     const wasReturn = toolAction.action === "RETURN";
@@ -5725,28 +5733,30 @@ function App() {
   }
 
   async function uploadInboundDocument() {
-    if (!token || !inboundUploadFile || !inboundUploadTitle.trim() || !docWarehouseFilter) return;
+    if (!token || !inboundUploadFiles.length || !inboundUploadTitle.trim() || !docWarehouseFilter) return;
     setInboundUploadBusy(true);
     setDocumentsMessage("");
     try {
-      const fd = new FormData();
-      fd.append("file", inboundUploadFile);
-      fd.append("warehouseId", docWarehouseFilter);
-      fd.append("title", inboundUploadTitle.trim());
-      fd.append("comment", inboundUploadComment.trim());
-      fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
-      const res = await fetchWithSession(`${API_URL}/api/documents/inbound/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd
-      });
-      if (!res.ok) {
-        setDocumentsMessage("Не удалось добавить документ");
-        return;
+      for (const file of inboundUploadFiles) {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("warehouseId", docWarehouseFilter);
+        fd.append("title", inboundUploadTitle.trim());
+        fd.append("comment", inboundUploadComment.trim());
+        fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
+        const res = await fetchWithSession(`${API_URL}/api/documents/inbound/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd
+        });
+        if (!res.ok) {
+          setDocumentsMessage("Не удалось добавить документ");
+          return;
+        }
       }
       setInboundUploadTitle("");
       setInboundUploadComment("");
-      setInboundUploadFile(null);
+      setInboundUploadFiles([]);
       setInboundUploadDate(new Date().toISOString().slice(0, 10));
       await loadInboundDocuments();
     } finally {
@@ -5887,7 +5897,7 @@ function App() {
       setLimitPromptRequest(null);
       setManualStockModalOpen(false);
       setIssueRecipientModal(null);
-      setIssueRecipientSignedFile(null);
+      setIssueRecipientSignedFiles([]);
       setPendingAcceptanceRequestId(null);
       setPendingAcceptanceFiles([]);
       setToolManualModalOpen(false);
@@ -6916,21 +6926,12 @@ function App() {
           ) : null}
           <label>
             Сканы документов (УПД, ТН, фото, можно несколько)
-            <input
-              type="file"
-              multiple
-              onChange={(e) => setPendingAcceptanceFiles(Array.from(e.target.files || []))}
+            <PendingFilesPicker
+              files={pendingAcceptanceFiles}
+              onChange={setPendingAcceptanceFiles}
+              addLabel="Добавить документы"
             />
           </label>
-          {pendingAcceptanceFiles.length > 0 && (
-            <ul className="plainList" style={{ marginTop: 6 }}>
-              {pendingAcceptanceFiles.map((f, i) => (
-                <li key={`pending-file-${i}`} className="muted">
-                  📎 {f.name} <span>({Math.ceil(f.size / 1024)} КБ)</span>
-                </li>
-              ))}
-            </ul>
-          )}
           <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
             {acceptErr ? (
               <p className="error" style={{ flex: "1 1 100%", margin: "0 0 8px" }}>
@@ -9132,12 +9133,12 @@ function App() {
               issueIssuesDomain === "WORKWEAR") && (
               <label className="muted" style={{ display: "block", marginTop: 10, fontSize: 13 }}>
                 Вложение подписанного акта при прямой выдаче (необязательно)
-                <input
-                  type="file"
+                <PendingFilesPicker
+                  files={directIssueSignedFiles}
+                  onChange={setDirectIssueSignedFiles}
                   accept="image/*,.pdf,application/pdf"
-                  style={{ marginTop: 6 }}
                   disabled={issueSubmitting}
-                  onChange={(e) => setDirectIssueSignedFile(e.target.files?.[0] ?? null)}
+                  addLabel="Добавить файлы"
                 />
               </label>
             )}
@@ -9274,12 +9275,12 @@ function App() {
                 )}
                 <label className="muted" style={{ display: "block", marginTop: 10, fontSize: 13 }}>
                   Подписанный акт по выдаче инструмента (необязательно)
-                  <input
-                    type="file"
+                  <PendingFilesPicker
+                    files={directIssueSignedFiles}
+                    onChange={setDirectIssueSignedFiles}
                     accept="image/*,.pdf,application/pdf"
-                    style={{ marginTop: 6 }}
                     disabled={issueSubmitting}
-                    onChange={(e) => setDirectIssueSignedFile(e.target.files?.[0] ?? null)}
+                    addLabel="Добавить файлы"
                   />
                 </label>
                 <div className="issueActionBar">
@@ -10784,8 +10785,8 @@ function App() {
                 onUploadCommentChange={setInboundUploadComment}
                 uploadDate={inboundUploadDate}
                 onUploadDateChange={setInboundUploadDate}
-                uploadFile={inboundUploadFile}
-                onUploadFileChange={setInboundUploadFile}
+                uploadFiles={inboundUploadFiles}
+                onUploadFilesChange={setInboundUploadFiles}
                 uploadBusy={inboundUploadBusy}
                 onUpload={() => void uploadInboundDocument()}
               />
@@ -12022,7 +12023,12 @@ function App() {
                   </label>
                   <label>
                     Фотофиксация (опционально)
-                    <input type="file" accept="image/*" onChange={(e) => setToolActionPhoto(e.target.files?.[0] || null)} />
+                    <PendingFilesPicker
+                      files={toolActionPhotos}
+                      onChange={setToolActionPhotos}
+                      accept="image/*"
+                      addLabel="Добавить фото"
+                    />
                   </label>
                 </div>
                 <div className="toolbar" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
@@ -12264,7 +12270,13 @@ function App() {
                       className="chatHiddenFile"
                       type="file"
                       accept="image/*"
-                      onChange={(e) => setFeedbackAttachment(e.target.files?.[0] || null)}
+                      multiple
+                      onChange={(e) => {
+                        if (e.target.files?.length) {
+                          setFeedbackAttachments((prev) => mergeFiles(prev, Array.from(e.target.files!)));
+                        }
+                        e.target.value = "";
+                      }}
                     />
                     <button
                       type="button"
@@ -12277,12 +12289,22 @@ function App() {
                     </button>
                   </div>
                   <p className="muted">Подсказка: Ctrl+Enter отправляет сообщение.</p>
-                  {feedbackAttachment ? (
-                    <div className="chatAttachmentBar">
-                      <small>{feedbackAttachment.name}</small>
-                      <button type="button" className="ghostBtn" onClick={() => setFeedbackAttachment(null)}>
-                        Убрать
-                      </button>
+                  {feedbackAttachments.length > 0 ? (
+                    <div className="chatAttachmentBar" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {feedbackAttachments.map((file, index) => (
+                        <div key={`fb-att-${index}`} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <small>{file.name}</small>
+                          <button
+                            type="button"
+                            className="ghostBtn"
+                            onClick={() =>
+                              setFeedbackAttachments((prev) => prev.filter((_, i) => i !== index))
+                            }
+                          >
+                            Убрать
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -13321,7 +13343,7 @@ function App() {
           }}
           onClick={() => {
             setIssueRecipientModal(null);
-            setIssueRecipientSignedFile(null);
+            setIssueRecipientSignedFiles([]);
           }}
         >
           <div className="card" style={{ maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
@@ -13331,7 +13353,7 @@ function App() {
               </h3>
               <button type="button" className="ghostBtn" onClick={() => {
                 setIssueRecipientModal(null);
-                setIssueRecipientSignedFile(null);
+                setIssueRecipientSignedFiles([]);
               }}>
                 Закрыть
               </button>
@@ -13366,15 +13388,15 @@ function App() {
                         return;
                       }
                       const { issueId, opts } = issueRecipientModal;
-                      const signed = issueRecipientSignedFile;
+                      const signed = issueRecipientSignedFiles;
                       const ok = await executeIssueAction(issueId, "issue", {
                         ...opts,
                         actualRecipientName: name,
-                        signedFile: signed
+                        signedFiles: signed
                       });
                       if (ok) {
                         setIssueRecipientModal(null);
-                        setIssueRecipientSignedFile(null);
+                        setIssueRecipientSignedFiles([]);
                       }
                     })();
                   }
@@ -13383,17 +13405,17 @@ function App() {
             </label>
             <label className="muted" style={{ marginTop: 10, display: "block", fontSize: 13 }}>
               Подписанный акт или скан (PDF, изображение) — необязательно, сохранится в карточке заявки
-              <input
-                type="file"
+              <PendingFilesPicker
+                files={issueRecipientSignedFiles}
+                onChange={setIssueRecipientSignedFiles}
                 accept="image/*,.pdf,application/pdf"
-                style={{ marginTop: 6 }}
-                onChange={(e) => setIssueRecipientSignedFile(e.target.files?.[0] ?? null)}
+                addLabel="Добавить файлы"
               />
             </label>
             <div className="toolbar" style={{ marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button type="button" className="ghostBtn" onClick={() => {
                 setIssueRecipientModal(null);
-                setIssueRecipientSignedFile(null);
+                setIssueRecipientSignedFiles([]);
               }}>
                 Отмена
               </button>
@@ -13414,15 +13436,15 @@ function App() {
                       return;
                     }
                     const { issueId, opts } = issueRecipientModal;
-                    const signed = issueRecipientSignedFile;
+                    const signed = issueRecipientSignedFiles;
                     const ok = await executeIssueAction(issueId, "issue", {
                       ...opts,
                       actualRecipientName: name,
-                      signedFile: signed
+                      signedFiles: signed
                     });
                     if (ok) {
                       setIssueRecipientModal(null);
-                      setIssueRecipientSignedFile(null);
+                      setIssueRecipientSignedFiles([]);
                     }
                   })();
                 }}

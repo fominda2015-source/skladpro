@@ -1,3 +1,5 @@
+import { mergeFiles } from "../../shared/mergeFiles";
+
 /** Лимит API: dataUrl max 500_000 символов — оставляем запас под base64. */
 export const CHAT_ATTACHMENT_MAX_CHARS = 480_000;
 
@@ -73,15 +75,7 @@ export function appendChatFiles(
 }
 
 export function mergeChatFiles(current: File[], incoming: File[]): File[] {
-  const seen = new Set(current.map((f) => `${f.name}:${f.size}:${f.lastModified}`));
-  const next = [...current];
-  for (const f of incoming) {
-    const key = `${f.name}:${f.size}:${f.lastModified}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    next.push(f);
-  }
-  return next;
+  return mergeFiles(current, incoming);
 }
 
 export function isImageAttachment(mimeType?: string | null, fileName?: string): boolean {

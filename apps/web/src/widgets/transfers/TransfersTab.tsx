@@ -1034,12 +1034,15 @@ export function TransfersTab({
                 <span className="primaryBtn">+ Прикрепить акт</span>
                 <input
                   type="file"
+                  multiple
                   accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
                   disabled={uploading || !canWrite}
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void uploadAct(receiveId, f);
+                    const files = Array.from(e.target.files || []);
                     e.target.value = "";
+                    void (async () => {
+                      for (const f of files) await uploadAct(receiveId, f);
+                    })();
                   }}
                 />
               </label>

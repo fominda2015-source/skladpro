@@ -466,6 +466,29 @@ async function attachSignedIssueAttachment(params: {
   });
 }
 
+async function attachSignedIssueUploads(params: {
+  issueId: string;
+  operationId: string | null;
+  userId: string;
+  files: Express.Multer.File[];
+}): Promise<Array<{ id: string; filePath: string; fileName: string }>> {
+  const out: Array<{ id: string; filePath: string; fileName: string }> = [];
+  for (const file of params.files) {
+    try {
+      const row = await attachSignedIssueAttachment({
+        issueId: params.issueId,
+        operationId: params.operationId,
+        userId: params.userId,
+        file
+      });
+      out.push({ id: row.id, filePath: row.filePath, fileName: row.fileName });
+    } catch (attachErr) {
+      console.error("Failed to attach signed issue scan", attachErr);
+    }
+  }
+  return out;
+}
+
 export const issueRequestsRouter = Router();
 issueRequestsRouter.use(requireAuth);
 issueRequestsRouter.use(requirePermission("issues.read"));
@@ -1042,7 +1065,7 @@ issueRequestsRouter.patch("/:id/admin-edit", requirePermission("issues.read"), a
 issueRequestsRouter.patch(
   "/:id/issue",
   requirePermission("operations.write"),
-  issueUpload.single("signedFile"),
+  issueUpload.array("signedFile", 20),
   async (req: AuthedRequest, res) => {
     const id = String(req.params.id);
     const rawBody = (req.body || {}) as Record<string, unknown>;
@@ -1085,8 +1108,9 @@ issueRequestsRouter.patch(
       return res.status(400).json({ error: "actualRecipientName is required" });
     }
 
-    const signedUpload = (req as AuthedRequest & { file?: Express.Multer.File }).file;
-    let signedAttachment: { id: string; filePath: string; fileName: string } | null = null;
+    const signedUploads =
+      ((req as AuthedRequest & { files?: Express.Multer.File[] }).files as Express.Multer.File[] | undefined) ?? [];
+    let signedAttachments: Array<{ id: string; filePath: string; fileName: string }> = [];
 
     if (issueRow.domain === IssueRequestDomain.TOOLS) {
       try {
@@ -1184,19 +1208,15 @@ issueRequestsRouter.patch(
         console.error("Failed to generate tool issue act", documentError);
       }
 
-      if (signedUpload) {
-        try {
-          const row = await attachSignedIssueAttachment({
-            issueId: result.issue.id,
-            operationId: null,
-            userId: req.user!.userId,
-            file: signedUpload
-          });
-          signedAttachment = { id: row.id, filePath: row.filePath, fileName: row.fileName };
-        } catch (attachErr) {
-          console.error("Failed to attach signed issue scan", attachErr);
-        }
+      if (signedUploads.length) {
+        signedAttachments = await attachSignedIssueUploads({
+          issueId: result.issue.id,
+          operationId: null,
+          userId: req.user!.userId,
+          files: signedUploads
+        });
       }
+      const signedAttachment = signedAttachments[0] ?? null;
 
       await recordAudit({
         userId: req.user!.userId,
@@ -1231,7 +1251,8 @@ issueRequestsRouter.patch(
         issue: result.issue,
         document,
         toolIds: result.toolIds,
-        signedAttachment
+        signedAttachment,
+        signedAttachments
       });
     } catch (error) {
       if (error instanceof Error && error.message === "NO_TOOLS") {
@@ -1476,19 +1497,15 @@ issueRequestsRouter.patch(
     } catch (documentError) {
       console.error("Failed to generate issue act", documentError);
     }
-    if (signedUpload) {
-      try {
-        const row = await attachSignedIssueAttachment({
-          issueId: issue.id,
-          operationId: operation.id,
-          userId: req.user!.userId,
-          file: signedUpload
-        });
-        signedAttachment = { id: row.id, filePath: row.filePath, fileName: row.fileName };
-      } catch (attachErr) {
-        console.error("Failed to attach signed issue scan", attachErr);
-      }
+    if (signedUploads.length) {
+      signedAttachments = await attachSignedIssueUploads({
+        issueId: issue.id,
+        operationId: operation.id,
+        userId: req.user!.userId,
+        files: signedUploads
+      });
     }
+    const signedAttachment = signedAttachments[0] ?? null;
     await recordAudit({
       userId: req.user!.userId,
       action: "ISSUE_REQUEST_ISSUE",
@@ -1518,7 +1535,7 @@ issueRequestsRouter.patch(
       entityId: issue.id
     });
 
-    return res.json({ operation, issue, document, signedAttachment });
+    return res.json({ operation, issue, document, signedAttachment, signedAttachments });
   } catch (error) {
     if (error instanceof Error && error.message === "LIMIT_EXCEEDED_NEEDS_APPROVAL") {
       return res.status(409).json({ error: "Limit exceeded. Send request for approval." });

@@ -30,7 +30,7 @@ export type ConsumablePickLine = {
 export type ElectricToolIssueWizardSubmit = {
   recipient: string;
   comment: string;
-  photo: File | null;
+  photos: File[];
   consumables: Array<{ materialId: string; quantity: number; condition: "NEW" | "USED" }>;
 };
 

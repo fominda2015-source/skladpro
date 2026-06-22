@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PendingFilesPicker } from "../../shared/PendingFilesPicker";
 import { MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
 
 export type WriteoffLine = {
@@ -38,7 +39,7 @@ export function MaterialReportWriteoffModal({
 }: Props) {
   const [rows, setRows] = useState<RowState[]>([]);
   const [comment, setComment] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export function MaterialReportWriteoffModal({
       }))
     );
     setComment("");
-    setFile(null);
+    setFiles([]);
   }, [lines]);
 
   async function submit() {
@@ -87,7 +88,7 @@ export function MaterialReportWriteoffModal({
         const c = comment.trim();
         if (c) payload.comment = c;
         form.append("payload", JSON.stringify(payload));
-        if (file) form.append("file", file);
+        for (const file of files) form.append("file", file);
         const res = await fetchWithSession(`${apiUrl}/api/material-report/writeoffs`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -128,7 +129,7 @@ export function MaterialReportWriteoffModal({
             ✕
           </button>
         </div>
-        <p className="muted">Отметьте позиции, укажите количество. Один документ прикрепится ко всем строкам.</p>
+        <p className="muted">Отметьте позиции, укажите количество. Прикреплённые документы сохранятся для каждой строки.</p>
         <div className="erpTableWrap">
           <table className="erpTable desktopTable">
             <thead>
@@ -188,8 +189,14 @@ export function MaterialReportWriteoffModal({
           <input value={comment} onChange={(e) => setComment(e.target.value)} disabled={busy} />
         </label>
         <label className="materialReportField">
-          Документ (акт, скан)
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          Документы (акт, скан)
+          <PendingFilesPicker
+            files={files}
+            onChange={setFiles}
+            disabled={busy}
+            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+            addLabel="Добавить документы"
+          />
         </label>
         <div className="toolbar" style={{ justifyContent: "flex-end", marginTop: 12 }}>
           <button type="button" className="ghostBtn" disabled={busy} onClick={onClose}>

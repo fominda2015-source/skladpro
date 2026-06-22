@@ -160,9 +160,15 @@ export function MaterialDocumentsSection({
               className="srOnly"
               disabled={uploading}
               accept=".pdf,image/*,.doc,.docx,.xls,.xlsx,application/pdf"
+              multiple
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadFile(file);
+                const picked = Array.from(e.target.files || []);
+                if (!picked.length) return;
+                void (async () => {
+                  for (const file of picked) {
+                    await uploadFile(file);
+                  }
+                })();
               }}
             />
             <button

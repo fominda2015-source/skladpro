@@ -760,7 +760,7 @@ const writeOffSchema = z.object({
 materialReportRouter.post(
   "/writeoffs",
   requirePermission("materialReport.write"),
-  upload.single("file"),
+  upload.array("file", 20),
   async (req: AuthedRequest, res) => {
     let body: unknown = {};
     try {
@@ -792,7 +792,8 @@ materialReportRouter.post(
       return res.status(400).json({ error: "holderKey обязателен" });
     }
 
-    const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+    const uploadedFiles =
+      ((req as AuthedRequest & { files?: Express.Multer.File[] }).files as Express.Multer.File[] | undefined) ?? [];
 
     const holderName = maps.holderLabels.get(holderKey) || holderKey;
     const balance = maps.qtyByKey.get(composeKey(holderKey, materialId)) || 0;
@@ -821,7 +822,8 @@ materialReportRouter.post(
         }
       });
 
-      if (file) {
+      let firstDocumentId: string | null = null;
+      for (const file of uploadedFiles) {
         const absPath = path.join(uploadDirAbs, file.filename);
         const checksumSha256 = await sha256File(absPath);
         const material = await tx.material.findUnique({
@@ -845,9 +847,13 @@ materialReportRouter.post(
             createdBy: req.user!.userId
           }
         });
+        if (!firstDocumentId) firstDocumentId = doc.id;
+      }
+
+      if (firstDocumentId) {
         await tx.materialHolderWriteoff.update({
           where: { id: row.id },
-          data: { documentFileId: doc.id }
+          data: { documentFileId: firstDocumentId }
         });
       }
 

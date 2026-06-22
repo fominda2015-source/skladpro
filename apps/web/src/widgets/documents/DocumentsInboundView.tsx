@@ -1,5 +1,6 @@
 import type { FormEvent, ReactNode } from "react";
 import { displayDocumentFileName, docTypeLabel, formatDocMoment } from "../../shared/fileName";
+import { PendingFilesPicker } from "../../shared/PendingFilesPicker";
 import { EmptyState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { FilterStrip } from "../ui/PageHero";
@@ -41,8 +42,8 @@ type Props = {
   onUploadCommentChange: (v: string) => void;
   uploadDate: string;
   onUploadDateChange: (v: string) => void;
-  uploadFile: File | null;
-  onUploadFileChange: (f: File | null) => void;
+  uploadFiles: File[];
+  onUploadFilesChange: (files: File[]) => void;
   uploadBusy: boolean;
   onUpload: () => void;
 };
@@ -106,8 +107,8 @@ export function DocumentsInboundView({
   onUploadCommentChange,
   uploadDate,
   onUploadDateChange,
-  uploadFile,
-  onUploadFileChange,
+  uploadFiles,
+  onUploadFilesChange,
   uploadBusy,
   onUpload
 }: Props) {
@@ -182,11 +183,11 @@ export function DocumentsInboundView({
               />
             </label>
             <label>
-              Файл
-              <input
-                type="file"
-                onChange={(e) => onUploadFileChange(e.target.files?.[0] || null)}
-                required
+              Файлы
+              <PendingFilesPicker
+                files={uploadFiles}
+                onChange={onUploadFilesChange}
+                addLabel="Добавить файлы"
               />
             </label>
             {warehouseRequired ? (
@@ -196,7 +197,7 @@ export function DocumentsInboundView({
               <button
                 type="submit"
                 className="primaryBtn"
-                disabled={uploadBusy || warehouseRequired || !uploadTitle.trim() || !uploadFile}
+                disabled={uploadBusy || warehouseRequired || !uploadTitle.trim() || uploadFiles.length < 1}
               >
                 {uploadBusy ? "Загрузка…" : "Добавить"}
               </button>
