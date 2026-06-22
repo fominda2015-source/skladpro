@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "./lib/prisma.js";
 import { config } from "./config.js";
 import { ASSISTANT_BOT_EMAIL, ensureAssistantBotUserId } from "./lib/criticalRecipients.js";
+import { repairOrphanedSectionScopes } from "./lib/objectAccess.js";
 
 const baseWarehouseOps = [
   "dashboard.read",
@@ -238,5 +239,9 @@ export async function seedBaseData(adminPasswordOverride?: string) {
   }
 
   await ensureAssistantBotUserId();
+  const { repaired } = await repairOrphanedSectionScopes();
+  if (repaired > 0) {
+    console.log(`Repaired orphaned section scopes: ${repaired}`);
+  }
   console.log(`Assistant bot ready: ${ASSISTANT_BOT_EMAIL}`);
 }

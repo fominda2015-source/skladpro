@@ -13,8 +13,11 @@ import { config } from "../config.js";
 import { getEffectivePermissions } from "../lib/access.js";
 import {
   assertSectionAllowedForWarehouse,
-  getAllowedSectionsForWarehouse
+  getAllowedSectionsForWarehouse,
+  listUserObjectAccess,
+  pickAllowedSection
 } from "../lib/objectAccess.js";
+import { scopeForbiddenPayload } from "../lib/accessScope.js";
 import { canViewAllObjects, getAllowedWarehouses } from "../lib/userWarehouses.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
@@ -181,20 +184,30 @@ authRouter.post("/login", async (req, res) => {
       user.activeWarehouseId && allowedWarehouses.some((w) => w.id === user.activeWarehouseId)
         ? user.activeWarehouseId
         : allowedWarehouses[0]?.id || null;
-    if (activeWarehouseId && activeWarehouseId !== user.activeWarehouseId) {
+
+    const sectionAccess = await allowedSectionsPayload(user.id, permissions, activeWarehouseId);
+    let activeSection = pickAllowedSection(
+      sectionAccess.allowedSections,
+      user.activeSection || "SS"
+    );
+
+    if (
+      activeWarehouseId &&
+      (activeWarehouseId !== user.activeWarehouseId || activeSection !== (user.activeSection || "SS"))
+    ) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { activeWarehouseId, activeSection: user.activeSection || "SS" }
+        data: { activeWarehouseId, activeSection }
       });
     }
+
+    const availableObjects = await listUserObjectAccess(user.id, permissions, allowedWarehouses);
 
     const token = jwt.sign(
       { userId: user.id, role: roleName, email: user.email, permissions },
       config.jwtSecret,
       { expiresIn: "12h" }
     );
-
-    const sectionAccess = await allowedSectionsPayload(user.id, permissions, activeWarehouseId);
 
     return res.json({
       token,
@@ -207,9 +220,9 @@ authRouter.post("/login", async (req, res) => {
         role: roleName,
         permissions,
         activeWarehouseId,
-        activeSection: user.activeSection || "SS",
+        activeSection,
         requireObjectSelection: !activeWarehouseId,
-        availableObjects: allowedWarehouses,
+        availableObjects,
         canViewAllObjects: viewAllObjects,
         ...sectionAccess
       }
@@ -236,6 +249,17 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
       ? me.activeWarehouseId
       : allowedWarehouses[0]?.id || null;
   const sectionAccess = await allowedSectionsPayload(me.id, permissions, activeWarehouseId);
+  const activeSection = pickAllowedSection(sectionAccess.allowedSections, me.activeSection || "SS");
+  if (
+    activeWarehouseId &&
+    (activeWarehouseId !== me.activeWarehouseId || activeSection !== (me.activeSection || "SS"))
+  ) {
+    await prisma.user.update({
+      where: { id: me.id },
+      data: { activeWarehouseId, activeSection }
+    });
+  }
+  const availableObjects = await listUserObjectAccess(me.id, permissions, allowedWarehouses);
   return res.json({
     id: me.id,
     email: me.email,
@@ -246,9 +270,9 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     role: me.role.name,
     permissions,
     activeWarehouseId,
-    activeSection: me.activeSection || "SS",
+    activeSection,
     requireObjectSelection: !activeWarehouseId,
-    availableObjects: allowedWarehouses,
+    availableObjects,
     canViewAllObjects: viewAllObjects,
     ...sectionAccess
   });
@@ -284,10 +308,10 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
   if (parsed.data.warehouseId === null) {
     const okAll = await canViewAllObjects(me.id, permissions);
     if (!okAll) {
-      return res.status(403).json({ error: "FORBIDDEN_ALL_OBJECTS" });
+      return res.status(403).json(scopeForbiddenPayload("FORBIDDEN_ALL_OBJECTS"));
     }
   } else if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
-    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE", message: "Нет доступа к этому объекту" });
+    return res.status(403).json(scopeForbiddenPayload("FORBIDDEN_WAREHOUSE"));
   } else {
     try {
       const allowed = await getAllowedSectionsForWarehouse(me.id, parsed.data.warehouseId, permissions);
@@ -295,13 +319,9 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) {
-        return res.status(403).json({
-          error: err.message,
-          message:
-            err.message === "FORBIDDEN_SECTION"
-              ? `Нет доступа к разделу ${parsed.data.section === "SS" ? "СС" : "ЭОМ"} на этом объекте`
-              : "Нет доступа к этому объекту"
-        });
+        return res
+          .status(403)
+          .json(scopeForbiddenPayload(err.message, parsed.data.section));
       }
       throw e;
     }

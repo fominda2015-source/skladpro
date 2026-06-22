@@ -348,8 +348,11 @@ export function toolWhereFromScope(scope: DataScope): Prisma.ToolWhereInput {
 }
 
 export function waybillWhereFromScope(scope: DataScope): Prisma.TransportWaybillWhereInput {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
     return {};
+  }
+  if (!scope.warehouseIds?.length) {
+    return { fromWarehouseId: { in: [] } };
   }
   return {
     OR: [{ fromWarehouseId: { in: scope.warehouseIds } }, { fromWarehouseId: null }]
@@ -357,8 +360,11 @@ export function waybillWhereFromScope(scope: DataScope): Prisma.TransportWaybill
 }
 
 export function warehouseWhereFromScope(scope: DataScope): Prisma.WarehouseWhereInput {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
     return {};
+  }
+  if (!scope.warehouseIds?.length) {
+    return { id: { in: [] } };
   }
   return { id: { in: scope.warehouseIds } };
 }
@@ -380,7 +386,7 @@ export function projectWhereFromScope(scope: DataScope): Prisma.ProjectWhereInpu
     });
   }
   if (!parts.length) {
-    return {};
+    return { id: { in: [] } };
   }
   if (parts.length === 1) {
     return parts[0];

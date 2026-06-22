@@ -1,5 +1,6 @@
 import { backfillIssueResponsibleNames } from "../issueResponsibleBackfill.js";
 import { rebuildAllPricing } from "../pricingRebuild.js";
+import { repairOrphanedSectionScopes } from "../objectAccess.js";
 import type { DataRebuildJob } from "./types.js";
 
 export const DATA_JOB_CATEGORY_LABELS: Record<DataRebuildJob["category"], string> = {
@@ -29,6 +30,18 @@ export const DATA_REBUILD_JOBS: DataRebuildJob[] = [
       "Заполняет поле «Ответственный» в выданных заявках из текста «Ответственный: …» в note. Безопасно повторять.",
     category: "issues",
     run: async () => backfillIssueResponsibleNames()
+  },
+  {
+    id: "repair.orphan-section-scopes",
+    title: "Починка доступов: раздел без привязки к объекту",
+    description:
+      "Для каждой записи доступа к разделу СС/ЭОМ без участия в объекте добавляет привязку к складу. Безопасно повторять.",
+    category: "warehouse",
+    deployVersion: "20260602_access_v1",
+    run: async () => {
+      const { repaired } = await repairOrphanedSectionScopes();
+      return { repaired };
+    }
   }
 ];
 

@@ -10,6 +10,7 @@ import {
   resolveReadScope,
   stockWhereForQuery
 } from "../lib/dataScope.js";
+import { isScopeForbiddenError, respondScopeForbidden } from "../lib/accessScope.js";
 import { prisma } from "../lib/prisma.js";
 import { materialQtyCoerceSchema, qtyFromDb } from "../lib/quantity.js";
 import { loadMaterialPriceBasisMap, materialAmountsForQty } from "../lib/materialPricing.js";
@@ -119,8 +120,8 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
     return res.status(201).json({ ok: true, materialId });
   } catch (error) {
     const err = error as Error & { status?: number };
-    if (err.status === 403) {
-      return res.status(403).json({ error: err.message });
+    if (isScopeForbiddenError(err)) {
+      return respondScopeForbidden(res, err);
     }
     return res.status(500).json({ error: "Failed to create manual stock line" });
   }
@@ -193,7 +194,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       assertObjectSectionInScope(scope, warehouseId, section);
     } catch (e) {
       const err = e as Error & { status?: number };
-      if (err.status === 403) return res.status(403).json({ error: err.message });
+      if (isScopeForbiddenError(err)) return respondScopeForbidden(res, err);
       throw e;
     }
   } else if (warehouseId) {
@@ -201,7 +202,7 @@ stocksRouter.get("/", async (req: AuthedRequest, res) => {
       assertWarehouseInScope(scope, warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
-      if (err.status === 403) return res.status(403).json({ error: err.message });
+      if (isScopeForbiddenError(err)) return respondScopeForbidden(res, err);
       throw e;
     }
   }
@@ -365,8 +366,8 @@ stocksRouter.patch("/:id/quantity", requirePermission("operations.write"), async
     });
   } catch (error) {
     const err = error as Error & { status?: number };
-    if (err.status === 403) {
-      return res.status(403).json({ error: err.message });
+    if (isScopeForbiddenError(err)) {
+      return respondScopeForbidden(res, err);
     }
     return res.status(500).json({ error: "Failed to adjust stock quantity" });
   }

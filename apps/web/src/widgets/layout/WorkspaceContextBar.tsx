@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
+import { SectionToggle } from "./SectionToggle";
 
 type ObjectOption = { id: string; name: string };
 
@@ -22,7 +23,6 @@ type Props = {
   hideObjectSelect?: boolean;
   hideObjectControls?: boolean;
   hideSection?: boolean;
-  /** На главной: оба раздела выглядят выбранными, переключение отключено */
   combinedSections?: boolean;
   tabFilter?: TabFilterProps;
   layout?: "stacked" | "inline";
@@ -50,11 +50,7 @@ export function WorkspaceContextBar(props: Props) {
   const ssAllowed = allowedSections === null || allowedSections.includes("SS");
   const eomAllowed = allowedSections === null || allowedSections.includes("EOM");
   const singleSectionOnly =
-    !combinedSections && ((ssAllowed && !eomAllowed) || (!ssAllowed && eomAllowed));
-  const hideSectionToggle = hideSection || singleSectionOnly;
-
-  const ssActive = combinedSections || section === "SS" || (singleSectionOnly && ssAllowed);
-  const eomActive = combinedSections || section === "EOM" || (singleSectionOnly && eomAllowed);
+    !combinedSections && !hideSection && ((ssAllowed && !eomAllowed) || (!ssAllowed && eomAllowed));
 
   return (
     <div
@@ -103,39 +99,21 @@ export function WorkspaceContextBar(props: Props) {
         </label>
       ) : null}
       {middleSlot}
-      {!hideSectionToggle ? (
-      <div className="workspaceContextSection workspaceContextSection--accent">
-        <span className="workspaceContextLabel">Раздел</span>
-        <div
-          className={`sectionToggle sectionToggle--accent workspaceContextSectionToggle${combinedSections ? " sectionToggle--combined" : ""}`}
-          aria-label={combinedSections ? "Разделы СС и ЭОМ — сводка" : "Раздел СС/ЭОМ"}
-        >
-          <button
-            type="button"
-            className={`sectionToggleBtn ${ssActive ? "active" : ""}`}
-            onClick={() => onSelectSection("SS")}
-            disabled={combinedSections || !ssAllowed}
-            aria-pressed={ssActive}
-            title={!ssAllowed ? "Нет доступа к разделу СС" : undefined}
-          >
-            СС
-          </button>
-          <button
-            type="button"
-            className={`sectionToggleBtn ${eomActive ? "active" : ""}`}
-            onClick={() => onSelectSection("EOM")}
-            disabled={combinedSections || !eomAllowed}
-            aria-pressed={eomActive}
-            title={!eomAllowed ? "Нет доступа к разделу ЭОМ" : undefined}
-          >
-            ЭОМ
-          </button>
+      {!hideSection && !singleSectionOnly ? (
+        <div className="workspaceContextSection workspaceContextSection--accent">
+          <span className="workspaceContextLabel">Раздел</span>
+          <SectionToggle
+            value={section}
+            allowedSections={allowedSections}
+            combinedSections={combinedSections}
+            onChange={onSelectSection}
+            className="sectionToggle sectionToggle--accent workspaceContextSectionToggle"
+          />
         </div>
-      </div>
-      ) : singleSectionOnly && !hideSection ? (
+      ) : singleSectionOnly ? (
         <div className="workspaceContextSection workspaceContextSection--accent workspaceContextSectionStatic">
           <span className="workspaceContextLabel">Раздел</span>
-          <span className="workspaceContextObjectValue">{ssAllowed ? "СС" : "ЭОМ"}</span>
+          <SectionToggle value={section} allowedSections={allowedSections} onChange={onSelectSection} />
         </div>
       ) : null}
     </div>

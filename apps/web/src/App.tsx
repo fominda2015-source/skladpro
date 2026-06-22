@@ -15,6 +15,8 @@ import {
   YAxis
 } from "recharts";
 import "./App.css";
+import { pickAllowedSection, readApiErrorMessage } from "./shared/accessScope";
+import { SectionToggle } from "./widgets/layout/SectionToggle";
 import jsQR from "jsqr";
 import {
   ALL_OBJECTS_ID,
@@ -204,7 +206,12 @@ type LoginResponse = {
     activeWarehouseId?: string | null;
     activeSection?: "SS" | "EOM";
     requireObjectSelection?: boolean;
-    availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
+    availableObjects?: Array<{
+      id: string;
+      name: string;
+      address?: string | null;
+      allowedSections?: ("SS" | "EOM")[] | null;
+    }>;
     canViewAllObjects?: boolean;
     allowedSections?: ("SS" | "EOM")[] | null;
   };
@@ -279,7 +286,12 @@ type MeResponse = {
   activeWarehouseId?: string | null;
   activeSection?: "SS" | "EOM";
   requireObjectSelection?: boolean;
-  availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
+  availableObjects?: Array<{
+    id: string;
+    name: string;
+    address?: string | null;
+    allowedSections?: ("SS" | "EOM")[] | null;
+  }>;
   canViewAllObjects?: boolean;
   allowedSections?: ("SS" | "EOM")[] | null;
 };
@@ -324,6 +336,16 @@ type IssueFlowType = "REQUEST" | "DIRECT_ISSUE";
 type IssueStatus = "DRAFT" | "ON_APPROVAL" | "APPROVED" | "REJECTED" | "ISSUED" | "CANCELLED";
 type IssueRequestDomainApi = "MATERIALS" | "TOOLS" | "CONSUMABLES" | "WORKWEAR";
 
+function allowedSectionsForWarehouse(
+  objects: Array<{ id: string; allowedSections?: ("SS" | "EOM")[] | null }>,
+  warehouseId: string,
+  fallback?: ("SS" | "EOM")[] | null
+): ("SS" | "EOM")[] | null {
+  if (!warehouseId || warehouseId === ALL_OBJECTS_ID) return fallback ?? null;
+  const obj = objects.find((o) => o.id === warehouseId);
+  return obj?.allowedSections ?? fallback ?? null;
+}
+
 function userObjectBindingKind(u: Pick<AdminUser, "warehouseScopeIds" | "projectScopeIds">): "free" | "projects" | "objects" {
   const wh = u.warehouseScopeIds?.length ?? 0;
   const pj = u.projectScopeIds?.length ?? 0;
@@ -331,6 +353,7 @@ function userObjectBindingKind(u: Pick<AdminUser, "warehouseScopeIds" | "project
   if (pj > 0) return "projects";
   return "free";
 }
+
 function effectiveIssueDomain(row: {
   domain?: IssueRequestDomainApi;
   items?: unknown[] | null;
@@ -844,13 +867,11 @@ function App() {
   } | null>(null);
   const [demoDataLoading, setDemoDataLoading] = useState(false);
   const [adminUserFilter, setAdminUserFilter] = useState("");
-  const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
   const [selectedProjectScopes, setSelectedProjectScopes] = useState<string[]>([]);
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserFullName, setNewUserFullName] = useState("");
   const [newUserRoleName, setNewUserRoleName] = useState("VIEWER");
   const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserWarehouseScopes, setNewUserWarehouseScopes] = useState<string[]>([]);
   const [newUserProjectScopes, setNewUserProjectScopes] = useState<string[]>([]);
   const [passCurrent, setPassCurrent] = useState("");
   const [passNext, setPassNext] = useState("");
@@ -2125,10 +2146,8 @@ function App() {
     if (!res.ok) {
       let msg = "Не удалось сменить контекст";
       try {
-        const body = (await res.json()) as { message?: string; error?: string };
-        if (typeof body.message === "string") msg = body.message;
-        else if (body.error === "FORBIDDEN_SECTION") msg = "Нет доступа к этому разделу на выбранном объекте";
-        else if (body.error === "FORBIDDEN_WAREHOUSE") msg = "Нет доступа к этому объекту";
+        const body = await res.json();
+        msg = readApiErrorMessage(body, msg);
       } catch {
         // ignore
       }
@@ -2324,7 +2343,7 @@ function App() {
         canViewAllObjects={canViewAllObjects}
         objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
         section={objectSectionFilter}
-        allowedSections={me?.allowedSections}
+        allowedSections={contextAllowedSections}
         onSelectObject={(id) => void selectTopObject(id)}
         onSelectSection={(next) => setSection(next)}
         hideObjectSelect={activeTab === "stocks"}
@@ -5947,7 +5966,6 @@ function App() {
   useEffect(() => {
     const u = users.find((x) => x.id === selectedUserId);
     if (u) {
-      setSelectedWarehouseScopes(u.warehouseScopeIds ?? []);
       setSelectedProjectScopes(u.projectScopeIds ?? []);
       setSelectedRoleName(u.role);
       setSelectedStatus(u.status);
@@ -6382,6 +6400,20 @@ function App() {
     setToolListWarehouseId(activeObjectId);
   }, [activeObjectId]);
 
+  const contextAllowedSections = allowedSectionsForWarehouse(
+    availableObjects,
+    activeObjectId,
+    me?.allowedSections ?? null
+  );
+
+  useEffect(() => {
+    if (!mustPickObject || !activeObjectId || activeObjectId === ALL_OBJECTS_ID) return;
+    const allowed = allowedSectionsForWarehouse(availableObjects, activeObjectId);
+    if (allowed) {
+      setObjectSectionFilter((prev) => pickAllowedSection(allowed, prev));
+    }
+  }, [mustPickObject, activeObjectId, availableObjects]);
+
   async function onLoginSubmit(e: FormEvent) {
     e.preventDefault();
     setAuthError("");
@@ -6537,22 +6569,11 @@ function App() {
                 </label>
                 <label>
                   Раздел
-                  <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
-                    <button
-                      type="button"
-                      className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                      onClick={() => setSection("SS")}
-                    >
-                      СС
-                    </button>
-                    <button
-                      type="button"
-                      className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                      onClick={() => setSection("EOM")}
-                    >
-                      ЭОМ
-                    </button>
-                  </div>
+                  <SectionToggle
+                    value={objectSectionFilter}
+                    allowedSections={contextAllowedSections}
+                    onChange={(next) => setSection(next)}
+                  />
                 </label>
                 <button
                   type="button"
@@ -6575,7 +6596,14 @@ function App() {
                   <select
                     className="workspaceContextObjectSelect workspaceContextObjectSelect--accent"
                     value={activeObjectId}
-                    onChange={(e) => setActiveObjectId(e.target.value)}
+                    onChange={(e) => {
+                      const warehouseId = e.target.value;
+                      setActiveObjectId(warehouseId);
+                      const allowed = allowedSectionsForWarehouse(availableObjects, warehouseId);
+                      if (allowed) {
+                        setObjectSectionFilter((prev) => pickAllowedSection(allowed, prev));
+                      }
+                    }}
                   >
                     <option value="">— выберите —</option>
                     {canViewAllObjects ? (
@@ -6590,22 +6618,11 @@ function App() {
                 </label>
                 <label>
                   Раздел
-                  <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
-                    <button
-                      type="button"
-                      className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                      onClick={() => setSection("SS")}
-                    >
-                      СС
-                    </button>
-                    <button
-                      type="button"
-                      className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                      onClick={() => setSection("EOM")}
-                    >
-                      ЭОМ
-                    </button>
-                  </div>
+                  <SectionToggle
+                    value={objectSectionFilter}
+                    allowedSections={contextAllowedSections}
+                    onChange={(next) => setSection(next)}
+                  />
                 </label>
                 <button
                   type="button"
@@ -10946,46 +10963,27 @@ function App() {
               МОЛ (материально ответственное лицо) — участвует в материальном отчёте
             </label>
           </div>
-          <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <h4>Склады (scope)</h4>
-              <p className="muted">Пусто — без фильтра по складу, пользователь переключает объект сам.</p>
-              <div className="plainList">
-                {warehouses.map((w) => (
-                  <label key={`adm-drawer-wh-${w.id}`} style={{ display: "block" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedWarehouseScopes.includes(w.id)}
-                      onChange={(e) => {
-                        setSelectedWarehouseScopes((prev) =>
-                          e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
-                        );
-                      }}
-                    />{" "}
-                    {safeName(w.name)}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h4>Проекты (scope)</h4>
-              <p className="muted">Пусто — без ограничения по проекту.</p>
-              <div className="plainList">
-                {projects.map((p) => (
-                  <label key={`adm-drawer-pr-${p.id}`} style={{ display: "block" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedProjectScopes.includes(p.id)}
-                      onChange={(e) => {
-                        setSelectedProjectScopes((prev) =>
-                          e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
-                        );
-                      }}
-                    />{" "}
-                    {safeName(p.name)}
-                  </label>
-                ))}
-              </div>
+          <div style={{ marginTop: 12 }}>
+            <h4>Проекты (ограничение)</h4>
+            <p className="muted">
+              Пусто — без ограничения по проектам. Доступ к объектам и разделам СС/ЭОМ настраивается на вкладке{" "}
+              <strong>Объекты</strong>.
+            </p>
+            <div className="plainList">
+              {projects.map((p) => (
+                <label key={`adm-drawer-pr-${p.id}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedProjectScopes.includes(p.id)}
+                    onChange={(e) => {
+                      setSelectedProjectScopes((prev) =>
+                        e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                      );
+                    }}
+                  />{" "}
+                  {safeName(p.name)}
+                </label>
+              ))}
             </div>
           </div>
           <div className="toolbar">
@@ -11001,19 +10999,18 @@ function App() {
                     "Content-Type": "application/json"
                   },
                   body: JSON.stringify({
-                    warehouseIds: selectedWarehouseScopes,
                     projectIds: selectedProjectScopes
                   })
                 });
                 if (!res.ok) {
-                  setAdminMessage("Ошибка сохранения scope");
+                  setAdminMessage("Ошибка сохранения проектов");
                   return;
                 }
-                setAdminMessage("Области (склады/проекты) сохранены");
+                setAdminMessage("Проекты пользователя сохранены");
                 await loadAdminData();
               }}
             >
-              Сохранить scope
+              Сохранить проекты
             </button>
           </div>
           <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>
@@ -12570,7 +12567,9 @@ function App() {
           {adminWorkspaceTab === "users" && (
           <>
           <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
-            Если не задан scope по складам и проектам, пользователь сам переключает объект в приложении — видимость данных как при полном доступе к списку объектов.
+            Объекты и разделы СС/ЭОМ назначаются на вкладке <strong>Объекты</strong>. Здесь можно ограничить
+            пользователя по <strong>проектам</strong> — пустой список означает доступ ко всем проектам в рамках
+            назначенных объектов.
           </p>
           <h3>Создание пользователя</h3>
           <div className="form">
@@ -12618,52 +12617,31 @@ function App() {
               МОЛ (материально ответственное лицо)
             </label>
           </div>
-          <div className="grid2" style={{ marginTop: 16 }}>
-            <div>
-              <h3>Склады новому пользователю</h3>
-              <div className="plainList">
-                {warehouses.map((w) => (
-                  <label key={`new-wh-${w.id}`} style={{ display: "block" }}>
-                    <input
-                      type="checkbox"
-                      checked={newUserWarehouseScopes.includes(w.id)}
-                      onChange={(e) => {
-                        setNewUserWarehouseScopes((prev) =>
-                          e.target.checked ? [...prev, w.id] : prev.filter((id) => id !== w.id)
-                        );
-                      }}
-                    />{" "}
-                    {safeName(w.name)}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3>Проекты новому пользователю</h3>
-              <div className="plainList">
-                {projects.map((p) => (
-                  <label key={`new-pr-${p.id}`} style={{ display: "block" }}>
-                    <input
-                      type="checkbox"
-                      checked={newUserProjectScopes.includes(p.id)}
-                      onChange={(e) => {
-                        setNewUserProjectScopes((prev) =>
-                          e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
-                        );
-                        const linked = p.warehouseId ? [p.warehouseId] : [];
-                        if (e.target.checked) {
-                          setNewUserWarehouseScopes((prev) => Array.from(new Set([...prev, ...linked])));
-                        }
-                      }}
-                    />{" "}
-                    {safeName(p.name)}
-                  </label>
-                ))}
-              </div>
+          <div style={{ marginTop: 16 }}>
+            <h3>Проекты новому пользователю</h3>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Доступ к объектам и разделам СС/ЭОМ назначайте после создания на вкладке <strong>Объекты</strong>.
+            </p>
+            <div className="plainList">
+              {projects.map((p) => (
+                <label key={`new-pr-${p.id}`} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={newUserProjectScopes.includes(p.id)}
+                    onChange={(e) => {
+                      setNewUserProjectScopes((prev) =>
+                        e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                      );
+                    }}
+                  />{" "}
+                  {safeName(p.name)}
+                </label>
+              ))}
             </div>
           </div>
           <p className="muted" style={{ fontSize: 13, margin: "12px 0 0" }}>
-            Права нового пользователя определяются выбранной <strong>ролью</strong>.
+            Права нового пользователя определяются выбранной <strong>ролью</strong>. Объекты — на вкладке{" "}
+            <strong>Объекты</strong>.
           </p>
           <div className="toolbar">
             <button
@@ -12682,7 +12660,6 @@ function App() {
                     fullName: newUserFullName.trim(),
                     roleName: newUserRoleName,
                     password: newUserPassword,
-                    warehouseIds: newUserWarehouseScopes,
                     projectIds: newUserProjectScopes,
                     positionId: newUserPositionId || undefined,
                     positionName: newPositionName.trim() || undefined,
@@ -12804,22 +12781,11 @@ function App() {
             </label>
             <label>
               Раздел
-              <div className="sectionToggle sectionToggle--accent" aria-label="Раздел СС/ЭОМ">
-                <button
-                  type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "SS" ? "active" : ""}`}
-                  onClick={() => setSection("SS")}
-                >
-                  СС
-                </button>
-                <button
-                  type="button"
-                  className={`sectionToggleBtn ${objectSectionFilter === "EOM" ? "active" : ""}`}
-                  onClick={() => setSection("EOM")}
-                >
-                  ЭОМ
-                </button>
-              </div>
+              <SectionToggle
+                value={objectSectionFilter}
+                allowedSections={contextAllowedSections}
+                onChange={(next) => setSection(next)}
+              />
             </label>
             <label>
               Почта

@@ -2,6 +2,7 @@ import { OperationType, StockCondition, StockMovementDirection } from "@prisma/c
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
+import { scopeForbiddenPayload } from "../lib/accessScope.js";
 import {
   assertProjectInScope,
   assertWarehouseInScope,
@@ -44,7 +45,7 @@ operationsRouter.get("/", async (req: AuthedRequest, res) => {
   const section = sectionParam === "SS" || sectionParam === "EOM" ? sectionParam : undefined;
 
   if (warehouseId && !scope.unrestricted && scope.warehouseIds?.length && !scope.warehouseIds.includes(warehouseId)) {
-    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+    return res.status(403).json(scopeForbiddenPayload("FORBIDDEN_WAREHOUSE"));
   }
 
   const rows = await prisma.operation.findMany({
