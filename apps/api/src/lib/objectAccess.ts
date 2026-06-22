@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { hasGlobalWarehouseAccess } from "./openAccess.js";
 import { prisma } from "./prisma.js";
 
 export type ObjectSection = "SS" | "EOM";
@@ -49,9 +50,10 @@ export function membersFromObjectScopes(
 export async function getAllowedSectionsForWarehouse(
   userId: string,
   warehouseId: string,
+  role: string,
   permissions: string[]
 ): Promise<ObjectSection[] | null> {
-  if (permissions.includes("*")) {
+  if (hasGlobalWarehouseAccess(role, permissions)) {
     return null;
   }
   const wh = await prisma.userWarehouseScope.findFirst({ where: { userId, warehouseId } });
@@ -215,12 +217,21 @@ export type UserObjectAccess = {
 
 export async function listUserObjectAccess(
   userId: string,
+  role: string,
   permissions: string[],
   warehouses: Array<{ id: string; name: string; address: string | null }>
 ): Promise<UserObjectAccess[]> {
   const result: UserObjectAccess[] = [];
   for (const warehouse of warehouses) {
-    const allowedSections = await getAllowedSectionsForWarehouse(userId, warehouse.id, permissions);
+    const allowedSections = await getAllowedSectionsForWarehouse(
+      userId,
+      warehouse.id,
+      role,
+      permissions
+    );
+    if (Array.isArray(allowedSections) && allowedSections.length === 0) {
+      continue;
+    }
     result.push({
       id: warehouse.id,
       name: warehouse.name,

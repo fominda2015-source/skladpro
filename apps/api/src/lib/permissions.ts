@@ -12,19 +12,9 @@ export function normalizePermissions(value: unknown): string[] {
   return [];
 }
 
-export function hasPermission(permissions: string[], needed: string) {
+/** Проверка UI-прав отключена — доступ к данным только через scope объектов. */
+export function hasPermission(_permissions: string[], _needed: string) {
+  void _needed;
   if (OPEN_ACCESS_ALL) return true;
-  if (permissions.includes("*")) return true;
-  if (permissions.includes(needed)) return true;
-  if (needed === "documents.upload" && permissions.includes("documents.write")) return true;
-  if (needed === "dashboard.read" && permissions.includes("stocks.read")) return true;
-  if (needed === "integrations.read" && permissions.includes("integrations.write")) return true;
-  if (needed === "notifications.read" && permissions.includes("notifications.write")) return true;
-  if (needed === "limits.edit" && permissions.includes("limits.write")) return true;
-  if (needed === "limits.write" && permissions.includes("limits.edit")) return true;
-  if (needed === "productivity.write" && permissions.includes("productivity.edit")) return true;
-  if (needed === "productivity.edit" && permissions.includes("productivity.write")) return true;
-  if (needed === "announcements.edit" && permissions.includes("announcements.write")) return true;
-  if (needed === "announcements.delete" && permissions.includes("announcements.write")) return true;
-  return false;
+  return true;
 }

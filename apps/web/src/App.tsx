@@ -29,7 +29,7 @@ import {
 } from "./app/constants";
 import { displayDocumentFileName } from "./shared/fileName";
 import { useDebouncedValue } from "./shared/hooks/useDebouncedValue";
-import { isAdminEquivalent, OPEN_ACCESS_ALL } from "./shared/openAccess";
+import { isAdminEquivalent } from "./shared/openAccess";
 import { MaterialCardModal } from "./widgets/materials/MaterialCardModal";
 import { EmptyState, ErrorState, LoadingState, ResultBanner } from "./shared/ui/StateViews";
 import { PageFileDropZone } from "./shared/ui/PageFileDropZone";
@@ -214,6 +214,9 @@ type LoginResponse = {
       allowedSections?: ("SS" | "EOM")[] | null;
     }>;
     canViewAllObjects?: boolean;
+    canReadAudit?: boolean;
+    canCreateFirstObject?: boolean;
+    responsibleWarehouseIds?: string[];
     allowedSections?: ("SS" | "EOM")[] | null;
   };
 };
@@ -294,6 +297,8 @@ type MeResponse = {
     allowedSections?: ("SS" | "EOM")[] | null;
   }>;
   canViewAllObjects?: boolean;
+  canReadAudit?: boolean;
+  canCreateFirstObject?: boolean;
   allowedSections?: ("SS" | "EOM")[] | null;
 };
 type AdminUser = {
@@ -318,8 +323,11 @@ type AdminObject = {
   name: string;
   address?: string | null;
   userIds: string[];
+  responsibleUserId?: string | null;
+  responsibleUser?: { id: string; fullName: string; email?: string } | null;
   sectionUsers?: { SS: string[]; EOM: string[] };
   members?: ObjectMember[];
+  canManage?: boolean;
 };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = {
@@ -345,6 +353,12 @@ function allowedSectionsForWarehouse(
   if (!warehouseId || warehouseId === ALL_OBJECTS_ID) return fallback ?? null;
   const obj = objects.find((o) => o.id === warehouseId);
   return obj?.allowedSections ?? fallback ?? null;
+}
+
+function userAccessibleObjects<T extends { allowedSections?: ("SS" | "EOM")[] | null }>(objects: T[]): T[] {
+  return objects.filter(
+    (o) => o.allowedSections === undefined || o.allowedSections === null || o.allowedSections.length > 0
+  );
 }
 
 function userObjectBindingKind(u: Pick<AdminUser, "warehouseScopeIds" | "projectScopeIds">): "free" | "projects" | "objects" {
@@ -776,7 +790,9 @@ function App() {
   const [authError, setAuthError] = useState("");
   /** Сообщение на экране входа после протухшего JWT / 401 от API. */
   const [sessionExpiredHint, setSessionExpiredHint] = useState("");
-  const [availableObjects, setAvailableObjects] = useState<Array<{ id: string; name: string; address?: string | null }>>([]);
+  const [availableObjects, setAvailableObjects] = useState<
+    Array<{ id: string; name: string; address?: string | null; allowedSections?: ("SS" | "EOM")[] | null }>
+  >([]);
   const [activeObjectId, setActiveObjectId] = useState("");
   const [tabWarehouseFilters, setTabWarehouseFilters] = useState<Record<string, string>>({});
   const [mustPickObject, setMustPickObject] = useState(false);
@@ -842,7 +858,9 @@ function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
-  const [adminObjects, setAdminObjects] = useState<AdminObject[]>([]);
+  const [managedObjects, setManagedObjects] = useState<AdminObject[]>([]);
+  const [directoryUsers, setDirectoryUsers] = useState<Array<{ id: string; fullName: string; avatarUrl?: string | null }>>([]);
+  const [objectsMessage, setObjectsMessage] = useState("");
   const [newObjectName, setNewObjectName] = useState("");
   const [newObjectAddress, setNewObjectAddress] = useState("");
   const [firstSetupName, setFirstSetupName] = useState("");
@@ -884,10 +902,7 @@ function App() {
   const [profileMessage, setProfileMessage] = useState("");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [catalogMessage, setCatalogMessage] = useState("");
   const [opsMessage, setOpsMessage] = useState("");
-  const [warehouseName, setWarehouseName] = useState("Главный склад");
-  const [warehouseAddress, setWarehouseAddress] = useState("Москва");
   const [opWarehouseId, setOpWarehouseId] = useState("");
   // Legacy-состояния прямого прихода удалены — приёмка идёт через заявки.
   const [issues, setIssues] = useState<IssueRequest[]>([]);
@@ -1284,27 +1299,18 @@ function App() {
   const [feedbackListLoading, setFeedbackListLoading] = useState(false);
   const [feedbackDetailLoading, setFeedbackDetailLoading] = useState(false);
   const [canViewAllObjects, setCanViewAllObjects] = useState(false);
+  const [canReadAudit, setCanReadAudit] = useState(false);
+  const [canCreateFirstObject, setCanCreateFirstObject] = useState(false);
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
   const [reportsSnapshotLoading, setReportsSnapshotLoading] = useState(false);
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const feedbackMessagesRef = useRef<HTMLDivElement | null>(null);
 
+  const hasObjectAccess = availableObjects.length > 0;
+  const hasPermission = (_permission: string) => Boolean(me && hasObjectAccess);
   const isAdmin = Boolean(me && isAdminEquivalent(me.role));
-  const hasPermission = (permission: string) =>
-    Boolean(
-      me &&
-        (OPEN_ACCESS_ALL ||
-          isAdmin ||
-          me.permissions?.includes("*") ||
-          me.permissions?.includes(permission) ||
-          (permission === "limits.edit" && Boolean(me.permissions?.includes("limits.write"))) ||
-          (permission === "limits.write" && Boolean(me.permissions?.includes("limits.edit"))) ||
-          (permission === "productivity.write" && Boolean(me.permissions?.includes("productivity.edit"))) ||
-          (permission === "productivity.edit" && Boolean(me.permissions?.includes("productivity.write"))) ||
-          (permission === "announcements.edit" && Boolean(me.permissions?.includes("announcements.write"))) ||
-          (permission === "announcements.delete" && Boolean(me.permissions?.includes("announcements.write"))))
-    );
+  const canManageUsers = isAdmin;
   const roleLabel = (role: string) =>
     ({
       ADMIN: "Системный администратор",
@@ -1772,7 +1778,7 @@ function App() {
   const tabTitleMap: Record<string, string> = {
     stocks: "Главная",
     warehouse: "Склад",
-    catalog: "Справочники",
+    catalog: "Объекты",
     audit: "Аудит действий",
     operations: "Приходы",
     issues: "Заявки на выдачу",
@@ -1798,7 +1804,6 @@ function App() {
   const currentTitle = tabTitleMap[activeTab] ?? "СкладПро";
 
   const isAuthed = useMemo(() => Boolean(token), [token]);
-  const canManageUsers = useMemo(() => isAdmin, [me?.role]);
   const showWorkspaceContext = Boolean(
     me &&
       activeTab !== "profile" &&
@@ -1806,16 +1811,9 @@ function App() {
       activeTab !== "password" &&
       activeTab !== "materialReport"
   );
-  const canWriteCatalog = useMemo(
-    () => Boolean(hasPermission("warehouses.read") || hasPermission("materials.read") || hasPermission("warehouses.write")),
-    [me]
-  );
-  const canOpenMaterialCards = useMemo(
-    () => hasPermission("materials.read") || hasPermission("stocks.read"),
-    [me]
-  );
-  const canWriteMaterialCards = useMemo(() => hasPermission("materials.write"), [me]);
-  const canWriteWarehouses = useMemo(() => hasPermission("warehouses.write"), [me]);
+  const canWriteCatalog = hasObjectAccess;
+  const canOpenMaterialCards = hasObjectAccess;
+  const canWriteMaterialCards = hasObjectAccess;
   const isAllObjectsView = activeObjectId === ALL_OBJECTS_ID;
 
   /** Главная «по объектам» — всегда все доступные объекты, независимо от выбора в шапке. */
@@ -1826,11 +1824,11 @@ function App() {
   }, [activeObjectId, activeTab, tabWarehouseFilters]);
   const objectFilterWarehouses = useMemo(
     () =>
-      (availableObjects.length ? availableObjects : warehouses).map((w) => ({
+      availableObjects.map((w) => ({
         id: w.id,
         name: safeName(w.name)
       })),
-    [availableObjects, warehouses]
+    [availableObjects]
   );
   const exportWarehouseId = useMemo(() => {
     if (effectiveWarehouseId) return effectiveWarehouseId;
@@ -1878,45 +1876,28 @@ function App() {
     limitSupplyByMaterialId
   ]);
 
-  const canWriteOperations = useMemo(() => hasPermission("operations.write"), [me]);
-  const canWriteLimits = useMemo(
-    () => hasPermission("limits.edit") || hasPermission("limits.write"),
-    [me]
-  );
-  const canReadAudit = useMemo(
-    () => hasPermission("audit.read"),
-    [me]
-  );
-  const canRevertAudit = useMemo(() => isAdmin, [me?.role]);
-  const canDashboard = useMemo(
-    () =>
-      Boolean(
-        hasPermission("dashboard.read") ||
-          hasPermission("stocks.read")
-      ),
-    [me]
-  );
-  const canReadStocks = useMemo(() => hasPermission("stocks.read"), [me]);
-  const canReadIssues = useMemo(() => hasPermission("issues.read"), [me]);
-  const canWriteIssues = useMemo(() => hasPermission("issues.write"), [me]);
-  const canReadOperations = useMemo(() => hasPermission("operations.read"), [me]);
-  const canReadLimits = useMemo(() => hasPermission("limits.read"), [me]);
-  const canMaterialReport = useMemo(() => hasPermission("materialReport.read"), [me]);
-  const canMaterialWriteoff = useMemo(() => hasPermission("materialReport.write"), [me]);
-  const canReadProductivity = useMemo(() => hasPermission("productivity.read"), [me]);
-  const canWriteProductivity = useMemo(() => hasPermission("productivity.write"), [me]);
-  const canReadTimesheet = useMemo(() => hasPermission("timesheet.read"), [me]);
-  const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
-  const canWriteDocuments = useMemo(
-    () => hasPermission("documents.write") || hasPermission("documents.upload"),
-    [me]
-  );
-  const canReadTools = useMemo(() => hasPermission("tools.read"), [me]);
-  const canReadWaybills = useMemo(() => hasPermission("waybills.read"), [me]);
-  const canWriteWaybills = useMemo(() => hasPermission("waybills.write"), [me]);
-  const canReadIntegrations = useMemo(() => hasPermission("integrations.read"), [me]);
-  const canReadNotifications = useMemo(() => hasPermission("notifications.read"), [me]);
-  const canManageFeedback = useMemo(() => hasPermission("feedback.manage"), [me]);
+  const canWriteOperations = hasObjectAccess;
+  const canWriteLimits = hasObjectAccess;
+  const canRevertAudit = canReadAudit;
+  const canDashboard = hasObjectAccess;
+  const canReadStocks = hasObjectAccess;
+  const canReadIssues = hasObjectAccess;
+  const canWriteIssues = hasObjectAccess;
+  const canReadOperations = hasObjectAccess;
+  const canReadLimits = hasObjectAccess;
+  const canMaterialReport = hasObjectAccess;
+  const canMaterialWriteoff = hasObjectAccess;
+  const canReadProductivity = hasObjectAccess;
+  const canWriteProductivity = hasObjectAccess;
+  const canReadTimesheet = hasObjectAccess;
+  const canReadDocuments = hasObjectAccess;
+  const canWriteDocuments = hasObjectAccess;
+  const canReadTools = hasObjectAccess;
+  const canReadWaybills = hasObjectAccess;
+  const canWriteWaybills = hasObjectAccess;
+  const canReadIntegrations = hasObjectAccess;
+  const canReadNotifications = hasObjectAccess;
+  const canManageFeedback = hasObjectAccess;
   const isStorekeeperMode = useMemo(() => me?.role === "STOREKEEPER", [me]);
 
   const unreadNotificationCount = useMemo(
@@ -1935,6 +1916,8 @@ function App() {
     setMe(null);
     setAvailableObjects([]);
     setCanViewAllObjects(false);
+    setCanReadAudit(false);
+    setCanCreateFirstObject(false);
     setActiveObjectId("");
     setMustPickObject(false);
     setAuthReady(true);
@@ -2112,9 +2095,11 @@ function App() {
       setProfileEmail(data.email);
       setProfilePhone(data.phone || "");
       if (Array.isArray(data.availableObjects)) {
-        setAvailableObjects(data.availableObjects);
+        setAvailableObjects(userAccessibleObjects(data.availableObjects));
       }
       setCanViewAllObjects(Boolean(data.canViewAllObjects));
+      setCanReadAudit(Boolean(data.canReadAudit));
+      setCanCreateFirstObject(Boolean(data.canCreateFirstObject));
       if (data.activeWarehouseId) {
         setActiveObjectId(data.activeWarehouseId);
       } else if (!data.requireObjectSelection && data.canViewAllObjects) {
@@ -2197,7 +2182,7 @@ function App() {
     setFirstSetupBusy(true);
     setAuthError("");
     try {
-      const res = await fetchWithSession(`${API_URL}/api/admin/objects`, {
+      const res = await fetchWithSession(`${API_URL}/api/warehouses`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3123,13 +3108,46 @@ function App() {
 
   async function syncObjectMembers(objectId: string, members: ObjectMember[]) {
     if (!token) return false;
-    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/members`, {
+    const res = await fetchWithSession(`${API_URL}/api/warehouses/${objectId}/members`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ members })
     });
     if (!res.ok) return false;
-    await loadAdminData();
+    await loadManagedObjects();
+    await loadMe();
+    return true;
+  }
+
+  async function loadManagedObjects() {
+    if (!token) return;
+    const [objectsRes, usersRes] = await Promise.all([
+      fetchWithSession(`${API_URL}/api/warehouses/managed`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetchWithSession(`${API_URL}/api/chat/users`, { headers: { Authorization: `Bearer ${token}` } })
+    ]);
+    if (objectsRes.ok) {
+      setManagedObjects((await objectsRes.json()) as AdminObject[]);
+    }
+    if (usersRes.ok) {
+      const rows = (await usersRes.json()) as Array<{ id: string; fullName: string; avatarUrl?: string | null }>;
+      const merged =
+        me?.id && !rows.some((u) => u.id === me.id)
+          ? [{ id: me.id, fullName: me.fullName, avatarUrl: me.avatarUrl ?? null }, ...rows]
+          : rows;
+      setDirectoryUsers(merged);
+    }
+  }
+
+  async function setObjectResponsible(objectId: string, responsibleUserId: string | null) {
+    if (!token) return false;
+    const res = await fetchWithSession(`${API_URL}/api/warehouses/${objectId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ responsibleUserId })
+    });
+    if (!res.ok) return false;
+    await loadManagedObjects();
+    await loadMe();
     return true;
   }
 
@@ -3153,7 +3171,7 @@ function App() {
     setUsers(usersData);
     setRoles(rolesData);
     setPositions(positionsData);
-    setAdminObjects(objectsData);
+    setManagedObjects(objectsData);
     if (usersData.length && !selectedUserId) {
       setSelectedUserId(usersData[0].id);
       setSelectedRoleName(usersData[0].role);
@@ -5923,7 +5941,7 @@ function App() {
     }
     if (canReadOperations) visibleTabs.add("operations");
     if (canReadWaybills) visibleTabs.add("waybills");
-    if (canReadStocks || canWriteCatalog) visibleTabs.add("catalog");
+    if (hasObjectAccess || canCreateFirstObject) visibleTabs.add("catalog");
     if (canReadDocuments) visibleTabs.add("documents");
     visibleTabs.add("acts");
     if (canReadTools) {
@@ -5981,6 +5999,9 @@ function App() {
   }, [users, selectedUserId, positions]);
 
   useEffect(() => {
+    if (token && activeTab === "catalog") {
+      void loadManagedObjects();
+    }
     if (token && (activeTab === "catalog" || activeTab === "operations")) {
       void loadCatalogData();
     }
@@ -6446,9 +6467,11 @@ function App() {
       const data = (await res.json()) as LoginResponse;
       localStorage.setItem(TOKEN_KEY, data.token);
       if (Array.isArray(data.user.availableObjects)) {
-        setAvailableObjects(data.user.availableObjects);
+        setAvailableObjects(userAccessibleObjects(data.user.availableObjects));
       }
       setCanViewAllObjects(Boolean(data.user.canViewAllObjects));
+      setCanReadAudit(Boolean(data.user.canReadAudit));
+      setCanCreateFirstObject(Boolean(data.user.canCreateFirstObject));
       if (data.user.activeWarehouseId) {
         setActiveObjectId(data.user.activeWarehouseId);
       }
@@ -6541,7 +6564,7 @@ function App() {
 
   if (mustPickObject) {
     const noObjects = availableObjects.length === 0;
-    const showFirstSetup = noObjects && isAdmin;
+    const showFirstSetup = noObjects && canCreateFirstObject;
 
     return (
       <main className="loginShell">
@@ -6591,8 +6614,7 @@ function App() {
               </>
             ) : noObjects ? (
               <p className="muted firstSetupHint">
-                Нет доступных объектов. Обратитесь к администратору — он должен создать объект и назначить вам
-                доступ.
+                Нет доступных объектов. Попросите ответственное лицо на объекте добавить вас в участники.
               </p>
             ) : (
               <>
@@ -6817,10 +6839,10 @@ function App() {
             canReadOperations={canReadOperations}
             canReadWaybills={canReadWaybills}
             canReadDocuments={canReadDocuments}
-            canWriteCatalog={canWriteCatalog}
             canReadIntegrations={canReadIntegrations}
             canReadNotifications={canReadNotifications}
             canReadAudit={canReadAudit}
+            canCreateFirstObject={canCreateFirstObject}
             canManageUsers={canManageUsers}
             unreadNotificationCount={unreadNotificationCount}
             chatUnreadTotal={chatUnreadTotal}
@@ -7462,64 +7484,136 @@ function App() {
         <div>
           <PageHero
             icon="▣"
-            title="Справочники"
-            subtitle="Склады и материалы — справочные данные системы"
+            title="Объекты"
+            subtitle="Участники, разделы СС/ЭОМ и ответственные лица"
             stats={[
-              { label: "Складов", value: warehouses.length },
-              { label: "Материалов", value: materials.length }
+              { label: "Объектов", value: managedObjects.length },
+              { label: "Доступно вам", value: availableObjects.length }
             ]}
           />
-          <div className="card grid2">
-            <div>
-              <h3>Создать склад</h3>
-              <div className="form">
-                <label>
-                  Название
-                  <input value={warehouseName} onChange={(e) => setWarehouseName(e.target.value)} />
-                </label>
-                <label>
-                  Адрес
-                  <input
-                    value={warehouseAddress}
-                    onChange={(e) => setWarehouseAddress(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={!canWriteWarehouses}
-                  onClick={async () => {
-                    if (!token) return;
-                    setCatalogMessage("");
-                    const res = await fetchWithSession(`${API_URL}/api/warehouses`, {
-                      method: "POST",
-                      headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": "application/json"
-                      },
-                      body: JSON.stringify({ name: warehouseName, address: warehouseAddress, isActive: true })
-                    });
-                    if (!res.ok) {
-                      setCatalogMessage("Ошибка создания склада");
-                      return;
-                    }
-                    setCatalogMessage("Склад создан");
-                    await loadCatalogData();
-                  }}
-                >
-                  Создать склад
-                </button>
-              </div>
+          <div className="card adminInsetCard">
+            <h4>Создать объект</h4>
+            <div className="form">
+              <label>
+                Название объекта
+                <input value={newObjectName} onChange={(e) => setNewObjectName(e.target.value)} />
+              </label>
+              <label>
+                Адрес
+                <input value={newObjectAddress} onChange={(e) => setNewObjectAddress(e.target.value)} />
+              </label>
             </div>
-
-            <div className="card">
-              <h3>Материалы</h3>
-              <p className="muted">
-                Новые позиции заводятся при приёмке и через «Склад» → «Добавить материал вручную». Там же задаются{" "}
-                <strong>вид</strong> (основной / расходник / спецодежда) и <strong>цена за единицу</strong>. Правка
-                карточки: API <code className="muted">PATCH /api/materials/:id</code> (поля kind, unitPrice).
-              </p>
+            <div className="toolbar">
+              <button
+                type="button"
+                disabled={!newObjectName.trim() || (!hasObjectAccess && !canCreateFirstObject)}
+                onClick={async () => {
+                  if (!token || !newObjectName.trim()) return;
+                  const res = await fetchWithSession(`${API_URL}/api/warehouses`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      name: newObjectName.trim(),
+                      address: newObjectAddress.trim() || undefined,
+                      userIds: me?.id ? [me.id] : []
+                    })
+                  });
+                  if (!res.ok) {
+                    setObjectsMessage("Не удалось создать объект");
+                    return;
+                  }
+                  setObjectsMessage("Объект создан");
+                  setNewObjectName("");
+                  setNewObjectAddress("");
+                  await loadManagedObjects();
+                  await loadMe();
+                  await loadCatalogData();
+                }}
+              >
+                Создать объект
+              </button>
             </div>
           </div>
-          {catalogMessage && <p className="muted">{catalogMessage}</p>}
+          <div className="objectCards adminObjectCardGrid">
+            {managedObjects.map((obj) => {
+              const members: ObjectMember[] =
+                obj.members ?? obj.userIds.map((userId) => ({ userId, sections: null }));
+              const memberUsers = directoryUsers.length
+                ? directoryUsers
+                : members.map((m) => ({
+                    id: m.userId,
+                    fullName: m.userId,
+                    avatarUrl: null as string | null
+                  }));
+              return (
+                <div key={`obj-card-${obj.id}`} className="objectCard">
+                  <div className="rightCardHeader">
+                    <h4>{obj.name}</h4>
+                    <span className="muted">{obj.address || "Без адреса"}</span>
+                  </div>
+                  <label>
+                    Ответственное лицо (логи действий)
+                    <select
+                      value={obj.responsibleUserId || ""}
+                      onChange={async (e) => {
+                        const next = e.target.value || null;
+                        const ok = await setObjectResponsible(obj.id, next);
+                        if (ok) setObjectsMessage(`Ответственное лицо для «${obj.name}» обновлено`);
+                      }}
+                    >
+                      <option value="">— не назначено —</option>
+                      {members.map((m) => {
+                        const u = memberUsers.find((x) => x.id === m.userId);
+                        return (
+                          <option key={m.userId} value={m.userId}>
+                            {u?.fullName || m.userId}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <ObjectMembersPanel
+                    objectId={obj.id}
+                    users={memberUsers.map((u) => ({
+                      id: u.id,
+                      fullName: u.fullName,
+                      avatarUrl: u.avatarUrl
+                    }))}
+                    members={members}
+                    onSave={async (next) => {
+                      const ok = await syncObjectMembers(obj.id, next);
+                      if (ok) setObjectsMessage(`Участники объекта «${obj.name}» сохранены`);
+                      return ok;
+                    }}
+                  />
+                  <div className="toolbar">
+                    <button
+                      type="button"
+                      className="dangerBtn"
+                      disabled={!token}
+                      onClick={async () => {
+                        if (!window.confirm(`Удалить объект «${obj.name}»?`)) return;
+                        const res = await fetchWithSession(
+                          `${API_URL}/api/warehouses/${encodeURIComponent(obj.id)}`,
+                          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (!res.ok) {
+                          setObjectsMessage("Не удалось удалить объект");
+                          return;
+                        }
+                        setObjectsMessage("Объект удалён");
+                        await loadManagedObjects();
+                        await loadMe();
+                      }}
+                    >
+                      Удалить объект
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {objectsMessage ? <p className="muted">{objectsMessage}</p> : null}
         </div>
       )}
 
@@ -12496,7 +12590,7 @@ function App() {
               </div>
               </div>
               <div className="objectCards adminObjectCardGrid">
-              {adminObjects.map((obj) => {
+              {managedObjects.map((obj: AdminObject) => {
                 const members: ObjectMember[] =
                   obj.members ??
                   obj.userIds.map((userId) => ({ userId, sections: null }));

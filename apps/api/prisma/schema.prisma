@@ -202,6 +202,7 @@ model User {
   announcementsCreated Announcement[] @relation("AnnouncementAuthor")
   materialWriteoffsHeld   MaterialHolderWriteoff[] @relation("MaterialWriteoffHolder")
   materialWriteoffsActed  MaterialHolderWriteoff[] @relation("MaterialWriteoffActor")
+  responsibleWarehouses   Warehouse[]          @relation("WarehouseResponsible")
   productivitySheetsCreated ProductivitySheet[] @relation("ProductivitySheetCreator")
   dataJobRuns             DataJobRun[]             @relation("DataJobRunTriggeredBy")
   createdAt        DateTime             @default(now())
@@ -265,6 +266,8 @@ model Warehouse {
   name        String
   address     String?
   isActive    Boolean      @default(true)
+  responsibleUserId String?
+  responsibleUser   User?  @relation("WarehouseResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
   stocks      Stock[]
   stockMovements StockMovement[]
   operations  Operation[]
@@ -285,6 +288,7 @@ model Warehouse {
   materialHolderWriteoffs MaterialHolderWriteoff[]
   toolConsumableIssues ToolConsumableIssue[]
   productivitySheets ProductivitySheet[]
+  auditLogs   AuditLog[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -564,6 +568,7 @@ model AuditLog {
   action       String
   entityType   String
   entityId     String
+  warehouseId  String?
   summary      String?
   beforeData   Json?
   afterData    Json?
@@ -574,9 +579,11 @@ model AuditLog {
   revertedById String?
   createdAt    DateTime  @default(now())
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   revertedBy   User?     @relation("AuditRevertedBy", fields: [revertedById], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
+  @@index([warehouseId])
   @@index([userId])
   @@index([createdAt])
   @@index([reverted])

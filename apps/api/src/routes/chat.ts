@@ -76,7 +76,7 @@ chatRouter.get("/users/:userId", async (req: AuthedRequest, res) => {
   });
   if (!target) return res.status(404).json({ error: "User not found" });
   const permissions = getEffectivePermissions(target.role.permissions, target.customPermissions);
-  const warehouses = await getAllowedWarehouses(target.id, permissions);
+  const warehouses = await getAllowedWarehouses(target.id, target.role.name, permissions);
   return res.json({
     ...serializeChatUser(target),
     warehouses: warehouses.map((w) => ({ id: w.id, name: w.name }))

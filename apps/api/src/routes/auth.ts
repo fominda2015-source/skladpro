@@ -19,19 +19,32 @@ import {
 } from "../lib/objectAccess.js";
 import { scopeForbiddenPayload } from "../lib/accessScope.js";
 import { canViewAllObjects, getAllowedWarehouses } from "../lib/userWarehouses.js";
+import { getResponsibleWarehouseIds } from "../lib/warehouseResponsibility.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
 
 const ADMIN_EMAIL = "admin@skladpro.local";
 const ADMIN_PASSWORD = "1111";
 
+async function userAccessExtras(userId: string) {
+  const [responsibleWarehouseIds, systemWarehouseCount] = await Promise.all([
+    getResponsibleWarehouseIds(userId),
+    prisma.warehouse.count({ where: { isActive: true } })
+  ]);
+  return {
+    responsibleWarehouseIds,
+    canReadAudit: responsibleWarehouseIds.length > 0,
+    canCreateFirstObject: systemWarehouseCount === 0
+  };
+}
 async function allowedSectionsPayload(
   userId: string,
+  role: string,
   permissions: string[],
   activeWarehouseId: string | null
 ) {
   if (!activeWarehouseId) return { allowedSections: null as ("SS" | "EOM")[] | null };
-  const allowed = await getAllowedSectionsForWarehouse(userId, activeWarehouseId, permissions);
+  const allowed = await getAllowedSectionsForWarehouse(userId, activeWarehouseId, role, permissions);
   if (allowed === null) return { allowedSections: null as ("SS" | "EOM")[] | null };
   return { allowedSections: allowed };
 }
@@ -178,14 +191,14 @@ authRouter.post("/login", async (req, res) => {
 
     const roleName = user.role.name as RoleName;
     const permissions = getEffectivePermissions(user.role.permissions, user.customPermissions);
-    const allowedWarehouses = await getAllowedWarehouses(user.id, permissions);
-    const viewAllObjects = await canViewAllObjects(user.id, permissions);
+    const allowedWarehouses = await getAllowedWarehouses(user.id, roleName, permissions);
+    const viewAllObjects = await canViewAllObjects(user.id, roleName, permissions);
     const activeWarehouseId =
       user.activeWarehouseId && allowedWarehouses.some((w) => w.id === user.activeWarehouseId)
         ? user.activeWarehouseId
         : allowedWarehouses[0]?.id || null;
 
-    const sectionAccess = await allowedSectionsPayload(user.id, permissions, activeWarehouseId);
+    const sectionAccess = await allowedSectionsPayload(user.id, roleName, permissions, activeWarehouseId);
     let activeSection = pickAllowedSection(
       sectionAccess.allowedSections,
       user.activeSection || "SS"
@@ -201,7 +214,8 @@ authRouter.post("/login", async (req, res) => {
       });
     }
 
-    const availableObjects = await listUserObjectAccess(user.id, permissions, allowedWarehouses);
+    const availableObjects = await listUserObjectAccess(user.id, roleName, permissions, allowedWarehouses);
+    const accessExtras = await userAccessExtras(user.id);
 
     const token = jwt.sign(
       { userId: user.id, role: roleName, email: user.email, permissions },
@@ -224,7 +238,8 @@ authRouter.post("/login", async (req, res) => {
         requireObjectSelection: !activeWarehouseId,
         availableObjects,
         canViewAllObjects: viewAllObjects,
-        ...sectionAccess
+        ...sectionAccess,
+        ...accessExtras
       }
     });
   } catch (err) {
@@ -242,13 +257,14 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: "User not found" });
   }
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
-  const allowedWarehouses = await getAllowedWarehouses(me.id, permissions);
-  const viewAllObjects = await canViewAllObjects(me.id, permissions);
+  const roleName = me.role.name as RoleName;
+  const allowedWarehouses = await getAllowedWarehouses(me.id, roleName, permissions);
+  const viewAllObjects = await canViewAllObjects(me.id, roleName, permissions);
   const activeWarehouseId =
     me.activeWarehouseId && allowedWarehouses.some((w) => w.id === me.activeWarehouseId)
       ? me.activeWarehouseId
       : allowedWarehouses[0]?.id || null;
-  const sectionAccess = await allowedSectionsPayload(me.id, permissions, activeWarehouseId);
+  const sectionAccess = await allowedSectionsPayload(me.id, roleName, permissions, activeWarehouseId);
   const activeSection = pickAllowedSection(sectionAccess.allowedSections, me.activeSection || "SS");
   if (
     activeWarehouseId &&
@@ -259,7 +275,8 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
       data: { activeWarehouseId, activeSection }
     });
   }
-  const availableObjects = await listUserObjectAccess(me.id, permissions, allowedWarehouses);
+  const availableObjects = await listUserObjectAccess(me.id, roleName, permissions, allowedWarehouses);
+  const accessExtras = await userAccessExtras(me.id);
   return res.json({
     id: me.id,
     email: me.email,
@@ -274,7 +291,8 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     requireObjectSelection: !activeWarehouseId,
     availableObjects,
     canViewAllObjects: viewAllObjects,
-    ...sectionAccess
+    ...sectionAccess,
+    ...accessExtras
   });
 });
 
@@ -285,7 +303,8 @@ authRouter.get("/context", requireAuth, async (req: AuthedRequest, res) => {
   });
   if (!me) return res.status(404).json({ error: "User not found" });
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
-  const objects = await getAllowedWarehouses(me.id, permissions);
+  const roleName = me.role.name as RoleName;
+  const objects = await getAllowedWarehouses(me.id, roleName, permissions);
   return res.json({
     activeWarehouseId: me.activeWarehouseId,
     activeSection: me.activeSection || "SS",
@@ -304,9 +323,10 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
   });
   if (!me) return res.status(404).json({ error: "User not found" });
   const permissions = getEffectivePermissions(me.role.permissions, me.customPermissions);
-  const objects = await getAllowedWarehouses(me.id, permissions);
+  const roleName = me.role.name as RoleName;
+  const objects = await getAllowedWarehouses(me.id, roleName, permissions);
   if (parsed.data.warehouseId === null) {
-    const okAll = await canViewAllObjects(me.id, permissions);
+    const okAll = await canViewAllObjects(me.id, roleName, permissions);
     if (!okAll) {
       return res.status(403).json(scopeForbiddenPayload("FORBIDDEN_ALL_OBJECTS"));
     }
@@ -314,7 +334,12 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(403).json(scopeForbiddenPayload("FORBIDDEN_WAREHOUSE"));
   } else {
     try {
-      const allowed = await getAllowedSectionsForWarehouse(me.id, parsed.data.warehouseId, permissions);
+      const allowed = await getAllowedSectionsForWarehouse(
+        me.id,
+        parsed.data.warehouseId,
+        roleName,
+        permissions
+      );
       assertSectionAllowedForWarehouse(allowed, parsed.data.section);
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -335,6 +360,7 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
   });
   const sectionAccess = await allowedSectionsPayload(
     me.id,
+    roleName,
     permissions,
     updated.activeWarehouseId
   );

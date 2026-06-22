@@ -14,10 +14,10 @@ type Props = {
   canReadOperations: boolean;
   canReadWaybills: boolean;
   canReadDocuments: boolean;
-  canWriteCatalog: boolean;
   canReadIntegrations: boolean;
   canReadNotifications: boolean;
   canReadAudit: boolean;
+  canCreateFirstObject: boolean;
   canManageUsers: boolean;
   unreadNotificationCount: number;
   chatUnreadTotal: number;
@@ -67,10 +67,10 @@ export function SidebarNav(props: Props) {
     canReadOperations,
     canReadWaybills,
     canReadDocuments,
-    canWriteCatalog,
     canReadIntegrations,
     canReadNotifications,
     canReadAudit,
+    canCreateFirstObject,
     canManageUsers,
     unreadNotificationCount,
     chatUnreadTotal
@@ -156,8 +156,8 @@ export function SidebarNav(props: Props) {
 
       <p className="navSectionTitle navSectionTitle--wip">В разработке</p>
       <SidebarNavItem tab="reports" activeTab={activeTab} icon="📄" label="Сводка по объекту" onSelect={onSelectTab} wip />
-      {(canReadStocks || canWriteCatalog) ? (
-        <SidebarNavItem tab="catalog" activeTab={activeTab} icon="▣" label="Справочники" onSelect={onSelectTab} wip />
+      {(canReadStocks || canCreateFirstObject) ? (
+        <SidebarNavItem tab="catalog" activeTab={activeTab} icon="▣" label="Объекты" onSelect={onSelectTab} />
       ) : null}
       {canReadIntegrations ? (
         <SidebarNavItem tab="integrations" activeTab={activeTab} icon="⎘" label="Интеграции" onSelect={onSelectTab} wip />

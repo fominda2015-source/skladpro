@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma.js";
 import type { AuthedRequest } from "../middleware/auth.js";
+import { hasGlobalWarehouseAccess } from "./openAccess.js";
 import { resolveAllowedSectionPairs, type ObjectSection } from "./objectAccess.js";
 
 const scopeCache = new WeakMap<AuthedRequest, Promise<DataScope>>();
@@ -37,7 +38,7 @@ export async function getRequestDataScope(req: AuthedRequest): Promise<DataScope
   }
   let p = scopeCache.get(req);
   if (!p) {
-    p = loadDataScope(req.user.userId, req.user.permissions);
+    p = loadDataScope(req.user.userId, req.user.role, req.user.permissions);
     scopeCache.set(req, p);
   }
   return p;
@@ -48,8 +49,8 @@ export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<Data
   if (!req.user) {
     throw new Error("Unauthorized");
   }
-  const { userId, permissions } = req.user;
-  if (permissions.includes("*")) {
+  const { userId, role, permissions } = req.user;
+  if (hasGlobalWarehouseAccess(role, permissions)) {
     return {
       unrestricted: true,
       warehouseIds: null,
@@ -78,7 +79,7 @@ export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<Data
   };
 }
 
-async function loadDataScope(userId: string, permissions: string[]): Promise<DataScope> {
+async function loadDataScope(userId: string, role: string, permissions: string[]): Promise<DataScope> {
   const [userRow, whRows, pjRows, sectionRows] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -88,7 +89,7 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
     prisma.userProjectScope.findMany({ where: { userId }, select: { projectId: true } }),
     prisma.userWarehouseSectionScope.findMany({ where: { userId }, select: { warehouseId: true, section: true } })
   ]);
-  if (permissions.includes("*")) {
+  if (hasGlobalWarehouseAccess(role, permissions)) {
     if (userRow?.activeWarehouseId) {
       const whId = userRow.activeWarehouseId;
       return {
