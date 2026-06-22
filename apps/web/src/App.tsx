@@ -5711,8 +5711,9 @@ function App() {
 
   async function loadInboundDocuments() {
     if (!token) return;
+    const warehouseId = effectiveWarehouseId;
     const parts = [
-      docWarehouseFilter ? `warehouseId=${encodeURIComponent(docWarehouseFilter)}` : "",
+      warehouseId ? `warehouseId=${encodeURIComponent(warehouseId)}` : "",
       objectSectionFilter ? `section=${encodeURIComponent(objectSectionFilter)}` : ""
     ].filter(Boolean);
     const query = parts.length ? `?${parts.join("&")}` : "";
@@ -5733,14 +5734,15 @@ function App() {
   }
 
   async function uploadInboundDocument() {
-    if (!token || !inboundUploadFiles.length || !inboundUploadTitle.trim() || !docWarehouseFilter) return;
+    const warehouseId = effectiveWarehouseId;
+    if (!token || !inboundUploadFiles.length || !inboundUploadTitle.trim() || !warehouseId) return;
     setInboundUploadBusy(true);
     setDocumentsMessage("");
     try {
       for (const file of inboundUploadFiles) {
         const fd = new FormData();
         fd.append("file", file);
-        fd.append("warehouseId", docWarehouseFilter);
+        fd.append("warehouseId", warehouseId);
         fd.append("title", inboundUploadTitle.trim());
         fd.append("comment", inboundUploadComment.trim());
         fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
@@ -6479,6 +6481,7 @@ function App() {
     docEntityType,
     docEntityId,
     docWarehouseFilter,
+    effectiveWarehouseId,
     objectSectionFilter
   ]);
 
@@ -10723,8 +10726,8 @@ function App() {
             </select>
           ) : null;
 
-        const inboundFiltersActive =
-          Boolean(docWarehouseFilter) || Boolean(docSearchQuery.trim());
+        const inboundFiltersActive = Boolean(docSearchQuery.trim());
+        const inboundWarehouseReady = Boolean(effectiveWarehouseId);
         const inboundVisible = sortInboundDocuments(
           filterInboundDocuments(inboundDocuments, docSearchQuery)
         );
@@ -10754,18 +10757,11 @@ function App() {
                 selectedDocument={selectedDocument}
                 docPreviewUrl={docPreviewUrl}
                 apiUrl={API_URL}
-                docWarehouseFilter={docWarehouseFilter}
-                warehouses={warehouses}
-                onWarehouseChange={(id) => {
-                  setDocWarehouseFilter(id);
-                  setSelectedDocumentId("");
-                  setDocPreviewUrl("");
-                }}
+                warehouseReady={inboundWarehouseReady}
                 docSearchQuery={docSearchQuery}
                 onSearchChange={setDocSearchQuery}
                 filtersActive={inboundFiltersActive}
                 onResetFilters={() => {
-                  setDocWarehouseFilter("");
                   setDocSearchQuery("");
                   setSelectedDocumentId("");
                   setDocPreviewUrl("");
@@ -10778,7 +10774,6 @@ function App() {
                   setDocPreviewUrl(`${API_URL}/${d.filePath}`);
                 }}
                 onDelete={(id, shownName) => void deleteDocument(id, shownName)}
-                safeName={safeName}
                 uploadTitle={inboundUploadTitle}
                 onUploadTitleChange={setInboundUploadTitle}
                 uploadComment={inboundUploadComment}

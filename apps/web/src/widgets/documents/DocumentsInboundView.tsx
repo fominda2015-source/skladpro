@@ -23,9 +23,7 @@ type Props = {
   selectedDocument: InboundDocumentRow | null;
   docPreviewUrl: string;
   apiUrl: string;
-  docWarehouseFilter: string;
-  warehouses: { id: string; name: string }[];
-  onWarehouseChange: (id: string) => void;
+  warehouseReady: boolean;
   docSearchQuery: string;
   onSearchChange: (q: string) => void;
   filtersActive: boolean;
@@ -35,7 +33,6 @@ type Props = {
   canWriteDocuments: boolean;
   onSelectPreview: (doc: InboundDocumentRow) => void;
   onDelete: (id: string, shownName: string) => void;
-  safeName: (n: string) => string;
   uploadTitle: string;
   onUploadTitleChange: (v: string) => void;
   uploadComment: string;
@@ -88,9 +85,7 @@ export function DocumentsInboundView({
   selectedDocument,
   docPreviewUrl,
   apiUrl,
-  docWarehouseFilter,
-  warehouses,
-  onWarehouseChange,
+  warehouseReady,
   docSearchQuery,
   onSearchChange,
   filtersActive,
@@ -100,7 +95,6 @@ export function DocumentsInboundView({
   canWriteDocuments,
   onSelectPreview,
   onDelete,
-  safeName,
   uploadTitle,
   onUploadTitleChange,
   uploadComment,
@@ -112,8 +106,6 @@ export function DocumentsInboundView({
   uploadBusy,
   onUpload
 }: Props) {
-  const warehouseRequired = !docWarehouseFilter;
-
   function onSubmitUpload(e: FormEvent) {
     e.preventDefault();
     onUpload();
@@ -131,14 +123,6 @@ export function DocumentsInboundView({
           />
         }
       >
-        <select value={docWarehouseFilter} onChange={(e) => onWarehouseChange(e.target.value)} aria-label="Объект">
-          <option value="">Все объекты</option>
-          {warehouses.map((w) => (
-            <option key={`inb-wh-${w.id}`} value={w.id}>
-              {safeName(w.name)}
-            </option>
-          ))}
-        </select>
         <button type="button" className="ghostBtn" onClick={onRefresh}>
           ↻ Обновить
         </button>
@@ -190,14 +174,14 @@ export function DocumentsInboundView({
                 addLabel="Добавить файлы"
               />
             </label>
-            {warehouseRequired ? (
-              <p className="muted">Выберите объект в фильтре выше, чтобы привязать документ.</p>
+            {canWriteDocuments && !warehouseReady ? (
+              <p className="muted">Выберите объект в шапке страницы, чтобы добавить документ.</p>
             ) : null}
             <div className="toolbar">
               <button
                 type="submit"
                 className="primaryBtn"
-                disabled={uploadBusy || warehouseRequired || !uploadTitle.trim() || uploadFiles.length < 1}
+                disabled={uploadBusy || !warehouseReady || !uploadTitle.trim() || uploadFiles.length < 1}
               >
                 {uploadBusy ? "Загрузка…" : "Добавить"}
               </button>
