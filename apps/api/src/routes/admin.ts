@@ -6,6 +6,11 @@ import { createDemoData, deleteDemoData, getDemoDataStatus } from "../lib/demoDa
 import { prisma } from "../lib/prisma.js";
 import { normalizePermissions } from "../lib/permissions.js";
 import { getEffectivePermissions } from "../lib/access.js";
+import {
+  membersFromObjectScopes,
+  syncObjectMembers,
+  type ObjectMemberInput
+} from "../lib/objectAccess.js";
 import { requireAdminRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { UserStatus } from "@prisma/client";
 
@@ -60,6 +65,13 @@ const bindObjectUsersSchema = z.object({
 });
 const bindObjectSectionUsersSchema = z.object({
   userIds: z.array(z.string().min(1)).default([])
+});
+const objectMemberSchema = z.object({
+  userId: z.string().min(1),
+  sections: z.array(z.enum(["SS", "EOM"])).nullable()
+});
+const syncObjectMembersSchema = z.object({
+  members: z.array(objectMemberSchema).default([])
 });
 
 export const adminRouter = Router();
@@ -383,17 +395,22 @@ adminRouter.get("/objects", async (_req, res) => {
     sectionUserIdsByWarehouse.set(l.warehouseId, current);
   }
   return res.json(
-    warehouses.map((w) => ({
-      id: w.id,
-      name: w.name,
-      address: w.address,
-      isActive: w.isActive,
-      userIds: Array.from(new Set(userIdsByWarehouse.get(w.id) || [])),
-      sectionUsers: {
+    warehouses.map((w) => {
+      const userIds = Array.from(new Set(userIdsByWarehouse.get(w.id) || []));
+      const sectionUsers = {
         SS: Array.from(new Set(sectionUserIdsByWarehouse.get(w.id)?.SS || [])),
         EOM: Array.from(new Set(sectionUserIdsByWarehouse.get(w.id)?.EOM || []))
-      }
-    }))
+      };
+      return {
+        id: w.id,
+        name: w.name,
+        address: w.address,
+        isActive: w.isActive,
+        userIds,
+        sectionUsers,
+        members: membersFromObjectScopes(userIds, sectionUsers)
+      };
+    })
   );
 });
 
@@ -411,10 +428,11 @@ adminRouter.post("/objects", async (req: AuthedRequest, res) => {
       }
     });
     if (parsed.data.userIds.length) {
-      await tx.userWarehouseScope.createMany({
-        data: parsed.data.userIds.map((userId) => ({ userId, warehouseId: warehouse.id })),
-        skipDuplicates: true
-      });
+      await syncObjectMembers(
+        tx,
+        warehouse.id,
+        parsed.data.userIds.map((userId) => ({ userId, sections: null }))
+      );
     }
     return warehouse;
   });
@@ -479,6 +497,12 @@ adminRouter.put("/objects/:id/sections/:section/users", async (req: AuthedReques
     select: { userId: true }
   });
   await prisma.$transaction(async (tx) => {
+    if (parsed.data.userIds.length) {
+      await tx.userWarehouseScope.createMany({
+        data: parsed.data.userIds.map((userId) => ({ userId, warehouseId })),
+        skipDuplicates: true
+      });
+    }
     await tx.userWarehouseSectionScope.deleteMany({
       where: {
         warehouseId,
@@ -693,6 +717,42 @@ adminRouter.delete("/objects/:id", async (req: AuthedRequest, res) => {
     before: { name: wh.name, force, hasData }
   });
   return res.json({ ok: true, force, wipedData: force && hasData });
+});
+
+adminRouter.put("/objects/:id/members", async (req: AuthedRequest, res) => {
+  const parsed = syncObjectMembersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const warehouseId = String(req.params.id);
+  const object = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!object) return res.status(404).json({ error: "Object not found" });
+
+  const beforeUsers = await prisma.userWarehouseScope.findMany({
+    where: { warehouseId },
+    select: { userId: true }
+  });
+  const beforeSections = await prisma.userWarehouseSectionScope.findMany({
+    where: { warehouseId },
+    select: { userId: true, section: true }
+  });
+
+  const members = parsed.data.members as ObjectMemberInput[];
+  await prisma.$transaction((tx) => syncObjectMembers(tx, warehouseId, members));
+
+  await recordAudit({
+    userId: req.user!.userId,
+    action: "OBJECT_MEMBERS_SYNC",
+    entityType: "Warehouse",
+    entityId: warehouseId,
+    summary: `Обновлены участники объекта ${object.name}`,
+    before: {
+      userIds: beforeUsers.map((x) => x.userId),
+      sectionScopes: beforeSections
+    },
+    after: { members }
+  });
+  return res.json({ ok: true });
 });
 
 adminRouter.put("/objects/:id/users", async (req: AuthedRequest, res) => {

@@ -11,12 +11,27 @@ import { UserStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../config.js";
 import { getEffectivePermissions } from "../lib/access.js";
+import {
+  assertSectionAllowedForWarehouse,
+  getAllowedSectionsForWarehouse
+} from "../lib/objectAccess.js";
 import { canViewAllObjects, getAllowedWarehouses } from "../lib/userWarehouses.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
 
 const ADMIN_EMAIL = "admin@skladpro.local";
 const ADMIN_PASSWORD = "1111";
+
+async function allowedSectionsPayload(
+  userId: string,
+  permissions: string[],
+  activeWarehouseId: string | null
+) {
+  if (!activeWarehouseId) return { allowedSections: null as ("SS" | "EOM")[] | null };
+  const allowed = await getAllowedSectionsForWarehouse(userId, activeWarehouseId, permissions);
+  if (allowed === null) return { allowedSections: null as ("SS" | "EOM")[] | null };
+  return { allowedSections: allowed };
+}
 
 const loginSchema = z.object({
   email: z.string().min(1),
@@ -179,6 +194,8 @@ authRouter.post("/login", async (req, res) => {
       { expiresIn: "12h" }
     );
 
+    const sectionAccess = await allowedSectionsPayload(user.id, permissions, activeWarehouseId);
+
     return res.json({
       token,
       user: {
@@ -193,7 +210,8 @@ authRouter.post("/login", async (req, res) => {
         activeSection: user.activeSection || "SS",
         requireObjectSelection: !activeWarehouseId,
         availableObjects: allowedWarehouses,
-        canViewAllObjects: viewAllObjects
+        canViewAllObjects: viewAllObjects,
+        ...sectionAccess
       }
     });
   } catch (err) {
@@ -217,6 +235,7 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     me.activeWarehouseId && allowedWarehouses.some((w) => w.id === me.activeWarehouseId)
       ? me.activeWarehouseId
       : allowedWarehouses[0]?.id || null;
+  const sectionAccess = await allowedSectionsPayload(me.id, permissions, activeWarehouseId);
   return res.json({
     id: me.id,
     email: me.email,
@@ -230,7 +249,8 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     activeSection: me.activeSection || "SS",
     requireObjectSelection: !activeWarehouseId,
     availableObjects: allowedWarehouses,
-    canViewAllObjects: viewAllObjects
+    canViewAllObjects: viewAllObjects,
+    ...sectionAccess
   });
 });
 
@@ -267,7 +287,24 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN_ALL_OBJECTS" });
     }
   } else if (!objects.some((x) => x.id === parsed.data.warehouseId)) {
-    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+    return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE", message: "Нет доступа к этому объекту" });
+  } else {
+    try {
+      const allowed = await getAllowedSectionsForWarehouse(me.id, parsed.data.warehouseId, permissions);
+      assertSectionAllowedForWarehouse(allowed, parsed.data.section);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) {
+        return res.status(403).json({
+          error: err.message,
+          message:
+            err.message === "FORBIDDEN_SECTION"
+              ? `Нет доступа к разделу ${parsed.data.section === "SS" ? "СС" : "ЭОМ"} на этом объекте`
+              : "Нет доступа к этому объекту"
+        });
+      }
+      throw e;
+    }
   }
   const updated = await prisma.user.update({
     where: { id: me.id },
@@ -276,9 +313,15 @@ authRouter.put("/context", requireAuth, async (req: AuthedRequest, res) => {
       activeSection: parsed.data.section
     }
   });
+  const sectionAccess = await allowedSectionsPayload(
+    me.id,
+    permissions,
+    updated.activeWarehouseId
+  );
   return res.json({
     activeWarehouseId: updated.activeWarehouseId,
-    activeSection: updated.activeSection || "SS"
+    activeSection: updated.activeSection || "SS",
+    ...sectionAccess
   });
 });
 

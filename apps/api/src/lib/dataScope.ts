@@ -1,10 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma.js";
 import type { AuthedRequest } from "../middleware/auth.js";
+import { resolveAllowedSectionPairs, type ObjectSection } from "./objectAccess.js";
 
 const scopeCache = new WeakMap<AuthedRequest, Promise<DataScope>>();
 
-type SectionPair = { warehouseId: string; section: "SS" | "EOM" };
+type SectionPair = { warehouseId: string; section: ObjectSection };
 
 export type DataScope = {
   unrestricted: boolean;
@@ -64,16 +65,16 @@ export async function getHomeOverviewDataScope(req: AuthedRequest): Promise<Data
   ]);
   return {
     unrestricted: false,
-    warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : null,
+    warehouseIds: whRows.length ? whRows.map((r) => r.warehouseId) : [],
     projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
     sectionScopes: sectionRows.map((s) => ({
       warehouseId: s.warehouseId,
       section: s.section
     })),
-    allowedSectionPairs: sectionRows.map((s) => ({
-      warehouseId: s.warehouseId,
-      section: s.section
-    }))
+    allowedSectionPairs: resolveAllowedSectionPairs(
+      whRows.map((r) => r.warehouseId),
+      sectionRows
+    )
   };
 }
 
@@ -113,19 +114,15 @@ async function loadDataScope(userId: string, permissions: string[]): Promise<Dat
   const scopedWarehouses = whRows.map((r) => r.warehouseId);
   const warehouseIds =
     activeWarehouseId && scopedWarehouses.includes(activeWarehouseId) ? [activeWarehouseId] : scopedWarehouses;
-  const filteredSections = sectionRows.filter((s) =>
-    activeWarehouseId ? s.warehouseId === activeWarehouseId : true
-  );
-  const allowedSectionPairs = filteredSections.map((s) => ({
-    warehouseId: s.warehouseId,
-    section: s.section
-  }));
+  const warehousesForPairs =
+    activeWarehouseId && scopedWarehouses.includes(activeWarehouseId) ? [activeWarehouseId] : scopedWarehouses;
+  const allowedSectionPairs = resolveAllowedSectionPairs(warehousesForPairs, sectionRows);
   const sectionScopes = activeSection
     ? allowedSectionPairs.filter((s) => s.section === activeSection)
     : allowedSectionPairs;
   return {
     unrestricted: false,
-    warehouseIds: warehouseIds.length ? warehouseIds : null,
+    warehouseIds: warehouseIds.length ? warehouseIds : [],
     projectIds: pjRows.length ? pjRows.map((r) => r.projectId) : null,
     sectionScopes,
     allowedSectionPairs
@@ -288,7 +285,7 @@ export function stockWhereFromScope(scope: DataScope): Prisma.StockWhereInput {
   if (scope.warehouseIds?.length) {
     return { warehouseId: { in: scope.warehouseIds } };
   }
-  return {};
+  return { warehouseId: { in: [] } };
 }
 
 export function issueWhereFromScope(scope: DataScope): Prisma.IssueRequestWhereInput {
@@ -302,6 +299,9 @@ export function issueWhereFromScope(scope: DataScope): Prisma.IssueRequestWhereI
   }
   if (!scope.unrestricted && scope.projectIds?.length) {
     parts.push({ OR: [{ projectId: null }, { projectId: { in: scope.projectIds } }] });
+  }
+  if (!scope.unrestricted && !scope.sectionScopes.length && !scope.warehouseIds?.length) {
+    return { warehouseId: { in: [] } };
   }
   if (!parts.length) {
     return {};
@@ -324,7 +324,7 @@ export function operationWhereFromScope(scope: DataScope): Prisma.OperationWhere
   if (scope.warehouseIds?.length) {
     return { warehouseId: { in: scope.warehouseIds } };
   }
-  return {};
+  return { warehouseId: { in: [] } };
 }
 
 export function toolWhereFromScope(scope: DataScope): Prisma.ToolWhereInput {
@@ -340,7 +340,7 @@ export function toolWhereFromScope(scope: DataScope): Prisma.ToolWhereInput {
     };
   }
   if (!scope.warehouseIds?.length) {
-    return {};
+    return { warehouseId: { in: [] } };
   }
   return {
     OR: [{ warehouseId: { in: scope.warehouseIds } }, { warehouseId: null }]
@@ -411,7 +411,7 @@ export function objectLimitTemplateWhereFromScope(scope: DataScope): Prisma.Obje
   if (scope.warehouseIds?.length) {
     return { warehouseId: { in: scope.warehouseIds } };
   }
-  return {};
+  return { warehouseId: { in: [] } };
 }
 
 /**
@@ -429,12 +429,17 @@ export async function resolveReadScope(
 }
 
 export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {
-  if (scope.unrestricted || !scope.warehouseIds?.length) {
+  if (scope.unrestricted) {
     return;
   }
+  if (!scope.warehouseIds?.length) {
+    const err = new Error("FORBIDDEN_WAREHOUSE") as Error & { status: number };
+    err.status = 403;
+    throw err;
+  }
   if (!scope.warehouseIds.includes(warehouseId)) {
-    const err = new Error("FORBIDDEN_WAREHOUSE");
-    (err as Error & { status: number }).status = 403;
+    const err = new Error("FORBIDDEN_WAREHOUSE") as Error & { status: number };
+    err.status = 403;
     throw err;
   }
 }

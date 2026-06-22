@@ -88,6 +88,7 @@ import { PeriodExportButton } from "./widgets/exports/PeriodExportButton";
 import { ObjectExportsPanel } from "./widgets/exports/ObjectExportsPanel";
 import { UserAccountMenu } from "./widgets/layout/UserAccountMenu";
 import { WorkspaceContextBar } from "./widgets/layout/WorkspaceContextBar";
+import { ObjectMembersPanel, type ObjectMember } from "./widgets/admin/ObjectMembersPanel";
 import { ReceiptInvoiceAttachBar } from "./widgets/receipts/ReceiptInvoiceAttachBar";
 import {
   clearReceiptWorkspaceSession,
@@ -205,6 +206,7 @@ type LoginResponse = {
     requireObjectSelection?: boolean;
     availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
     canViewAllObjects?: boolean;
+    allowedSections?: ("SS" | "EOM")[] | null;
   };
 };
 type StockRow = {
@@ -279,6 +281,7 @@ type MeResponse = {
   requireObjectSelection?: boolean;
   availableObjects?: Array<{ id: string; name: string; address?: string | null }>;
   canViewAllObjects?: boolean;
+  allowedSections?: ("SS" | "EOM")[] | null;
 };
 type AdminUser = {
   id: string;
@@ -303,6 +306,7 @@ type AdminObject = {
   address?: string | null;
   userIds: string[];
   sectionUsers?: { SS: string[]; EOM: string[] };
+  members?: ObjectMember[];
 };
 type Warehouse = { id: string; name: string; address?: string | null; isActive: boolean };
 type Material = {
@@ -820,9 +824,6 @@ function App() {
   const [firstSetupAddress, setFirstSetupAddress] = useState("");
   const [firstSetupBusy, setFirstSetupBusy] = useState(false);
   const [newObjectUserIds, setNewObjectUserIds] = useState<string[]>([]);
-  const [selectedObjectSection, setSelectedObjectSection] = useState<"SS" | "EOM">("SS");
-  const [bindObjectSectionUserIds, setBindObjectSectionUserIds] = useState<string[]>([]);
-  const [objectQuickUserIds, setObjectQuickUserIds] = useState<Record<string, string>>({});
   const [positions, setPositions] = useState<Position[]>([]);
   const [newPositionName, setNewPositionName] = useState("");
   const [newUserPositionId, setNewUserPositionId] = useState("");
@@ -843,7 +844,6 @@ function App() {
   } | null>(null);
   const [demoDataLoading, setDemoDataLoading] = useState(false);
   const [adminUserFilter, setAdminUserFilter] = useState("");
-  const [expandedAdminObjectId, setExpandedAdminObjectId] = useState("");
   const [selectedWarehouseScopes, setSelectedWarehouseScopes] = useState<string[]>([]);
   const [selectedProjectScopes, setSelectedProjectScopes] = useState<string[]>([]);
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -2101,6 +2101,12 @@ function App() {
       if (data.activeSection) {
         setObjectSectionFilter(data.activeSection);
       }
+      if (Array.isArray(data.allowedSections) && data.allowedSections.length === 1) {
+        const only = data.allowedSections[0];
+        if (only && data.activeSection !== only) {
+          setObjectSectionFilter(only);
+        }
+      }
       setMustPickObject(Boolean(data.requireObjectSelection));
     } catch {
       // сеть / неверный ответ API
@@ -2116,10 +2122,37 @@ function App() {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(next)
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      let msg = "Не удалось сменить контекст";
+      try {
+        const body = (await res.json()) as { message?: string; error?: string };
+        if (typeof body.message === "string") msg = body.message;
+        else if (body.error === "FORBIDDEN_SECTION") msg = "Нет доступа к этому разделу на выбранном объекте";
+        else if (body.error === "FORBIDDEN_WAREHOUSE") msg = "Нет доступа к этому объекту";
+      } catch {
+        // ignore
+      }
+      setOpsMessage(msg);
+      return false;
+    }
+    const body = (await res.json()) as {
+      activeWarehouseId?: string | null;
+      activeSection?: "SS" | "EOM";
+      allowedSections?: ("SS" | "EOM")[] | null;
+    };
     setActiveObjectId(next.warehouseId);
-    setObjectSectionFilter(next.section);
+    setObjectSectionFilter(body.activeSection || next.section);
     setMustPickObject(false);
+    setMe((prev) =>
+      prev
+        ? {
+            ...prev,
+            activeWarehouseId: body.activeWarehouseId ?? next.warehouseId,
+            activeSection: body.activeSection || next.section,
+            allowedSections: body.allowedSections ?? prev.allowedSections
+          }
+        : prev
+    );
     return true;
   }
 
@@ -2231,6 +2264,11 @@ function App() {
 
   async function applyWorkspaceSection(next: "SS" | "EOM") {
     if (next === objectSectionFilter) return;
+    const allowed = me?.allowedSections;
+    if (allowed && !allowed.includes(next)) {
+      setOpsMessage(`Нет доступа к разделу ${next === "SS" ? "СС" : "ЭОМ"}`);
+      return;
+    }
     ++sectionReloadSeq.current;
     receiptRequestsLoadSeq.current += 1;
     if (!token) {
@@ -2286,6 +2324,7 @@ function App() {
         canViewAllObjects={canViewAllObjects}
         objects={availableObjects.map((o) => ({ id: o.id, name: safeName(o.name) }))}
         section={objectSectionFilter}
+        allowedSections={me?.allowedSections}
         onSelectObject={(id) => void selectTopObject(id)}
         onSelectSection={(next) => setSection(next)}
         hideObjectSelect={activeTab === "stocks"}
@@ -3060,24 +3099,12 @@ function App() {
     await Promise.all([loadFeedbackTickets(), loadFeedbackTicketDetail(ticketId)]);
   }
 
-  async function syncObjectUsers(objectId: string, userIds: string[]) {
+  async function syncObjectMembers(objectId: string, members: ObjectMember[]) {
     if (!token) return false;
-    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/users`, {
+    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/members`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ userIds })
-    });
-    if (!res.ok) return false;
-    await loadAdminData();
-    return true;
-  }
-
-  async function syncObjectSectionUsers(objectId: string, section: "SS" | "EOM", userIds: string[]) {
-    if (!token) return false;
-    const res = await fetchWithSession(`${API_URL}/api/admin/objects/${objectId}/sections/${section}/users`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ userIds })
+      body: JSON.stringify({ members })
     });
     if (!res.ok) return false;
     await loadAdminData();
@@ -6391,6 +6418,25 @@ function App() {
       if (data.user.activeSection) {
         setObjectSectionFilter(data.user.activeSection);
       }
+      if (Array.isArray(data.user.allowedSections) && data.user.allowedSections.length === 1) {
+        const only = data.user.allowedSections[0];
+        if (only) setObjectSectionFilter(only);
+      }
+      setMe({
+        id: data.user.id,
+        email: data.user.email,
+        fullName: data.user.fullName,
+        avatarUrl: data.user.avatarUrl,
+        position: data.user.position,
+        role: data.user.role,
+        permissions: data.user.permissions,
+        activeWarehouseId: data.user.activeWarehouseId,
+        activeSection: data.user.activeSection,
+        requireObjectSelection: data.user.requireObjectSelection,
+        availableObjects: data.user.availableObjects,
+        canViewAllObjects: data.user.canViewAllObjects,
+        allowedSections: data.user.allowedSections
+      });
       setMustPickObject(Boolean(data.user.requireObjectSelection));
       setToken(data.token);
     } catch (err) {
@@ -12434,136 +12480,29 @@ function App() {
               </div>
               <div className="objectCards adminObjectCardGrid">
               {adminObjects.map((obj) => {
-                const assigned = users.filter((u) => obj.userIds.includes(u.id));
+                const members: ObjectMember[] =
+                  obj.members ??
+                  obj.userIds.map((userId) => ({ userId, sections: null }));
                 return (
                   <div key={`obj-card-${obj.id}`} className="objectCard">
                     <div className="rightCardHeader">
                       <h4>{obj.name}</h4>
                       <span className="muted">{obj.address || "Без адреса"}</span>
                     </div>
-                    <div className="objectUsers">
-                      {assigned.length ? assigned.map((u) => (
-                        <div key={`obj-${obj.id}-user-${u.id}`} className="userMiniChip">
-                          <span className="userAvatar">
-                            <UserAvatarChip
-                              fullName={u.fullName}
-                              avatarUrl={u.avatarUrl}
-                              imageClassName="userAvatarImage"
-                              imageAlt={u.fullName}
-                            />
-                          </span>
-                          <span>{u.fullName}</span>
-                          <button
-                            type="button"
-                            className="ghostBtn"
-                            onClick={async () => {
-                              const next = obj.userIds.filter((id) => id !== u.id);
-                              const ok = await syncObjectUsers(obj.id, next);
-                              if (!ok) setAdminMessage("Не удалось убрать пользователя из объекта");
-                            }}
-                          >
-                            Убрать
-                          </button>
-                        </div>
-                      )) : <p className="muted">Пока нет привязанных пользователей</p>}
-                    </div>
-                    <div className="toolbar">
-                      <select
-                        value={objectQuickUserIds[obj.id] || ""}
-                        onChange={(e) =>
-                          setObjectQuickUserIds((prev) => ({ ...prev, [obj.id]: e.target.value }))
-                        }
-                      >
-                        <option value="">Выбери пользователя</option>
-                        {users
-                          .filter((u) => !obj.userIds.includes(u.id))
-                          .map((u) => (
-                            <option key={`quick-${obj.id}-${u.id}`} value={u.id}>{u.fullName}</option>
-                          ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const pickedUserId = objectQuickUserIds[obj.id];
-                          if (!pickedUserId) return;
-                          const next = Array.from(new Set([...obj.userIds, pickedUserId]));
-                          const ok = await syncObjectUsers(obj.id, next);
-                          if (!ok) setAdminMessage("Не удалось добавить пользователя в объект");
-                          else setObjectQuickUserIds((prev) => ({ ...prev, [obj.id]: "" }));
-                        }}
-                      >
-                        Добавить
-                      </button>
-                      <button
-                        type="button"
-                        className="ghostBtn"
-                        onClick={() => {
-                          if (expandedAdminObjectId === obj.id) {
-                            setExpandedAdminObjectId("");
-                          } else {
-                            setExpandedAdminObjectId(obj.id);
-                            setSelectedObjectSection("SS");
-                            const o = adminObjects.find((x) => x.id === obj.id);
-                            setBindObjectSectionUserIds(o?.sectionUsers?.SS ?? []);
-                          }
-                        }}
-                      >
-                        {expandedAdminObjectId === obj.id ? "Скрыть СС/ЭОМ" : "Доступ СС / ЭОМ"}
-                      </button>
-                    </div>
-                    {expandedAdminObjectId === obj.id ? (
-                      <div className="adminObjectSectionPanel">
-                        <label>
-                          Раздел
-                          <select
-                            value={selectedObjectSection}
-                            onChange={(e) => {
-                              const section = e.target.value as "SS" | "EOM";
-                              setSelectedObjectSection(section);
-                              const o = adminObjects.find((x) => x.id === obj.id);
-                              setBindObjectSectionUserIds(o?.sectionUsers?.[section] ?? []);
-                            }}
-                          >
-                            <option value="SS">СС</option>
-                            <option value="EOM">ЭОМ</option>
-                          </select>
-                        </label>
-                        <p className="muted" style={{ margin: "6px 0 8px" }}>
-                          Отметь, кто видит выбранный раздел на этом объекте (дополнительно к привязке к объекту).
-                        </p>
-                        <div className="plainList">
-                          {users.map((u) => (
-                            <label key={`obj-sec-${obj.id}-${u.id}`} style={{ display: "block" }}>
-                              <input
-                                type="checkbox"
-                                checked={bindObjectSectionUserIds.includes(u.id)}
-                                onChange={(e) => {
-                                  setBindObjectSectionUserIds((prev) =>
-                                    e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
-                                  );
-                                }}
-                              />{" "}
-                              {u.fullName}
-                            </label>
-                          ))}
-                        </div>
-                        <div className="toolbar">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const ok = await syncObjectSectionUsers(obj.id, selectedObjectSection, bindObjectSectionUserIds);
-                              if (!ok) {
-                                setAdminMessage("Не удалось сохранить доступы по разделу");
-                              } else {
-                                setAdminMessage(`Доступы к разделу ${selectedObjectSection} сохранены`);
-                              }
-                            }}
-                          >
-                            Сохранить доступ к разделу
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
+                    <ObjectMembersPanel
+                      objectId={obj.id}
+                      users={users.map((u) => ({
+                        id: u.id,
+                        fullName: u.fullName,
+                        avatarUrl: u.avatarUrl
+                      }))}
+                      members={members}
+                      onSave={async (next) => {
+                        const ok = await syncObjectMembers(obj.id, next);
+                        if (ok) setAdminMessage(`Доступ к объекту «${obj.name}» сохранён`);
+                        return ok;
+                      }}
+                    />
                     <div className="toolbar">
                       <button
                         type="button"
@@ -12613,7 +12552,6 @@ function App() {
                             return;
                           }
                           setAdminMessage("Объект удалён");
-                          if (expandedAdminObjectId === obj.id) setExpandedAdminObjectId("");
                           await loadAdminData();
                           await loadCatalogData();
                           await loadStocks(q);

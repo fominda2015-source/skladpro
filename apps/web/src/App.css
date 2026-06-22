@@ -1511,6 +1511,71 @@ button:hover {
   border-top: 1px dashed #dbe1ec;
 }
 
+.objectMembersPanel {
+  margin-top: 8px;
+}
+
+.objectMembersHint {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.objectMembersList {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.objectMemberRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e7edf8;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.objectMemberUser {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.objectMemberName {
+  font-weight: 600;
+}
+
+.objectMemberScope {
+  font-size: 12px;
+}
+
+.objectMemberSections {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.objectMemberSectionCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.objectMembersToolbar {
+  flex-wrap: wrap;
+}
+
+.workspaceContextSectionStatic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .detailDrawer.detailDrawerAdminUser {
   width: min(480px, calc(100vw - 36px));
 }
