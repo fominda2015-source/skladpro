@@ -8,6 +8,7 @@ import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } 
 import type { DocumentRow } from "./DocumentsTabView";
 
 export type InboundDocumentRow = DocumentRow & {
+  groupId?: string | null;
   title?: string | null;
   comment?: string | null;
   documentDate?: string | null;
@@ -15,10 +16,14 @@ export type InboundDocumentRow = DocumentRow & {
   sourceLabel?: string;
 };
 
+export type InboundDocumentEntry =
+  | { kind: "single"; doc: InboundDocumentRow }
+  | { kind: "group"; groupId: string; docs: InboundDocumentRow[] };
+
 type Props = {
   objectFilter?: ReactNode;
   documents: InboundDocumentRow[];
-  visibleDocs: InboundDocumentRow[];
+  visibleDocs: InboundDocumentEntry[];
   selectedDocumentId: string;
   selectedDocument: InboundDocumentRow | null;
   docPreviewUrl: string;
@@ -32,7 +37,7 @@ type Props = {
   documentsMessage?: string;
   canWriteDocuments: boolean;
   onSelectPreview: (doc: InboundDocumentRow) => void;
-  onDelete: (id: string, shownName: string) => void;
+  onDelete: (id: string, shownName: string, relatedIds?: string[]) => void;
   uploadTitle: string;
   onUploadTitleChange: (v: string) => void;
   uploadComment: string;
@@ -52,6 +57,72 @@ function docSortDate(doc: InboundDocumentRow): number {
 
 export function sortInboundDocuments(docs: InboundDocumentRow[]): InboundDocumentRow[] {
   return docs.slice().sort((a, b) => docSortDate(b) - docSortDate(a));
+}
+
+export function groupInboundDocumentsForDisplay(docs: InboundDocumentRow[]): InboundDocumentEntry[] {
+  const others: InboundDocumentEntry[] = [];
+  const byGroup = new Map<string, InboundDocumentRow[]>();
+
+  for (const d of docs) {
+    const isManualBundle = d.sourceKind === "manual" && d.type === "inbound-manual" && d.groupId;
+    if (isManualBundle) {
+      const g = d.groupId!;
+      const arr = byGroup.get(g) || [];
+      arr.push(d);
+      byGroup.set(g, arr);
+    } else {
+      others.push({ kind: "single", doc: d });
+    }
+  }
+
+  const grouped: InboundDocumentEntry[] = [];
+  for (const [groupId, groupDocs] of byGroup) {
+    const sorted = groupDocs.slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    if (sorted.length === 1) {
+      grouped.push({ kind: "single", doc: sorted[0] });
+    } else {
+      grouped.push({ kind: "group", groupId, docs: sorted });
+    }
+  }
+
+  return [...others, ...grouped].sort((a, b) => {
+    const da = a.kind === "single" ? docSortDate(a.doc) : docSortDate(a.docs[0]);
+    const db = b.kind === "single" ? docSortDate(b.doc) : docSortDate(b.docs[0]);
+    return db - da;
+  });
+}
+
+export function buildInboundVisibleList(docs: InboundDocumentRow[], search: string): InboundDocumentEntry[] {
+  return groupInboundDocumentsForDisplay(filterInboundDocuments(docs, search));
+}
+
+function entryPrimaryDoc(entry: InboundDocumentEntry): InboundDocumentRow {
+  return entry.kind === "single" ? entry.doc : entry.docs[0];
+}
+
+function entryFileCount(entry: InboundDocumentEntry): number {
+  return entry.kind === "single" ? 1 : entry.docs.length;
+}
+
+function entryTotalSize(entry: InboundDocumentEntry): number {
+  if (entry.kind === "single") return entry.doc.size || 0;
+  return entry.docs.reduce((sum, d) => sum + (d.size || 0), 0);
+}
+
+function entryIds(entry: InboundDocumentEntry): string[] {
+  return entry.kind === "single" ? [entry.doc.id] : entry.docs.map((d) => d.id);
+}
+
+function entryIsSelected(entry: InboundDocumentEntry, selectedDocumentId: string): boolean {
+  return entryIds(entry).includes(selectedDocumentId);
+}
+
+function shownTitle(doc: InboundDocumentRow): string {
+  return displayDocumentFileName(doc.fileName, {
+    type: doc.type,
+    createdAt: doc.createdAt,
+    title: doc.title
+  });
 }
 
 export function filterInboundDocuments(docs: InboundDocumentRow[], search: string): InboundDocumentRow[] {
@@ -109,6 +180,125 @@ export function DocumentsInboundView({
   function onSubmitUpload(e: FormEvent) {
     e.preventDefault();
     onUpload();
+  }
+
+  const previewSiblings =
+    selectedDocument?.groupId && selectedDocument.type === "inbound-manual"
+      ? documents
+          .filter((d) => d.groupId === selectedDocument.groupId && d.type === "inbound-manual")
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      : selectedDocument
+        ? [selectedDocument]
+        : [];
+
+  function renderEntryRow(entry: InboundDocumentEntry, mobile: boolean) {
+    const primary = entryPrimaryDoc(entry);
+    const title = shownTitle(primary);
+    const dateLabel = formatDocMoment(primary.documentDate || primary.createdAt);
+    const fileCount = entryFileCount(entry);
+    const totalSize = entryTotalSize(entry);
+    const selected = entryIsSelected(entry, selectedDocumentId);
+    const relatedIds = entry.kind === "group" ? entry.docs.map((d) => d.id) : undefined;
+
+    if (mobile) {
+      return (
+        <MobileCard key={`m-inb-${primary.id}`} onClick={() => onSelectPreview(primary)}>
+          <h4>
+            {title}
+            {fileCount > 1 ? (
+              <span className="badge neutral" style={{ marginLeft: 6, fontSize: 11 }}>
+                {fileCount} файла
+              </span>
+            ) : null}
+          </h4>
+          <MobileCardField label="Дата">{dateLabel}</MobileCardField>
+          <MobileCardField label="Источник">{primary.sourceLabel || docTypeLabel(primary.type)}</MobileCardField>
+          {primary.comment ? <MobileCardField label="Комментарий">{primary.comment}</MobileCardField> : null}
+          {fileCount > 1 ? (
+            <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+              {entry.kind === "group"
+                ? entry.docs.map((d) => d.fileName).join(", ")
+                : primary.fileName}
+            </p>
+          ) : null}
+          <MobileCardActions>
+            <a
+              className="ghostBtn"
+              href={`${apiUrl}/${primary.filePath}`}
+              target="_blank"
+              rel="noreferrer"
+              download={title}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Открыть
+            </a>
+            {canWriteDocuments && primary.sourceKind === "manual" ? (
+              <button
+                type="button"
+                className="ghostBtn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(primary.id, title, relatedIds);
+                }}
+              >
+                Удалить
+              </button>
+            ) : null}
+          </MobileCardActions>
+        </MobileCard>
+      );
+    }
+
+    return (
+      <tr
+        key={primary.id}
+        className={selected ? "rowHighlight" : ""}
+        style={{ cursor: "pointer" }}
+        onClick={() => onSelectPreview(primary)}
+      >
+        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{dateLabel}</td>
+        <td>
+          <StatusBadge tone="doc">{primary.sourceLabel || docTypeLabel(primary.type)}</StatusBadge>
+        </td>
+        <td title={primary.fileName}>
+          <strong>{title}</strong>
+          {fileCount > 1 ? (
+            <span className="badge neutral" style={{ marginLeft: 6, fontSize: 11 }}>
+              {fileCount} файла
+            </span>
+          ) : null}
+          <div className="muted" style={{ fontSize: 11 }}>
+            {docTypeLabel(primary.type)}
+            {primary.sourceKind !== "manual" ? ` · ${primary.entityType}` : ""}
+            {fileCount > 1 && entry.kind === "group"
+              ? ` · ${entry.docs.map((d) => d.fileName).join(", ")}`
+              : ""}
+          </div>
+        </td>
+        <td className="muted" style={{ maxWidth: 220 }}>
+          {primary.comment?.trim() || "—"}
+        </td>
+        <td className="muted">{totalSize ? `${Math.max(1, Math.ceil(totalSize / 1024))} КБ` : "—"}</td>
+        <td onClick={(e) => e.stopPropagation()}>
+          <div className="erpCellActions">
+            <a
+              className="ghostBtn"
+              href={`${apiUrl}/${primary.filePath}`}
+              target="_blank"
+              rel="noreferrer"
+              download={title}
+            >
+              Открыть
+            </a>
+            {canWriteDocuments && primary.sourceKind === "manual" ? (
+              <button type="button" className="ghostBtn" onClick={() => onDelete(primary.id, title, relatedIds)}>
+                Удалить
+              </button>
+            ) : null}
+          </div>
+        </td>
+      </tr>
+    );
   }
 
   return (
@@ -217,100 +407,11 @@ export function DocumentsInboundView({
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleDocs.map((d) => {
-                    const shownName = displayDocumentFileName(d.fileName, {
-                      type: d.type,
-                      createdAt: d.createdAt,
-                      title: d.title
-                    });
-                    const dateLabel = formatDocMoment(d.documentDate || d.createdAt);
-                    return (
-                      <tr
-                        key={d.id}
-                        className={selectedDocumentId === d.id ? "rowHighlight" : ""}
-                        style={{ cursor: "pointer" }}
-                        onClick={() => onSelectPreview(d)}
-                      >
-                        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{dateLabel}</td>
-                        <td>
-                          <StatusBadge tone="doc">{d.sourceLabel || docTypeLabel(d.type)}</StatusBadge>
-                        </td>
-                        <td title={d.fileName}>
-                          <strong>{shownName}</strong>
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            {docTypeLabel(d.type)}
-                            {d.sourceKind !== "manual" ? ` · ${d.entityType}` : ""}
-                          </div>
-                        </td>
-                        <td className="muted" style={{ maxWidth: 220 }}>
-                          {d.comment?.trim() || "—"}
-                        </td>
-                        <td className="muted">{d.size ? `${Math.max(1, Math.ceil(d.size / 1024))} КБ` : "—"}</td>
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <div className="erpCellActions">
-                            <a
-                              className="ghostBtn"
-                              href={`${apiUrl}/${d.filePath}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              download={shownName}
-                            >
-                              Открыть
-                            </a>
-                            {canWriteDocuments && d.sourceKind === "manual" ? (
-                              <button type="button" className="ghostBtn" onClick={() => onDelete(d.id, shownName)}>
-                                Удалить
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {visibleDocs.map((entry) => renderEntryRow(entry, false))}
                 </tbody>
               </table>
               <div className="mobileCards">
-                {visibleDocs.map((d) => {
-                  const shownName = displayDocumentFileName(d.fileName, {
-                    type: d.type,
-                    createdAt: d.createdAt,
-                    title: d.title
-                  });
-                  return (
-                    <MobileCard key={`m-inb-${d.id}`} onClick={() => onSelectPreview(d)}>
-                      <h4>{shownName}</h4>
-                      <MobileCardField label="Дата">
-                        {formatDocMoment(d.documentDate || d.createdAt)}
-                      </MobileCardField>
-                      <MobileCardField label="Источник">{d.sourceLabel || docTypeLabel(d.type)}</MobileCardField>
-                      {d.comment ? <MobileCardField label="Комментарий">{d.comment}</MobileCardField> : null}
-                      <MobileCardActions>
-                        <a
-                          className="ghostBtn"
-                          href={`${apiUrl}/${d.filePath}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          download={shownName}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Открыть
-                        </a>
-                        {canWriteDocuments && d.sourceKind === "manual" ? (
-                          <button
-                            type="button"
-                            className="ghostBtn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDelete(d.id, shownName);
-                            }}
-                          >
-                            Удалить
-                          </button>
-                        ) : null}
-                      </MobileCardActions>
-                    </MobileCard>
-                  );
-                })}
+                {visibleDocs.map((entry) => renderEntryRow(entry, true))}
               </div>
             </ResponsiveTableShell>
           )}
@@ -320,17 +421,32 @@ export function DocumentsInboundView({
           {selectedDocument ? (
             <>
               <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
-                {displayDocumentFileName(selectedDocument.fileName, {
-                  type: selectedDocument.type,
-                  createdAt: selectedDocument.createdAt,
-                  title: selectedDocument.title
-                })}{" "}
-                · {formatDocMoment(selectedDocument.documentDate || selectedDocument.createdAt)}
+                {shownTitle(selectedDocument)} ·{" "}
+                {formatDocMoment(selectedDocument.documentDate || selectedDocument.createdAt)}
               </p>
               {selectedDocument.comment ? (
                 <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
                   {selectedDocument.comment}
                 </p>
+              ) : null}
+              {previewSiblings.length > 1 ? (
+                <div className="toolbar" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  {previewSiblings.map((d) => {
+                    const label = d.fileName;
+                    const active = d.id === selectedDocumentId;
+                    return (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className={active ? "primaryBtn" : "ghostBtn"}
+                        style={{ fontSize: 12 }}
+                        onClick={() => onSelectPreview(d)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               ) : null}
               <iframe
                 src={docPreviewUrl || `${apiUrl}/${selectedDocument.filePath}`}

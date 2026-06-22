@@ -328,9 +328,9 @@ documentsRouter.get("/inbound", async (req: AuthedRequest, res) => {
   return res.json(payload);
 });
 
-documentsRouter.post("/inbound/upload", upload.single("file"), async (req: AuthedRequest, res) => {
-  const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
-  if (!file) {
+documentsRouter.post("/inbound/upload", upload.array("file", 20), async (req: AuthedRequest, res) => {
+  const files = (req as AuthedRequest & { files?: Express.Multer.File[] }).files;
+  if (!files?.length) {
     return res.status(400).json({ error: "file is required" });
   }
   const warehouseId = String(req.body.warehouseId || "");
@@ -360,32 +360,38 @@ documentsRouter.post("/inbound/upload", upload.single("file"), async (req: Authe
     return res.status(400).json({ error: "Invalid documentDate" });
   }
 
-  const absPath = path.join(uploadDirAbs, file.filename);
-  const checksumSha256 = await sha256File(absPath);
-  const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
-  const created = await prisma.documentFile.create({
-    data: {
-      groupId: crypto.randomUUID(),
-      version: 1,
-      entityType: "inbound",
-      entityId: warehouseId,
-      type: "inbound-manual",
-      title,
-      comment: comment || null,
-      documentDate,
-      fileName: decodeUploadedOriginalName(file.originalname),
-      filePath,
-      mimeType: file.mimetype,
-      size: file.size,
-      checksumSha256,
-      createdBy: req.user!.userId
-    }
-  });
-  return res.status(201).json({
-    ...withRepairedFileName(created),
+  const groupId = crypto.randomUUID();
+  const createdRows = [];
+  for (const file of files) {
+    const absPath = path.join(uploadDirAbs, file.filename);
+    const checksumSha256 = await sha256File(absPath);
+    const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
+    const created = await prisma.documentFile.create({
+      data: {
+        groupId,
+        version: 1,
+        entityType: "inbound",
+        entityId: warehouseId,
+        type: "inbound-manual",
+        title,
+        comment: comment || null,
+        documentDate,
+        fileName: decodeUploadedOriginalName(file.originalname),
+        filePath,
+        mimeType: file.mimetype,
+        size: file.size,
+        checksumSha256,
+        createdBy: req.user!.userId
+      }
+    });
+    createdRows.push(created);
+  }
+  const payload = createdRows.map((row) => ({
+    ...withRepairedFileName(row),
     sourceKind: "manual" as const,
     sourceLabel: "Вручную"
-  });
+  }));
+  return res.status(201).json(payload.length === 1 ? payload[0] : { groupId, files: payload });
 });
 
 documentsRouter.patch("/:id/meta", async (req: AuthedRequest, res) => {

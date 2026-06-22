@@ -83,8 +83,7 @@ import {
 import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
 import {
   DocumentsInboundView,
-  filterInboundDocuments,
-  sortInboundDocuments,
+  buildInboundVisibleList,
   type InboundDocumentRow
 } from "./widgets/documents/DocumentsInboundView";
 import {
@@ -5760,22 +5759,22 @@ function App() {
     setInboundUploadBusy(true);
     setDocumentsMessage("");
     try {
+      const fd = new FormData();
       for (const file of inboundUploadFiles) {
-        const fd = new FormData();
         fd.append("file", file);
-        fd.append("warehouseId", warehouseId);
-        fd.append("title", inboundUploadTitle.trim());
-        fd.append("comment", inboundUploadComment.trim());
-        fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
-        const res = await fetchWithSession(`${API_URL}/api/documents/inbound/upload`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: fd
-        });
-        if (!res.ok) {
-          setDocumentsMessage("Не удалось добавить документ");
-          return;
-        }
+      }
+      fd.append("warehouseId", warehouseId);
+      fd.append("title", inboundUploadTitle.trim());
+      fd.append("comment", inboundUploadComment.trim());
+      fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
+      const res = await fetchWithSession(`${API_URL}/api/documents/inbound/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd
+      });
+      if (!res.ok) {
+        setDocumentsMessage("Не удалось добавить документ");
+        return;
       }
       setInboundUploadTitle("");
       setInboundUploadComment("");
@@ -5812,18 +5811,25 @@ function App() {
     }
   }
 
-  async function deleteDocument(docId: string, fileLabel: string) {
+  async function deleteDocument(docId: string, fileLabel: string, relatedIds?: string[]) {
     if (!token || !canWriteDocuments) return;
-    if (!window.confirm(`Удалить документ «${fileLabel}»?`)) return;
-    const res = await fetchWithSession(`${API_URL}/api/documents/${encodeURIComponent(docId)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      setDocumentsMessage("Не удалось удалить документ");
-      return;
+    const ids = relatedIds?.length ? relatedIds : [docId];
+    const confirmText =
+      ids.length > 1
+        ? `Удалить запись «${fileLabel}» вместе с ${ids.length} файлами?`
+        : `Удалить документ «${fileLabel}»?`;
+    if (!window.confirm(confirmText)) return;
+    for (const id of ids) {
+      const res = await fetchWithSession(`${API_URL}/api/documents/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        setDocumentsMessage("Не удалось удалить документ");
+        return;
+      }
     }
-    if (selectedDocumentId === docId) {
+    if (ids.includes(selectedDocumentId)) {
       setSelectedDocumentId("");
       setDocPreviewUrl("");
     }
@@ -10771,9 +10777,7 @@ function App() {
 
         const inboundFiltersActive = Boolean(docSearchQuery.trim());
         const inboundWarehouseReady = Boolean(effectiveWarehouseId);
-        const inboundVisible = sortInboundDocuments(
-          filterInboundDocuments(inboundDocuments, docSearchQuery)
-        );
+        const inboundVisible = buildInboundVisibleList(inboundDocuments, docSearchQuery);
 
         return (
           <DocumentsTabView
@@ -10816,7 +10820,7 @@ function App() {
                   setSelectedDocumentId(d.id);
                   setDocPreviewUrl(`${API_URL}/${d.filePath}`);
                 }}
-                onDelete={(id, shownName) => void deleteDocument(id, shownName)}
+                onDelete={(id, shownName, relatedIds) => void deleteDocument(id, shownName, relatedIds)}
                 uploadTitle={inboundUploadTitle}
                 onUploadTitleChange={setInboundUploadTitle}
                 uploadComment={inboundUploadComment}
