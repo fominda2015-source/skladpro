@@ -13456,6 +13456,7 @@ function App() {
           materialName={safeName(stockBindLimitModal.materialName)}
           materialUnit={stockBindLimitModal.materialUnit}
           canWrite={canWriteOperations}
+          safeName={safeName}
           onClose={() => {
             setStockBindLimitModal(null);
             void loadStockLimitBindings();

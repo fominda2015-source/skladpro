@@ -6335,6 +6335,77 @@ button.homeInsightPill:hover:not(:disabled) {
 .homeDrillModal--wide .homeDrillBody {
   padding: 14px 18px;
 }
+.warehouseBindLimitLayout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.warehouseBindLimitAside {
+  padding: 12px 14px;
+  position: sticky;
+  top: 0;
+}
+.warehouseBindLimitItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.warehouseBindLimitItems li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.warehouseBindLimitPickForm label {
+  display: block;
+  font-size: 13px;
+}
+.warehouseBindLimitPickForm input {
+  width: 100%;
+  margin-top: 4px;
+}
+.warehouseBindLimitTree {
+  min-width: 0;
+}
+.limitPickRow {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.limitPickRow:hover {
+  background: #f0f7ff !important;
+}
+.limitPickRow--selected {
+  background: #dbeafe !important;
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+.limitPickRow--bound .matName,
+.limitPickRow--bound strong {
+  color: #0f766e;
+}
+.limitPickBoundBadge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  color: #0f766e;
+  font-weight: 600;
+}
+@media (max-width: 900px) {
+  .warehouseBindLimitLayout {
+    grid-template-columns: 1fr;
+  }
+  .warehouseBindLimitAside {
+    position: static;
+  }
+}
 .homeDrillHead {
   display: flex;
   align-items: flex-start;
