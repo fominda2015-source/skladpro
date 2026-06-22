@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "backfill:issue-responsible": "tsx src/scripts/backfillIssueResponsibleName.ts",
     "data:migrate": "tsx src/scripts/runDataMigrations.ts",
-    "test:unit": "tsx --test src/lib/objectAccess.test.ts src/lib/dataScope.test.ts src/lib/productivitySheet.test.ts",
+    "test:unit": "tsx --test src/lib/objectAccess.test.ts src/lib/dataScope.test.ts src/lib/productivitySheet.test.ts src/lib/timesheetContext.test.ts",
     "data:rebuild-pricing": "tsx src/scripts/rebuildMaterialPricing.ts --force",
     "data:job": "tsx src/scripts/rebuildMaterialPricing.ts",
     "users:reset": "node dist/scripts/resetUsers.js",

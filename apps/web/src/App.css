@@ -10172,3 +10172,240 @@ button.whMenuItem:hover,
   }
 }
 
+.timesheetTab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.timesheetLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.2fr) minmax(240px, 0.8fr);
+  gap: 16px;
+}
+
+.timesheetPanel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.timesheetAutoCard {
+  background: color-mix(in srgb, var(--card) 92%, var(--accent) 8%);
+}
+
+.timesheetAutoList {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.timesheetAutoList div {
+  display: grid;
+  gap: 4px;
+}
+
+.timesheetAutoList dt {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.timesheetAutoList dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.timesheetAutoMeta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.timesheetPanel--actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin-top: -4px;
+}
+
+.timesheetPanelTitle {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.timesheetFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.timesheetFormGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.timesheetFormGrid label span {
+  font-weight: 600;
+}
+
+.timesheetFormGrid input {
+  width: 100%;
+}
+
+.timesheetFormGrid--wide {
+  grid-column: 1 / -1;
+}
+
+.timesheetActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.timesheetHint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.timesheetTableCard {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.timesheetTableWrap {
+  overflow: auto;
+  max-height: min(70vh, 720px);
+}
+
+.timesheetTable {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.timesheetTable th,
+.timesheetTable td {
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 4px;
+  vertical-align: middle;
+  background: var(--card);
+}
+
+.timesheetTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  font-weight: 600;
+  text-align: center;
+}
+
+.timesheetSticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.timesheetTable thead .timesheetSticky {
+  z-index: 3;
+}
+
+.timesheetNumCol {
+  left: 0;
+  min-width: 42px;
+  text-align: center;
+}
+
+.timesheetNameCol {
+  left: 42px;
+  min-width: 220px;
+}
+
+.timesheetPosCol {
+  left: 262px;
+  min-width: 140px;
+}
+
+.timesheetDateCol {
+  left: 402px;
+  min-width: 130px;
+}
+
+.timesheetOpsCol {
+  right: 0;
+  left: auto;
+  min-width: 88px;
+}
+
+.timesheetDayCol {
+  min-width: 42px;
+  text-align: center;
+}
+
+.timesheetDayCol--weekend {
+  background: color-mix(in srgb, var(--surface-2) 80%, #f59e0b 20%);
+}
+
+.timesheetDayNum {
+  display: block;
+  font-weight: 700;
+}
+
+.timesheetDayWd {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+
+.timesheetCellInput,
+.timesheetMarkInput {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.timesheetCellInput:focus,
+.timesheetMarkInput:focus {
+  border-color: var(--accent);
+  background: var(--card);
+  outline: none;
+}
+
+.timesheetMarkInput {
+  text-align: center;
+  padding: 4px 2px;
+}
+
+@media (max-width: 960px) {
+  .timesheetLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .timesheetFormGrid {
+    grid-template-columns: 1fr;
+  }
+}
+

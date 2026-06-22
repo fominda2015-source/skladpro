@@ -60,6 +60,7 @@ import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { AdminMaintenancePanel } from "./widgets/admin/AdminMaintenancePanel";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { ProductivityTab } from "./widgets/productivity/ProductivityTab";
+import { TimesheetTab } from "./widgets/timesheet/TimesheetTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFields";
@@ -834,6 +835,7 @@ function App() {
     | "feedback"
     | "materialReport"
     | "productivity"
+    | "timesheet"
     | "reports"
     | "acts"
   >("stocks");
@@ -1903,6 +1905,7 @@ function App() {
   const canMaterialWriteoff = useMemo(() => hasPermission("materialReport.write"), [me]);
   const canReadProductivity = useMemo(() => hasPermission("productivity.read"), [me]);
   const canWriteProductivity = useMemo(() => hasPermission("productivity.write"), [me]);
+  const canReadTimesheet = useMemo(() => hasPermission("timesheet.read"), [me]);
   const canReadDocuments = useMemo(() => hasPermission("documents.read"), [me]);
   const canWriteDocuments = useMemo(
     () => hasPermission("documents.write") || hasPermission("documents.upload"),
@@ -5930,6 +5933,7 @@ function App() {
     if (canReadLimits) visibleTabs.add("limits");
     if (canMaterialReport) visibleTabs.add("materialReport");
     if (canReadProductivity) visibleTabs.add("productivity");
+    if (canReadTimesheet) visibleTabs.add("timesheet");
     visibleTabs.add("camp");
     if (canReadIntegrations || canReadNotifications) visibleTabs.add("integrations");
     if (canReadNotifications) visibleTabs.add("notifications");
@@ -5957,6 +5961,7 @@ function App() {
     canReadLimits,
     canMaterialReport,
     canReadProductivity,
+    canReadTimesheet,
     canReadIntegrations,
     canReadNotifications,
     canReadAudit,
@@ -6806,6 +6811,7 @@ function App() {
             canReadLimits={canReadLimits}
             canMaterialReport={canMaterialReport}
             canReadProductivity={canReadProductivity}
+            canReadTimesheet={canReadTimesheet}
             canReadTools={canReadTools}
             canReadIssues={canReadIssues}
             canReadOperations={canReadOperations}
@@ -10172,6 +10178,20 @@ function App() {
             onUploadFile={uploadProductivityTemplate}
           />
         </PageFileDropZone>
+      )}
+
+      {canReadTimesheet && activeTab === "timesheet" && (
+        <TimesheetTab
+          token={token}
+          apiUrl={API_URL}
+          fetchWithSession={fetchWithSession}
+          warehouseId={activeObjectId}
+          section={objectSectionFilter}
+          warehouseName={safeName(
+            warehouses.find((w) => w.id === activeObjectId)?.name ||
+              availableObjects.find((o) => o.id === activeObjectId)?.name
+          )}
+        />
       )}
 
       {activeTab === "approvals" && (
