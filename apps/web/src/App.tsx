@@ -64,6 +64,7 @@ import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
 import { ProductivityTab } from "./widgets/productivity/ProductivityTab";
 import { TimesheetTab } from "./widgets/timesheet/TimesheetTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
+import { IssueLimitBatchModal, type IssueLimitBatchRow } from "./widgets/issues/IssueLimitBatchModal";
 import { ToolsListTable, toolStatusTone } from "./widgets/tools/ToolsListTable";
 import { ToolKitCompletenessFields } from "./widgets/tools/ToolKitCompletenessFields";
 import {
@@ -955,6 +956,10 @@ function App() {
   const [issuePickCart, setIssuePickCart] = useState<IssuePickCartLine[]>([]);
   const [issuePickQtyByKey, setIssuePickQtyByKey] = useState<Record<string, number>>({});
   const [issueLimitPickRow, setIssueLimitPickRow] = useState<IssuePickCartLine | null>(null);
+  const [issueLimitPickBatch, setIssueLimitPickBatch] = useState<{
+    rows: IssueLimitBatchRow[];
+    pendingOpts?: { openDocument?: boolean };
+  } | null>(null);
   const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
     try {
       const saved = localStorage.getItem("skladpro_issue_domain");
@@ -4646,7 +4651,8 @@ function App() {
 
     const materialIds = [...new Set(draftLines.filter((l) => !l.limitNodeId).map((l) => l.materialId))];
     if (materialIds.length) {
-      const bindingMap = new Map<string, Array<{ limitNodeId: string }>>();
+      type BindingRow = { limitNodeId: string; materialId: string; path: string };
+      const bindingMap = new Map<string, BindingRow[]>();
       await Promise.all(
         materialIds.map(async (materialId) => {
           const params = new URLSearchParams({
@@ -4658,10 +4664,12 @@ function App() {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (res.ok) {
-            bindingMap.set(materialId, (await res.json()) as Array<{ limitNodeId: string }>);
+            bindingMap.set(materialId, (await res.json()) as BindingRow[]);
           }
         })
       );
+
+      const batchRows: IssueLimitBatchRow[] = [];
       for (const line of draftLines) {
         if (line.limitNodeId) continue;
         const bindings = bindingMap.get(line.materialId) ?? [];
@@ -4669,13 +4677,26 @@ function App() {
           line.limitNodeId = bindings[0]!.limitNodeId;
         } else if (bindings.length > 1) {
           const cartRow = issuePickCart.find((c) => c.pickKey === line.pickKey);
-          if (cartRow) {
-            setIssueLimitPickRow(cartRow);
-            setIssuesMessage("Материал привязан к нескольким строкам лимита — выберите, из какого лимита выдаём");
-            setIssuesTone("neutral");
-            return;
+          const materialLabel = safeName(cartRow?.factLabel || cartRow?.canonName || "материал");
+          const existing = batchRows.find((r) => r.materialId === line.materialId);
+          if (existing) {
+            if (!existing.pickKeys.includes(line.pickKey)) existing.pickKeys.push(line.pickKey);
+          } else {
+            batchRows.push({
+              materialId: line.materialId,
+              materialLabel,
+              pickKeys: [line.pickKey],
+              options: bindings.map((b) => ({ limitNodeId: b.limitNodeId, path: b.path }))
+            });
           }
         }
+      }
+
+      if (batchRows.length > 0) {
+        setIssueLimitPickBatch({ rows: batchRows, pendingOpts: opts });
+        setIssuesMessage("Выберите подраздел лимита для каждого материала в заказе на выдачу");
+        setIssuesTone("neutral");
+        return;
       }
     }
 
@@ -9170,6 +9191,28 @@ function App() {
                       : "Выдать материал"}
               </button>
             </div>
+
+            {issueLimitPickBatch ? (
+              <IssueLimitBatchModal
+                rows={issueLimitPickBatch.rows}
+                onCancel={() => setIssueLimitPickBatch(null)}
+                onConfirm={(selections) => {
+                  setIssuePickCart((prev) =>
+                    prev.map((row) => {
+                      const batchRow = issueLimitPickBatch.rows.find((r) => r.pickKeys.includes(row.pickKey));
+                      if (!batchRow) return row;
+                      const limitNodeId = selections[batchRow.materialId];
+                      const path =
+                        batchRow.options.find((o) => o.limitNodeId === limitNodeId)?.path || row.limitPath;
+                      return limitNodeId ? { ...row, limitNodeId, limitPath: path ?? null } : row;
+                    })
+                  );
+                  const pendingOpts = issueLimitPickBatch.pendingOpts;
+                  setIssueLimitPickBatch(null);
+                  void performDirectIssue(pendingOpts);
+                }}
+              />
+            ) : null}
 
             {issueLimitPickRow && activeObjectId ? (
               <IssueLimitSubsectionModal

@@ -72,6 +72,20 @@ function buildOriginalName(c: string, d: string, e: string): string {
   return parts.join(" ").trim() || normCell(c);
 }
 
+/** C/D/E совпадает с наименованием из лимита (N). */
+export function cdeMatchesLimitName(c: string, d: string, e: string, n: string): boolean {
+  const origKey = normNameKey(buildOriginalName(c, d, e));
+  const cKey = normNameKey(c);
+  const nKey = normNameKey(n);
+  const dKey = normNameKey(d);
+  const eKey = normNameKey(e);
+  if (!nKey) return true;
+  if (nKey !== origKey && nKey !== cKey) return false;
+  if (dKey && nKey !== dKey) return false;
+  if (eKey && nKey !== eKey) return false;
+  return true;
+}
+
 /** Сравнение C/D/E с N и O по правилам заказчика. */
 export function analyzeCatalogNames(
   c: string,
@@ -85,37 +99,29 @@ export function analyzeCatalogNames(
   "renameLimitToO" | "limitDisplayName" | "nameAlertNote" | "limitCatalogNameN" | "limitCatalogNameO"
 > {
   const orig = buildOriginalName(c, d, e);
-  const origKey = normNameKey(orig);
-  const cKey = normNameKey(c);
-  const nKey = normNameKey(n);
   const oKey = normNameKey(o);
-  const dKey = normNameKey(d);
-  const eKey = normNameKey(e);
+  const limitCatalogNameN = n ? normCell(n) : null;
+  const limitCatalogNameO = o ? normCell(o) : null;
 
-  const nNorm = nKey || origKey;
-  const oNorm = oKey || origKey;
+  if (cdeMatchesLimitName(c, d, e, n)) {
+    return {
+      renameLimitToO: false,
+      limitDisplayName: orig || normCell(n) || normCell(o),
+      nameAlertNote: null,
+      limitCatalogNameN,
+      limitCatalogNameO
+    };
+  }
 
-  const cdeMatchN =
-    (!nKey || nKey === origKey || nKey === cKey) &&
-    (!dKey || !nKey || nKey === dKey) &&
-    (!eKey || !nKey || nKey === eKey);
-
-  const allSame =
-    cdeMatchN &&
-    (!oKey || oKey === origKey || oKey === cKey || oKey === nKey) &&
-    (!nKey || !oKey || nKey === oKey);
-
-  const renameLimitToO = cdeMatchN && Boolean(oKey) && oKey !== cKey && oKey !== origKey && oKey !== nKey;
-
-  const limitDisplayName = renameLimitToO ? normCell(o) : orig;
-  const nameAlertNote = renameLimitToO ? parseExternalComment(externalCommentRaw) || null : null;
+  const replacementName = oKey ? normCell(o) : orig;
+  const nameAlertNote = parseExternalComment(externalCommentRaw) || null;
 
   return {
-    renameLimitToO: renameLimitToO && !allSame,
-    limitDisplayName,
+    renameLimitToO: Boolean(replacementName && normNameKey(n)),
+    limitDisplayName: replacementName,
     nameAlertNote: nameAlertNote || null,
-    limitCatalogNameN: n ? normCell(n) : null,
-    limitCatalogNameO: o ? normCell(o) : null
+    limitCatalogNameN,
+    limitCatalogNameO
   };
 }
 

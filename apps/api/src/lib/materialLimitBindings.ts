@@ -177,6 +177,37 @@ export async function resolveLimitConsumptionQty(
   return stockQty * factor;
 }
 
+export async function ensureStockLimitBinding(
+  tx: Tx,
+  opts: {
+    warehouseId: string;
+    section: ObjectSection;
+    materialId: string;
+    limitNodeId: string;
+    userId?: string | null;
+  }
+): Promise<void> {
+  await tx.stockMaterialLimitBinding.upsert({
+    where: {
+      warehouseId_section_materialId_limitNodeId: {
+        warehouseId: opts.warehouseId,
+        section: opts.section,
+        materialId: opts.materialId,
+        limitNodeId: opts.limitNodeId
+      }
+    },
+    create: {
+      warehouseId: opts.warehouseId,
+      section: opts.section,
+      materialId: opts.materialId,
+      limitNodeId: opts.limitNodeId,
+      quantity: 1,
+      createdById: opts.userId ?? null
+    },
+    update: {}
+  });
+}
+
 export async function resolveDefaultLimitNodeId(
   warehouseId: string,
   section: ObjectSection,

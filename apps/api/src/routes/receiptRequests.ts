@@ -48,6 +48,7 @@ import {
 } from "../lib/receiptUnits.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
 import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
+import { ensureStockLimitBinding } from "../lib/materialLimitBindings.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
 import {
   buildMaterialCreateFromReceiptItem,
@@ -206,6 +207,24 @@ type ReceiptLimitItemRow = {
   limitSectionPath: string | null;
 };
 
+function receiptCatalogMeta(item: {
+  sourceName: string;
+  namePartD?: string | null;
+  namePartE?: string | null;
+  limitCatalogNameN?: string | null;
+  limitCatalogNameO?: string | null;
+  externalComment?: string | null;
+}) {
+  return analyzeCatalogNames(
+    item.sourceName,
+    item.namePartD || "",
+    item.namePartE || "",
+    item.limitCatalogNameN || "",
+    item.limitCatalogNameO || "",
+    item.externalComment || ""
+  );
+}
+
 async function syncReceiptItemsToLimitTemplate(
   tx: Prisma.TransactionClient,
   templateId: string,
@@ -213,14 +232,7 @@ async function syncReceiptItemsToLimitTemplate(
 ): Promise<number> {
   let synced = 0;
   for (const item of items) {
-    const meta = analyzeCatalogNames(
-      item.sourceName,
-      item.namePartD || "",
-      item.namePartE || "",
-      item.limitCatalogNameN || "",
-      item.limitCatalogNameO || "",
-      item.externalComment || ""
-    );
+    const meta = receiptCatalogMeta(item);
     const sync = await syncReceiptItemToLimitTemplate(tx, templateId, {
       limitSectionPath: item.limitSectionPath,
       namePartC: item.sourceName,
@@ -343,6 +355,11 @@ async function resolveReceiptTargetMaterialId(
     sourceUnit: string;
     mappedMaterialId: string | null;
     limitNodeId: string | null;
+    namePartD?: string | null;
+    namePartE?: string | null;
+    limitCatalogNameN?: string | null;
+    limitCatalogNameO?: string | null;
+    externalComment?: string | null;
     category?: import("@prisma/client").ReceiptItemCategory | null;
     unitPrice?: unknown;
   },
@@ -369,15 +386,23 @@ async function resolveReceiptTargetMaterialId(
     return materialId;
   };
 
+  const meta = receiptCatalogMeta(item);
+  const unifiedCardName = meta.limitDisplayName.trim() || item.sourceName.trim();
+
+  if (meta.renameLimitToO && unifiedCardName) {
+    return findOrCreateMaterial(tx, unifiedCardName, item.sourceUnit || "шт", itemCategory, unitPrice).then((id) =>
+      id ? applyCatalogFields(id) : undefined
+    );
+  }
+
   if (item.limitNodeId) {
     const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
     if (fromNode) return applyCatalogFields(fromNode);
   }
   if (mapping.materialId) return applyCatalogFields(mapping.materialId);
   if (item.mappedMaterialId) return applyCatalogFields(item.mappedMaterialId);
-  const cardName = item.sourceName.trim();
-  if (cardName) {
-    return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт", itemCategory, unitPrice);
+  if (unifiedCardName) {
+    return findOrCreateMaterial(tx, unifiedCardName, item.sourceUnit || "шт", itemCategory, unitPrice);
   }
   const legacyName = mapping.newMaterialName?.trim();
   if (legacyName) {
@@ -1512,11 +1537,19 @@ receiptRequestsRouter.post(
             if (oobNodeId) {
               limitNodeId = oobNodeId;
               r.limitNodeId = oobNodeId;
-              await attachMaterialToLimitNode(tx, oobNodeId, r.materialId);
             }
           }
-        } else if (!campCategory && !toolInventory && !toolCatalogMaterial && limitNodeId && r.materialId) {
+        }
+
+        if (!campCategory && !toolInventory && !toolCatalogMaterial && limitNodeId && r.materialId) {
           await attachMaterialToLimitNode(tx, limitNodeId, r.materialId);
+          await ensureStockLimitBinding(tx, {
+            warehouseId: row.warehouseId,
+            section: row.section,
+            materialId: r.materialId,
+            limitNodeId,
+            userId: req.user!.userId
+          });
         }
 
         const nextAcceptedQty = addReceiptAcceptedQty(r.item.acceptedQty, r.acceptedQty);

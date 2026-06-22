@@ -175,12 +175,19 @@ export async function syncReceiptItemToLimitTemplate(
     }
   });
 
-  const searchNames = [
-    item.namePartC,
-    item.limitCatalogNameN || "",
-    item.limitCatalogNameO || "",
-    item.limitDisplayName
-  ];
+  const searchNames = item.renameLimitToO
+    ? [
+        item.limitCatalogNameN || "",
+        item.namePartC,
+        item.limitCatalogNameO || "",
+        item.limitDisplayName
+      ]
+    : [
+        item.namePartC,
+        item.limitCatalogNameN || "",
+        item.limitCatalogNameO || "",
+        item.limitDisplayName
+      ];
   const node = findMaterialNodeByLimitPath(nodes, item.limitSectionPath, searchNames);
   if (!node) {
     return { limitNodeId: null, limitNameRenamed: false };
