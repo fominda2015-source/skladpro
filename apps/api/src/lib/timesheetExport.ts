@@ -1,4 +1,7 @@
 import ExcelJS from "exceljs";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { listPeriodDays } from "./timesheetContext.js";
 
 export type TimesheetEmployeeInput = {
@@ -22,46 +25,47 @@ export type TimesheetExportInput = {
 };
 
 const WEEKDAYS_RU = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"] as const;
+const TEMPLATE_DATA_ROWS = 3;
+const FIRST_DATA_ROW = 20;
+const DAY_COL_START = 5;
+const DAY_COL_COUNT = 31;
 
-const LEGEND: Array<[string, string]> = [
-  ["ОТ", "ОТПУСК ЕЖЕГОДНЫЙ, ОПЛАЧИВАЕМЫЙ"],
-  ["Б", "БОЛЬНИЧНЫЙ ОФОРМЛЕННЫЙ"],
-  ["ДО", "ОТПУСК БЕЗ СОХРАНЕНИЯ ЗАРПЛАТЫ"],
-  ["П", "ПРОСТОЙ"],
-  ["Н", "ЧЕЛОВЕК НЕ ВЫШЕЛ, ПРОПАЛ ПО НЕЯСНЫМ ПРИЧИНАМ"]
-];
+const YELLOW_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFFFC000" }
+};
 
-const COL = {
-  num: 1,
-  name: 2,
-  position: 3,
-  hireDate: 4,
-  dayStart: 5,
-  halfFirst: 36,
-  halfSecond: 37,
-  monthTotal: 38,
-  vacation: 39,
-  sick: 40,
-  unpaid: 41,
-  idle: 42,
-  absent: 43,
-  sumTotal: 44,
-  sumCard: 45,
-  sumCash: 46,
-  legend: 47,
-  accepted: 24,
-  fired: 28,
-  compileDate: 7,
-  periodFrom: 12,
-  periodTo: 14,
-  responsibleTitle: 24,
-  responsibleName: 38,
-  responsibleLabel: 31
-} as const;
+const NO_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "none"
+};
+
+function templatePath(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, "../../assets/timesheet-template.xlsx"),
+    path.resolve(process.cwd(), "assets/timesheet-template.xlsx")
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error("TIMESHEET_TEMPLATE_MISSING");
+}
 
 function ymdToDate(ymd: string): Date {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0, 0);
+}
+
+function monthDayIso(monthYm: string, dayNum: number): string | null {
+  const [y, m] = monthYm.split("-").map(Number);
+  if (!y || !m || dayNum < 1 || dayNum > 31) return null;
+  const d = new Date(y, m - 1, dayNum, 12, 0, 0, 0);
+  if (d.getMonth() !== m - 1) return null;
+  const mm = String(m).padStart(2, "0");
+  const dd = String(dayNum).padStart(2, "0");
+  return `${y}-${mm}-${dd}`;
 }
 
 function weekdayShort(iso: string): string {
@@ -71,6 +75,10 @@ function weekdayShort(iso: string): string {
 function normMark(v: string | number | null | undefined): string {
   if (v == null || v === "") return "";
   return String(v).trim();
+}
+
+function inPeriod(iso: string, from: string, to: string): boolean {
+  return iso >= from && iso <= to;
 }
 
 type MarkStats = {
@@ -84,7 +92,12 @@ type MarkStats = {
   absent: number;
 };
 
-function parseMarkStats(days: string[], marks: Record<string, string | number | null>): MarkStats {
+function parseMarkStats(
+  monthYm: string,
+  periodFrom: string,
+  periodTo: string,
+  marks: Record<string, string | number | null>
+): MarkStats {
   const stats: MarkStats = {
     hours: 0,
     halfFirst: 0,
@@ -96,12 +109,13 @@ function parseMarkStats(days: string[], marks: Record<string, string | number | 
     absent: 0
   };
 
-  for (const iso of days) {
+  for (let day = 1; day <= DAY_COL_COUNT; day += 1) {
+    const iso = monthDayIso(monthYm, day);
+    if (!iso || !inPeriod(iso, periodFrom, periodTo)) continue;
     const raw = normMark(marks[iso]);
     if (!raw) continue;
     const upper = raw.toUpperCase();
-    const dayNum = ymdToDate(iso).getDate();
-    const isFirstHalf = dayNum <= 15;
+    const isFirstHalf = day <= 15;
 
     if (upper === "ОТ") {
       stats.vacation += 1;
@@ -134,174 +148,170 @@ function parseMarkStats(days: string[], marks: Record<string, string | number | 
   return stats;
 }
 
-function thinBorder(): Partial<ExcelJS.Borders> {
-  const side: Partial<ExcelJS.Border> = { style: "thin", color: { argb: "FF9CA3AF" } };
-  return { top: side, left: side, bottom: side, right: side };
-}
-
-function setBorderRange(ws: ExcelJS.Worksheet, r1: number, c1: number, r2: number, c2: number) {
-  for (let r = r1; r <= r2; r += 1) {
-    for (let c = c1; c <= c2; c += 1) {
-      ws.getCell(r, c).border = thinBorder();
-    }
-  }
+function normHoursForPeriod(periodFrom: string, periodTo: string): number {
+  const days = listPeriodDays(periodFrom, periodTo).length;
+  return Math.max(0, Math.round(days * (40 / 5)));
 }
 
 function safeSheetName(name: string): string {
   return String(name).replace(/[\\/:?*[\]]/g, " ").slice(0, 31) || "Табель";
 }
 
-function normHoursForPeriod(periodFrom: string, periodTo: string): number {
-  const days = listPeriodDays(periodFrom, periodTo).length;
-  return Math.max(0, Math.round(days * (40 / 5)));
+function setCell(ws: ExcelJS.Worksheet, row: number, col: number, value: ExcelJS.CellValue) {
+  ws.getCell(row, col).value = value;
+}
+
+function fillHeader(ws: ExcelJS.Worksheet, input: TimesheetExportInput) {
+  setCell(ws, 5, 1, input.organization);
+  setCell(ws, 7, 1, input.department);
+  setCell(ws, 9, 1, input.objectName);
+  setCell(ws, 5, 24, input.responsibleTitle || "");
+  setCell(ws, 5, 38, input.responsibleName || "");
+
+  const compileDate = ymdToDate(input.compileDate);
+  const periodFrom = ymdToDate(input.periodFrom);
+  const periodTo = ymdToDate(input.periodTo);
+
+  setCell(ws, 12, 7, compileDate);
+  ws.getCell(12, 7).numFmt = "yyyy-mm-dd";
+  setCell(ws, 13, 7, compileDate);
+  ws.getCell(13, 7).numFmt = "yyyy-mm-dd";
+
+  setCell(ws, 12, 12, "с");
+  setCell(ws, 12, 15, "по");
+  setCell(ws, 13, 12, periodFrom);
+  ws.getCell(13, 12).numFmt = "yyyy-mm-dd";
+  setCell(ws, 13, 15, periodTo);
+  ws.getCell(13, 15).numFmt = "yyyy-mm-dd";
+}
+
+function fillSummaryRow(
+  ws: ExcelJS.Worksheet,
+  input: TimesheetExportInput,
+  totalHours: number
+) {
+  const count = input.employees.length;
+  setCell(ws, 12, 24, count);
+  setCell(ws, 13, 24, count);
+  setCell(ws, 12, 28, 0);
+  setCell(ws, 13, 28, 0);
+  setCell(ws, 12, 36, 0);
+  setCell(ws, 13, 36, 0);
+  const norm = normHoursForPeriod(input.periodFrom, input.periodTo);
+  setCell(ws, 12, 38, norm);
+  setCell(ws, 13, 38, norm);
+  const avg = count > 0 ? totalHours / count : 0;
+  setCell(ws, 12, 40, avg);
+  setCell(ws, 13, 40, avg);
+  setCell(ws, 12, 42, count > 0 ? Math.round(avg) : 0);
+  setCell(ws, 13, 42, count > 0 ? Math.round(avg) : 0);
+}
+
+function updateDayHeaderRows(ws: ExcelJS.Worksheet, monthYm: string) {
+  for (let day = 1; day <= DAY_COL_COUNT; day += 1) {
+    const col = DAY_COL_START + day - 1;
+    const iso = monthDayIso(monthYm, day);
+    const isWeekend = iso ? [0, 6].includes(ymdToDate(iso).getDay()) : false;
+    const fill = isWeekend ? YELLOW_FILL : NO_FILL;
+
+    for (const row of [16, 17, 18]) {
+      const cell = ws.getCell(row, col);
+      cell.value = iso ? day : "";
+      cell.fill = fill;
+    }
+
+    const wdCell = ws.getCell(19, col);
+    wdCell.value = iso ? weekdayShort(iso) : "";
+    wdCell.fill = fill;
+  }
+}
+
+function ensureEmployeeRows(ws: ExcelJS.Worksheet, count: number) {
+  if (count <= TEMPLATE_DATA_ROWS) return;
+  const extra = count - TEMPLATE_DATA_ROWS;
+  const anchorRow = FIRST_DATA_ROW + TEMPLATE_DATA_ROWS - 1;
+  ws.duplicateRow(anchorRow, extra, true);
+}
+
+function fillEmployeeRow(
+  ws: ExcelJS.Worksheet,
+  row: number,
+  index: number,
+  emp: TimesheetEmployeeInput,
+  monthYm: string,
+  periodFrom: string,
+  periodTo: string
+) {
+  const stats = parseMarkStats(monthYm, periodFrom, periodTo, emp.marks);
+
+  setCell(ws, row, 1, index);
+  setCell(ws, row, 2, emp.fullName);
+  setCell(ws, row, 3, emp.position || "");
+  if (emp.hireDate) {
+    setCell(ws, row, 4, ymdToDate(emp.hireDate));
+    ws.getCell(row, 4).numFmt = "yyyy-mm-dd";
+  }
+
+  for (let day = 1; day <= DAY_COL_COUNT; day += 1) {
+    const col = DAY_COL_START + day - 1;
+    const iso = monthDayIso(monthYm, day);
+    const cell = ws.getCell(row, col);
+    if (!iso || !inPeriod(iso, periodFrom, periodTo)) {
+      cell.value = null;
+      continue;
+    }
+    const mark = normMark(emp.marks[iso]);
+    if (!mark) {
+      cell.value = null;
+      continue;
+    }
+    const n = Number(mark.replace(",", "."));
+    cell.value = Number.isFinite(n) ? n : mark;
+  }
+
+  setCell(ws, row, 36, stats.halfFirst || 0);
+  setCell(ws, row, 37, stats.halfSecond || 0);
+  setCell(ws, row, 38, stats.hours || 0);
+  setCell(ws, row, 39, stats.vacation || 0);
+  setCell(ws, row, 40, stats.sick || 0);
+  setCell(ws, row, 41, stats.unpaid || 0);
+  setCell(ws, row, 42, stats.idle || 0);
+  setCell(ws, row, 43, stats.absent || 0);
+}
+
+function updatePrintArea(ws: ExcelJS.Worksheet, lastRow: number) {
+  const lastCol = "AT";
+  ws.pageSetup.printArea = `A1:${lastCol}${lastRow}`;
 }
 
 export async function buildTimesheetWorkbook(input: TimesheetExportInput): Promise<Buffer> {
-  const days = listPeriodDays(input.periodFrom, input.periodTo);
-  if (!days.length) throw new Error("EMPTY_PERIOD");
+  if (!input.employees.length) throw new Error("EMPTY_EMPLOYEES");
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "СкладПро";
-  wb.created = new Date();
-  const ws = wb.addWorksheet(safeSheetName(input.sheetLabel || "Табель"));
+  await wb.xlsx.readFile(templatePath());
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error("TIMESHEET_TEMPLATE_INVALID");
 
-  ws.getColumn(COL.num).width = 4;
-  ws.getColumn(COL.name).width = 28;
-  ws.getColumn(COL.position).width = 18;
-  ws.getColumn(COL.hireDate).width = 12;
-  for (let i = 0; i < 31; i += 1) {
-    ws.getColumn(COL.dayStart + i).width = 4.2;
-  }
+  ws.name = safeSheetName(input.sheetLabel || "Табель");
+  const monthYm = input.periodTo.slice(0, 7);
 
-  ws.mergeCells(5, 1, 5, 16);
-  ws.getCell(5, 1).value = input.organization;
-  ws.getCell(6, 1).value = "наименование организации";
-
-  ws.mergeCells(7, 1, 7, 16);
-  ws.getCell(7, 1).value = input.department;
-  ws.getCell(8, 1).value = "структурное подразделение";
-
-  ws.mergeCells(9, 1, 9, 16);
-  ws.getCell(9, 1).value = input.objectName;
-  ws.getCell(10, 1).value = "объект";
-
-  ws.mergeCells(11, 2, 11, 5);
-  ws.getCell(11, 2).value = "ТАБЕЛЬ УЧЕТА РАБОЧЕГО ВРЕМЕНИ";
-  ws.getCell(11, 2).font = { bold: true, size: 12 };
-  ws.getCell(11, COL.compileDate).value = "Дата составления";
-  ws.getCell(11, COL.periodFrom).value = "Отчетный период";
-  ws.getCell(12, COL.compileDate).value = ymdToDate(input.compileDate);
-  ws.getCell(12, COL.compileDate).numFmt = "yyyy-mm-dd";
-  ws.getCell(12, COL.periodFrom).value = "с";
-  ws.getCell(12, COL.periodTo).value = "по";
-  ws.getCell(13, COL.periodFrom).value = ymdToDate(input.periodFrom);
-  ws.getCell(13, COL.periodFrom).numFmt = "yyyy-mm-dd";
-  ws.getCell(13, COL.periodTo).value = ymdToDate(input.periodTo);
-  ws.getCell(13, COL.periodTo).numFmt = "yyyy-mm-dd";
-
-  ws.getCell(11, COL.accepted).value = "ПРИНЯТО";
-  ws.getCell(11, COL.fired).value = "УВОЛЕНО";
-  ws.getCell(11, COL.halfFirst).value = "ТЕКУЩЕСТЬ";
-  ws.getCell(11, COL.monthTotal).value = "НОРМА ЧАСОВ";
-  ws.getCell(11, COL.sick).value = "отработано";
-  ws.getCell(11, COL.idle).value = "ССЧ";
-
-  if (input.responsibleTitle || input.responsibleName) {
-    ws.getCell(5, COL.responsibleTitle).value = input.responsibleTitle || "";
-    ws.getCell(5, COL.responsibleName).value = input.responsibleName || "";
-    ws.getCell(6, COL.responsibleLabel).value = "( Ответственный за табельный учет)";
-  }
-
-  const headerRow = 15;
-  ws.getCell(headerRow, COL.num).value = "№";
-  ws.getCell(headerRow, COL.name).value = "Фамилия И.О.";
-  ws.getCell(headerRow, COL.position).value = "Должность";
-  ws.getCell(headerRow, COL.hireDate).value = "Дата приема";
-  ws.mergeCells(headerRow, COL.dayStart, headerRow, COL.dayStart + 30);
-  ws.getCell(headerRow, COL.dayStart).value = "Отметки о явках и неявках на работу по часам";
-  ws.getCell(headerRow, COL.halfFirst).value = "Отработано часов за";
-  ws.getCell(headerRow, COL.vacation).value = "отпуск ежегод";
-  ws.getCell(headerRow, COL.sick).value = "больничный";
-  ws.getCell(headerRow, COL.unpaid).value = "БСЗП";
-  ws.getCell(headerRow, COL.idle).value = "простой";
-  ws.getCell(headerRow, COL.absent).value = "невыход";
-  ws.getCell(headerRow, COL.sumTotal).value = "сумма общая";
-  ws.getCell(headerRow, COL.sumCard).value = "сумма на карту";
-  ws.getCell(headerRow, COL.sumCash).value = "сумма на руки";
-
-  const dayNumRow = headerRow + 1;
-  for (let i = 0; i < 31; i += 1) {
-    ws.getCell(dayNumRow, COL.dayStart + i).value = i < days.length ? i + 1 : "";
-  }
-  ws.getCell(dayNumRow, COL.halfFirst).value = "половина месяца";
-  ws.getCell(dayNumRow, COL.monthTotal).value = "месяц";
-
-  const halfRow = headerRow + 2;
-  ws.getCell(halfRow, COL.halfFirst).value = "I";
-  ws.getCell(halfRow, COL.halfSecond).value = "II";
-
-  const weekdayRow = headerRow + 4;
-  for (let i = 0; i < days.length; i += 1) {
-    ws.getCell(weekdayRow, COL.dayStart + i).value = weekdayShort(days[i]!);
-  }
+  fillHeader(ws, input);
+  updateDayHeaderRows(ws, monthYm);
+  ensureEmployeeRows(ws, input.employees.length);
 
   let totalHours = 0;
   input.employees.forEach((emp, idx) => {
-    const row = headerRow + 5 + idx;
-    const stats = parseMarkStats(days, emp.marks);
-    totalHours += stats.hours;
-
-    ws.getCell(row, COL.num).value = idx + 1;
-    ws.getCell(row, COL.name).value = emp.fullName;
-    ws.getCell(row, COL.position).value = emp.position || "";
-    if (emp.hireDate) {
-      ws.getCell(row, COL.hireDate).value = ymdToDate(emp.hireDate);
-      ws.getCell(row, COL.hireDate).numFmt = "yyyy-mm-dd";
-    }
-
-    days.forEach((iso, dayIdx) => {
-      const mark = normMark(emp.marks[iso]);
-      const cell = ws.getCell(row, COL.dayStart + dayIdx);
-      if (mark === "") return;
-      const n = Number(mark.replace(",", "."));
-      cell.value = Number.isFinite(n) ? n : mark;
-    });
-
-    ws.getCell(row, COL.halfFirst).value = stats.halfFirst || "";
-    ws.getCell(row, COL.halfSecond).value = stats.halfSecond || "";
-    ws.getCell(row, COL.monthTotal).value = stats.hours || "";
-    ws.getCell(row, COL.vacation).value = stats.vacation || "";
-    ws.getCell(row, COL.sick).value = stats.sick || "";
-    ws.getCell(row, COL.unpaid).value = stats.unpaid || "";
-    ws.getCell(row, COL.idle).value = stats.idle || "";
-    ws.getCell(row, COL.absent).value = stats.absent || "";
+    const row = FIRST_DATA_ROW + idx;
+    fillEmployeeRow(ws, row, idx + 1, emp, monthYm, input.periodFrom, input.periodTo);
+    totalHours += parseMarkStats(monthYm, input.periodFrom, input.periodTo, emp.marks).hours;
   });
 
-  const statsRow = 12;
-  ws.getCell(statsRow, COL.accepted).value = input.employees.length;
-  ws.getCell(statsRow, COL.fired).value = 0;
-  ws.getCell(statsRow, COL.halfFirst).value = 0;
-  ws.getCell(statsRow, COL.monthTotal).value = normHoursForPeriod(input.periodFrom, input.periodTo);
-  ws.getCell(statsRow, COL.sick).value =
-    input.employees.length > 0 ? totalHours / input.employees.length : 0;
-  ws.getCell(statsRow, COL.idle).value =
-    input.employees.length > 0 ? Math.round(totalHours / input.employees.length) : 0;
-
-  ws.getCell(5, COL.legend).value = "УСЛОВНЫЕ ОБОЗНАЧЕНИЯ";
-  LEGEND.forEach(([code, label], i) => {
-    ws.getCell(6 + i, COL.legend).value = code;
-    ws.getCell(6 + i, COL.legend + 1).value = label;
-  });
-
-  const lastDataRow = headerRow + 4 + input.employees.length;
-  setBorderRange(ws, headerRow, COL.num, lastDataRow, COL.absent);
-  setBorderRange(ws, headerRow, COL.dayStart, weekdayRow, COL.dayStart + 30);
-
-  for (let r = headerRow; r <= lastDataRow; r += 1) {
-    ws.getRow(r).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  for (let r = FIRST_DATA_ROW + input.employees.length; r < FIRST_DATA_ROW + TEMPLATE_DATA_ROWS; r += 1) {
+    for (let c = 1; c <= 46; c += 1) ws.getCell(r, c).value = null;
   }
-  ws.getColumn(COL.name).alignment = { horizontal: "left" };
-  ws.getColumn(COL.position).alignment = { horizontal: "left" };
+
+  fillSummaryRow(ws, input, totalHours);
+  updatePrintArea(ws, FIRST_DATA_ROW + input.employees.length - 1);
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
