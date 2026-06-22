@@ -37,6 +37,7 @@ export function docTypeLabel(type: string): string {
     passport: "Паспорт",
     certificate: "Сертификат",
     datasheet: "Тех. документация",
+    "inbound-manual": "Приход (вручную)",
     material: "Материал",
     other: "Прочее"
   };
@@ -56,8 +57,9 @@ export function formatDocMoment(iso: string): string {
 /** Человекочитаемое имя файла для списков и ссылок. */
 export function displayDocumentFileName(
   fileName: string,
-  opts?: { type?: string; createdAt?: string }
+  opts?: { type?: string; createdAt?: string; title?: string | null }
 ): string {
+  if (opts?.title?.trim()) return opts.title.trim();
   const repaired = repairUploadedFileName(fileName);
   if (repaired && !looksLikeMojibake(repaired)) return repaired;
   if (opts?.type && opts.createdAt) {

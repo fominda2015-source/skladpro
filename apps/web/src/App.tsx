@@ -79,6 +79,12 @@ import {
 } from "./widgets/approvals/ApprovalsQueueTables";
 import { DocumentsTabView } from "./widgets/documents/DocumentsTabView";
 import {
+  DocumentsInboundView,
+  filterInboundDocuments,
+  sortInboundDocuments,
+  type InboundDocumentRow
+} from "./widgets/documents/DocumentsInboundView";
+import {
   RECEIPT_ITEM_CATEGORIES,
   receiptItemCategoryLabel,
   receiptStatusLabel,
@@ -597,6 +603,9 @@ type DocumentFile = {
   replacedById?: string | null;
   isDeleted?: boolean;
   createdAt: string;
+  title?: string | null;
+  comment?: string | null;
+  documentDate?: string | null;
   /** Если список открыт по сущности и файл попал сюда только через DocumentLink */
   matchedLinkId?: string | null;
 };
@@ -1083,7 +1092,14 @@ function App() {
   const [issueRecipientSignedFile, setIssueRecipientSignedFile] = useState<File | null>(null);
   const [directIssueSignedFile, setDirectIssueSignedFile] = useState<File | null>(null);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
+  const [inboundDocuments, setInboundDocuments] = useState<InboundDocumentRow[]>([]);
   const [documentsMessage, setDocumentsMessage] = useState("");
+  const [docSectionTab, setDocSectionTab] = useState<"all" | "inbound">("all");
+  const [inboundUploadTitle, setInboundUploadTitle] = useState("");
+  const [inboundUploadComment, setInboundUploadComment] = useState("");
+  const [inboundUploadDate, setInboundUploadDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [inboundUploadFile, setInboundUploadFile] = useState<File | null>(null);
+  const [inboundUploadBusy, setInboundUploadBusy] = useState(false);
   const [docSearchQuery, setDocSearchQuery] = useState("");
   const [docEntityType, setDocEntityType] = useState<"" | "operation" | "issue" | "receipt">("");
   const [docEntityId, setDocEntityId] = useState("");
@@ -2266,6 +2282,7 @@ function App() {
     }
     if (tab === "documents") {
       await loadDocuments().catch(() => undefined);
+      await loadInboundDocuments().catch(() => undefined);
     }
   }
 
@@ -5602,6 +5619,59 @@ function App() {
     );
   }
 
+  async function loadInboundDocuments() {
+    if (!token) return;
+    const parts = [
+      docWarehouseFilter ? `warehouseId=${encodeURIComponent(docWarehouseFilter)}` : "",
+      objectSectionFilter ? `section=${encodeURIComponent(objectSectionFilter)}` : ""
+    ].filter(Boolean);
+    const query = parts.length ? `?${parts.join("&")}` : "";
+    const res = await fetchWithSession(`${API_URL}/api/documents/inbound${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      setDocumentsMessage("Не удалось загрузить документы по приходам");
+      return;
+    }
+    setDocumentsMessage("");
+    const data = (await res.json()) as InboundDocumentRow[];
+    setInboundDocuments(data);
+    if (data.length && docSectionTab === "inbound" && !selectedDocumentId) {
+      setSelectedDocumentId(data[0].id);
+      setDocPreviewUrl(`${API_URL}/${data[0].filePath}`);
+    }
+  }
+
+  async function uploadInboundDocument() {
+    if (!token || !inboundUploadFile || !inboundUploadTitle.trim() || !docWarehouseFilter) return;
+    setInboundUploadBusy(true);
+    setDocumentsMessage("");
+    try {
+      const fd = new FormData();
+      fd.append("file", inboundUploadFile);
+      fd.append("warehouseId", docWarehouseFilter);
+      fd.append("title", inboundUploadTitle.trim());
+      fd.append("comment", inboundUploadComment.trim());
+      fd.append("documentDate", new Date(`${inboundUploadDate}T12:00:00`).toISOString());
+      const res = await fetchWithSession(`${API_URL}/api/documents/inbound/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd
+      });
+      if (!res.ok) {
+        setDocumentsMessage("Не удалось добавить документ");
+        return;
+      }
+      setInboundUploadTitle("");
+      setInboundUploadComment("");
+      setInboundUploadFile(null);
+      setInboundUploadDate(new Date().toISOString().slice(0, 10));
+      await loadInboundDocuments();
+    } finally {
+      setInboundUploadBusy(false);
+    }
+  }
+
   async function loadDocuments() {
     if (!token) return;
     const parts = [
@@ -5643,6 +5713,9 @@ function App() {
       setDocPreviewUrl("");
     }
     await loadDocuments();
+    if (docSectionTab === "inbound") {
+      await loadInboundDocuments();
+    }
   }
 
   function openDocumentsForEntity(entityType: "issue" | "operation" | "receipt", entityId: string) {
@@ -5671,7 +5744,10 @@ function App() {
 
   const selectedIssue = issues.find((x) => x.id === selectedIssueId) || null;
   const selectedWaybill = waybills.find((x) => x.id === selectedWaybillId) || null;
-  const selectedDocument = documents.find((x) => x.id === selectedDocumentId) || null;
+  const selectedDocument =
+    (docSectionTab === "inbound"
+      ? inboundDocuments.find((x) => x.id === selectedDocumentId)
+      : documents.find((x) => x.id === selectedDocumentId)) || null;
   const issuesTotalPages = Math.max(1, Math.ceil(issuesTotal / issuesPageSize));
   const waybillsTotalPages = Math.max(1, Math.ceil(waybillsTotal / waybillsPageSize));
   const toolsTotalPages = Math.max(1, Math.ceil(toolsTotal / toolsPageSize));
@@ -6297,9 +6373,22 @@ function App() {
       void loadIssues();
       void loadOperations();
       void loadReceiptRequests();
-      void loadDocuments();
+      if (docSectionTab === "inbound") {
+        void loadInboundDocuments();
+      } else {
+        void loadDocuments();
+      }
     }
-  }, [token, activeTab, docTypeFilter, docEntityType, docEntityId, docWarehouseFilter]);
+  }, [
+    token,
+    activeTab,
+    docSectionTab,
+    docTypeFilter,
+    docEntityType,
+    docEntityId,
+    docWarehouseFilter,
+    objectSectionFilter
+  ]);
 
   useEffect(() => {
     if (token && activeTab === "qr") {
@@ -10548,8 +10637,74 @@ function App() {
             </select>
           ) : null;
 
+        const inboundFiltersActive =
+          Boolean(docWarehouseFilter) || Boolean(docSearchQuery.trim());
+        const inboundVisible = sortInboundDocuments(
+          filterInboundDocuments(inboundDocuments, docSearchQuery)
+        );
+
         return (
           <DocumentsTabView
+            documentsSection={docSectionTab}
+            onDocumentsSectionChange={(id) => {
+              setDocSectionTab(id);
+              setSelectedDocumentId("");
+              setDocPreviewUrl("");
+              if (id === "inbound") {
+                void loadInboundDocuments();
+              } else {
+                void loadDocuments();
+              }
+            }}
+            documentsSectionTabs={[
+              { id: "all", label: "Все документы" },
+              { id: "inbound", label: "Приходы" }
+            ]}
+            inboundPanel={
+              <DocumentsInboundView
+                documents={inboundDocuments}
+                visibleDocs={inboundVisible}
+                selectedDocumentId={selectedDocumentId}
+                selectedDocument={selectedDocument}
+                docPreviewUrl={docPreviewUrl}
+                apiUrl={API_URL}
+                docWarehouseFilter={docWarehouseFilter}
+                warehouses={warehouses}
+                onWarehouseChange={(id) => {
+                  setDocWarehouseFilter(id);
+                  setSelectedDocumentId("");
+                  setDocPreviewUrl("");
+                }}
+                docSearchQuery={docSearchQuery}
+                onSearchChange={setDocSearchQuery}
+                filtersActive={inboundFiltersActive}
+                onResetFilters={() => {
+                  setDocWarehouseFilter("");
+                  setDocSearchQuery("");
+                  setSelectedDocumentId("");
+                  setDocPreviewUrl("");
+                }}
+                onRefresh={() => void loadInboundDocuments()}
+                documentsMessage={documentsMessage}
+                canWriteDocuments={canWriteDocuments}
+                onSelectPreview={(d) => {
+                  setSelectedDocumentId(d.id);
+                  setDocPreviewUrl(`${API_URL}/${d.filePath}`);
+                }}
+                onDelete={(id, shownName) => void deleteDocument(id, shownName)}
+                safeName={safeName}
+                uploadTitle={inboundUploadTitle}
+                onUploadTitleChange={setInboundUploadTitle}
+                uploadComment={inboundUploadComment}
+                onUploadCommentChange={setInboundUploadComment}
+                uploadDate={inboundUploadDate}
+                onUploadDateChange={setInboundUploadDate}
+                uploadFile={inboundUploadFile}
+                onUploadFileChange={setInboundUploadFile}
+                uploadBusy={inboundUploadBusy}
+                onUpload={() => void uploadInboundDocument()}
+              />
+            }
             documents={documents}
             visibleDocs={visibleDocs}
             selectedDocumentId={selectedDocumentId}
@@ -10591,7 +10746,13 @@ function App() {
               setSelectedDocumentId("");
               setDocPreviewUrl("");
             }}
-            onRefresh={() => void loadDocuments()}
+            onRefresh={() => {
+              if (docSectionTab === "inbound") {
+                void loadInboundDocuments();
+              } else {
+                void loadDocuments();
+              }
+            }}
             documentsMessage={documentsMessage}
             canWriteDocuments={canWriteDocuments}
             onSelectPreview={(d) => {

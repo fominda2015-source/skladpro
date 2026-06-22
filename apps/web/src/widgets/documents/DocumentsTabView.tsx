@@ -20,8 +20,14 @@ export type DocumentRow = {
 
 type DocTypeTab = { id: string; label: string };
 
+type DocSectionTab = { id: "all" | "inbound"; label: string };
+
 type Props = {
   objectFilter?: ReactNode;
+  documentsSection: "all" | "inbound";
+  onDocumentsSectionChange: (id: "all" | "inbound") => void;
+  documentsSectionTabs: DocSectionTab[];
+  inboundPanel?: ReactNode;
   documents: DocumentRow[];
   visibleDocs: DocumentRow[];
   selectedDocumentId: string;
@@ -52,6 +58,10 @@ type Props = {
 
 export function DocumentsTabView({
   objectFilter,
+  documentsSection,
+  onDocumentsSectionChange,
+  documentsSectionTabs,
+  inboundPanel,
   documents,
   visibleDocs,
   selectedDocumentId,
@@ -104,6 +114,23 @@ export function DocumentsTabView({
         }
       />
 
+      <div className="tabs documentsSectionTabs" style={{ flexWrap: "wrap", marginBottom: 4 }}>
+        {documentsSectionTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={documentsSection === tab.id ? "active" : ""}
+            onClick={() => onDocumentsSectionChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {documentsSection === "inbound" && inboundPanel ? inboundPanel : null}
+
+      {documentsSection === "all" ? (
+        <>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {docTypeTabs.map((tab) => (
           <button
@@ -295,6 +322,8 @@ export function DocumentsTabView({
           )}
         </aside>
       </div>
+        </>
+      ) : null}
     </TabShell>
   );
 }

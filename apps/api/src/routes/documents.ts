@@ -49,8 +49,15 @@ function canWriteEntityDocument(permissions: string[], entityType: string) {
   if (hasPermission(permissions, "documents.write") || hasPermission(permissions, "documents.upload")) {
     return true;
   }
+  if (entityType === "inbound") return hasPermission(permissions, "documents.read");
   return entityType === "material" && hasPermission(permissions, "materials.write");
 }
+
+const inboundMetaSchema = z.object({
+  title: z.string().max(200).optional().nullable(),
+  comment: z.string().max(2000).optional().nullable(),
+  documentDate: z.string().datetime().optional().nullable()
+});
 
 documentsRouter.use(async (req: AuthedRequest, res, next) => {
   try {
@@ -229,6 +236,194 @@ documentsRouter.get("/", async (req: AuthedRequest, res) => {
     return { ...f, matchedLinkId };
   });
   return res.json(payload);
+});
+
+/** Документы приходов: заявки на приход, операции прихода и вручную добавленные. */
+documentsRouter.get("/inbound", async (req: AuthedRequest, res) => {
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId : undefined;
+  const sectionParam = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section: ObjectSection | undefined =
+    sectionParam === "SS"
+      ? ObjectSection.SS
+      : sectionParam === "EOM"
+        ? ObjectSection.EOM
+        : undefined;
+  const scope = await getRequestDataScope(req);
+  const warehouseIds: string[] = [];
+  if (warehouseId) {
+    try {
+      assertWarehouseInScope(scope, warehouseId);
+      warehouseIds.push(warehouseId);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      throw e;
+    }
+  } else if (scope.warehouseIds?.length) {
+    warehouseIds.push(...scope.warehouseIds);
+  } else if (scope.unrestricted) {
+    const all = await prisma.warehouse.findMany({ where: { isActive: true }, select: { id: true } });
+    warehouseIds.push(...all.map((w) => w.id));
+  }
+  if (!warehouseIds.length) {
+    return res.json([]);
+  }
+
+  const scopedWh = { warehouseId: { in: warehouseIds }, ...(section ? { section } : {}) };
+  const [receipts, operations] = await Promise.all([
+    prisma.receiptRequest.findMany({ where: scopedWh, select: { id: true, number: true } }),
+    prisma.operation.findMany({
+      where: { ...scopedWh, type: "INCOME" },
+      select: { id: true, documentNumber: true }
+    })
+  ]);
+  const receiptById = new Map(receipts.map((r) => [r.id, r.number]));
+  const operationById = new Map(operations.map((o) => [o.id, o.documentNumber]));
+
+  const entityOr: Prisma.DocumentFileWhereInput[] = [];
+  const linkOr: Prisma.DocumentLinkWhereInput[] = [];
+  for (const whId of warehouseIds) {
+    entityOr.push({ entityType: "inbound", entityId: whId });
+  }
+  if (receipts.length) {
+    const ids = receipts.map((r) => r.id);
+    entityOr.push({ entityType: "receipt", entityId: { in: ids } });
+    linkOr.push({ entityType: "receipt", entityId: { in: ids } });
+  }
+  if (operations.length) {
+    const ids = operations.map((o) => o.id);
+    entityOr.push({ entityType: "operation", entityId: { in: ids } });
+    linkOr.push({ entityType: "operation", entityId: { in: ids } });
+  }
+
+  const rows = await prisma.documentFile.findMany({
+    where: {
+      isDeleted: false,
+      OR: [
+        ...entityOr,
+        ...(linkOr.length ? [{ links: { some: { OR: linkOr } } }] : [])
+      ]
+    },
+    orderBy: [{ documentDate: "desc" }, { createdAt: "desc" }],
+    take: 1000
+  });
+
+  const repaired = rows.map((r) => withRepairedFileName(r));
+  const payload = repaired.map((row) => {
+    let sourceKind: "manual" | "receipt" | "operation" = "manual";
+    let sourceLabel = "Вручную";
+    if (row.entityType === "receipt") {
+      sourceKind = "receipt";
+      sourceLabel = `Заявка ${receiptById.get(row.entityId) || row.entityId.slice(0, 8)}`;
+    } else if (row.entityType === "operation") {
+      sourceKind = "operation";
+      const num = operationById.get(row.entityId);
+      sourceLabel = num ? `Приход ${num}` : `Приход ${row.entityId.slice(0, 8)}`;
+    } else if (row.entityType === "inbound") {
+      sourceKind = "manual";
+      sourceLabel = "Вручную";
+    }
+    return { ...row, sourceKind, sourceLabel };
+  });
+  return res.json(payload);
+});
+
+documentsRouter.post("/inbound/upload", upload.single("file"), async (req: AuthedRequest, res) => {
+  const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+  if (!file) {
+    return res.status(400).json({ error: "file is required" });
+  }
+  const warehouseId = String(req.body.warehouseId || "");
+  const title = String(req.body.title || "").trim();
+  const comment = String(req.body.comment || "").trim();
+  const documentDateRaw = String(req.body.documentDate || "").trim();
+  if (!warehouseId) {
+    return res.status(400).json({ error: "warehouseId is required" });
+  }
+  if (!title) {
+    return res.status(400).json({ error: "title is required" });
+  }
+  const permissions = req.user!.permissions ?? (await loadUserPermissions(req.user!.userId));
+  if (!canWriteEntityDocument(permissions, "inbound")) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const documentDate = documentDateRaw ? new Date(documentDateRaw) : new Date();
+  if (Number.isNaN(documentDate.getTime())) {
+    return res.status(400).json({ error: "Invalid documentDate" });
+  }
+
+  const absPath = path.join(uploadDirAbs, file.filename);
+  const checksumSha256 = await sha256File(absPath);
+  const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
+  const created = await prisma.documentFile.create({
+    data: {
+      groupId: crypto.randomUUID(),
+      version: 1,
+      entityType: "inbound",
+      entityId: warehouseId,
+      type: "inbound-manual",
+      title,
+      comment: comment || null,
+      documentDate,
+      fileName: decodeUploadedOriginalName(file.originalname),
+      filePath,
+      mimeType: file.mimetype,
+      size: file.size,
+      checksumSha256,
+      createdBy: req.user!.userId
+    }
+  });
+  return res.status(201).json({
+    ...withRepairedFileName(created),
+    sourceKind: "manual" as const,
+    sourceLabel: "Вручную"
+  });
+});
+
+documentsRouter.patch("/:id/meta", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  const parsed = inboundMetaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+  }
+  const row = await prisma.documentFile.findUnique({ where: { id } });
+  if (!row || row.isDeleted) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+  if (row.entityType !== "inbound") {
+    return res.status(400).json({ error: "Редактирование метаданных только для документов, добавленных вручную" });
+  }
+  const permissions = req.user!.permissions ?? (await loadUserPermissions(req.user!.userId));
+  if (!canWriteEntityDocument(permissions, "inbound")) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, row.entityId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const updated = await prisma.documentFile.update({
+    where: { id },
+    data: {
+      ...(parsed.data.title !== undefined ? { title: parsed.data.title?.trim() || null } : {}),
+      ...(parsed.data.comment !== undefined ? { comment: parsed.data.comment?.trim() || null } : {}),
+      ...(parsed.data.documentDate !== undefined
+        ? { documentDate: parsed.data.documentDate ? new Date(parsed.data.documentDate) : null }
+        : {})
+    }
+  });
+  return res.json({ ...withRepairedFileName(updated), sourceKind: "manual", sourceLabel: "Вручную" });
 });
 
 documentsRouter.post(

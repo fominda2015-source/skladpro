@@ -537,6 +537,9 @@ model DocumentFile {
   mimeType   String?
   size       Int?
   checksumSha256 String?
+  title         String?
+  comment       String?
+  documentDate  DateTime?
   createdBy  String
   replacedById String?
   isDeleted  Boolean  @default(false)
