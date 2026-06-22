@@ -209,17 +209,18 @@ export function TransfersTab({
   }, [loadTransfers]);
 
   useEffect(() => {
-    if (subTab === "request") void loadPeer();
+    if (subTab === "request" || subTab === "send") void loadPeer();
   }, [subTab, loadPeer]);
 
   useEffect(() => {
     if (subTab === "send") void loadOwn();
   }, [subTab, loadOwn]);
 
-  const destinationWarehouses = useMemo(
-    () => warehouses.filter((w) => w.id !== toWarehouseId),
-    [warehouses, toWarehouseId]
-  );
+  const destinationWarehouses = useMemo(() => {
+    const fromPeers = peerData.map((w) => ({ id: w.warehouseId, name: w.warehouseName }));
+    if (fromPeers.length) return fromPeers;
+    return warehouses.filter((w) => w.id !== toWarehouseId);
+  }, [peerData, warehouses, toWarehouseId]);
 
   const outgoingRows = useMemo(
     () =>

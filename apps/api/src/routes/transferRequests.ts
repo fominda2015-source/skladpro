@@ -127,28 +127,22 @@ transferRequestsRouter.get("/peer-inventory", async (req: AuthedRequest, res) =>
     throw e;
   }
 
-  let warehouseIds: string[];
-  if (scope.unrestricted && !scope.warehouseIds?.length) {
-    const whs = await prisma.warehouse.findMany({
-      where: { isActive: true },
-      select: { id: true },
-      orderBy: { name: "asc" }
-    });
-    warehouseIds = whs.map((w) => w.id);
-  } else {
-    warehouseIds = scope.warehouseIds ?? [];
-  }
-
-  const peerIds = warehouseIds.filter((id) => id !== toWarehouseId);
+  // Остатки «чужих» объектов для заявки — все активные склады, кроме получателя.
+  // Не сужаем до activeWarehouse в scope: иначе при выбранном объекте в шапке peerIds пустой.
+  const peerWarehouses = await prisma.warehouse.findMany({
+    where: { isActive: true, id: { not: toWarehouseId } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" }
+  });
+  const peerIds = peerWarehouses.map((w) => w.id);
   if (!peerIds.length) return res.json({ section, toWarehouseId, warehouses: [] });
 
-  const [stocks, toolGroups, campGroups, warehouses, limitNodes] = await Promise.all([
+  const [stocks, toolGroups, campGroups, limitNodes] = await Promise.all([
     prisma.stock.findMany({
       where: {
-        AND: [
-          stockWhereFromScope(scope),
-          { warehouseId: { in: peerIds }, section, quantity: { gt: 0 } }
-        ]
+        warehouseId: { in: peerIds },
+        section,
+        quantity: { gt: 0 }
       },
       include: { material: true, warehouse: { select: { id: true, name: true } } },
       orderBy: [{ warehouse: { name: "asc" } }, { material: { name: "asc" } }]
@@ -162,11 +156,6 @@ transferRequestsRouter.get("/peer-inventory", async (req: AuthedRequest, res) =>
       by: ["warehouseId"],
       where: { warehouseId: { in: peerIds }, section },
       _count: { _all: true }
-    }),
-    prisma.warehouse.findMany({
-      where: { id: { in: peerIds } },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" }
     }),
     prisma.objectLimitNode.findMany({
       where: {
@@ -206,7 +195,7 @@ transferRequestsRouter.get("/peer-inventory", async (req: AuthedRequest, res) =>
     stocksByWh.set(s.warehouseId, list);
   }
 
-  const warehousesPayload = warehouses.map((w) => {
+  const warehousesPayload = peerWarehouses.map((w) => {
     const rows = stocksByWh.get(w.id) ?? [];
     return {
       warehouseId: w.id,
@@ -343,8 +332,26 @@ transferRequestsRouter.post("/", requirePermission("waybills.write"), async (req
 
   try {
     const scope = await getRequestDataScope(req);
-    assertWarehouseInScope(scope, parsed.data.fromWarehouseId);
-    assertWarehouseInScope(scope, parsed.data.toWarehouseId);
+    const { fromWarehouseId, toWarehouseId } = parsed.data;
+    const canFrom = (() => {
+      try {
+        assertWarehouseInScope(scope, fromWarehouseId);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const canTo = (() => {
+      try {
+        assertWarehouseInScope(scope, toWarehouseId);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    if (!canFrom && !canTo) {
+      return res.status(403).json({ error: "FORBIDDEN_WAREHOUSE" });
+    }
 
     const materialIds = [...new Set(parsed.data.lines.map((l) => l.materialId))];
     const mats = await prisma.material.findMany({ where: { id: { in: materialIds } }, select: { id: true } });
