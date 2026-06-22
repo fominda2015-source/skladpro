@@ -12673,7 +12673,6 @@ function App() {
                 setAdminMessage("Пользователь создан");
                 setNewUserEmail("");
                 setNewUserFullName("");
-                setNewUserWarehouseScopes([]);
                 setNewUserProjectScopes([]);
                 setNewPositionName("");
                 setNewUserPositionId("");
