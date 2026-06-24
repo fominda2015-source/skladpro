@@ -20,20 +20,21 @@ import {
 import { scopeForbiddenPayload } from "../lib/accessScope.js";
 import { canViewAllObjects, getAllowedWarehouses } from "../lib/userWarehouses.js";
 import { getResponsibleWarehouseIds } from "../lib/warehouseResponsibility.js";
+import { isAdminEquivalent } from "../lib/openAccess.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import type { RoleName } from "../types.js";
 
 const ADMIN_EMAIL = "admin@skladpro.local";
 const ADMIN_PASSWORD = "1111";
 
-async function userAccessExtras(userId: string) {
+async function userAccessExtras(userId: string, role: string) {
   const [responsibleWarehouseIds, systemWarehouseCount] = await Promise.all([
     getResponsibleWarehouseIds(userId),
     prisma.warehouse.count({ where: { isActive: true } })
   ]);
   return {
     responsibleWarehouseIds,
-    canReadAudit: responsibleWarehouseIds.length > 0,
+    canReadAudit: isAdminEquivalent(role),
     canCreateFirstObject: systemWarehouseCount === 0
   };
 }
@@ -215,7 +216,7 @@ authRouter.post("/login", async (req, res) => {
     }
 
     const availableObjects = await listUserObjectAccess(user.id, roleName, permissions, allowedWarehouses);
-    const accessExtras = await userAccessExtras(user.id);
+    const accessExtras = await userAccessExtras(user.id, roleName);
 
     const token = jwt.sign(
       { userId: user.id, role: roleName, email: user.email, permissions },
@@ -276,7 +277,7 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     });
   }
   const availableObjects = await listUserObjectAccess(me.id, roleName, permissions, allowedWarehouses);
-  const accessExtras = await userAccessExtras(me.id);
+  const accessExtras = await userAccessExtras(me.id, roleName);
   return res.json({
     id: me.id,
     email: me.email,

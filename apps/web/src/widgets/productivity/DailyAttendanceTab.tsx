@@ -212,12 +212,19 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
           </label>
           <div className="fieldDocTableWrap fieldDocTableWrap--attendance" style={{ marginTop: 8 }}>
             <table className="fieldDocTable fieldDocTable--attendance">
+              <colgroup>
+                <col className="fieldDocColNum" />
+                <col className="fieldDocColPos" />
+                <col className="fieldDocColNorm" />
+                <col className="fieldDocColPresence" />
+                <col className="fieldDocColName" />
+              </colgroup>
               <thead>
                 <tr>
                   <th className="fieldDocColNum">№</th>
                   <th className="fieldDocColPos">Должность</th>
-                  <th className="fieldDocColQty">Норма</th>
-                  <th className="fieldDocColQty">Присутствие</th>
+                  <th className="fieldDocColNorm">Норма</th>
+                  <th className="fieldDocColPresence">Присутствие</th>
                   <th className="fieldDocColName">ФИО / причины / меры</th>
                 </tr>
               </thead>
@@ -232,7 +239,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
                         onChange={(e) => updateRow(blockIdx, rowIdx, { position: e.target.value })}
                       />
                     </td>
-                    <td className="fieldDocColQty">
+                    <td className="fieldDocColNorm">
                       <input
                         type="number"
                         min={0}
@@ -241,7 +248,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
                         onChange={(e) => updateRow(blockIdx, rowIdx, { normQty: Number(e.target.value) || 0 })}
                       />
                     </td>
-                    <td className="fieldDocColQty">
+                    <td className="fieldDocColPresence">
                       <input
                         type="number"
                         min={0}

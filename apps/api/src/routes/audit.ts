@@ -8,37 +8,14 @@ import {
   StockMovementDirection,
   ToolStatus
 } from "@prisma/client";
-import { Router, type NextFunction, type Response } from "express";
+import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { isReceiptFullyAccepted, receiptAcceptedQty } from "../lib/receiptQty.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
-import { getResponsibleWarehouseIds } from "../lib/warehouseResponsibility.js";
+import { requireAdminRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 
 export const auditRouter = Router();
 auditRouter.use(requireAuth);
-
-async function requireResponsibleForAudit(req: AuthedRequest, res: Response, next: NextFunction) {
-  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-  const ids = await getResponsibleWarehouseIds(req.user.userId);
-  if (!ids.length) {
-    return res.status(403).json({ error: "Логи доступны только ответственному лицу на объекте" });
-  }
-  (req as AuthedRequest & { responsibleWarehouseIds?: string[] }).responsibleWarehouseIds = ids;
-  return next();
-}
-
-auditRouter.use(requireResponsibleForAudit);
-
-function requireAuditRevertPrivilege(req: AuthedRequest, res: Response, next: NextFunction) {
-  if (!req.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  const ids = (req as AuthedRequest & { responsibleWarehouseIds?: string[] }).responsibleWarehouseIds;
-  if (ids?.length) {
-    return next();
-  }
-  return res.status(403).json({ error: "Forbidden" });
-}
+auditRouter.use(requireAdminRole);
 
 const ENTITY_LABELS: Record<string, string> = {
   User: "Пользователь",
@@ -122,8 +99,6 @@ function formatRow(row: any) {
 }
 
 auditRouter.get("/", async (req: AuthedRequest, res) => {
-  const responsibleIds =
-    (req as AuthedRequest & { responsibleWarehouseIds?: string[] }).responsibleWarehouseIds ?? [];
   const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
   const entityId = typeof req.query.entityId === "string" ? req.query.entityId : undefined;
   const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
@@ -135,10 +110,6 @@ auditRouter.get("/", async (req: AuthedRequest, res) => {
   const take = Math.min(Number(req.query.take) || 200, 1000);
 
   const where: Prisma.AuditLogWhereInput = {
-    OR: [
-      { warehouseId: { in: responsibleIds } },
-      { entityType: "Warehouse", entityId: { in: responsibleIds } }
-    ],
     ...(entityType ? { entityType } : {}),
     ...(entityId ? { entityId } : {}),
     ...(userId ? { userId } : {}),
@@ -176,22 +147,14 @@ auditRouter.get("/", async (req: AuthedRequest, res) => {
 });
 
 // Метаданные для UI: список пользователей и сущностей для фильтров.
-auditRouter.get("/meta", async (req: AuthedRequest, res) => {
-  const responsibleIds =
-    (req as AuthedRequest & { responsibleWarehouseIds?: string[] }).responsibleWarehouseIds ?? [];
-  const scopeWhere: Prisma.AuditLogWhereInput = {
-    OR: [
-      { warehouseId: { in: responsibleIds } },
-      { entityType: "Warehouse", entityId: { in: responsibleIds } }
-    ]
-  };
+auditRouter.get("/meta", async (_req: AuthedRequest, res) => {
   const [users, entityTypesRaw] = await Promise.all([
     prisma.user.findMany({
-      where: { auditLogs: { some: scopeWhere } },
+      where: { auditLogs: { some: {} } },
       select: { id: true, fullName: true, email: true },
       orderBy: { fullName: "asc" }
     }),
-    prisma.auditLog.groupBy({ by: ["entityType"], where: scopeWhere, _count: { entityType: true } })
+    prisma.auditLog.groupBy({ by: ["entityType"], _count: { entityType: true } })
   ]);
   const entityTypes = entityTypesRaw
     .map((g) => ({
@@ -788,7 +751,6 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
 
 auditRouter.post(
   "/:id/revert",
-  requireAuditRevertPrivilege,
   async (req: AuthedRequest, res) => {
     const id = String(req.params.id);
     const log = await prisma.auditLog.findUnique({
@@ -801,33 +763,23 @@ auditRouter.post(
     // `?force=1` — мягкая отмена: помечаем запись лога как отменённую без бизнес-эффекта.
     // Используется админом для логов, которые нельзя откатить автоматически, либо когда
     // бизнес-откат отказался (например, остаток уже использован). Доступно только ADMIN.
-    const responsibleIds =
-      (req as AuthedRequest & { responsibleWarehouseIds?: string[] }).responsibleWarehouseIds ?? [];
-    const logWarehouseId =
-      log.warehouseId ?? (log.entityType === "Warehouse" ? log.entityId : null);
-    if (logWarehouseId && !responsibleIds.includes(logWarehouseId)) {
-      return res.status(403).json({ error: "Нет доступа к логу этого объекта" });
-    }
-
-    const isResponsible = responsibleIds.length > 0;
     const force =
-      isResponsible &&
-      (String(req.query.force ?? "").toLowerCase() === "1" ||
-        String(req.query.force ?? "").toLowerCase() === "true" ||
-        (req.body && (req.body as { force?: unknown }).force === true));
+      String(req.query.force ?? "").toLowerCase() === "1" ||
+      String(req.query.force ?? "").toLowerCase() === "true" ||
+      (req.body && (req.body as { force?: unknown }).force === true);
 
     const supportsHard = isRevertable(log.action);
     if (!supportsHard && !force) {
       return res
         .status(400)
-        .json({ error: "Откат этого типа действия не поддерживается", canForce: isResponsible });
+        .json({ error: "Откат этого типа действия не поддерживается", canForce: true });
     }
 
     let softNote: string | undefined;
     if (supportsHard) {
       const result = await revertAction(log);
       if (!result.ok) {
-        if (!force) return res.status(400).json({ error: result.error, canForce: isResponsible });
+        if (!force) return res.status(400).json({ error: result.error, canForce: true });
         softNote = `Бизнес-откат отказался («${result.error}»), запись закрыта вручную админом.`;
       }
     } else {

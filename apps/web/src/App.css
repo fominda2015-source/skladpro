@@ -10632,10 +10632,18 @@ button.whMenuItem:hover,
 .fieldDocTableWrap--attendance {
   border: 1px solid var(--border);
   border-radius: 8px;
+  overflow-x: auto;
 }
 
 .fieldDocTable--attendance {
   table-layout: fixed;
+  min-width: 680px;
+}
+
+.fieldDocTable--attendance th {
+  white-space: normal;
+  line-height: 1.3;
+  overflow: hidden;
 }
 
 .fieldDocTable--attendance .fieldDocColNum {
@@ -10644,15 +10652,21 @@ button.whMenuItem:hover,
 }
 
 .fieldDocTable--attendance .fieldDocColPos {
-  width: 22%;
+  width: 20%;
 }
 
-.fieldDocTable--attendance .fieldDocColQty {
-  width: 72px;
+.fieldDocTable--attendance .fieldDocColNorm {
+  width: 64px;
   text-align: center;
 }
 
-.fieldDocTable--attendance .fieldDocColQty input {
+.fieldDocTable--attendance .fieldDocColPresence {
+  width: 96px;
+  text-align: center;
+}
+
+.fieldDocTable--attendance .fieldDocColNorm input,
+.fieldDocTable--attendance .fieldDocColPresence input {
   text-align: center;
 }
 

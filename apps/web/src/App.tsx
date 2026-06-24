@@ -1362,7 +1362,6 @@ function App() {
   const [feedbackListLoading, setFeedbackListLoading] = useState(false);
   const [feedbackDetailLoading, setFeedbackDetailLoading] = useState(false);
   const [canViewAllObjects, setCanViewAllObjects] = useState(false);
-  const [canReadAudit, setCanReadAudit] = useState(false);
   const [canCreateFirstObject, setCanCreateFirstObject] = useState(false);
   const [reportsMessage, setReportsMessage] = useState("");
   const [warehouseSnapshot, setWarehouseSnapshot] = useState<WarehouseSnapshotReport | null>(null);
@@ -1946,7 +1945,7 @@ function App() {
 
   const canWriteOperations = hasObjectAccess;
   const canWriteLimits = hasObjectAccess;
-  const canRevertAudit = canReadAudit;
+  const canRevertAudit = canManageUsers;
   const canDashboard = hasObjectAccess;
   const canReadStocks = hasObjectAccess;
   const canReadIssues = hasObjectAccess;
@@ -1984,7 +1983,6 @@ function App() {
     setMe(null);
     setAvailableObjects([]);
     setCanViewAllObjects(false);
-    setCanReadAudit(false);
     setCanCreateFirstObject(false);
     setActiveObjectId("");
     setMustPickObject(false);
@@ -2166,7 +2164,6 @@ function App() {
         setAvailableObjects(userAccessibleObjects(data.availableObjects));
       }
       setCanViewAllObjects(Boolean(data.canViewAllObjects));
-      setCanReadAudit(Boolean(data.canReadAudit));
       setCanCreateFirstObject(Boolean(data.canCreateFirstObject));
       if (data.activeWarehouseId) {
         setActiveObjectId(data.activeWarehouseId);
@@ -2714,7 +2711,7 @@ function App() {
   }
 
   async function loadAuditLogs() {
-    if (!token || !canReadAudit) {
+    if (!token || !canManageUsers) {
       return;
     }
     setAuditMessage("");
@@ -2737,7 +2734,7 @@ function App() {
   }
 
   async function loadAuditMeta() {
-    if (!token || !canReadAudit) return;
+    if (!token || !canManageUsers) return;
     const r = await fetchWithSession(`${API_URL}/api/audit/meta`, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -6450,7 +6447,7 @@ function App() {
   }, [token, receiptRequests, expandedReceiptIds]);
 
   useEffect(() => {
-    if (!token || activeTab !== "audit" || !canReadAudit) {
+    if (!token || activeTab !== "audit" || !canManageUsers) {
       return;
     }
     void loadAuditLogs();
@@ -6458,7 +6455,7 @@ function App() {
   }, [
     token,
     activeTab,
-    canReadAudit,
+    canManageUsers,
     auditFilterUserId,
     auditFilterEntityType,
     auditFilterEntityId,
@@ -6575,8 +6572,10 @@ function App() {
     visibleTabs.add("chat");
     visibleTabs.add("feedback");
     visibleTabs.add("reports");
-    if (canReadAudit) visibleTabs.add("audit");
-    if (canManageUsers) visibleTabs.add("admin");
+    if (canManageUsers) {
+      visibleTabs.add("admin");
+      visibleTabs.add("audit");
+    }
     visibleTabs.add("password");
     visibleTabs.add("settings");
     visibleTabs.add("profile");
@@ -6599,7 +6598,6 @@ function App() {
     canReadTimesheet,
     canReadIntegrations,
     canReadNotifications,
-    canReadAudit,
     canManageUsers
   ]);
 
@@ -7101,7 +7099,6 @@ function App() {
         setAvailableObjects(userAccessibleObjects(data.user.availableObjects));
       }
       setCanViewAllObjects(Boolean(data.user.canViewAllObjects));
-      setCanReadAudit(Boolean(data.user.canReadAudit));
       setCanCreateFirstObject(Boolean(data.user.canCreateFirstObject));
       if (data.user.activeWarehouseId) {
         setActiveObjectId(data.user.activeWarehouseId);
@@ -7463,7 +7460,6 @@ function App() {
             canReadDocuments={canReadDocuments}
             canReadIntegrations={canReadIntegrations}
             canReadNotifications={canReadNotifications}
-            canReadAudit={canReadAudit}
             canCreateFirstObject={canCreateFirstObject}
             canManageUsers={canManageUsers}
             unreadNotificationCount={unreadNotificationCount}
@@ -7754,7 +7750,7 @@ function App() {
       )}
 
 
-      {activeTab === "audit" && canReadAudit && (
+      {activeTab === "audit" && canManageUsers && (
         <div>
           <PageHero
             icon="◉"

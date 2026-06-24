@@ -16,7 +16,6 @@ type Props = {
   canReadDocuments: boolean;
   canReadIntegrations: boolean;
   canReadNotifications: boolean;
-  canReadAudit: boolean;
   canCreateFirstObject: boolean;
   canManageUsers: boolean;
   unreadNotificationCount: number;
@@ -69,7 +68,6 @@ export function SidebarNav(props: Props) {
     canReadDocuments,
     canReadIntegrations,
     canReadNotifications,
-    canReadAudit,
     canCreateFirstObject,
     canManageUsers,
     unreadNotificationCount,
@@ -149,9 +147,6 @@ export function SidebarNav(props: Props) {
       {canReadTools ? (
         <SidebarNavItem tab="qr" activeTab={activeTab} icon="⌁" label="QR-сканер" onSelect={onSelectTab} />
       ) : null}
-      {canReadAudit ? (
-        <SidebarNavItem tab="audit" activeTab={activeTab} icon="◉" label="Логи действий" onSelect={onSelectTab} />
-      ) : null}
       <SidebarNavItem tab="feedback" activeTab={activeTab} icon="🛠" label="Обратная связь" onSelect={onSelectTab} />
 
       <p className="navSectionTitle navSectionTitle--wip">В разработке</p>
@@ -167,6 +162,7 @@ export function SidebarNav(props: Props) {
         <>
           <p className="navSectionTitle">Администрирование</p>
           <SidebarNavItem tab="admin" activeTab={activeTab} icon="⚙" label="Доступы" onSelect={onSelectTab} />
+          <SidebarNavItem tab="audit" activeTab={activeTab} icon="◉" label="Логи действий" onSelect={onSelectTab} />
         </>
       ) : null}
     </>
