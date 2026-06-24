@@ -697,6 +697,22 @@ toolsRouter.patch("/:id", requirePermission("tools.write"), async (req: AuthedRe
       entityType: "Tool",
       entityId: updated.id,
       summary: `Обновлена карточка инструмента: ${updated.name} (инв. ${updated.inventoryNumber})`,
+      before: {
+        name: existing.name,
+        serialNumber: existing.serialNumber,
+        warehouseId: existing.warehouseId,
+        section: existing.section,
+        projectId: existing.projectId,
+        responsible: existing.responsible,
+        note: existing.note,
+        brand: existing.brand,
+        toolType: existing.toolType,
+        status: existing.status,
+        categoryId: existing.categoryId,
+        kitComplete: existing.kitComplete,
+        kitMissingNote: existing.kitMissingNote,
+        purchasePrice: existing.purchasePrice
+      },
       after: {
         id: updated.id,
         name: updated.name,

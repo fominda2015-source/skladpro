@@ -640,6 +640,7 @@ type AuditLogRow = {
   revertedAt?: string | null;
   revertedBy?: { id?: string; email?: string; fullName?: string } | null;
   revertable?: boolean;
+  canSoftRevert?: boolean;
 };
 type AuditMetaResponse = {
   users: Array<{ id: string; fullName: string; email: string }>;
@@ -1945,7 +1946,6 @@ function App() {
 
   const canWriteOperations = hasObjectAccess;
   const canWriteLimits = hasObjectAccess;
-  const canRevertAudit = canManageUsers;
   const canDashboard = hasObjectAccess;
   const canReadStocks = hasObjectAccess;
   const canReadIssues = hasObjectAccess;
@@ -2743,9 +2743,13 @@ function App() {
     }
   }
 
-  async function revertAuditLog(id: string) {
+  async function revertAuditLog(id: string, opts?: { softOnly?: boolean }) {
     if (!token) return;
-    if (!window.confirm("Отменить это действие? Изменения будут откачены.")) return;
+    const softOnly = Boolean(opts?.softOnly);
+    const confirmText = softOnly
+      ? "Отменить запись в журнале? Для этого типа действия автоматический откат данных недоступен — запись будет помечена отменённой."
+      : "Отменить это действие? Система попытается откатить изменения в данных.";
+    if (!window.confirm(confirmText)) return;
     setAuditReverting((prev) => ({ ...prev, [id]: true }));
     try {
       const tryRevert = async (force: boolean) =>
@@ -2753,18 +2757,17 @@ function App() {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` }
         });
-      let r = await tryRevert(false);
+      let r = await tryRevert(softOnly);
       let body: { error?: string; canForce?: boolean; softRevert?: boolean } = {};
       try {
         body = await r.json();
       } catch {
         // ignore
       }
-      // Если бэкенд предлагает «принудительно» закрыть запись (canForce=true) — спросим у админа.
-      if (!r.ok && body.canForce) {
+      if (!r.ok && body.canForce && !softOnly) {
         if (
           window.confirm(
-            `${body.error || "Откат не поддерживается"}.\n\nПометить запись лога «отменённой» вручную? Бизнес-эффект (остатки/статусы) при этом не изменится.`
+            `${body.error || "Автоматический откат не удался"}.\n\nПометить запись «отменённой» вручную? Остатки и статусы при этом не изменятся.`
           )
         ) {
           r = await tryRevert(true);
@@ -7932,28 +7935,24 @@ function App() {
                       <td>
                         {row.reverted ? (
                           <span className="muted">отменено</span>
-                        ) : row.revertable && canRevertAudit ? (
+                        ) : canManageUsers ? (
                           <button
                             type="button"
-                            className="dangerBtn"
+                            className={row.revertable ? "dangerBtn" : "ghostBtn"}
                             disabled={busy}
-                            onClick={() => void revertAuditLog(row.id)}
+                            onClick={() =>
+                              void revertAuditLog(row.id, { softOnly: !row.revertable })
+                            }
+                            title={
+                              row.revertable
+                                ? "Откатить изменения в системе"
+                                : "Пометить запись отменённой (автооткат для этого типа недоступен)"
+                            }
                           >
                             {busy ? "Отменяем…" : "Отменить"}
                           </button>
-                        ) : isAdmin ? (
-                          // Для админа разрешаем «мягкую» отмену любых записей — бэкенд решит, можно ли откатить бизнес-логически.
-                          <button
-                            type="button"
-                            className="ghostBtn"
-                            disabled={busy}
-                            onClick={() => void revertAuditLog(row.id)}
-                            title="Закрыть запись лога вручную (без бизнес-отката, если он невозможен)"
-                          >
-                            {busy ? "Отменяем…" : "Отменить (admin)"}
-                          </button>
                         ) : (
-                          <span className="muted" title="Откат этого типа действия пока не поддерживается">
+                          <span className="muted" title="Откат доступен только администратору">
                             —
                           </span>
                         )}

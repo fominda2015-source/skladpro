@@ -10,6 +10,11 @@ import {
 } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import {
+  membersFromObjectScopes,
+  syncObjectMembers,
+  type ObjectMemberInput
+} from "../lib/objectAccess.js";
 import { isReceiptFullyAccepted, receiptAcceptedQty } from "../lib/receiptQty.js";
 import { requireAdminRole, requireAuth, type AuthedRequest } from "../middleware/auth.js";
 
@@ -38,6 +43,7 @@ const ACTION_LABELS: Record<string, string> = {
   OBJECT_SECTION_USERS_SYNC: "Обновлены доступы по разделу объекта",
   OPERATION_CREATE: "Создана операция",
   TOOL_CREATE: "Создан инструмент",
+  TOOL_UPDATE: "Обновлена карточка инструмента",
   TOOL_ISSUE: "Инструмент выдан",
   TOOL_RETURN: "Инструмент возвращен",
   TOOL_SEND_TO_REPAIR: "Инструмент отправлен в ремонт",
@@ -55,7 +61,12 @@ const ACTION_LABELS: Record<string, string> = {
   ISSUE_REQUEST_DELETE: "Заявка на выдачу удалена",
   RECEIPT_REQUEST_ACCEPT: "Приёмка по заявке",
   RECEIPT_REQUEST_CANCEL: "Заявка на приход отменена",
-  RECEIPT_REQUEST_DELETE: "Заявка на приход удалена"
+  RECEIPT_REQUEST_DELETE: "Заявка на приход удалена",
+  STOCK_MANUAL_LINE: "Ручное добавление на склад",
+  STOCK_QUANTITY_ADJUST: "Корректировка остатка",
+  OBJECT_MEMBERS_SYNC: "Обновлены участники объекта",
+  ADMIN_DATA_JOB_RUN: "Запуск фоновой задачи",
+  ADMIN_DATA_JOBS_RUN_PENDING: "Запуск отложенных задач"
 };
 
 const REVERTABLE_ACTIONS = new Set<string>([
@@ -64,6 +75,7 @@ const REVERTABLE_ACTIONS = new Set<string>([
   "CAMP_ITEM_DELETE",
   "OPERATION_CREATE",
   "TOOL_CREATE",
+  "TOOL_UPDATE",
   "TOOL_ISSUE",
   "TOOL_RETURN",
   "TOOL_SEND_TO_REPAIR",
@@ -74,17 +86,58 @@ const REVERTABLE_ACTIONS = new Set<string>([
   "OBJECT_CREATE",
   "OBJECT_USERS_ADD",
   "OBJECT_USERS_SYNC",
+  "OBJECT_MEMBERS_SYNC",
   "OBJECT_SECTION_USERS_SYNC",
   "USER_SCOPES_SET",
   "ISSUE_REQUEST_APPROVE",
   "ISSUE_REQUEST_REJECT",
   "ISSUE_REQUEST_CANCEL",
   "ISSUE_REQUEST_ISSUE",
-  "RECEIPT_REQUEST_ACCEPT"
+  "RECEIPT_REQUEST_ACCEPT",
+  "STOCK_MANUAL_LINE",
+  "STOCK_QUANTITY_ADJUST"
 ]);
+
+type RevertResult = { ok: true } | { ok: false; error: string };
 
 function isRevertable(action: string): boolean {
   return REVERTABLE_ACTIONS.has(action);
+}
+
+function mergeSoftRevertAfterData(afterData: unknown, note: string): Prisma.InputJsonValue {
+  const patch = { __softRevert: { note, at: new Date().toISOString() } };
+  if (afterData && typeof afterData === "object" && !Array.isArray(afterData)) {
+    return { ...(afterData as Record<string, unknown>), ...patch } as Prisma.InputJsonValue;
+  }
+  return { payload: afterData ?? null, ...patch } as Prisma.InputJsonValue;
+}
+
+function membersFromAuditBefore(before: unknown): ObjectMemberInput[] | null {
+  if (!before || typeof before !== "object") return null;
+  const data = before as {
+    members?: ObjectMemberInput[];
+    userIds?: string[];
+    sectionScopes?: Array<{ userId: string; section: ObjectSection }>;
+  };
+  if (Array.isArray(data.members)) return data.members;
+  if (!Array.isArray(data.userIds)) return null;
+  const sectionUsers: Record<ObjectSection, string[]> = { SS: [], EOM: [] };
+  for (const row of data.sectionScopes ?? []) {
+    if (row?.userId && (row.section === "SS" || row.section === "EOM")) {
+      sectionUsers[row.section].push(row.userId);
+    }
+  }
+  return membersFromObjectScopes(data.userIds, sectionUsers);
+}
+
+async function restoreObjectMembersFromBefore(
+  warehouseId: string,
+  before: unknown
+): Promise<RevertResult> {
+  const members = membersFromAuditBefore(before);
+  if (!members) return { ok: false, error: "Нет снимка участников до изменения" };
+  await prisma.$transaction((tx) => syncObjectMembers(tx, warehouseId, members));
+  return { ok: true };
 }
 
 function formatRow(row: any) {
@@ -167,8 +220,6 @@ auditRouter.get("/meta", async (_req: AuthedRequest, res) => {
 });
 
 type AuditLogRow = Prisma.AuditLogGetPayload<{ include: { user: true } }>;
-
-type RevertResult = { ok: true } | { ok: false; error: string };
 
 async function revertAction(log: AuditLogRow): Promise<RevertResult> {
   switch (log.action) {
@@ -344,6 +395,68 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
       });
       return { ok: true };
     }
+    case "TOOL_UPDATE": {
+      const before = log.beforeData as Record<string, unknown> | null;
+      if (!before) return { ok: false, error: "Нет данных до изменения" };
+      const tool = await prisma.tool.findUnique({ where: { id: log.entityId } });
+      if (!tool) return { ok: false, error: "Инструмент не найден" };
+      await prisma.tool.update({
+        where: { id: log.entityId },
+        data: {
+          name: typeof before.name === "string" ? before.name : tool.name,
+          serialNumber:
+            before.serialNumber === null || typeof before.serialNumber === "string"
+              ? (before.serialNumber as string | null)
+              : tool.serialNumber,
+          warehouseId:
+            before.warehouseId === null || typeof before.warehouseId === "string"
+              ? (before.warehouseId as string | null)
+              : tool.warehouseId,
+          section:
+            before.section === "SS" || before.section === "EOM"
+              ? (before.section as ObjectSection)
+              : tool.section,
+          projectId:
+            before.projectId === null || typeof before.projectId === "string"
+              ? (before.projectId as string | null)
+              : tool.projectId,
+          responsible:
+            before.responsible === null || typeof before.responsible === "string"
+              ? (before.responsible as string | null)
+              : tool.responsible,
+          note:
+            before.note === null || typeof before.note === "string"
+              ? (before.note as string | null)
+              : tool.note,
+          brand:
+            before.brand === null || typeof before.brand === "string"
+              ? (before.brand as string | null)
+              : tool.brand,
+          toolType:
+            before.toolType === null || typeof before.toolType === "string"
+              ? (before.toolType as string | null)
+              : tool.toolType,
+          status:
+            typeof before.status === "string"
+              ? (before.status as ToolStatus)
+              : tool.status,
+          categoryId:
+            before.categoryId === null || typeof before.categoryId === "string"
+              ? (before.categoryId as string | null)
+              : tool.categoryId,
+          kitComplete: typeof before.kitComplete === "boolean" ? before.kitComplete : tool.kitComplete,
+          kitMissingNote:
+            before.kitMissingNote === null || typeof before.kitMissingNote === "string"
+              ? (before.kitMissingNote as string | null)
+              : tool.kitMissingNote,
+          purchasePrice:
+            before.purchasePrice === null || typeof before.purchasePrice === "number"
+              ? (before.purchasePrice as number | null)
+              : tool.purchasePrice
+        }
+      });
+      return { ok: true };
+    }
     case "TOOL_ISSUE":
     case "TOOL_RETURN":
     case "TOOL_SEND_TO_REPAIR":
@@ -423,20 +536,9 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
       });
       return { ok: true };
     }
-    case "OBJECT_USERS_SYNC": {
-      const before = log.beforeData as { userIds?: string[] } | null;
-      const prevIds = Array.isArray(before?.userIds) ? before!.userIds : null;
-      if (!prevIds) return { ok: false, error: "Нет снимка предыдущих пользователей" };
-      await prisma.$transaction(async (tx) => {
-        await tx.userWarehouseScope.deleteMany({ where: { warehouseId: log.entityId } });
-        if (prevIds.length) {
-          await tx.userWarehouseScope.createMany({
-            data: prevIds.map((userId) => ({ userId, warehouseId: log.entityId })),
-            skipDuplicates: true
-          });
-        }
-      });
-      return { ok: true };
+    case "OBJECT_USERS_SYNC":
+    case "OBJECT_MEMBERS_SYNC": {
+      return restoreObjectMembersFromBefore(log.entityId, log.beforeData);
     }
     case "OBJECT_SECTION_USERS_SYNC": {
       const before = log.beforeData as { section?: ObjectSection; userIds?: string[] } | null;
@@ -744,6 +846,92 @@ async function revertAction(log: AuditLogRow): Promise<RevertResult> {
         throw err;
       }
     }
+    case "STOCK_MANUAL_LINE": {
+      const after = log.afterData as
+        | {
+            warehouseId?: string;
+            section?: ObjectSection;
+            materialId?: string;
+            quantity?: number;
+          }
+        | null;
+      if (!after?.warehouseId || !after.materialId || !after.section) {
+        return { ok: false, error: "Нет данных для отката ручного добавления" };
+      }
+      const qty = Number(after.quantity) || 0;
+      if (qty <= 0) return { ok: true };
+      try {
+        await prisma.$transaction(async (tx) => {
+          const stock = await tx.stock.findUnique({
+            where: {
+              warehouseId_materialId_section_condition: {
+                warehouseId: after.warehouseId!,
+                materialId: after.materialId!,
+                section: after.section!,
+                condition: StockCondition.NEW
+              }
+            }
+          });
+          if (!stock || Number(stock.quantity) < qty - 1e-6) {
+            throw new Error("INSUFFICIENT_STOCK_FOR_MANUAL_REVERT");
+          }
+          await tx.stock.update({
+            where: { id: stock.id },
+            data: { quantity: { decrement: qty } }
+          });
+          const movement = await tx.stockMovement.findFirst({
+            where: {
+              warehouseId: after.warehouseId,
+              materialId: after.materialId,
+              direction: StockMovementDirection.IN,
+              sourceDocumentType: "MANUAL_WAREHOUSE",
+              quantity: qty,
+              createdById: log.userId
+            },
+            orderBy: { createdAt: "desc" }
+          });
+          if (movement) {
+            await tx.stockMovement.delete({ where: { id: movement.id } });
+          }
+        });
+        return { ok: true };
+      } catch (err) {
+        if ((err as Error).message === "INSUFFICIENT_STOCK_FOR_MANUAL_REVERT") {
+          return {
+            ok: false,
+            error: "Недостаточно остатка для отката — часть уже списана или выдана"
+          };
+        }
+        throw err;
+      }
+    }
+    case "STOCK_QUANTITY_ADJUST": {
+      const before = log.beforeData as { quantity?: number } | null;
+      if (before?.quantity === undefined) return { ok: false, error: "Нет данных до изменения" };
+      const stock = await prisma.stock.findUnique({ where: { id: log.entityId } });
+      if (!stock) return { ok: false, error: "Строка остатка не найдена" };
+      const prevQty = Number(before.quantity);
+      const currentQty = Number(stock.quantity);
+      const delta = prevQty - currentQty;
+      await prisma.$transaction(async (tx) => {
+        await tx.stock.update({ where: { id: log.entityId }, data: { quantity: prevQty } });
+        if (Math.abs(delta) > 1e-9) {
+          await tx.stockMovement.create({
+            data: {
+              warehouseId: stock.warehouseId,
+              materialId: stock.materialId,
+              quantity: Math.abs(delta),
+              direction: delta > 0 ? StockMovementDirection.IN : StockMovementDirection.OUT,
+              sourceDocumentType: "STOCK_ADJUSTMENT",
+              sourceDocumentId: log.id,
+              note: `Откат корректировки остатка`,
+              createdById: log.userId
+            }
+          });
+        }
+      });
+      return { ok: true };
+    }
     default:
       return { ok: false, error: "Откат этого типа действия пока не поддерживается" };
   }
@@ -794,10 +982,7 @@ auditRouter.post(
         revertedById: req.user!.userId,
         ...(softNote
           ? {
-              afterData: {
-                ...((log.afterData as Record<string, unknown> | null) ?? {}),
-                __softRevert: { note: softNote, at: new Date().toISOString() }
-              }
+              afterData: mergeSoftRevertAfterData(log.afterData, softNote)
             }
           : {})
       },
