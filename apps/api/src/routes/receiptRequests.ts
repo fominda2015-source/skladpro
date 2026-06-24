@@ -299,7 +299,12 @@ async function findOrCreateMaterial(
   const unit = String(unitRaw || "шт").trim() || "шт";
   const toolSection = receiptCategoryToToolSection(itemCategory);
   const catalogFields = buildMaterialCreateFromReceiptItem(itemCategory, toolSection, unitPrice);
-  const existing = await tx.material.findFirst({ where: { name, unit } });
+  const existing = await tx.material.findFirst({
+    where: {
+      name: { equals: name, mode: "insensitive" },
+      unit: { equals: unit, mode: "insensitive" }
+    }
+  });
   if (existing) {
     if (Object.keys(catalogFields).length > 0) {
       await tx.material.update({ where: { id: existing.id }, data: catalogFields });
@@ -392,6 +397,30 @@ async function lookupPriorReceiptMaterialByFactLabel(
     orderBy: { updatedAt: "desc" }
   });
   return prior?.mappedMaterialId ?? null;
+}
+
+/** Если на складе уже есть остаток по похожему названию — не плодим вторую карточку. */
+async function lookupStockedMaterialByName(
+  tx: ReceiptAcceptTx,
+  opts: { warehouseId: string; section: "SS" | "EOM"; name: string; unit?: string | null }
+): Promise<string | null> {
+  const name = opts.name.trim();
+  if (!name) return null;
+  const unit = (opts.unit || "шт").trim() || "шт";
+  const row = await tx.stock.findFirst({
+    where: {
+      warehouseId: opts.warehouseId,
+      section: opts.section,
+      quantity: { gt: 0 },
+      material: {
+        name: { equals: name, mode: "insensitive" },
+        unit: { equals: unit, mode: "insensitive" }
+      }
+    },
+    select: { materialId: true },
+    orderBy: { updatedAt: "desc" }
+  });
+  return row?.materialId ?? null;
 }
 
 async function resolveReceiptTargetMaterialId(
@@ -494,6 +523,16 @@ async function resolveReceiptTargetMaterialId(
   }
 
   if (unifiedCardName) {
+    const stockedId = await lookupStockedMaterialByName(tx, {
+      warehouseId: ctx.warehouseId,
+      section: ctx.section,
+      name: unifiedCardName,
+      unit: item.sourceUnit
+    });
+    if (stockedId) {
+      const id = await applyCatalogFields(stockedId);
+      if (id) return id;
+    }
     const unifiedId = await findOrCreateMaterial(
       tx,
       unifiedCardName,

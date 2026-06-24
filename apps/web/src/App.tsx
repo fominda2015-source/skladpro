@@ -7261,9 +7261,11 @@ function App() {
       void loadCatalogData().catch(() => undefined);
       if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
         setStockFilterWarehouseId(activeObjectId);
+        setShowAttachedMaterials(true);
       }
+      void loadStocks(q, objectSectionFilter, undefined, activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : undefined);
     }
-  }, [token, activeTab, activeObjectId]);
+  }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
   useEffect(() => {
     if (token && activeTab === "documents") {
@@ -9120,6 +9122,7 @@ function App() {
                                         {displayUpd}
                                       </td>
                                       <td>{displayUnit}</td>
+                                      <td className="muted">—</td>
                                       <td className="muted">—</td>
                                       <td>
                                         {it.category ? receiptItemCategoryLabel(it.category) : "—"}

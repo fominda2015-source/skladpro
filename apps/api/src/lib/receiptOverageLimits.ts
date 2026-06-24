@@ -244,7 +244,12 @@ export async function resolveMaterialIdForLimitNode(tx: Tx, limitNodeId: string)
   const name = String(node.materialName || node.title || "").trim();
   if (!name) return null;
   const unit = String(node.unit || "шт").trim() || "шт";
-  const existing = await tx.material.findFirst({ where: { name, unit } });
+  const existing = await tx.material.findFirst({
+    where: {
+      name: { equals: name, mode: "insensitive" },
+      unit: { equals: unit, mode: "insensitive" }
+    }
+  });
   if (existing) return existing.id;
   const created = await tx.material.create({ data: { name, unit } });
   return created.id;
