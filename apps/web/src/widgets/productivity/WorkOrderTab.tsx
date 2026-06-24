@@ -107,18 +107,21 @@ export function WorkOrderTab({ token, apiUrl, fetchWithSession, warehouseId, sec
           if (!data.objectTitle) setObjectTitle(ctx.objectTitle || "");
         }
       }
-      await loadHistory();
     } catch (e) {
       setMessage(`Не удалось загрузить наряд-задание: ${String(e)}`);
       setMessageTone("err");
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, workDate, apiUrl, fetchWithSession, loadHistory, scopeQuery]);
+  }, [token, warehouseId, section, workDate, apiUrl, fetchWithSession, scopeQuery]);
 
   useEffect(() => {
     void loadDay();
   }, [loadDay]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   async function save() {
     if (!token || !canWrite) return;

@@ -60,7 +60,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
   const [historyTo, setHistoryTo] = useState("");
 
   const limits = useMemo(() => ROW_LIMITS[section], [section]);
-  const scopeParams = new URLSearchParams({ warehouseId, section });
+  const scopeQuery = `warehouseId=${encodeURIComponent(warehouseId)}&section=${encodeURIComponent(section)}`;
 
   const loadHistory = useCallback(async () => {
     if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID) return;
@@ -81,25 +81,29 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
     setLoading(true);
     setMessage("");
     try {
-      const res = await fetchWithSession(`${apiUrl}/api/daily-attendance/${workDate}?${scopeParams}`, {
+      const res = await fetchWithSession(`${apiUrl}/api/daily-attendance/${workDate}?${scopeQuery}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setObjectTitle(data.objectTitle || "");
-      setBlocks((data.blocks as DailyAttendanceBlock[]) || []);
-      await loadHistory();
+      const nextBlocks = (data.blocks as DailyAttendanceBlock[]) || [];
+      setBlocks(nextBlocks.length ? nextBlocks : []);
     } catch (e) {
       setMessage(`Не удалось загрузить табель: ${String(e)}`);
       setMessageTone("err");
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, workDate, apiUrl, fetchWithSession, loadHistory, scopeParams]);
+  }, [token, warehouseId, section, workDate, apiUrl, fetchWithSession, scopeQuery]);
 
   useEffect(() => {
     void loadDay();
   }, [loadDay]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   function updateBlock(blockIdx: number, patch: Partial<DailyAttendanceBlock>) {
     setBlocks((prev) => prev.map((b, i) => (i === blockIdx ? { ...b, ...patch } : b)));
@@ -152,7 +156,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
     try {
       await downloadApiExcel(
         fetchWithSession,
-        `${apiUrl}/api/daily-attendance/${workDate}/export?${scopeParams}`,
+        `${apiUrl}/api/daily-attendance/${workDate}/export?${scopeQuery}`,
         token,
         `Табель учета ${workDate}.xlsx`
       );
@@ -346,7 +350,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
                       onClick={() =>
                         void downloadApiExcel(
                           fetchWithSession,
-                          `${apiUrl}/api/daily-attendance/${h.workDate}/export?${scopeParams}`,
+                          `${apiUrl}/api/daily-attendance/${h.workDate}/export?${scopeQuery}`,
                           token!,
                           `Табель ${h.workDate}.xlsx`
                         )
