@@ -841,6 +841,7 @@ function App() {
   const [objectSectionFilter, setObjectSectionFilter] = useState<"SS" | "EOM">("SS");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
+  const [reconcileStockLoading, setReconcileStockLoading] = useState(false);
   const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
@@ -1660,6 +1661,17 @@ function App() {
     return rows;
   }, [stocks, activeObjectId]);
 
+  const receiptAcceptedWithMaterialCount = useMemo(
+    () =>
+      receiptRequests.reduce((n, r) => {
+        for (const it of r.items) {
+          if (parseMaterialQty(it.acceptedQty) > 0) n += 1;
+        }
+        return n;
+      }, 0),
+    [receiptRequests]
+  );
+
   const warehouseVisibleRows = useMemo(() => {
     if (!limitFilterEnabled) return warehouseStockRows;
 
@@ -2249,6 +2261,66 @@ function App() {
       }
     } finally {
       setLoadingStocks(false);
+    }
+  }
+
+  async function reconcileWarehouseStockFromReceipts(): Promise<boolean> {
+    if (!token || !isAdmin) return false;
+    if (
+      !window.confirm(
+        "Восстановить остатки на складе по уже принятым позициям заявок?\n\nБудут созданы недостающие приходы и остатки (если приёмка прошла без склада или заявка была закрыта вручную)."
+      )
+    ) {
+      return false;
+    }
+    setReconcileStockLoading(true);
+    setStocksError("");
+    try {
+      const wh = activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : stockFilterWarehouseId || "";
+      const res = await fetchWithSession(`${API_URL}/api/receipt-requests/reconcile-stock`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          warehouseId: wh || undefined,
+          section: objectSectionFilter
+        })
+      });
+      if (!res.ok) {
+        let msg = "Не удалось восстановить остатки";
+        try {
+          const body = (await res.json()) as { error?: string; message?: string };
+          msg = body.message || body.error || msg;
+        } catch {
+          // ignore
+        }
+        setStocksError(msg);
+        return false;
+      }
+      const data = (await res.json()) as {
+        quantityAdded?: number;
+        details?: Array<{ materialName: string; addedQty: number }>;
+      };
+      const added = Number(data.quantityAdded ?? 0);
+      const names = (data.details ?? [])
+        .filter((d) => d.addedQty > 0)
+        .slice(0, 3)
+        .map((d) => `${d.materialName} (+${d.addedQty})`)
+        .join("; ");
+      setOpsMessage(
+        added > 0
+          ? `Восстановлено на склад: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}`
+          : "Недостающих остатков не найдено — проверьте карточки материалов и повторите обычную приёмку"
+      );
+      await loadStocks(q, objectSectionFilter, undefined, wh || undefined);
+      return true;
+    } catch (e) {
+      setStocksError(`Не удалось восстановить остатки: ${String(e)}`);
+      return false;
+    } finally {
+      setReconcileStockLoading(false);
     }
   }
 
@@ -7264,6 +7336,9 @@ function App() {
         setShowAttachedMaterials(true);
       }
       void loadStocks(q, objectSectionFilter, undefined, activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : undefined);
+      void loadReceiptRequests(objectSectionFilter, activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : undefined).catch(
+        () => undefined
+      );
     }
   }, [token, activeTab, activeObjectId, objectSectionFilter]);
 
@@ -8001,6 +8076,30 @@ function App() {
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">
+          {isAdmin &&
+          !loadingStocks &&
+          warehouseStockRows.length === 0 &&
+          receiptAcceptedWithMaterialCount > 0 ? (
+            <ResultBanner
+              text={`Склад пуст, но в приходах есть ${receiptAcceptedWithMaterialCount} принятых позиций. Возможно, приёмка прошла без остатка (закрытие заявки, «без склада» или старая версия).`}
+              tone="conflict"
+            />
+          ) : null}
+          {isAdmin &&
+          !loadingStocks &&
+          warehouseStockRows.length === 0 &&
+          receiptAcceptedWithMaterialCount > 0 ? (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                className="primaryBtn"
+                disabled={reconcileStockLoading}
+                onClick={() => void reconcileWarehouseStockFromReceipts()}
+              >
+                {reconcileStockLoading ? "Восстановление…" : "Восстановить остатки из приёмок"}
+              </button>
+            </div>
+          ) : null}
           <WarehouseStockView
             sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
             rows={warehouseDisplayRows.map((row) => ({

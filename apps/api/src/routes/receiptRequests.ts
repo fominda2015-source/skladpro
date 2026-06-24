@@ -64,6 +64,7 @@ import {
 } from "../lib/receiptToolApply.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
+import { reconcileReceiptWarehouseStock } from "../lib/receiptStockReconcile.js";
 
 async function persistReceiptAcceptScans(
   files: Express.Multer.File[],
@@ -2162,7 +2163,10 @@ receiptRequestsRouter.patch(
       return res.status(409).json({ error: "Заявка отменена — закрытие недоступно" });
     }
     await prisma.$transaction(async (tx) => {
-      await completeAllReceiptItems(id, row.items, tx);
+      await tx.receiptRequest.update({
+        where: { id },
+        data: { status: "RECEIVED", acceptedAt: row.acceptedAt ?? new Date() }
+      });
     });
     const updated = await prisma.receiptRequest.findUnique({
       where: { id },
@@ -2174,7 +2178,7 @@ receiptRequestsRouter.patch(
       action: "RECEIPT_REQUEST_CLOSE",
       entityType: "ReceiptRequest",
       entityId: id,
-      summary: `Заявка на приход ${updated.number} закрыта вручную (ADMIN). Причина: ${reason}`,
+      summary: `Заявка на приход ${updated.number} закрыта вручную (статус RECEIVED, количества по позициям не менялись). Причина: ${reason}`,
       before: { status: row.status },
       after: { status: updated.status, reason }
     });
@@ -2304,8 +2308,26 @@ receiptRequestsRouter.patch(
           }
         });
 
-        const materialId = item.mappedMaterialId;
+        let materialId = item.mappedMaterialId;
         const itemCategory = item.category;
+        if (
+          acceptedDelta !== 0 &&
+          !materialId &&
+          !isToolInventoryReceiptCategory(itemCategory) &&
+          !receiptCategoryToCampCategory(itemCategory)
+        ) {
+          const resolvedId = await resolveReceiptTargetMaterialId(tx, item, {}, {
+            warehouseId: row.warehouseId,
+            section: row.section
+          });
+          if (resolvedId) {
+            materialId = resolvedId;
+            await tx.receiptRequestItem.update({
+              where: { id: itemId },
+              data: { mappedMaterialId: resolvedId }
+            });
+          }
+        }
         if (
           acceptedDelta !== 0 &&
           materialId &&
@@ -2532,5 +2554,56 @@ receiptRequestsRouter.delete(
       excludeUserIds: [req.user!.userId, ...(row.createdById ? [row.createdById] : [])]
     }).catch(() => undefined);
     return res.json({ ok: true, force });
+  }
+);
+
+const reconcileStockSchema = z.object({
+  warehouseId: z.string().min(1).optional(),
+  section: z.enum(["SS", "EOM"]).optional(),
+  dryRun: z.boolean().optional()
+});
+
+receiptRequestsRouter.post(
+  "/reconcile-stock",
+  requirePermission("operations.write"),
+  async (req: AuthedRequest, res) => {
+    if (!isAdminEquivalent(req.user?.role)) {
+      return res.status(403).json({ error: "Восстановление остатков доступно только администратору" });
+    }
+    const parsed = reconcileStockSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+    }
+    const scope = await getRequestDataScope(req);
+    if (parsed.data.warehouseId) {
+      try {
+        assertWarehouseInScope(scope, parsed.data.warehouseId);
+      } catch (e) {
+        const err = e as Error & { status?: number };
+        if (err.status === 403) return res.status(403).json({ error: err.message });
+        throw e;
+      }
+    }
+    try {
+      const result = await reconcileReceiptWarehouseStock({
+        warehouseId: parsed.data.warehouseId,
+        section: parsed.data.section,
+        dryRun: parsed.data.dryRun === true
+      });
+      if (!parsed.data.dryRun) {
+        await recordAudit({
+          userId: req.user!.userId,
+          action: "RECEIPT_STOCK_RECONCILE",
+          entityType: "Stock",
+          entityId: parsed.data.warehouseId ?? "all",
+          summary: `Восстановление остатков по приёмкам: +${result.quantityAdded}, материалов ${result.details.length}`,
+          after: result
+        });
+      }
+      return res.json(result);
+    } catch (error) {
+      const mapped = handlePrismaError(error);
+      return res.status(mapped.status).json(mapped.body);
+    }
   }
 );
