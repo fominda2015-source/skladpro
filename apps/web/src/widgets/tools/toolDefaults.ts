@@ -49,6 +49,13 @@ export function buildToolDisplayName(brand: string, toolType: string) {
   return [brand.trim(), toolType.trim()].filter(Boolean).join(" ");
 }
 
+/** Уникальный инв. номер для ручного создания (избегает коллизий при пакетном добавлении). */
+export function newToolInventoryNumber(seq = 0): string {
+  const suffix = seq > 0 ? `-${seq}` : "";
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `INV-${Date.now()}${suffix}-${rand}`;
+}
+
 export function loadToolCreateDefaults(): ToolCreateDefaults {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

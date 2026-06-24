@@ -77,3 +77,31 @@ export function receiptItemCategoryLabel(cat: ReceiptItemCategory | string | nul
     } as Record<string, string>
   )[String(cat || "")] ?? "—";
 }
+
+/** Общая сумма строки прихода → цена за единицу. */
+export function receiptLineUnitCost(
+  lineTotal: number | null | undefined,
+  qty: number | null | undefined
+): number | null {
+  if (lineTotal == null || !Number.isFinite(lineTotal)) return null;
+  const q = qty != null && Number(qty) > 0 ? Number(qty) : 0;
+  if (q <= 0) return null;
+  return lineTotal / q;
+}
+
+export function formatReceiptLineUnitCost(
+  lineTotal: number | null | undefined,
+  qty: number | null | undefined
+): string {
+  const perUnit = receiptLineUnitCost(lineTotal, qty);
+  if (perUnit == null) return "—";
+  return perUnit.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+}
+
+/** В поле ввода — всегда общая сумма строки. */
+export function receiptDraftPriceInputValue(storedValue: number | string | null | undefined): string {
+  if (storedValue == null || storedValue === "") return "";
+  const num = Number(storedValue);
+  if (!Number.isFinite(num)) return String(storedValue);
+  return String(num);
+}

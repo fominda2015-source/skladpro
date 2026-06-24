@@ -10392,43 +10392,67 @@ button.whMenuItem:hover,
 .timesheetSticky {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
+  background: var(--card);
+}
+
+.timesheetTable tbody .timesheetSticky {
+  z-index: 2;
+  background: var(--card);
 }
 
 .timesheetTable thead .timesheetSticky {
-  z-index: 3;
+  z-index: 4;
+  background: var(--surface-2);
 }
 
 .timesheetNumCol {
   left: 0;
   min-width: 42px;
+  width: 42px;
   text-align: center;
 }
 
 .timesheetNameCol {
   left: 42px;
   min-width: 220px;
+  box-shadow: 1px 0 0 var(--border);
 }
 
 .timesheetPosCol {
   left: 262px;
   min-width: 140px;
+  box-shadow: 1px 0 0 var(--border);
 }
 
 .timesheetDateCol {
   left: 402px;
-  min-width: 130px;
+  min-width: 148px;
+  max-width: 148px;
+  box-shadow: 4px 0 8px -4px rgba(15, 23, 42, 0.12);
+}
+
+.timesheetDateCol .timesheetCellInput {
+  width: 100%;
+  max-width: 132px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .timesheetOpsCol {
   right: 0;
   left: auto;
   min-width: 88px;
+  z-index: 2;
+  box-shadow: -4px 0 8px -4px rgba(15, 23, 42, 0.12);
 }
 
 .timesheetDayCol {
   min-width: 42px;
+  width: 42px;
   text-align: center;
+  position: relative;
+  z-index: 0;
 }
 
 .timesheetDayCol--weekend {

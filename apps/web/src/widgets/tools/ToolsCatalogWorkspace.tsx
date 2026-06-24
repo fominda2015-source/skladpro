@@ -49,6 +49,12 @@ type Props = {
   safeName?: (name: string) => string;
   onConsumableDrawerChange?: (open: boolean) => void;
   onConsumableDrawerMount?: (drawer: import("react").ReactNode) => void;
+  onMovementClick?: (movement: {
+    sourceDocumentType: string;
+    sourceDocumentId?: string | null;
+    operationId?: string | null;
+    issueRequestId?: string | null;
+  }) => void;
 };
 
 export function ToolsCatalogWorkspace({
@@ -70,7 +76,8 @@ export function ToolsCatalogWorkspace({
   recipientSuggestions = [],
   safeName = (n) => n,
   onConsumableDrawerChange,
-  onConsumableDrawerMount
+  onConsumableDrawerMount,
+  onMovementClick
 }: Props) {
   const current = navPath[navPath.length - 1] ?? "hub";
   const [summary, setSummary] = useState<ToolCatalogSummary | null>(null);
@@ -216,6 +223,13 @@ export function ToolsCatalogWorkspace({
 
   return (
     <div className="toolsCatalogWorkspace">
+      {canWrite && onAddCatalogItem ? (
+        <div className="toolbar" style={{ marginBottom: 12 }}>
+          <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
+            + Добавить
+          </button>
+        </div>
+      ) : null}
       <ToolsCatalogNav navPath={navPath} onNavPathChange={onNavPathChange} onBack={goBack} />
 
       {hubCards && (
@@ -246,11 +260,6 @@ export function ToolsCatalogWorkspace({
       {usesToolNameGroupCards(current) ? (
         <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
           <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>
-          {canWrite && onAddCatalogItem ? (
-            <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
-              + Добавить
-            </button>
-          ) : null}
         </div>
       ) : null}
 
@@ -258,11 +267,6 @@ export function ToolsCatalogWorkspace({
         <>
           <div className="toolbar" style={{ marginTop: hubCards ? 16 : 0, alignItems: "center" }}>
             <h3 style={{ margin: 0, flex: 1 }}>{toolsNavTitle(navPath)}</h3>
-            {canWrite && onAddCatalogItem ? (
-              <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
-                + Добавить
-              </button>
-            ) : null}
           </div>
           {canWrite && materialRows.length > 0 && !matLoading ? (
             <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>
@@ -280,6 +284,13 @@ export function ToolsCatalogWorkspace({
               currentSection={materialSection}
               canWrite={canWrite}
               busy={busyMaterialId === selectedMaterial.materialId}
+              token={token}
+              apiUrl={apiUrl}
+              fetchWithSession={fetchWithSession}
+              onMovementClick={(m) => {
+                setSelectedMaterial(null);
+                onMovementClick?.(m);
+              }}
               onClose={() => setSelectedMaterial(null)}
               onChangeSection={async (materialId, section) => {
                 await changeMaterialSection(materialId, section);

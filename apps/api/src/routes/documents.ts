@@ -394,6 +394,68 @@ documentsRouter.post("/inbound/upload", upload.array("file", 20), async (req: Au
   return res.status(201).json(payload.length === 1 ? payload[0] : { groupId, files: payload });
 });
 
+/** Документы к пакетному ручному добавлению на склад / в каталог. */
+documentsRouter.post("/manual-batch/upload", upload.array("file", 20), async (req: AuthedRequest, res) => {
+  const files = (req as AuthedRequest & { files?: Express.Multer.File[] }).files;
+  if (!files?.length) {
+    return res.status(400).json({ error: "file is required" });
+  }
+  const warehouseId = String(req.body.warehouseId || "");
+  const batchId = String(req.body.batchId || "").trim();
+  const title = String(req.body.title || "").trim();
+  const comment = String(req.body.comment || "").trim();
+  const documentDateRaw = String(req.body.documentDate || "").trim();
+  if (!warehouseId || !batchId) {
+    return res.status(400).json({ error: "warehouseId and batchId are required" });
+  }
+  if (!title) {
+    return res.status(400).json({ error: "title is required" });
+  }
+  const permissions = req.user!.permissions ?? (await loadUserPermissions(req.user!.userId));
+  if (!canWriteEntityDocument(permissions, "inbound")) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, warehouseId);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    throw e;
+  }
+  const documentDate = documentDateRaw ? new Date(documentDateRaw) : new Date();
+  if (Number.isNaN(documentDate.getTime())) {
+    return res.status(400).json({ error: "Invalid documentDate" });
+  }
+
+  const createdRows = [];
+  for (const file of files) {
+    const absPath = path.join(uploadDirAbs, file.filename);
+    const checksumSha256 = await sha256File(absPath);
+    const filePath = `${config.uploadsDir}/${file.filename}`.replace(/\\/g, "/");
+    const created = await prisma.documentFile.create({
+      data: {
+        groupId: batchId,
+        version: 1,
+        entityType: "inbound",
+        entityId: warehouseId,
+        type: "inbound-manual",
+        title,
+        comment: comment ? `${comment} · batch:${batchId}` : `batch:${batchId}`,
+        documentDate,
+        fileName: decodeUploadedOriginalName(file.originalname),
+        filePath,
+        mimeType: file.mimetype,
+        size: file.size,
+        checksumSha256,
+        createdBy: req.user!.userId
+      }
+    });
+    createdRows.push(created);
+  }
+  return res.status(201).json({ batchId, files: createdRows.map((row) => withRepairedFileName(row)) });
+});
+
 documentsRouter.patch("/:id/meta", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
   const parsed = inboundMetaSchema.safeParse(req.body);

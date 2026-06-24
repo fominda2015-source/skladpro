@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { MATERIAL_QTY_STEP, parseMaterialQty } from "../../shared/quantity";
+import {
+  DISPOSABLE_TOOL_CONSUMABLE_HINT,
+  isDisposableToolConsumableName
+} from "./toolConsumableDisposable";
 import type { ToolCatalogMaterialRow } from "./toolCatalog";
 
 type PickLine = { materialId: string; name: string; unit: string; maxQty: number; qty: string };
@@ -145,7 +149,17 @@ export function ToolConsumablesIssueModal({
                 {lines.map((l, i) => (
                   <tr key={l.materialId}>
                     <td>
-                      {l.name} <span className="muted">({l.unit})</span>
+                      {l.name}
+                      {isDisposableToolConsumableName(l.name) ? (
+                        <span
+                          className="chip warn"
+                          style={{ marginLeft: 6, fontSize: 11 }}
+                          title={DISPOSABLE_TOOL_CONSUMABLE_HINT}
+                        >
+                          одноразовый
+                        </span>
+                      ) : null}{" "}
+                      <span className="muted">({l.unit})</span>
                     </td>
                     <td>{l.maxQty}</td>
                     <td>

@@ -6,6 +6,10 @@ import { ToolConsumableListTable } from "./ToolConsumableListTable";
 import type { ToolCatalogConsumableLine } from "./toolCatalog";
 import type { ConsumablePickLine, ElectricToolIssueWizardSubmit } from "./electricToolIssue";
 import { sortConsumablePickLines } from "./electricToolIssue";
+import {
+  DISPOSABLE_TOOL_CONSUMABLE_HINT,
+  isDisposableToolConsumableName
+} from "./toolConsumableDisposable";
 
 type WizardStep = "consumables" | "recipient";
 
@@ -207,7 +211,16 @@ export function ElectricToolIssueWizardModal({
                       {lines.map((l) => (
                         <tr key={l.key}>
                           <td>
-                            {l.name}{" "}
+                            {l.name}
+                            {isDisposableToolConsumableName(l.name) ? (
+                              <span
+                                className="chip warn"
+                                style={{ marginLeft: 6, fontSize: 11 }}
+                                title={DISPOSABLE_TOOL_CONSUMABLE_HINT}
+                              >
+                                одноразовый
+                              </span>
+                            ) : null}{" "}
                             <span className="muted">
                               ({l.condition === "USED" ? "б/у" : "новые"} · макс. {l.maxQty})
                             </span>

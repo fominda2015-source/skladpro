@@ -26,6 +26,12 @@ type Props = {
   safeName?: (name: string) => string;
   onConsumableDrawerChange?: (open: boolean) => void;
   onConsumableDrawerMount?: (drawer: React.ReactNode) => void;
+  onMovementClick?: (movement: {
+    sourceDocumentType: string;
+    sourceDocumentId?: string | null;
+    operationId?: string | null;
+    issueRequestId?: string | null;
+  }) => void;
 };
 
 export function ToolsInventoryBlock({
@@ -47,7 +53,8 @@ export function ToolsInventoryBlock({
   recipientSuggestions,
   safeName,
   onConsumableDrawerChange,
-  onConsumableDrawerMount
+  onConsumableDrawerMount,
+  onMovementClick
 }: Props) {
   return (
     <div className={embedMode ? "toolsInventoryBlock toolsInventoryBlock--embed" : "toolsInventoryBlock"}>
@@ -72,6 +79,7 @@ export function ToolsInventoryBlock({
         safeName={safeName}
         onConsumableDrawerChange={onConsumableDrawerChange}
         onConsumableDrawerMount={onConsumableDrawerMount}
+        onMovementClick={onMovementClick}
       />
     </div>
   );

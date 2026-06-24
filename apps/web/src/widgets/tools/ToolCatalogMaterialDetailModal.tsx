@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatMaterialQty } from "../../shared/quantity";
 import { formatMoneyOrDash } from "../../shared/pricing";
+import { movementNavLabel, resolveStockMovementNav } from "../../shared/stockMovementNav";
 import {
   CATALOG_MATERIAL_SECTIONS,
   catalogMaterialSectionLabel,
@@ -9,11 +11,28 @@ import {
   type ToolCatalogMaterialRow
 } from "./toolCatalog";
 
+type MovementRow = {
+  id: string;
+  createdAt: string;
+  direction: "IN" | "OUT";
+  quantity: string;
+  sourceDocumentType: string;
+  sourceDocumentId?: string | null;
+  operationId?: string | null;
+  issueRequestId?: string | null;
+  operation?: { documentNumber?: string | null } | null;
+  issueRequest?: { number?: string } | null;
+};
+
 type Props = {
   row: ToolCatalogMaterialRow;
   currentSection?: CatalogMaterialSection | LegacyCatalogMaterialSection | null;
   canWrite?: boolean;
   busy?: boolean;
+  token?: string | null;
+  apiUrl?: string;
+  fetchWithSession?: (url: string, init?: RequestInit) => Promise<Response>;
+  onMovementClick?: (movement: MovementRow) => void;
   onClose: () => void;
   onChangeSection?: (materialId: string, section: CatalogMaterialSection | null) => void | Promise<void>;
 };
@@ -23,11 +42,49 @@ export function ToolCatalogMaterialDetailModal({
   currentSection,
   canWrite,
   busy,
+  token,
+  apiUrl,
+  fetchWithSession,
+  onMovementClick,
   onClose,
   onChangeSection
 }: Props) {
   const moveTargets = CATALOG_MATERIAL_SECTIONS.filter((s) => s.value !== currentSection);
   const total = row.qtyNew + row.qtyUsed;
+  const unitCost =
+    row.lineTotal != null &&
+    row.priceBasisQty != null &&
+    Number(row.priceBasisQty) > 0 &&
+    Number.isFinite(Number(row.lineTotal))
+      ? Number(row.lineTotal) / Number(row.priceBasisQty)
+      : null;
+  const [movements, setMovements] = useState<MovementRow[]>([]);
+  const [movementsLoading, setMovementsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!token || !apiUrl || !fetchWithSession) return;
+    let cancelled = false;
+    setMovementsLoading(true);
+    void (async () => {
+      try {
+        const q = new URLSearchParams({
+          warehouseId: row.warehouseId,
+          materialId: row.materialId,
+          take: "30"
+        });
+        const res = await fetchWithSession(`${apiUrl}/api/stock-movements?${q}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok || cancelled) return;
+        setMovements((await res.json()) as MovementRow[]);
+      } finally {
+        if (!cancelled) setMovementsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, apiUrl, fetchWithSession, row.warehouseId, row.materialId]);
 
   return createPortal(
     <div
@@ -42,7 +99,7 @@ export function ToolCatalogMaterialDetailModal({
         <div className="toolbar" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
           <div>
             <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-              Карточка расходника
+              Карточка позиции
             </p>
             <h3 style={{ margin: "4px 0 0" }}>{row.name}</h3>
           </div>
@@ -95,10 +152,58 @@ export function ToolCatalogMaterialDetailModal({
               <dt>Сумма в карточке</dt>
               <dd>
                 {formatMoneyOrDash(row.lineTotal)} за {formatMaterialQty(row.priceBasisQty)} {row.unit}
+                {unitCost != null && Number.isFinite(unitCost)
+                  ? ` · ${unitCost.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽/ед.`
+                  : ""}
               </dd>
             </div>
           ) : null}
         </dl>
+
+        {movements.length > 0 || movementsLoading ? (
+          <section className="whDetailBlock" style={{ marginTop: 12 }}>
+            <h4 style={{ margin: "0 0 8px" }}>Движения</h4>
+            {movementsLoading ? <p className="muted">Загрузка…</p> : null}
+            {!movementsLoading && movements.length > 0 ? (
+              <table className="whSubTable">
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Тип</th>
+                    <th>Кол-во</th>
+                    <th>Источник</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {movements.map((m) => {
+                    const nav = resolveStockMovementNav(m);
+                    const label = movementNavLabel(m);
+                    return (
+                      <tr key={m.id}>
+                        <td>{new Date(m.createdAt).toLocaleString("ru-RU")}</td>
+                        <td>{m.direction === "IN" ? "Приход" : "Выдача"}</td>
+                        <td>{formatMaterialQty(Number(m.quantity))}</td>
+                        <td>
+                          {nav && onMovementClick ? (
+                            <button
+                              type="button"
+                              className="whLinkBtn"
+                              onClick={() => onMovementClick(m)}
+                            >
+                              {label}
+                            </button>
+                          ) : (
+                            label
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : null}
+          </section>
+        ) : null}
 
         {canWrite && onChangeSection ? (
           <div className="toolCatalogMaterialDetailActions">

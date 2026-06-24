@@ -1,4 +1,5 @@
 import { StockCondition, StockMovementDirection, NotificationLevel, ToolStatus, type Prisma, type ToolCatalogSection } from "@prisma/client";
+import { isDisposableToolConsumableName } from "../lib/toolConsumableDisposable.js";
 import path from "node:path";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
@@ -20,7 +21,7 @@ import { handlePrismaError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { amountForQuantity, loadMaterialPriceBasisMap } from "../lib/materialPricing.js";
 import { materialQtyAcceptedCoerceSchema, materialQtyCoerceSchema, materialQtySchema, qtyFromDb } from "../lib/quantity.js";
-import { buildMaterialCreateFromReceiptItem } from "../lib/receiptMaterialApply.js";
+import { buildMaterialCreateFromReceiptItem, parseReceiptStoragePlace } from "../lib/receiptMaterialApply.js";
 import {
   CATALOG_MATERIAL_TOOL_SECTIONS,
   ensureDefaultToolCategories,
@@ -52,7 +53,8 @@ const createToolSchema = z.object({
   toolType: z.string().optional(),
   categoryId: z.string().nullable().optional(),
   kitComplete: z.boolean().optional(),
-  kitMissingNote: z.string().max(2000).nullable().optional()
+  kitMissingNote: z.string().max(2000).nullable().optional(),
+  purchasePrice: z.coerce.number().nonnegative().nullable().optional()
 });
 
 const kitPatchSchema = z.object({
@@ -939,7 +941,9 @@ const manualCatalogMaterialSchema = z.object({
   quantity: materialQtyCoerceSchema,
   unit: z.string().trim().min(1).max(64).optional().default("шт"),
   toolCatalogSection: z.enum(CATALOG_MATERIAL_TOOL_SECTIONS),
-  unitPrice: z.coerce.number().nonnegative().optional().nullable()
+  unitPrice: z.coerce.number().nonnegative().optional().nullable(),
+  batchId: z.string().trim().min(1).max(64).optional(),
+  storagePlace: z.string().trim().max(200).optional().nullable()
 });
 
 toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async (req: AuthedRequest, res) => {
@@ -960,6 +964,9 @@ toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async
       parsed.data.toolCatalogSection,
       parsed.data.unitPrice ?? null
     );
+    const priceBasisPatch =
+      parsed.data.unitPrice != null && qty > 0 ? { priceBasisQty: qty } : {};
+    const { storageRoom, storageCell } = parseReceiptStoragePlace(parsed.data.storagePlace);
 
     const { materialId } = await prisma.$transaction(async (tx) => {
       const existing = await tx.material.findFirst({ where: { name, unit } });
@@ -967,12 +974,12 @@ toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async
       if (existing) {
         await tx.material.update({
           where: { id: existing.id },
-          data: catalogFields
+          data: { ...catalogFields, ...priceBasisPatch }
         });
         materialId = existing.id;
       } else {
         const material = await tx.material.create({
-          data: { name, unit, ...catalogFields },
+          data: { name, unit, ...catalogFields, ...priceBasisPatch },
           select: { id: true }
         });
         materialId = material.id;
@@ -990,7 +997,11 @@ toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async
       if (existingStock) {
         await tx.stock.update({
           where: stockKey,
-          data: { quantity: { increment: qty } }
+          data: {
+            quantity: { increment: qty },
+            ...(storageRoom ? { storageRoom } : {}),
+            ...(storageCell ? { storageCell } : {})
+          }
         });
       } else {
         await tx.stock.create({
@@ -1000,7 +1011,9 @@ toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async
             section: parsed.data.section,
             condition: StockCondition.NEW,
             quantity: qty,
-            reserved: 0
+            reserved: 0,
+            storageRoom,
+            storageCell
           }
         });
       }
@@ -1012,6 +1025,7 @@ toolsRouter.post("/catalog/manual-line", requirePermission("tools.write"), async
           quantity: qty,
           direction: StockMovementDirection.IN,
           sourceDocumentType: "MANUAL_TOOL_CATALOG",
+          sourceDocumentId: parsed.data.batchId ?? null,
           note: "Ручная строка в каталоге инструментов/СИЗ",
           createdById: req.user!.userId
         }
@@ -1290,10 +1304,35 @@ toolsRouter.post("/consumables/issue", requirePermission("tools.write"), async (
           const label = condition === StockCondition.USED ? "б/у" : "новых";
           throw Object.assign(new Error(`Недостаточно расходника (${label}) на складе`), { status: 409 });
         }
+        const material = await tx.material.findUnique({
+          where: { id: it.materialId },
+          select: { name: true }
+        });
+        const disposable = material ? isDisposableToolConsumableName(material.name) : false;
+
         await tx.stock.update({
           where: { id: stock.id },
           data: { quantity: { decrement: it.quantity } }
         });
+        if (disposable) {
+          await tx.stockMovement.create({
+            data: {
+              warehouseId: parsed.data.warehouseId,
+              materialId: it.materialId,
+              quantity: it.quantity,
+              direction: StockMovementDirection.OUT,
+              sourceDocumentType: "TOOL_CONSUMABLE_WRITEOFF",
+              note: [
+                `Одноразовый расходник: ${parsed.data.holderName}`,
+                material?.name,
+                condition === StockCondition.USED ? "б/у" : "новые"
+              ]
+                .filter(Boolean)
+                .join(" · "),
+              createdById: req.user!.userId
+            }
+          });
+        }
         const line = await tx.toolConsumableIssue.create({
           data: {
             toolId: parsed.data.toolId,
@@ -1302,8 +1341,10 @@ toolsRouter.post("/consumables/issue", requirePermission("tools.write"), async (
             section: parsed.data.section,
             issueRequestId: parsed.data.issueRequestId,
             qtyIssued: it.quantity,
+            qtyWrittenOff: disposable ? it.quantity : 0,
             holderName: parsed.data.holderName,
-            status: "OPEN"
+            status: disposable ? "CLOSED" : "OPEN",
+            ...(disposable ? { writeoffReason: "Одноразовый расходник" } : {})
           }
         });
         lines.push(line);

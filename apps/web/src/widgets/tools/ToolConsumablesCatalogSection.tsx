@@ -31,7 +31,6 @@ export function ToolConsumablesCatalogSection({
   apiUrl,
   fetchWithSession,
   canWrite,
-  onAddCatalogItem,
   onCatalogMessage,
   catalogRefreshNonce = 0,
   recipientSuggestions,
@@ -306,11 +305,6 @@ export function ToolConsumablesCatalogSection({
               <button type="button" className="ghostBtn" onClick={() => void loadLines()}>
                 ↻
               </button>
-              {canWrite && onAddCatalogItem ? (
-                <button type="button" className="primaryBtn" onClick={onAddCatalogItem}>
-                  + Добавить
-                </button>
-              ) : null}
             </>
           }
         />

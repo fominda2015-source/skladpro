@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { MaterialKind, StockCondition, StockMovementDirection } from "@prisma/client";
 import { warehouseReceiptCategoryToMaterialFields, WAREHOUSE_RECEIPT_CATEGORIES } from "../lib/warehouseStock.js";
+import { parseReceiptStoragePlace } from "../lib/receiptMaterialApply.js";
 import { recordAudit } from "../lib/audit.js";
 import {
   assertObjectSectionInScope,
@@ -27,7 +28,9 @@ const manualStockLineSchema = z.object({
   quantity: materialQtyCoerceSchema,
   unit: z.string().trim().min(1).max(64).optional().default("шт"),
   warehouseCategory: z.enum(WAREHOUSE_RECEIPT_CATEGORIES).optional().default("EQUIPMENT"),
-  unitPrice: z.coerce.number().nonnegative().optional().nullable()
+  unitPrice: z.coerce.number().nonnegative().optional().nullable(),
+  batchId: z.string().trim().min(1).max(64).optional(),
+  storagePlace: z.string().trim().max(200).optional().nullable()
 });
 
 stocksRouter.post("/manual-line", requirePermission("operations.write"), async (req: AuthedRequest, res) => {
@@ -44,6 +47,7 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
     const unit = parsed.data.unit.trim() || "шт";
 
     const { kind, category } = warehouseReceiptCategoryToMaterialFields(parsed.data.warehouseCategory);
+    const { storageRoom, storageCell } = parseReceiptStoragePlace(parsed.data.storagePlace);
 
     const { materialId } = await prisma.$transaction(async (tx) => {
       const material = await tx.material.create({
@@ -71,7 +75,11 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
       if (existing) {
         await tx.stock.update({
           where: stockKey,
-          data: { quantity: { increment: qty } }
+          data: {
+            quantity: { increment: qty },
+            ...(storageRoom ? { storageRoom } : {}),
+            ...(storageCell ? { storageCell } : {})
+          }
         });
       } else {
         await tx.stock.create({
@@ -81,7 +89,9 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
             section: parsed.data.section,
             condition: StockCondition.NEW,
             quantity: qty,
-            reserved: 0
+            reserved: 0,
+            storageRoom,
+            storageCell
           }
         });
       }
@@ -93,6 +103,7 @@ stocksRouter.post("/manual-line", requirePermission("operations.write"), async (
           quantity: qty,
           direction: StockMovementDirection.IN,
           sourceDocumentType: "MANUAL_WAREHOUSE",
+          sourceDocumentId: parsed.data.batchId ?? null,
           note: "Ручная строка со вкладки «Склад»",
           createdById: req.user!.userId
         }

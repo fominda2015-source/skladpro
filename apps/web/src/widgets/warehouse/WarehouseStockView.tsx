@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { movementNavLabel, resolveStockMovementNav } from "../../shared/stockMovementNav";
 import {
   warehouseStockKindTabLabel,
   warehouseStockRowLabel,
@@ -36,6 +37,9 @@ type MovementSlice = {
   direction: "IN" | "OUT";
   quantity: string;
   sourceDocumentType: string;
+  sourceDocumentId?: string | null;
+  operationId?: string | null;
+  issueRequestId?: string | null;
   operation?: { documentNumber?: string | null } | null;
   issueRequest?: { number?: string } | null;
 };
@@ -89,6 +93,7 @@ export type WarehouseStockViewProps = {
   updFactsByMaterialId: Map<string, Map<string, UpdFactEntry>>;
   movementsLoading?: boolean;
   movementsError?: string;
+  onMovementClick?: (movement: MovementSlice) => void;
 };
 
 function fmtQty(n: number, maxFrac = 0): string {
@@ -147,7 +152,8 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     movementsByKey,
     updFactsByMaterialId,
     movementsLoading,
-    movementsError
+    movementsError,
+    onMovementClick
   } = props;
 
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -615,22 +621,37 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {movements.map((m) => (
-                                      <tr key={m.id}>
-                                        <td>{new Date(m.createdAt).toLocaleString("ru-RU")}</td>
-                                        <td>{m.direction === "IN" ? "Приход" : "Выдача"}</td>
-                                        <td>
-                                          {Number.isFinite(Number(m.quantity))
-                                            ? fmtQty(Number(m.quantity))
-                                            : m.quantity}
-                                        </td>
-                                        <td>
-                                          {m.operation?.documentNumber ||
-                                            m.issueRequest?.number ||
-                                            m.sourceDocumentType}
-                                        </td>
-                                      </tr>
-                                    ))}
+                                    {movements.map((m) => {
+                                      const nav = resolveStockMovementNav(m);
+                                      const label = movementNavLabel(m);
+                                      return (
+                                        <tr key={m.id}>
+                                          <td>{new Date(m.createdAt).toLocaleString("ru-RU")}</td>
+                                          <td>{m.direction === "IN" ? "Приход" : "Выдача"}</td>
+                                          <td>
+                                            {Number.isFinite(Number(m.quantity))
+                                              ? fmtQty(Number(m.quantity))
+                                              : m.quantity}
+                                          </td>
+                                          <td>
+                                            {nav && onMovementClick ? (
+                                              <button
+                                                type="button"
+                                                className="whLinkBtn"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  onMovementClick(m);
+                                                }}
+                                              >
+                                                {label}
+                                              </button>
+                                            ) : (
+                                              label
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               )}
