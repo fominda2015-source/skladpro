@@ -50,6 +50,8 @@ export type WarehouseStockViewProps = {
   sectionLabel: string;
   rows: WarehouseStockRow[];
   totalVisible: number;
+  /** Остатки на складе, скрытые фильтром «Только лимит» */
+  limitHiddenCount?: number;
   lowCount: number;
   loading: boolean;
   error: string;
@@ -111,6 +113,7 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
     sectionLabel,
     rows,
     totalVisible,
+    limitHiddenCount = 0,
     lowCount,
     loading,
     error,
@@ -322,7 +325,14 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
       {!loading && !error && !rows.length ? (
         <div className="whEmpty card">
           <strong>Ничего не найдено</strong>
-          <p className="muted">Измените поиск или снимите фильтры.</p>
+          {limitHiddenCount > 0 ? (
+            <p className="muted">
+              На складе есть {limitHiddenCount} позиций с остатком, но они скрыты фильтром «Только лимит».
+              Нажмите «Все позиции» справа или проверьте, что при приёмке не включён режим «Без прихода на склад».
+            </p>
+          ) : (
+            <p className="muted">Измените поиск или снимите фильтры.</p>
+          )}
         </div>
       ) : null}
 

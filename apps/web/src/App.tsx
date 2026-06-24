@@ -1609,22 +1609,56 @@ function App() {
     return out;
   }, [limitTemplates]);
 
-  const limitMaterialIdSet = useMemo(
-    () => new Set(limitMaterialCandidates.filter((c) => !!c.materialId).map((c) => c.materialId as string)),
-    [limitMaterialCandidates]
-  );
+  const limitMaterialIdSet = useMemo(() => {
+    const ids = new Set(
+      limitMaterialCandidates.filter((c) => !!c.materialId).map((c) => c.materialId as string)
+    );
+    for (const b of stockLimitBindings) {
+      if (b.materialId) ids.add(b.materialId);
+    }
+    for (const r of receiptRequests) {
+      if (activeObjectId !== ALL_OBJECTS_ID && r.warehouseId !== activeObjectId) continue;
+      if (r.section !== objectSectionFilter) continue;
+      for (const it of r.items) {
+        if (!it.mappedMaterialId) continue;
+        if (parseMaterialQty(it.acceptedQty) > 0) ids.add(it.mappedMaterialId);
+      }
+    }
+    return ids;
+  }, [
+    limitMaterialCandidates,
+    stockLimitBindings,
+    receiptRequests,
+    activeObjectId,
+    objectSectionFilter
+  ]);
 
   const limitMaterialNameSet = useMemo(() => {
     const normalize = (v: string) => v.trim().toLowerCase();
-    return new Set(limitMaterialCandidates.map((c) => normalize(c.materialName)).filter(Boolean));
-  }, [limitMaterialCandidates]);
+    const names = new Set(limitMaterialCandidates.map((c) => normalize(c.materialName)).filter(Boolean));
+    for (const r of receiptRequests) {
+      if (activeObjectId !== ALL_OBJECTS_ID && r.warehouseId !== activeObjectId) continue;
+      if (r.section !== objectSectionFilter) continue;
+      for (const it of r.items) {
+        if (parseMaterialQty(it.acceptedQty) <= 0) continue;
+        for (const raw of [it.sourceName, it.mappedMaterial?.name, it.factLabel]) {
+          const n = (raw || "").trim();
+          if (n) names.add(normalize(n));
+        }
+      }
+    }
+    return names;
+  }, [limitMaterialCandidates, receiptRequests, activeObjectId, objectSectionFilter]);
 
   const limitFilterEnabled = limitTemplates.length > 0 && (limitMaterialIdSet.size > 0 || limitMaterialNameSet.size > 0);
 
-  const warehouseStockRows = useMemo(
-    () => stocks.filter((row) => !row.materialToolCatalogSection),
-    [stocks]
-  );
+  const warehouseStockRows = useMemo(() => {
+    let rows = stocks.filter((row) => !row.materialToolCatalogSection);
+    if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
+      rows = rows.filter((r) => r.warehouseId === activeObjectId);
+    }
+    return rows;
+  }, [stocks, activeObjectId]);
 
   const warehouseVisibleRows = useMemo(() => {
     if (!limitFilterEnabled) return warehouseStockRows;
@@ -2172,7 +2206,12 @@ function App() {
     }
   }
 
-  async function loadStocks(search = "", sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
+  async function loadStocks(
+    search = "",
+    sectionOverride?: "SS" | "EOM",
+    workspaceReloadSeq?: number,
+    warehouseIdOverride?: string
+  ) {
     if (!token) {
       return;
     }
@@ -2183,6 +2222,10 @@ function App() {
       const params = new URLSearchParams();
       if (search) params.set("q", search);
       params.set("section", sectionOverride ?? objectSectionFilter);
+      const wh =
+        warehouseIdOverride ??
+        (activeObjectId && activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : "");
+      if (wh) params.set("warehouseId", wh);
       const query = params.toString() ? `?${params.toString()}` : "";
       const res = await fetchWithSession(`${API_URL}/api/stocks${query}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -4296,6 +4339,9 @@ function App() {
       setOpsMessage(
         `Приёмка по заявке ${row.number} проведена${skipStock ? " (без прихода на склад)" : ""}${filesToSend.length ? ` · приложено документов: ${filesToSend.length}` : ""}`
       );
+      if (!skipStock) {
+        setShowAttachedMaterials(true);
+      }
 
       setAcceptanceDrafts((prev) => {
         const next = { ...prev };
@@ -4348,7 +4394,8 @@ function App() {
           }
         }
         await Promise.all([
-          loadStocks(q).catch(() => undefined),
+          loadStocks(q, row.section, undefined, row.warehouseId).catch(() => undefined),
+          loadStockLimitBindings(row.warehouseId, row.section).catch(() => undefined),
           loadOperations().catch(() => undefined),
           row.objectLimitTemplateId || row.fromLimit
             ? loadLimitTemplates().catch(() => undefined)
@@ -7196,8 +7243,11 @@ function App() {
   useEffect(() => {
     if (token && activeTab === "warehouse") {
       void loadCatalogData().catch(() => undefined);
+      if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
+        setStockFilterWarehouseId(activeObjectId);
+      }
     }
-  }, [token, activeTab]);
+  }, [token, activeTab, activeObjectId]);
 
   useEffect(() => {
     if (token && activeTab === "documents") {
@@ -7940,7 +7990,12 @@ function App() {
               materialName: safeName(row.materialName),
               warehouseName: safeName(row.warehouseName)
             }))}
-            totalVisible={warehouseVisibleRows.length}
+            totalVisible={warehouseStockRows.length}
+            limitHiddenCount={
+              !showAttachedMaterials && limitFilterEnabled && warehouseDisplayRows.length === 0
+                ? warehouseStockRows.length
+                : 0
+            }
             lowCount={warehouseVisibleRows.filter((r) => r.isLow).length}
             loading={loadingStocks}
             error={stocksError}
