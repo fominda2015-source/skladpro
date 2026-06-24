@@ -348,9 +348,56 @@ async function upsertWarehouseMaterialMapping(
 }
 
 /** Карточка материала = номенклатура из заявки/лимита, не наименование по УПД. */
+async function lookupWarehouseMaterialMapping(
+  tx: ReceiptAcceptTx,
+  opts: { warehouseId: string; section: "SS" | "EOM"; sourceName: string; sourceUnit?: string | null }
+): Promise<string | null> {
+  const sourceName = opts.sourceName.trim();
+  if (!sourceName) return null;
+  const sourceUnit = (opts.sourceUnit || "шт").trim() || "шт";
+  const row = await tx.materialMappingLibrary.findUnique({
+    where: {
+      warehouseId_section_sourceName_sourceUnit: {
+        warehouseId: opts.warehouseId,
+        section: opts.section,
+        sourceName,
+        sourceUnit
+      }
+    },
+    select: { targetMaterialId: true }
+  });
+  return row?.targetMaterialId ?? null;
+}
+
+async function lookupPriorReceiptMaterialByFactLabel(
+  tx: ReceiptAcceptTx,
+  opts: {
+    warehouseId: string;
+    section: "SS" | "EOM";
+    factLabel: string;
+    excludeItemId?: string;
+  }
+): Promise<string | null> {
+  const factLabel = opts.factLabel.trim();
+  if (!factLabel) return null;
+  const prior = await tx.receiptRequestItem.findFirst({
+    where: {
+      id: opts.excludeItemId ? { not: opts.excludeItemId } : undefined,
+      factLabel,
+      mappedMaterialId: { not: null },
+      acceptedQty: { gt: 0 },
+      receiptRequest: { warehouseId: opts.warehouseId, section: opts.section }
+    },
+    select: { mappedMaterialId: true },
+    orderBy: { updatedAt: "desc" }
+  });
+  return prior?.mappedMaterialId ?? null;
+}
+
 async function resolveReceiptTargetMaterialId(
   tx: ReceiptAcceptTx,
   item: {
+    id?: string;
     sourceName: string;
     sourceUnit: string;
     mappedMaterialId: string | null;
@@ -366,9 +413,13 @@ async function resolveReceiptTargetMaterialId(
   mapping: {
     materialId?: string;
     newMaterialName?: string;
+    factLabel?: string;
+    factLabelUnit?: string;
+    limitNodeId?: string | null;
     category?: import("@prisma/client").ReceiptItemCategory | null;
     unitPrice?: number | null;
-  }
+  },
+  ctx: { warehouseId: string; section: "SS" | "EOM" }
 ): Promise<string | undefined> {
   const itemCategory = mapping.category ?? item.category ?? null;
   const unitPrice =
@@ -388,6 +439,53 @@ async function resolveReceiptTargetMaterialId(
 
   const meta = receiptCatalogMeta(item);
   const unifiedCardName = meta.limitDisplayName.trim() || item.sourceName.trim();
+  const factLabel = (mapping.factLabel ?? "").trim();
+  const factUnit = mapping.factLabelUnit?.trim() || item.sourceUnit || "шт";
+  const bindLimitNodeId = mapping.limitNodeId ?? item.limitNodeId ?? null;
+
+  const fromExplicitMapping = mapping.materialId
+    ? await applyCatalogFields(mapping.materialId)
+    : undefined;
+  if (fromExplicitMapping) return fromExplicitMapping;
+
+  if (item.mappedMaterialId) {
+    const id = await applyCatalogFields(item.mappedMaterialId);
+    if (id) return id;
+  }
+
+  if (factLabel) {
+    const fromFactMap = await lookupWarehouseMaterialMapping(tx, {
+      warehouseId: ctx.warehouseId,
+      section: ctx.section,
+      sourceName: factLabel,
+      sourceUnit: factUnit
+    });
+    if (fromFactMap) {
+      const id = await applyCatalogFields(fromFactMap);
+      if (id) return id;
+    }
+    const fromPriorFact = await lookupPriorReceiptMaterialByFactLabel(tx, {
+      warehouseId: ctx.warehouseId,
+      section: ctx.section,
+      factLabel,
+      excludeItemId: item.id
+    });
+    if (fromPriorFact) {
+      const id = await applyCatalogFields(fromPriorFact);
+      if (id) return id;
+    }
+  }
+
+  const fromSourceMap = await lookupWarehouseMaterialMapping(tx, {
+    warehouseId: ctx.warehouseId,
+    section: ctx.section,
+    sourceName: item.sourceName,
+    sourceUnit: item.sourceUnit
+  });
+  if (fromSourceMap) {
+    const id = await applyCatalogFields(fromSourceMap);
+    if (id) return id;
+  }
 
   if (meta.renameLimitToO && unifiedCardName) {
     return findOrCreateMaterial(tx, unifiedCardName, item.sourceUnit || "шт", itemCategory, unitPrice).then((id) =>
@@ -395,15 +493,25 @@ async function resolveReceiptTargetMaterialId(
     );
   }
 
-  if (item.limitNodeId) {
-    const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
+  if (unifiedCardName) {
+    const unifiedId = await findOrCreateMaterial(
+      tx,
+      unifiedCardName,
+      item.sourceUnit || "шт",
+      itemCategory,
+      unitPrice
+    );
+    if (unifiedId) {
+      const id = await applyCatalogFields(unifiedId);
+      if (id) return id;
+    }
+  }
+
+  if (bindLimitNodeId) {
+    const fromNode = await resolveMaterialIdForLimitNode(tx, bindLimitNodeId);
     if (fromNode) return applyCatalogFields(fromNode);
   }
-  if (mapping.materialId) return applyCatalogFields(mapping.materialId);
-  if (item.mappedMaterialId) return applyCatalogFields(item.mappedMaterialId);
-  if (unifiedCardName) {
-    return findOrCreateMaterial(tx, unifiedCardName, item.sourceUnit || "шт", itemCategory, unitPrice);
-  }
+
   const legacyName = mapping.newMaterialName?.trim();
   if (legacyName) {
     return findOrCreateMaterial(tx, legacyName, item.sourceUnit || "шт", itemCategory, unitPrice);
@@ -1421,7 +1529,10 @@ receiptRequestsRouter.post(
         const toolInventory = isToolInventoryReceiptCategory(itemCategory);
         let materialId: string | undefined;
         if (!campCategory && !toolInventory) {
-          materialId = await resolveReceiptTargetMaterialId(tx, it, m);
+          materialId = await resolveReceiptTargetMaterialId(tx, it, m, {
+            warehouseId: row.warehouseId,
+            section: row.section
+          });
           if (!materialId) {
             throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
           }
@@ -1708,24 +1819,25 @@ receiptRequestsRouter.post(
               createdById: req.user!.userId
             }
           });
+        }
+
+        await upsertWarehouseMaterialMapping(tx, {
+          warehouseId: row.warehouseId,
+          section: row.section,
+          sourceName: r.item.sourceName,
+          sourceUnit: r.item.sourceUnit || "",
+          targetMaterialId: materialId,
+          createdById: req.user!.userId
+        });
+        if (factLabel) {
           await upsertWarehouseMaterialMapping(tx, {
             warehouseId: row.warehouseId,
             section: row.section,
-            sourceName: r.item.sourceName,
-            sourceUnit: r.item.sourceUnit || "",
+            sourceName: factLabel,
+            sourceUnit: factUnit || r.sourceUnit || "шт",
             targetMaterialId: materialId,
             createdById: req.user!.userId
           });
-          if (factLabel) {
-            await upsertWarehouseMaterialMapping(tx, {
-              warehouseId: row.warehouseId,
-              section: row.section,
-              sourceName: factLabel,
-              sourceUnit: factUnit || r.sourceUnit || "шт",
-              targetMaterialId: materialId,
-              createdById: req.user!.userId
-            });
-          }
         }
 
         if (!toolCatalogMaterial && row.objectLimitTemplateId && materialId && r.limitNodeId && mapping) {

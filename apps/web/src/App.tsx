@@ -1667,7 +1667,14 @@ function App() {
     const isLimitRow = (row: StockRow) =>
       limitMaterialIdSet.has(row.materialId) || limitMaterialNameSet.has(normalize(row.materialName));
 
-    return showAttachedMaterials ? warehouseStockRows : warehouseStockRows.filter(isLimitRow);
+    return showAttachedMaterials
+      ? warehouseStockRows
+      : warehouseStockRows.filter(
+          (row) =>
+            isLimitRow(row) ||
+            Number(row.available) > 0 ||
+            Number(row.quantity) > 0
+        );
   }, [
     limitFilterEnabled,
     warehouseStockRows,
@@ -4155,6 +4162,7 @@ function App() {
       unitPrice?: number | null;
       storagePlace?: string | null;
     }> = [];
+    const skippedPack: string[] = [];
     for (const it of row.items) {
       if (!isReceiptItemOpen(it)) continue;
       const draft = drafts[it.id];
@@ -4193,10 +4201,18 @@ function App() {
       };
       if (receiptItemUsesPackUnit(it.sourceUnit, unit)) {
         const perPack = parseMaterialQty(draft?.unitsPerPack);
-        if (perPack <= 0) continue;
+        if (perPack <= 0) {
+          skippedPack.push(it.sourceName);
+          continue;
+        }
         mapping.unitsPerPack = perPack;
       }
       mappings.push(mapping);
+    }
+    if (skippedPack.length) {
+      setOpsMessage(
+        `Укажите «шт/уп» для: ${skippedPack.slice(0, 3).join("; ")}${skippedPack.length > 3 ? "…" : ""}`
+      );
     }
     return mappings;
   }
@@ -8001,7 +8017,7 @@ function App() {
             error={stocksError}
             limitHint={
               limitFilterEnabled
-                ? "Показаны материалы лимитов, которые есть на складе. Нулевые позиции из лимитов скрыты."
+                ? "Показаны материалы лимита и все позиции с ненулевым остатком. Нулевые строки лимита скрыты, если не включены «Все позиции»."
                 : undefined
             }
             manualMessage={manualStockMessage && !manualStockModalOpen ? manualStockMessage : undefined}
