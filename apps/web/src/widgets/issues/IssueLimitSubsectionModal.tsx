@@ -8,6 +8,8 @@ export type LimitNodePickRow = {
   templateTitle?: string;
   plannedQty?: number | null;
   coefficient?: number;
+  remainingQty?: number;
+  acceptedQty?: number;
 };
 
 type Props = {
@@ -19,6 +21,13 @@ type Props = {
   sourceName: string;
   materialLabel: string;
   initialLimitNodeId?: string | null;
+  /** Если задано — не запрашиваем API, показываем только эти узлы (из приёмок) */
+  slotHints?: Array<{
+    limitNodeId: string;
+    path: string;
+    remainingQty: number;
+    acceptedQty: number;
+  }>;
   onCancel: () => void;
   onConfirm: (limitNodeId: string, path: string) => void;
 };
@@ -32,15 +41,30 @@ export function IssueLimitSubsectionModal({
   sourceName,
   materialLabel,
   initialLimitNodeId,
+  slotHints,
   onCancel,
   onConfirm
 }: Props) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!slotHints?.length);
   const [error, setError] = useState("");
   const [picks, setPicks] = useState<LimitNodePickRow[]>([]);
   const [limitNodeId, setLimitNodeId] = useState(initialLimitNodeId || "");
 
   useEffect(() => {
+    if (slotHints?.length) {
+      const rows: LimitNodePickRow[] = slotHints.map((s) => ({
+        id: s.limitNodeId,
+        path: s.path,
+        remainingQty: s.remainingQty,
+        acceptedQty: s.acceptedQty
+      }));
+      setPicks(rows);
+      setLoading(false);
+      setError("");
+      if (!limitNodeId && rows.length === 1) setLimitNodeId(rows[0]!.id);
+      else if (!limitNodeId && rows.length > 1) setLimitNodeId(rows[0]!.id);
+      return;
+    }
     if (!token) return;
     const params = new URLSearchParams({
       warehouseId,
@@ -65,7 +89,7 @@ export function IssueLimitSubsectionModal({
         setPicks([]);
       })
       .finally(() => setLoading(false));
-  }, [token, fetchWithSession, warehouseId, section, materialId, sourceName]);
+  }, [token, fetchWithSession, warehouseId, section, materialId, sourceName, slotHints]);
 
   const selected = picks.find((p) => p.id === limitNodeId);
 
@@ -94,6 +118,8 @@ export function IssueLimitSubsectionModal({
               {picks.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.path}
+                  {p.remainingQty != null ? ` · к выдаче ${p.remainingQty}` : ""}
+                  {p.acceptedQty != null && p.remainingQty == null ? ` · принято ${p.acceptedQty}` : ""}
                   {p.plannedQty != null ? ` · план ${p.plannedQty}` : ""}
                   {p.coefficient != null && p.coefficient !== 1 ? ` · коэфф. ${p.coefficient}` : ""}
                 </option>

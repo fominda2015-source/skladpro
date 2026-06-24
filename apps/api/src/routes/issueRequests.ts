@@ -35,6 +35,8 @@ import {
   notifyUser
 } from "../lib/notifications.js";
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
+import { handlePrismaError } from "../lib/errors.js";
+import { assertFactSlotIssueCapacity, computeFactIssueSlots } from "../lib/issueFactSlots.js";
 
 const cancelSchema = z.object({ reason: z.string().min(1).max(2000) });
 const deleteIssueSchema = z.object({
@@ -493,6 +495,28 @@ export const issueRequestsRouter = Router();
 issueRequestsRouter.use(requireAuth);
 issueRequestsRouter.use(requirePermission("issues.read"));
 
+issueRequestsRouter.get("/fact-slots", async (req: AuthedRequest, res) => {
+  const warehouseId = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+  const sectionRaw = typeof req.query.section === "string" ? req.query.section.toUpperCase() : "";
+  const section = sectionRaw === "SS" || sectionRaw === "EOM" ? sectionRaw : null;
+  if (!warehouseId || !section) {
+    return res.status(400).json({ error: "warehouseId и section (SS|EOM) обязательны" });
+  }
+  try {
+    const scope = await getRequestDataScope(req);
+    assertWarehouseInScope(scope, warehouseId);
+    assertObjectSectionInScope(scope, warehouseId, section);
+    const rows = await computeFactIssueSlots({ warehouseId, section });
+    return res.json(rows);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    if (err.status === 403) return res.status(403).json({ error: err.message });
+    console.error("GET /issues/fact-slots failed:", e);
+    const mapped = handlePrismaError(e);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
+
 issueRequestsRouter.get("/", async (req: AuthedRequest, res) => {
   const scope = await getRequestDataScope(req);
   const pageRaw = Number(req.query.page);
@@ -724,45 +748,51 @@ issueRequestsRouter.post("/", requirePermission("issues.write"), async (req: Aut
     }
   }
 
-  const created = await prisma.issueRequest.create({
-    data: {
-      number,
-      domain,
-      limitReleasePath: limitReleasePath || undefined,
-      flowType: parsed.data.flowType ?? "REQUEST",
-      warehouseId: parsed.data.warehouseId,
-      section: parsed.data.section,
-      stockSection: parsed.data.stockSection,
-      projectId: parsed.data.projectId,
-      note: parsed.data.note,
-      responsibleName: parsed.data.responsibleName ?? undefined,
-      basisType,
-      basisRef: parsed.data.basisRef ?? undefined,
-      requestedById: req.user!.userId,
-      status: initialStatus,
-      ...(domain !== IssueRequestDomain.TOOLS
-        ? {
-            items: {
-              create: parsed.data.items.map((item) => ({
-                materialId: item.materialId,
-                quantity: item.quantity,
-                factLabel: item.factLabel?.trim() || null,
-                limitNodeId: item.limitNodeId || null
-              }))
+  try {
+    const created = await prisma.issueRequest.create({
+      data: {
+        number,
+        domain,
+        limitReleasePath: limitReleasePath || undefined,
+        flowType: parsed.data.flowType ?? "REQUEST",
+        warehouseId: parsed.data.warehouseId,
+        section: parsed.data.section,
+        stockSection: parsed.data.stockSection,
+        projectId: parsed.data.projectId,
+        note: parsed.data.note,
+        responsibleName: parsed.data.responsibleName ?? undefined,
+        basisType,
+        basisRef: parsed.data.basisRef ?? undefined,
+        requestedById: req.user!.userId,
+        status: initialStatus,
+        ...(domain !== IssueRequestDomain.TOOLS
+          ? {
+              items: {
+                create: parsed.data.items.map((item) => ({
+                  materialId: item.materialId,
+                  quantity: item.quantity,
+                  factLabel: item.factLabel?.trim() || null,
+                  limitNodeId: item.limitNodeId || null
+                }))
+              }
             }
-          }
-        : {
-            toolItems: {
-              create: parsed.data.toolItems.map((item) => ({
-                toolId: item.toolId
-              }))
-            }
-          })
-    },
-    include: { items: { include: { material: true } }, toolItems: { include: { tool: true } } }
-  });
+          : {
+              toolItems: {
+                create: parsed.data.toolItems.map((item) => ({
+                  toolId: item.toolId
+                }))
+              }
+            })
+      },
+      include: { items: { include: { material: true } }, toolItems: { include: { tool: true } } }
+    });
 
-  return res.status(201).json(created);
+    return res.status(201).json(created);
+  } catch (error) {
+    console.error("POST /issues failed:", error);
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
+  }
 });
 
 const updateDraftIssueSchema = z.object({
@@ -1089,7 +1119,7 @@ issueRequestsRouter.patch(
     const scope = await getRequestDataScope(req);
     const issueRow = await prisma.issueRequest.findFirst({
       where: mergeIssueWhere(scope, { id }),
-      include: { items: true, toolItems: { include: { tool: true } } }
+      include: { items: { include: { material: true } }, toolItems: { include: { tool: true } } }
     });
     if (!issueRow) {
       return res.status(404).json({ error: "Issue request not found" });
@@ -1282,6 +1312,23 @@ issueRequestsRouter.patch(
       return res.status(500).json({ error: "Internal server error" });
     }
     }
+
+  for (const item of issueRow.items) {
+    if (!item.limitNodeId) continue;
+    const capErr = await assertFactSlotIssueCapacity({
+      warehouseId: issueRow.warehouseId,
+      section: issueRow.section,
+      materialId: item.materialId,
+      limitNodeId: item.limitNodeId,
+      factLabel: item.factLabel,
+      quantity: Number(item.quantity),
+      materialName: item.material?.name,
+      materialUnit: item.material?.unit
+    });
+    if (capErr) {
+      return res.status(409).json({ error: capErr });
+    }
+  }
 
   try {
     const prevStatus = issueRow.status;
@@ -1543,7 +1590,9 @@ issueRequestsRouter.patch(
     if (error instanceof Error && error.message.startsWith("INSUFFICIENT_STOCK:")) {
       return res.status(409).json({ error: "Insufficient stock", materialId: error.message.split(":")[1] });
     }
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("PATCH /issues/:id/issue failed:", error);
+    const mapped = handlePrismaError(error);
+    return res.status(mapped.status).json(mapped.body);
   }
 });
 

@@ -441,9 +441,32 @@ type IssuePickCartLine = {
   sku: string | null;
   available: number;
   acceptedQty?: number;
+  /** Остаток к выдаче по выбранному узлу лимита */
+  remainingByLimit?: number;
   /** Подраздел лимита для учёта выдачи */
   limitNodeId?: string | null;
   limitPath?: string | null;
+  /** Варианты узлов лимита (если одно факт. название — несколько приходов) */
+  limitSlots?: Array<{
+    materialId: string;
+    limitNodeId: string | null;
+    limitPath: string | null;
+    acceptedQty: number;
+    issuedQty: number;
+    remainingQty: number;
+    canonName: string;
+  }>;
+};
+type FactIssueSlotRow = {
+  factLabel: string;
+  factUnit: string;
+  materialId: string;
+  materialName: string;
+  limitNodeId: string | null;
+  limitSectionPath: string | null;
+  acceptedQty: number;
+  issuedQty: number;
+  remainingQty: number;
 };
 type OperationRow = {
   id: string;
@@ -958,6 +981,7 @@ function App() {
     rows: IssueLimitBatchRow[];
     pendingOpts?: { openDocument?: boolean };
   } | null>(null);
+  const [factIssueSlots, setFactIssueSlots] = useState<FactIssueSlotRow[]>([]);
   const [issueIssuesDomain, setIssueIssuesDomain] = useState<IssueRequestDomainApi>(() => {
     try {
       const saved = localStorage.getItem("skladpro_issue_domain");
@@ -1328,11 +1352,16 @@ function App() {
   const [auditFilterTo, setAuditFilterTo] = useState("");
   const [auditShowReverted, setAuditShowReverted] = useState(false);
   const [auditReverting, setAuditReverting] = useState<Record<string, boolean>>({});
+  const [selectedAuditLogIds, setSelectedAuditLogIds] = useState<string[]>([]);
   const debouncedQ = useDebouncedValue(q, 280);
   const debouncedToolSearch = useDebouncedValue(toolSearch, 280);
   const debouncedIssueSearch = useDebouncedValue(issueSearch, 280);
   const debouncedIssueToolSearch = useDebouncedValue(issueToolSearch, 280);
   const debouncedAuditFilterQuery = useDebouncedValue(auditFilterQuery, 280);
+  const selectableAuditLogs = useMemo(() => auditLogs.filter((r) => !r.reverted), [auditLogs]);
+  const allAuditLogsSelected =
+    selectableAuditLogs.length > 0 && selectableAuditLogs.every((r) => selectedAuditLogIds.includes(r.id));
+  const someAuditLogsSelected = selectedAuditLogIds.length > 0 && !allAuditLogsSelected;
   const [integrationJobs, setIntegrationJobs] = useState<IntegrationJobRow[]>([]);
   const [integrationKind, setIntegrationKind] = useState("erp-sync");
   const [integrationPayload, setIntegrationPayload] = useState("{\"batch\":1}");
@@ -1614,7 +1643,6 @@ function App() {
   ]);
 
   // Сколько принято по каждому названию из УПД (factLabel), сгруппировано по карточке материала.
-  // материалу-таргету. Заполняется из acceptedQty по позициям заявок.
   const acceptedBySourceByTargetId = useMemo(() => {
     const map = new Map<
       string,
@@ -1647,6 +1675,134 @@ function App() {
     }
     return map;
   }, [receiptRequests]);
+
+  const factLabelGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        factLabel: string;
+        unit: string;
+        slots: NonNullable<IssuePickCartLine["limitSlots"]>;
+        totalAccepted: number;
+        totalRemaining: number;
+        materialIds: Set<string>;
+      }
+    >();
+    for (const slot of factIssueSlots) {
+      if (slot.remainingQty <= 0 && slot.acceptedQty <= 0) continue;
+      const factKey = `${slot.factLabel.trim().toLowerCase()}|${slot.factUnit.trim().toLowerCase()}`;
+      const g = groups.get(factKey) || {
+        factLabel: slot.factLabel,
+        unit: slot.factUnit,
+        slots: [],
+        totalAccepted: 0,
+        totalRemaining: 0,
+        materialIds: new Set<string>()
+      };
+      g.slots.push({
+        materialId: slot.materialId,
+        limitNodeId: slot.limitNodeId,
+        limitPath: slot.limitSectionPath,
+        acceptedQty: slot.acceptedQty,
+        issuedQty: slot.issuedQty,
+        remainingQty: slot.remainingQty,
+        canonName: slot.materialName
+      });
+      g.totalAccepted += slot.acceptedQty;
+      g.totalRemaining += slot.remainingQty;
+      g.materialIds.add(slot.materialId);
+      groups.set(factKey, g);
+    }
+    return groups;
+  }, [factIssueSlots]);
+
+  const issueFacingRows = useMemo((): IssuePickCartLine[] => {
+    const out: IssuePickCartLine[] = [];
+    if (!activeObjectId) return out;
+    const usedFactKeys = new Set<string>();
+
+    for (const g of factLabelGroups.values()) {
+      const materialIds = [...g.materialIds];
+      const stockRows = materialIds
+        .map((mid) => stocks.find((s) => s.warehouseId === activeObjectId && s.materialId === mid))
+        .filter((s): s is StockRow => Boolean(s && Number(s.available) > 0));
+      if (!stockRows.length) continue;
+      const primary = stockRows[0]!;
+      const mk = (primary.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+      if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
+      if (issueIssuesDomain === "CONSUMABLES" && mk !== "CONSUMABLE") continue;
+      if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
+
+      const factKey = `${g.factLabel.trim().toLowerCase()}|${g.unit.trim().toLowerCase()}`;
+      usedFactKeys.add(factKey);
+      const available = stockRows.reduce((acc, s) => acc + Number(s.available), 0);
+      const activeSlots = g.slots.filter((s) => s.remainingQty > 0 || s.acceptedQty > 0);
+      out.push({
+        pickKey: `fact:${encodeURIComponent(factKey)}`,
+        materialId: primary.materialId,
+        factLabel: g.factLabel,
+        canonName:
+          materialIds.length === 1
+            ? primary.materialName
+            : materialIds.map((mid) => stocks.find((s) => s.materialId === mid)?.materialName || mid).join("; "),
+        unit: g.unit || primary.materialUnit,
+        sku: primary.materialSku,
+        available,
+        acceptedQty: g.totalAccepted,
+        remainingByLimit: g.totalRemaining,
+        limitSlots: activeSlots
+      });
+    }
+
+    for (const s of stocks) {
+      if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
+      const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
+      if (s.materialToolCatalogSection) {
+        const sec = s.materialToolCatalogSection;
+        const allowedInDomain =
+          (issueIssuesDomain === "WORKWEAR" && sec === "PPE") ||
+          (issueIssuesDomain === "CONSUMABLES" && sec === "TOOL_CONSUMABLE");
+        if (!allowedInDomain) continue;
+      }
+      if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
+      if (issueIssuesDomain === "CONSUMABLES" && mk !== "CONSUMABLE") continue;
+      if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
+      const mid = s.materialId;
+      const bucket = acceptedBySourceByTargetId.get(mid);
+      const av = Number(s.available);
+      if (bucket?.size) {
+        for (const v of bucket.values()) {
+          const fk = `${v.sourceName.trim().toLowerCase()}|${(v.sourceUnit || "").trim().toLowerCase()}`;
+          if (usedFactKeys.has(fk)) continue;
+          out.push({
+            pickKey: `${mid}::upd:${encodeURIComponent(`${v.sourceName}|${v.sourceUnit || ""}`)}`,
+            materialId: mid,
+            factLabel: v.sourceName,
+            canonName: s.materialName,
+            unit: v.sourceUnit || s.materialUnit,
+            sku: s.materialSku,
+            available: av,
+            acceptedQty: v.quantity
+          });
+        }
+      } else {
+        out.push({
+          pickKey: `${mid}::card`,
+          materialId: mid,
+          factLabel: null,
+          canonName: s.materialName,
+          unit: s.materialUnit,
+          sku: s.materialSku,
+          available: av
+        });
+      }
+    }
+    return out.sort((a, b) =>
+      (a.factLabel || a.canonName || "").localeCompare(b.factLabel || b.canonName || "", "ru", {
+        sensitivity: "base"
+      })
+    );
+  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, factLabelGroups]);
 
   const warehouseDisplayRows = useMemo(() => {
     let rows = warehouseVisibleRows;
@@ -1690,58 +1846,6 @@ function App() {
     [stockWarehouseIdsInView, warehouses, stocks]
   );
 
-  const issueFacingRows = useMemo((): IssuePickCartLine[] => {
-    const out: IssuePickCartLine[] = [];
-    if (!activeObjectId) return out;
-    for (const s of stocks) {
-      if (s.warehouseId !== activeObjectId || !(Number(s.available) > 0)) continue;
-      const mk = (s.materialKind ?? "MATERIAL") as "MATERIAL" | "CONSUMABLE" | "WORKWEAR";
-      if (s.materialToolCatalogSection) {
-        const sec = s.materialToolCatalogSection;
-        const allowedInDomain =
-          (issueIssuesDomain === "WORKWEAR" && sec === "PPE") ||
-          (issueIssuesDomain === "CONSUMABLES" && sec === "TOOL_CONSUMABLE");
-        if (!allowedInDomain) continue;
-      }
-      if (issueIssuesDomain === "MATERIALS" && mk !== "MATERIAL") continue;
-      if (issueIssuesDomain === "CONSUMABLES" && mk !== "CONSUMABLE") continue;
-      if (issueIssuesDomain === "WORKWEAR" && mk !== "WORKWEAR") continue;
-      const mid = s.materialId;
-      const bucket = acceptedBySourceByTargetId.get(mid);
-      const av = Number(s.available);
-      if (bucket?.size) {
-        for (const v of bucket.values()) {
-          const uk = `${v.sourceName}|${v.sourceUnit || ""}`;
-          out.push({
-            pickKey: `${mid}::upd:${encodeURIComponent(uk)}`,
-            materialId: mid,
-            factLabel: v.sourceName,
-            canonName: s.materialName,
-            unit: v.sourceUnit || s.materialUnit,
-            sku: s.materialSku,
-            available: av,
-            acceptedQty: v.quantity
-          });
-        }
-      } else {
-        out.push({
-          pickKey: `${mid}::card`,
-          materialId: mid,
-          factLabel: null,
-          canonName: s.materialName,
-          unit: s.materialUnit,
-          sku: s.materialSku,
-          available: av
-        });
-      }
-    }
-    return out.sort((a, b) =>
-      (a.factLabel || a.canonName || "").localeCompare(b.factLabel || b.canonName || "", "ru", {
-        sensitivity: "base"
-      })
-    );
-  }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId]);
-
   const issueFacingRowsFiltered = useMemo(() => {
     const qLower = issueMaterialSearch.trim().toLowerCase();
     if (!qLower) return issueFacingRows;
@@ -1759,21 +1863,41 @@ function App() {
     [stocks, issueWarehouseId]
   );
 
-  const toggleIssuePickRow = useCallback((row: IssuePickCartLine) => {
-    setIssuePickCart((prev) => {
-      const exists = prev.some((p) => p.pickKey === row.pickKey);
-      if (exists) {
-        setIssuePickQtyByKey((qty) => {
-          const next = { ...qty };
-          delete next[row.pickKey];
-          return next;
-        });
-        return prev.filter((p) => p.pickKey !== row.pickKey);
-      }
-      setIssuePickQtyByKey((qty) => ({ ...qty, [row.pickKey]: qty[row.pickKey] ?? 1 }));
-      return [...prev, row];
-    });
-  }, []);
+  const toggleIssuePickRow = useCallback(
+    (row: IssuePickCartLine) => {
+      setIssuePickCart((prev) => {
+        const exists = prev.some((p) => p.pickKey === row.pickKey);
+        if (exists) {
+          setIssuePickQtyByKey((qty) => {
+            const next = { ...qty };
+            delete next[row.pickKey];
+            return next;
+          });
+          return prev.filter((p) => p.pickKey !== row.pickKey);
+        }
+        const activeSlots = (row.limitSlots || []).filter((s) => s.remainingQty > 0);
+        if (activeSlots.length > 1) {
+          setIssueLimitPickRow(row);
+          return prev;
+        }
+        let nextRow = row;
+        if (activeSlots.length === 1) {
+          const slot = activeSlots[0]!;
+          nextRow = {
+            ...row,
+            materialId: slot.materialId,
+            limitNodeId: slot.limitNodeId,
+            limitPath: slot.limitPath,
+            remainingByLimit: slot.remainingQty,
+            canonName: slot.canonName || row.canonName
+          };
+        }
+        setIssuePickQtyByKey((qty) => ({ ...qty, [nextRow.pickKey]: qty[nextRow.pickKey] ?? 1 }));
+        return [...prev, nextRow];
+      });
+    },
+    []
+  );
 
   const chatTimeLabel = (iso?: string) => {
     if (!iso) return "";
@@ -2743,6 +2867,42 @@ function App() {
     }
   }
 
+  async function performRevertAuditLog(
+    id: string,
+    opts?: { softOnly?: boolean; autoSoftOnFail?: boolean }
+  ): Promise<{ ok: boolean; soft?: boolean; canForce?: boolean; error?: string }> {
+    if (!token) return { ok: false, error: "Нет сессии" };
+    const softOnly = Boolean(opts?.softOnly);
+    const tryRevert = async (force: boolean) =>
+      fetchWithSession(`${API_URL}/api/audit/${id}/revert${force ? "?force=1" : ""}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    let r = await tryRevert(softOnly);
+    let body: { error?: string; canForce?: boolean; softRevert?: boolean } = {};
+    try {
+      body = await r.json();
+    } catch {
+      // ignore
+    }
+    if (!r.ok && body.canForce && !softOnly) {
+      if (opts?.autoSoftOnFail) {
+        r = await tryRevert(true);
+        try {
+          body = await r.json();
+        } catch {
+          body = {};
+        }
+      } else {
+        return { ok: false, canForce: true, error: body.error || "Откат не поддерживается" };
+      }
+    }
+    if (!r.ok) {
+      return { ok: false, error: body.error || `HTTP ${r.status}` };
+    }
+    return { ok: true, soft: Boolean(body.softRevert) };
+  }
+
   async function revertAuditLog(id: string, opts?: { softOnly?: boolean }) {
     if (!token) return;
     const softOnly = Boolean(opts?.softOnly);
@@ -2752,40 +2912,24 @@ function App() {
     if (!window.confirm(confirmText)) return;
     setAuditReverting((prev) => ({ ...prev, [id]: true }));
     try {
-      const tryRevert = async (force: boolean) =>
-        fetchWithSession(`${API_URL}/api/audit/${id}/revert${force ? "?force=1" : ""}`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` }
-        });
-      let r = await tryRevert(softOnly);
-      let body: { error?: string; canForce?: boolean; softRevert?: boolean } = {};
-      try {
-        body = await r.json();
-      } catch {
-        // ignore
-      }
-      if (!r.ok && body.canForce && !softOnly) {
+      let result = await performRevertAuditLog(id, { softOnly });
+      if (!result.ok && result.canForce) {
         if (
           window.confirm(
-            `${body.error || "Автоматический откат не удался"}.\n\nПометить запись «отменённой» вручную? Остатки и статусы при этом не изменятся.`
+            `${result.error || "Автоматический откат не удался"}.\n\nПометить запись «отменённой» вручную? Остатки и статусы при этом не изменятся.`
           )
         ) {
-          r = await tryRevert(true);
-          try {
-            body = await r.json();
-          } catch {
-            body = {};
-          }
+          result = await performRevertAuditLog(id, { softOnly: true });
         } else {
           setAuditMessage("Отмена не выполнена.");
           return;
         }
       }
-      if (!r.ok) {
-        setAuditMessage(body.error || `Не удалось отменить действие (HTTP ${r.status})`);
+      if (!result.ok) {
+        setAuditMessage(result.error || "Не удалось отменить действие");
         return;
       }
-      setAuditMessage(body.softRevert ? "Запись помечена отменённой вручную." : "Действие отменено");
+      setAuditMessage(result.soft ? "Запись помечена отменённой вручную." : "Действие отменено");
       await loadAuditLogs();
     } finally {
       setAuditReverting((prev) => {
@@ -2794,6 +2938,61 @@ function App() {
         return next;
       });
     }
+  }
+
+  async function revertSelectedAuditLogs() {
+    const rows = auditLogs.filter((r) => selectedAuditLogIds.includes(r.id) && !r.reverted);
+    if (!rows.length) return;
+    if (
+      !window.confirm(
+        `Отменить выбранные записи (${rows.length})? Система попытается откатить каждое действие; при невозможности — пометит запись отменённой вручную.`
+      )
+    ) {
+      return;
+    }
+    let ok = 0;
+    let soft = 0;
+    let fail = 0;
+    for (const row of rows) {
+      setAuditReverting((prev) => ({ ...prev, [row.id]: true }));
+      try {
+        const result = await performRevertAuditLog(row.id, {
+          softOnly: !row.revertable,
+          autoSoftOnFail: true
+        });
+        if (result.ok) {
+          if (result.soft) soft += 1;
+          else ok += 1;
+        } else {
+          fail += 1;
+        }
+      } finally {
+        setAuditReverting((prev) => {
+          const next = { ...prev };
+          delete next[row.id];
+          return next;
+        });
+      }
+    }
+    setSelectedAuditLogIds([]);
+    await loadAuditLogs();
+    const parts = [];
+    if (ok) parts.push(`откачено: ${ok}`);
+    if (soft) parts.push(`помечено вручную: ${soft}`);
+    if (fail) parts.push(`ошибок: ${fail}`);
+    setAuditMessage(parts.length ? `Готово (${parts.join(", ")})` : "Ничего не отменено");
+  }
+
+  function toggleAuditLogSelection(id: string, checked: boolean) {
+    setSelectedAuditLogIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  }
+
+  function setAllAuditLogsSelected(checked: boolean) {
+    if (!checked) {
+      setSelectedAuditLogIds([]);
+      return;
+    }
+    setSelectedAuditLogIds(selectableAuditLogs.map((r) => r.id));
   }
 
   async function loadIntegrationJobs() {
@@ -4346,6 +4545,27 @@ function App() {
     }
   }
 
+  async function loadFactIssueSlots(sectionOverride?: "SS" | "EOM", workspaceReloadSeq?: number) {
+    if (!token || !activeObjectId) {
+      setFactIssueSlots([]);
+      return;
+    }
+    try {
+      const params = new URLSearchParams({
+        warehouseId: activeObjectId,
+        section: sectionOverride ?? objectSectionFilter
+      });
+      const res = await fetchWithSession(`${API_URL}/api/issues/fact-slots?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      if (isStaleWorkspaceReload(workspaceReloadSeq)) return;
+      setFactIssueSlots((await res.json()) as FactIssueSlotRow[]);
+    } catch {
+      // ignore — выдача работает и без слотов
+    }
+  }
+
   async function executeIssueAction(
     issueId: string,
     action: "send-for-approval" | "approve" | "reject" | "cancel" | "issue",
@@ -4681,9 +4901,35 @@ function App() {
         quantity: parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1) || MATERIAL_QTY_MIN,
         factLabel: row.factLabel?.trim() || "",
         limitNodeId: row.limitNodeId || undefined,
-        pickKey: row.pickKey
+        pickKey: row.pickKey,
+        remainingByLimit: row.remainingByLimit
       }))
       .filter((line) => line.materialId && line.quantity > 0);
+
+    const batchRows: IssueLimitBatchRow[] = [];
+    for (const line of draftLines) {
+      if (line.limitNodeId) continue;
+      const cartRow = issuePickCart.find((c) => c.pickKey === line.pickKey);
+      const activeSlots = (cartRow?.limitSlots || []).filter((s) => s.remainingQty > 0 && s.limitNodeId);
+      if (activeSlots.length === 1) {
+        const slot = activeSlots[0]!;
+        line.limitNodeId = slot.limitNodeId || undefined;
+        line.materialId = slot.materialId;
+        continue;
+      }
+      if (activeSlots.length > 1) {
+        const materialLabel = safeName(cartRow?.factLabel || cartRow?.canonName || "материал");
+        batchRows.push({
+          materialId: line.materialId,
+          materialLabel,
+          pickKeys: [line.pickKey],
+          options: activeSlots.map((s) => ({
+            limitNodeId: s.limitNodeId!,
+            path: s.limitPath || s.canonName
+          }))
+        });
+      }
+    }
 
     const materialIds = [...new Set(draftLines.filter((l) => !l.limitNodeId).map((l) => l.materialId))];
     if (materialIds.length) {
@@ -4705,7 +4951,6 @@ function App() {
         })
       );
 
-      const batchRows: IssueLimitBatchRow[] = [];
       for (const line of draftLines) {
         if (line.limitNodeId) continue;
         const bindings = bindingMap.get(line.materialId) ?? [];
@@ -4714,34 +4959,51 @@ function App() {
         } else if (bindings.length > 1) {
           const cartRow = issuePickCart.find((c) => c.pickKey === line.pickKey);
           const materialLabel = safeName(cartRow?.factLabel || cartRow?.canonName || "материал");
-          const existing = batchRows.find((r) => r.materialId === line.materialId);
-          if (existing) {
-            if (!existing.pickKeys.includes(line.pickKey)) existing.pickKeys.push(line.pickKey);
-          } else {
-            batchRows.push({
-              materialId: line.materialId,
-              materialLabel,
-              pickKeys: [line.pickKey],
-              options: bindings.map((b) => ({ limitNodeId: b.limitNodeId, path: b.path }))
-            });
-          }
+          const existing = batchRows.find((r) => r.pickKeys.includes(line.pickKey));
+          if (existing) continue;
+          batchRows.push({
+            materialId: line.materialId,
+            materialLabel,
+            pickKeys: [line.pickKey],
+            options: bindings.map((b) => ({ limitNodeId: b.limitNodeId, path: b.path }))
+          });
         }
-      }
-
-      if (batchRows.length > 0) {
-        setIssueLimitPickBatch({ rows: batchRows, pendingOpts: opts });
-        setIssuesMessage("Выберите подраздел лимита для каждого материала в заказе на выдачу");
-        setIssuesTone("neutral");
-        return;
       }
     }
 
-    const lines = draftLines.map(({ pickKey: _pk, ...rest }) => rest);
+    if (batchRows.length > 0) {
+      setIssueLimitPickBatch({ rows: batchRows, pendingOpts: opts });
+      setIssuesMessage("Выберите подраздел лимита для каждого материала в заказе на выдачу");
+      setIssuesTone("neutral");
+      return;
+    }
+
+    const lines = draftLines.map(({ pickKey: _pk, remainingByLimit: _rb, ...rest }) => rest);
 
     if (!lines.length) {
       setIssuesMessage("Добавьте хотя бы один материал в список выдачи");
       setIssuesTone("error");
       return;
+    }
+    for (const row of issuePickCart) {
+      const qty = parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1);
+      if (row.limitNodeId) {
+        const slot = factIssueSlots.find(
+          (s) =>
+            s.materialId === row.materialId &&
+            s.limitNodeId === row.limitNodeId &&
+            s.factLabel.trim() === (row.factLabel || "").trim()
+        );
+        const cap = slot?.remainingQty ?? row.remainingByLimit;
+        if (cap != null && qty > cap + 1e-9) {
+          const path = row.limitPath || slot?.limitSectionPath || "узел лимита";
+          setIssuesMessage(
+            `Нельзя выдать ${formatMaterialQty(qty)} ${row.unit} — по «${path}» доступно не более ${formatMaterialQty(cap)} ${row.unit}`
+          );
+          setIssuesTone("error");
+          return;
+        }
+      }
     }
     const qtySumByMaterial = new Map<string, number>();
     for (const line of lines) {
@@ -4776,8 +5038,14 @@ function App() {
         })
       });
       if (!createRes.ok) {
-        const err = await createRes.json().catch(() => ({}));
-        setIssuesMessage(typeof err.error === "string" ? err.error : "Не удалось создать выдачу");
+        const err = (await createRes.json().catch(() => ({}))) as { error?: string; message?: string };
+        setIssuesMessage(
+          typeof err.message === "string"
+            ? err.message
+            : typeof err.error === "string"
+              ? err.error
+              : "Не удалось создать выдачу"
+        );
         setIssuesTone(createRes.status === 409 ? "conflict" : "error");
         return;
       }
@@ -4824,6 +5092,7 @@ function App() {
       setIssueNote("");
       setDirectIssueSignedFiles([]);
       await loadIssues();
+      await loadFactIssueSlots();
       await loadStocks(q);
       await loadStockMovements();
     } catch (e) {
@@ -6006,7 +6275,7 @@ function App() {
         {!toolsLoading && !toolsError && tools.length > 0 && (
           <>
             <p className="muted" style={{ margin: "8px 0" }}>
-              Отметьте строки для печати QR. Клик по строке — карточка инструмента.
+              Отметьте строки для печати QR или выберите все на странице. Клик по строке — карточка инструмента.
             </p>
             <ToolsListTable
               tools={tools}
@@ -6015,6 +6284,19 @@ function App() {
                 if (checked) setSelectedToolIds((prev) => [...prev, id]);
                 else setSelectedToolIds((prev) => prev.filter((x) => x !== id));
               }}
+              onSelectAll={(checked) => {
+                const pageIds = tools.map((t) => t.id);
+                if (!checked) {
+                  setSelectedToolIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+                  return;
+                }
+                setSelectedToolIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+              }}
+              allSelected={tools.length > 0 && tools.every((t) => selectedToolIds.includes(t.id))}
+              someSelected={
+                tools.some((t) => selectedToolIds.includes(t.id)) &&
+                !tools.every((t) => selectedToolIds.includes(t.id))
+              }
               onOpen={(id) => openTool(id)}
               statusLabel={toolStatusLabel}
               statusTone={toolStatusTone}
@@ -6469,6 +6751,12 @@ function App() {
   ]);
 
   useEffect(() => {
+    setSelectedAuditLogIds((prev) =>
+      prev.filter((id) => auditLogs.some((row) => row.id === id && !row.reverted))
+    );
+  }, [auditLogs]);
+
+  useEffect(() => {
     if (!token || activeTab !== "integrations") {
       return;
     }
@@ -6634,6 +6922,7 @@ function App() {
       void loadStocks(q, objectSectionFilter, seq);
       void loadLimitTemplates(objectSectionFilter, seq);
       void loadReceiptRequests(objectSectionFilter, undefined, seq);
+      void loadFactIssueSlots(objectSectionFilter, seq);
     }
   }, [
     token,
@@ -7848,6 +8137,22 @@ function App() {
               />
               <span>Показывать уже отменённые</span>
             </label>
+            {selectedAuditLogIds.length > 0 ? (
+              <>
+                <span className="chip neutral">Выбрано: {selectedAuditLogIds.length}</span>
+                <button
+                  type="button"
+                  className="dangerBtn"
+                  disabled={Object.keys(auditReverting).length > 0}
+                  onClick={() => void revertSelectedAuditLogs()}
+                >
+                  Отменить выбранные
+                </button>
+                <button type="button" className="ghostBtn" onClick={() => setSelectedAuditLogIds([])}>
+                  Снять выбор
+                </button>
+              </>
+            ) : null}
             <button type="button" className="ghostBtn" onClick={() => void loadAuditLogs()}>
               Обновить
             </button>
@@ -7885,6 +8190,18 @@ function App() {
             <table style={{ marginTop: 8 }}>
               <thead>
                 <tr>
+                  <th style={{ width: 36 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Выбрать все записи"
+                      checked={allAuditLogsSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someAuditLogsSelected;
+                      }}
+                      disabled={!selectableAuditLogs.length}
+                      onChange={(e) => setAllAuditLogsSelected(e.target.checked)}
+                    />
+                  </th>
                   <th>Время</th>
                   <th>Пользователь</th>
                   <th>Действие</th>
@@ -7896,11 +8213,22 @@ function App() {
               <tbody>
                 {auditLogs.map((row) => {
                   const busy = Boolean(auditReverting[row.id]);
+                  const selected = selectedAuditLogIds.includes(row.id);
                   return (
                     <tr
                       key={row.id}
                       style={row.reverted ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
                     >
+                      <td>
+                        {!row.reverted ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`Выбрать запись ${row.actionLabel || row.action}`}
+                            checked={selected}
+                            onChange={(e) => toggleAuditLogSelection(row.id, e.target.checked)}
+                          />
+                        ) : null}
+                      </td>
                       <td>{new Date(row.createdAt).toLocaleString()}</td>
                       <td>{row.user?.fullName || row.userId}</td>
                       <td>{row.actionLabel || row.action}</td>
@@ -9441,9 +9769,9 @@ function App() {
                 <div>
                   <h3 style={{ margin: 0 }}>Что выдавать</h3>
                   <p className="muted" style={{ margin: "4px 0 0" }}>
-                    Позиции с остатком на выбранном объекте. Если при приёмке было отдельное название по УПД — оно
-                    показывается отдельной строкой; иначе — по названию карточки. Остаток на складе общий на
-                    карточку.
+                    Позиции с остатком на выбранном объекте. Одинаковые фактические названия из УПД
+                    схлопываются в одну строку; при нескольких узлах лимита при выдаче выбирается источник.
+                    Остаток на складе общий на карточку.
                   </p>
                 </div>
                 <span className="muted">
@@ -9487,8 +9815,13 @@ function App() {
                           </span>
                           {typeof r.acceptedQty === "number" && r.acceptedQty > 0 ? (
                             <span className="muted" style={{ fontSize: 12 }}>
-                              принято под этим названием:{" "}
-                              {formatMaterialQty(r.acceptedQty)} {r.unit}
+                              принято под этим названием: {formatMaterialQty(r.acceptedQty)} {r.unit}
+                              {typeof r.remainingByLimit === "number"
+                                ? ` · к выдаче по лимитам: ${formatMaterialQty(r.remainingByLimit)} ${r.unit}`
+                                : ""}
+                              {(r.limitSlots?.length ?? 0) > 1
+                                ? ` · узлов лимита: ${r.limitSlots!.length}`
+                                : ""}
                             </span>
                           ) : null}
                         </div>
@@ -9660,7 +9993,16 @@ function App() {
                       const limitNodeId = selections[batchRow.materialId];
                       const path =
                         batchRow.options.find((o) => o.limitNodeId === limitNodeId)?.path || row.limitPath;
-                      return limitNodeId ? { ...row, limitNodeId, limitPath: path ?? null } : row;
+                      const slot = row.limitSlots?.find((s) => s.limitNodeId === limitNodeId);
+                      return limitNodeId
+                        ? {
+                            ...row,
+                            materialId: slot?.materialId || row.materialId,
+                            limitNodeId,
+                            limitPath: path ?? null,
+                            remainingByLimit: slot?.remainingQty ?? row.remainingByLimit
+                          }
+                        : row;
                     })
                   );
                   const pendingOpts = issueLimitPickBatch.pendingOpts;
@@ -9684,13 +10026,40 @@ function App() {
                     : safeName(issueLimitPickRow.canonName)
                 }
                 initialLimitNodeId={issueLimitPickRow.limitNodeId}
+                slotHints={
+                  issueLimitPickRow.limitSlots
+                    ?.filter((s) => s.limitNodeId && s.remainingQty > 0)
+                    .map((s) => ({
+                      limitNodeId: s.limitNodeId!,
+                      path: s.limitPath || s.canonName,
+                      remainingQty: s.remainingQty,
+                      acceptedQty: s.acceptedQty
+                    }))
+                }
                 onCancel={() => setIssueLimitPickRow(null)}
                 onConfirm={(limitNodeId, path) => {
-                  setIssuePickCart((prev) =>
-                    prev.map((r) =>
-                      r.pickKey === issueLimitPickRow.pickKey ? { ...r, limitNodeId, limitPath: path } : r
-                    )
-                  );
+                  const row = issueLimitPickRow;
+                  if (!row) return;
+                  const slot = row.limitSlots?.find((s) => s.limitNodeId === limitNodeId);
+                  const nextRow: IssuePickCartLine = {
+                    ...row,
+                    materialId: slot?.materialId || row.materialId,
+                    limitNodeId,
+                    limitPath: path,
+                    remainingByLimit: slot?.remainingQty ?? row.remainingByLimit,
+                    canonName: slot?.canonName || row.canonName
+                  };
+                  setIssuePickCart((prev) => {
+                    const exists = prev.some((p) => p.pickKey === nextRow.pickKey);
+                    if (exists) {
+                      return prev.map((r) => (r.pickKey === nextRow.pickKey ? nextRow : r));
+                    }
+                    setIssuePickQtyByKey((qty) => ({
+                      ...qty,
+                      [nextRow.pickKey]: qty[nextRow.pickKey] ?? 1
+                    }));
+                    return [...prev, nextRow];
+                  });
                   setIssueLimitPickRow(null);
                 }}
               />

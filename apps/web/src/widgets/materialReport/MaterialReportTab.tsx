@@ -357,6 +357,26 @@ export function MaterialReportTab({
       }));
   }, [selectedHolder, visibleLines, checked, subTab, warehouseFilter]);
 
+  const allVisibleLinesChecked =
+    Boolean(selectedHolder) &&
+    visibleLines.length > 0 &&
+    visibleLines.every((ln) => checked[lineKey(selectedHolder!.holderKey, ln.materialId)]);
+  const someVisibleLinesChecked =
+    Boolean(selectedHolder) &&
+    visibleLines.some((ln) => checked[lineKey(selectedHolder!.holderKey, ln.materialId)]) &&
+    !allVisibleLinesChecked;
+
+  function setAllVisibleLinesChecked(nextChecked: boolean) {
+    if (!selectedHolder) return;
+    setChecked((prev) => {
+      const next = { ...prev };
+      for (const ln of visibleLines) {
+        next[lineKey(selectedHolder.holderKey, ln.materialId)] = nextChecked;
+      }
+      return next;
+    });
+  }
+
   const writeoffSection: "SS" | "EOM" =
     sectionFilter === "ALL" ? "SS" : sectionFilter;
 
@@ -696,15 +716,33 @@ export function MaterialReportTab({
                       aria-label="Поиск материала"
                     />
                     {canWriteoff ? (
-                      <button
-                        type="button"
-                        className="primaryBtn"
-                        disabled={checkedLines.length === 0 || !warehouseFilter}
-                        title={!warehouseFilter ? "Выберите объект для списания" : undefined}
-                        onClick={() => setWriteoffOpen(true)}
-                      >
-                        Списать ({checkedLines.length})
-                      </button>
+                      <>
+                        <label
+                          className="toolbar"
+                          style={{ gap: 6, alignItems: "center", padding: 0, cursor: "pointer" }}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label="Выбрать все позиции"
+                            checked={allVisibleLinesChecked}
+                            ref={(el) => {
+                              if (el) el.indeterminate = someVisibleLinesChecked;
+                            }}
+                            disabled={!visibleLines.length}
+                            onChange={(e) => setAllVisibleLinesChecked(e.target.checked)}
+                          />
+                          <span>Выбрать все</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="primaryBtn"
+                          disabled={checkedLines.length === 0 || !warehouseFilter}
+                          title={!warehouseFilter ? "Выберите объект для списания" : undefined}
+                          onClick={() => setWriteoffOpen(true)}
+                        >
+                          Списать ({checkedLines.length})
+                        </button>
+                      </>
                     ) : null}
                   </div>
 

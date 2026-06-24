@@ -19,6 +19,9 @@ type Props = {
   tools: ToolListRow[];
   selectedIds: string[];
   onToggleSelect: (id: string, checked: boolean) => void;
+  onSelectAll?: (checked: boolean) => void;
+  allSelected?: boolean;
+  someSelected?: boolean;
   onOpen: (id: string) => void;
   statusLabel: (status: string) => string;
   statusTone: (status: string) => "ok" | "warn" | "bad" | "neutral";
@@ -29,6 +32,9 @@ export function ToolsListTable({
   tools,
   selectedIds,
   onToggleSelect,
+  onSelectAll,
+  allSelected = false,
+  someSelected = false,
   onOpen,
   statusLabel,
   statusTone,
@@ -40,7 +46,20 @@ export function ToolsListTable({
       <table className="erpTable desktopTable">
         <thead>
           <tr>
-            <th style={{ width: 40 }} />
+            <th style={{ width: 40 }}>
+              {onSelectAll ? (
+                <input
+                  type="checkbox"
+                  aria-label="Выбрать все на странице"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
+                  disabled={!tools.length}
+                  onChange={(e) => onSelectAll(e.target.checked)}
+                />
+              ) : null}
+            </th>
             <th>Категория</th>
             <th>Наименование</th>
             <th style={{ width: 100 }}>Марка</th>
