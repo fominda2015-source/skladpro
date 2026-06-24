@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { ResponsiveTableShell } from "../layout/MobileCardParts";
+import { downloadApiExcel, formatRuDate, formatRuDateTime } from "../productivity/fieldDocUtils";
 
-export type TimesheetEmployeeRow = {
+type EmployeeListItem = {
   id: string;
   fullName: string;
   position: string;
   hireDate: string;
-  marks: Record<string, string>;
+  hasDraft: boolean;
+  draftUpdatedAt: string | null;
 };
 
 type TimesheetContext = {
@@ -26,12 +28,14 @@ type TimesheetContext = {
   responsibleName: string;
   responsibleFullName: string;
   days: string[];
-  staff: Array<{
-    id: string;
-    fullName: string;
-    position: string;
-    hireDate: string;
-  }>;
+  isClosed?: boolean;
+};
+
+type ArchiveItem = {
+  id: string;
+  month: string;
+  closedAt: string;
+  closedByName: string | null;
 };
 
 type Props = {
@@ -42,16 +46,6 @@ type Props = {
   section: "SS" | "EOM";
   warehouseName: string;
 };
-
-function newRow(partial?: Partial<TimesheetEmployeeRow>): TimesheetEmployeeRow {
-  return {
-    id: partial?.id || `row-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    fullName: partial?.fullName || "",
-    position: partial?.position || "",
-    hireDate: partial?.hireDate || "",
-    marks: partial?.marks || {}
-  };
-}
 
 function isWeekend(iso: string): boolean {
   const [y, m, d] = iso.split("-").map(Number);
@@ -70,54 +64,48 @@ function formatDayLabel(iso: string): string {
   return String(Number(d));
 }
 
-function formatRuDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString("ru-RU");
-}
-
 function defaultWorkMark(iso: string): string {
   return isWeekend(iso) ? "н" : "8";
 }
 
-function buildEmployeesFromContext(ctx: TimesheetContext): TimesheetEmployeeRow[] {
-  return ctx.staff.map((u) =>
-    newRow({
-      id: u.id,
-      fullName: u.fullName,
-      position: u.position,
-      hireDate: u.hireDate,
-      marks: Object.fromEntries(ctx.days.map((iso) => [iso, defaultWorkMark(iso)]))
-    })
-  );
-}
-
-function parseFilenameFromDisposition(header: string | null): string | null {
-  if (!header) return null;
-  const star = header.match(/filename\*=UTF-8''([^;]+)/i);
-  if (star?.[1]) {
-    try {
-      return decodeURIComponent(star[1]);
-    } catch {
-      return star[1];
-    }
-  }
-  const plain = header.match(/filename="([^"]+)"/i);
-  return plain?.[1] ?? null;
-}
-
 export function TimesheetTab({ token, apiUrl, fetchWithSession, warehouseId, section, warehouseName }: Props) {
+  const [view, setView] = useState<"editor" | "history">("editor");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "err">("ok");
-  const [exportBusy, setExportBusy] = useState(false);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [context, setContext] = useState<TimesheetContext | null>(null);
   const [organization, setOrganization] = useState("");
   const [department, setDepartment] = useState("");
   const [objectName, setObjectName] = useState("");
-  const [employees, setEmployees] = useState<TimesheetEmployeeRow[]>([]);
+  const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fullName, setFullName] = useState("");
+  const [position, setPosition] = useState("");
+  const [hireDate, setHireDate] = useState("");
+  const [marks, setMarks] = useState<Record<string, string>>({});
+  const [readOnly, setReadOnly] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [archives, setArchives] = useState<ArchiveItem[]>([]);
+  const loadedRef = useRef<string>("");
 
   const days = context?.days ?? [];
+  const isClosed = context?.isClosed === true;
+
+  const loadEmployees = useCallback(async () => {
+    if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID) return;
+    const params = new URLSearchParams({ warehouseId, section, month });
+    const res = await fetchWithSession(`${apiUrl}/api/timesheet/employees?${params}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { employees: EmployeeListItem[] };
+    setEmployees(data.employees);
+    setSelectedId((prev) => prev ?? data.employees[0]?.id ?? null);
+  }, [token, warehouseId, section, month, apiUrl, fetchWithSession]);
 
   const loadContext = useCallback(async () => {
     if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID) {
@@ -126,7 +114,6 @@ export function TimesheetTab({ token, apiUrl, fetchWithSession, warehouseId, sec
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setMessage("");
     try {
@@ -140,7 +127,11 @@ export function TimesheetTab({ token, apiUrl, fetchWithSession, warehouseId, sec
       setOrganization(data.organization);
       setDepartment(data.department);
       setObjectName(data.objectName);
-      setEmployees(buildEmployeesFromContext(data));
+      await loadEmployees();
+      const archRes = await fetchWithSession(`${apiUrl}/api/timesheet/archives?${new URLSearchParams({ warehouseId, section })}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (archRes.ok) setArchives((await archRes.json()) as ArchiveItem[]);
     } catch (e) {
       setMessage(`Не удалось подготовить табель: ${String(e)}`);
       setMessageTone("err");
@@ -149,113 +140,167 @@ export function TimesheetTab({ token, apiUrl, fetchWithSession, warehouseId, sec
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, section, month, apiUrl, fetchWithSession]);
+  }, [token, warehouseId, section, month, apiUrl, fetchWithSession, loadEmployees]);
+
+  const loadEmployeeDraft = useCallback(
+    async (staffUserId: string) => {
+      if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID) return;
+      const params = new URLSearchParams({ warehouseId, section, month });
+      const res = await fetchWithSession(`${apiUrl}/api/timesheet/draft/${staffUserId}?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setFullName(data.fullName || "");
+      setPosition(data.position || "");
+      setHireDate(data.hireDate || "");
+      setMarks((data.marks as Record<string, string>) || {});
+      setReadOnly(Boolean(data.readOnly));
+      setDirty(false);
+      loadedRef.current = `${staffUserId}:${month}`;
+    },
+    [token, warehouseId, section, month, apiUrl, fetchWithSession]
+  );
 
   useEffect(() => {
     void loadContext();
   }, [loadContext]);
 
-  const updateEmployee = useCallback((id: string, patch: Partial<TimesheetEmployeeRow>) => {
-    setEmployees((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
-  }, []);
+  useEffect(() => {
+    if (!selectedId) return;
+    void loadEmployeeDraft(selectedId);
+  }, [selectedId, loadEmployeeDraft]);
 
-  const updateMark = useCallback((id: string, iso: string, value: string) => {
-    setEmployees((prev) =>
-      prev.map((row) =>
-        row.id === id ? { ...row, marks: { ...row.marks, [iso]: value } } : row
-      )
-    );
-  }, []);
+  async function pickEmployee(id: string) {
+    if (dirty && selectedId && !window.confirm("Есть несохранённые изменения. Перейти без сохранения?")) return;
+    setSelectedId(id);
+  }
 
-  const fillWeekdays = useCallback(() => {
-    setEmployees((prev) =>
-      prev.map((row) => {
-        const marks = { ...row.marks };
-        for (const iso of days) {
-          marks[iso] = defaultWorkMark(iso);
-        }
-        return { ...row, marks };
-      })
-    );
-  }, [days]);
-
-  const exportTimesheet = useCallback(async () => {
-    if (!token || !warehouseId || warehouseId === ALL_OBJECTS_ID || !context) return;
-    const validEmployees = employees.filter((e) => e.fullName.trim());
-    if (!validEmployees.length) {
-      setMessage("Нет сотрудников для выгрузки");
+  async function saveEmployee() {
+    if (!token || !selectedId || readOnly) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/timesheet/draft/${selectedId}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouseId,
+          section,
+          month,
+          fullName,
+          position,
+          hireDate: hireDate || null,
+          marks
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      setDirty(false);
+      setMessage("Табель сотрудника сохранён");
+      setMessageTone("ok");
+      await loadEmployees();
+    } catch (e) {
+      setMessage(String(e));
       setMessageTone("err");
-      return;
+    } finally {
+      setSaving(false);
     }
+  }
 
+  async function exportTimesheet() {
+    if (!token || !context) return;
     setExportBusy(true);
     setMessage("");
     try {
       const res = await fetchWithSession(`${apiUrl}/api/timesheet/export`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           warehouseId,
           section,
           month: context.month,
           organization: organization.trim(),
           department: department.trim(),
-          objectName: objectName.trim(),
-          employees: validEmployees.map((e) => ({
-            fullName: e.fullName.trim(),
-            position: e.position.trim() || undefined,
-            hireDate: e.hireDate || undefined,
-            marks: e.marks
-          }))
+          objectName: objectName.trim()
         })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
+        throw new Error((err as { error?: string }).error || `HTTP ${res.status}`);
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download =
-        parseFilenameFromDisposition(res.headers.get("Content-Disposition")) ||
-        `Табель ${context.month}.xlsx`;
+      a.download = `Табель ${context.month}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
       setMessage("Табель сформирован и скачан");
       setMessageTone("ok");
     } catch (e) {
-      setMessage(`Не удалось сформировать табель: ${String(e)}`);
+      setMessage(String(e));
       setMessageTone("err");
     } finally {
       setExportBusy(false);
     }
-  }, [token, warehouseId, context, employees, organization, department, objectName, section, apiUrl, fetchWithSession]);
+  }
 
-  const periodSummary = useMemo(() => {
-    if (!context) return "";
-    return `${formatRuDate(context.periodFrom)} — ${formatRuDate(context.periodTo)}`;
-  }, [context]);
+  async function closeMonth() {
+    if (!token || !context || isClosed) return;
+    const unsaved = employees.filter((e) => !e.hasDraft);
+    const warn =
+      unsaved.length > 0
+        ? `Не сохранено сотрудников: ${unsaved.length}. Они попадут в архив с отметками по умолчанию. Закрыть месяц?`
+        : "Закрыть месяц? После закрытия правки будут недоступны.";
+    if (!window.confirm(warn)) return;
+    setCloseBusy(true);
+    setMessage("");
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/timesheet/close-month`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouseId,
+          section,
+          month,
+          organization: organization.trim(),
+          department: department.trim(),
+          objectName: objectName.trim()
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      setMessage("Месяц закрыт и сохранён в истории");
+      setMessageTone("ok");
+      await loadContext();
+    } catch (e) {
+      setMessage(String(e));
+      setMessageTone("err");
+    } finally {
+      setCloseBusy(false);
+    }
+  }
+
+  const periodSummary =
+    context ? `${formatRuDate(context.periodFrom)} — ${formatRuDate(context.periodTo)}` : "";
 
   if (!warehouseId || warehouseId === ALL_OBJECTS_ID) {
-    return (
-      <EmptyState title="Выберите объект" hint="Табель формируется для конкретного объекта склада" />
-    );
+    return <EmptyState title="Выберите объект" hint="Табель формируется для конкретного объекта склада" />;
   }
 
-  if (loading) {
-    return <LoadingState text="Подготовка табеля…" />;
-  }
+  if (loading) return <LoadingState text="Подготовка табеля…" />;
 
   return (
     <div className="timesheetTab">
       <PageHero
         icon="▤"
         title="Табель"
-        subtitle={`Формирование табеля учёта рабочего времени · ${section}`}
+        subtitle={`Учёт рабочего времени · ${section}`}
         stats={[
           { label: "Сотрудников", value: employees.length },
           { label: "Дней в периоде", value: days.length },
@@ -263,170 +308,233 @@ export function TimesheetTab({ token, apiUrl, fetchWithSession, warehouseId, sec
         ]}
       />
 
-      {message ? (
-        <ResultBanner text={message} tone={messageTone === "ok" ? "success" : "error"} />
-      ) : null}
+      {message ? <ResultBanner text={message} tone={messageTone === "ok" ? "success" : "error"} /> : null}
 
-      <div className="timesheetLayout">
-        <section className="timesheetPanel">
-          <h3 className="timesheetPanelTitle">Реквизиты табеля</h3>
-          <div className="timesheetFormGrid">
-            <label>
-              <span>Организация</span>
-              <input value={organization} onChange={(e) => setOrganization(e.target.value)} />
-            </label>
-            <label>
-              <span>Структурное подразделение</span>
-              <input value={department} onChange={(e) => setDepartment(e.target.value)} />
-            </label>
-            <label className="timesheetFormGrid--wide">
-              <span>Объект</span>
-              <input value={objectName} onChange={(e) => setObjectName(e.target.value)} />
-            </label>
-            <label>
-              <span>Отчётный месяц</span>
-              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-            </label>
-          </div>
-        </section>
+      <nav className="productivitySubTabs" aria-label="Режим табеля">
+        <button type="button" className={view === "editor" ? "active" : ""} onClick={() => setView("editor")}>
+          Заполнение
+        </button>
+        <button type="button" className={view === "history" ? "active" : ""} onClick={() => setView("history")}>
+          История
+        </button>
+      </nav>
 
-        <section className="timesheetPanel timesheetAutoCard">
-          <h3 className="timesheetPanelTitle">Заполняется автоматически</h3>
-          <dl className="timesheetAutoList">
-            <div>
-              <dt>Дата составления</dt>
-              <dd>{context ? formatRuDate(context.compileDate) : "—"}</dd>
-            </div>
-            <div>
-              <dt>Отчётный период</dt>
-              <dd>{periodSummary || "—"}</dd>
-            </div>
-            <div>
-              <dt>Ответственный за табельный учёт</dt>
-              <dd>
-                {context ? (
-                  <>
-                    <strong>{context.responsibleFullName}</strong>
-                    <span className="timesheetAutoMeta">
-                      {context.responsibleTitle} · подпись: {context.responsibleName}
-                    </span>
-                  </>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Лист Excel</dt>
-              <dd>{context?.sheetLabel || "—"}</dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-
-      <section className="timesheetPanel timesheetPanel--actions">
-        <div className="timesheetActions">
-          <button type="button" className="btn secondary" onClick={() => void loadContext()}>
-            Обновить данные
-          </button>
-          <button type="button" className="btn secondary" onClick={() => setEmployees((prev) => [...prev, newRow()])}>
-            Добавить строку
-          </button>
-          <button type="button" className="btn secondary" disabled={!employees.length} onClick={fillWeekdays}>
-            Заполнить будни: 8, выходные: н
-          </button>
-          <button type="button" className="btn primary" disabled={exportBusy || !employees.length} onClick={() => void exportTimesheet()}>
-            {exportBusy ? "Формирование…" : "Скачать Excel"}
-          </button>
-        </div>
-        <p className="timesheetHint">
-          Сотрудники, даты и ответственный подставляются из системы. Отметки: число часов (8), <code>н</code> — неявка,
-          <code>ОТ</code>, <code>Б</code>, <code>ДО</code>, <code>П</code>.
-        </p>
-      </section>
-
-      {!employees.length ? (
-        <EmptyState
-          title="Сотрудники не найдены"
-          hint="Назначьте пользователей на объект или добавьте строки вручную"
-        />
-      ) : (
-        <div className="timesheetTableCard">
-          <ResponsiveTableShell className="timesheetTableWrap">
-            <table className="timesheetTable">
+      {view === "history" ? (
+        <section className="fieldDocPanel">
+          <h3 className="fieldDocPanelTitle">Закрытые месяцы</h3>
+          {!archives.length ? (
+            <p className="muted">Архив пуст</p>
+          ) : (
+            <table className="fieldDocHistoryTable">
               <thead>
                 <tr>
-                  <th className="timesheetSticky timesheetNumCol">№</th>
-                  <th className="timesheetSticky timesheetNameCol">Фамилия И.О.</th>
-                  <th className="timesheetSticky timesheetPosCol">Должность</th>
-                  <th className="timesheetSticky timesheetDateCol">Дата приёма</th>
-                  {days.map((iso) => (
-                    <th
-                      key={iso}
-                      className={["timesheetDayCol", isWeekend(iso) ? "timesheetDayCol--weekend" : ""]
-                        .filter(Boolean)
-                        .join(" ")}
-                      title={iso}
-                    >
-                      <span className="timesheetDayNum">{formatDayLabel(iso)}</span>
-                      <span className="timesheetDayWd">{weekdayShort(iso)}</span>
-                    </th>
-                  ))}
-                  <th className="timesheetSticky timesheetOpsCol" />
+                  <th>Месяц</th>
+                  <th>Закрыл</th>
+                  <th>Когда</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
-                {employees.map((row, idx) => (
-                  <tr key={row.id}>
-                    <td className="timesheetSticky timesheetNumCol">{idx + 1}</td>
-                    <td className="timesheetSticky timesheetNameCol">
-                      <input
-                        className="timesheetCellInput"
-                        value={row.fullName}
-                        onChange={(e) => updateEmployee(row.id, { fullName: e.target.value })}
-                        placeholder="Фамилия Имя Отчество"
-                      />
-                    </td>
-                    <td className="timesheetSticky timesheetPosCol">
-                      <input
-                        className="timesheetCellInput"
-                        value={row.position}
-                        onChange={(e) => updateEmployee(row.id, { position: e.target.value })}
-                      />
-                    </td>
-                    <td className="timesheetSticky timesheetDateCol">
-                      <input
-                        className="timesheetCellInput"
-                        type="date"
-                        value={row.hireDate}
-                        onChange={(e) => updateEmployee(row.id, { hireDate: e.target.value })}
-                      />
-                    </td>
-                    {days.map((iso) => (
-                      <td key={iso} className={isWeekend(iso) ? "timesheetDayCol--weekend" : ""}>
-                        <input
-                          className="timesheetMarkInput"
-                          value={row.marks[iso] ?? ""}
-                          onChange={(e) => updateMark(row.id, iso, e.target.value)}
-                          placeholder="8"
-                        />
-                      </td>
-                    ))}
-                    <td className="timesheetSticky timesheetOpsCol">
+                {archives.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.month}</td>
+                    <td>{a.closedByName || "—"}</td>
+                    <td className="muted">{formatRuDateTime(a.closedAt)}</td>
+                    <td>
                       <button
                         type="button"
                         className="btn ghost small"
-                        onClick={() => setEmployees((prev) => prev.filter((e) => e.id !== row.id))}
+                        onClick={() =>
+                          void downloadApiExcel(
+                            fetchWithSession,
+                            `${apiUrl}/api/timesheet/archives/${a.month}/export?${new URLSearchParams({ warehouseId, section })}`,
+                            token!,
+                            `Табель ${a.month}.xlsx`
+                          )
+                        }
                       >
-                        Удалить
+                        Excel
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </ResponsiveTableShell>
-        </div>
+          )}
+        </section>
+      ) : (
+        <>
+          <div className="timesheetLayout">
+            <section className="timesheetPanel">
+              <h3 className="timesheetPanelTitle">Реквизиты табеля</h3>
+              <div className="timesheetFormGrid">
+                <label>
+                  <span>Организация</span>
+                  <input value={organization} disabled={isClosed} onChange={(e) => setOrganization(e.target.value)} />
+                </label>
+                <label>
+                  <span>Структурное подразделение</span>
+                  <input value={department} disabled={isClosed} onChange={(e) => setDepartment(e.target.value)} />
+                </label>
+                <label className="timesheetFormGrid--wide">
+                  <span>Объект</span>
+                  <input value={objectName} disabled={isClosed} onChange={(e) => setObjectName(e.target.value)} />
+                </label>
+                <label>
+                  <span>Отчётный месяц</span>
+                  <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+                </label>
+              </div>
+            </section>
+
+            <section className="timesheetPanel timesheetAutoCard">
+              <h3 className="timesheetPanelTitle">Автоматически</h3>
+              <dl className="timesheetAutoList">
+                <div>
+                  <dt>Дата составления</dt>
+                  <dd>{context ? formatRuDate(context.compileDate) : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Отчётный период</dt>
+                  <dd>{periodSummary || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Ответственный</dt>
+                  <dd>{context?.responsibleFullName || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Статус месяца</dt>
+                  <dd>{isClosed ? "Закрыт" : "Открыт"}</dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+
+          <section className="timesheetPanel timesheetPanel--actions">
+            <div className="timesheetActions">
+              {!isClosed ? (
+                <button type="button" className="btn primary" disabled={closeBusy} onClick={() => void closeMonth()}>
+                  {closeBusy ? "Закрытие…" : "Закрыть месяц"}
+                </button>
+              ) : null}
+              <button type="button" className="btn secondary" disabled={exportBusy} onClick={() => void exportTimesheet()}>
+                {exportBusy ? "Формирование…" : "Скачать Excel"}
+              </button>
+            </div>
+          </section>
+
+          <div className="timesheetEmployeeLayout">
+            <aside className="timesheetEmployeeList">
+              <h3>Сотрудники</h3>
+              <ul>
+                {employees.map((e) => (
+                  <li key={e.id}>
+                    <button
+                      type="button"
+                      className={selectedId === e.id ? "active" : ""}
+                      onClick={() => void pickEmployee(e.id)}
+                    >
+                      <span className="timesheetEmployeeName">{e.fullName}</span>
+                      <span className={`timesheetDraftBadge ${e.hasDraft ? "saved" : "pending"}`}>
+                        {e.hasDraft ? "сохранён" : "не сохранён"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+
+            <div className="timesheetEmployeeEditor">
+              {!selectedId ? (
+                <EmptyState title="Выберите сотрудника" />
+              ) : (
+                <>
+                  <div className="timesheetEmployeeHeader">
+                    <label>
+                      ФИО
+                      <input
+                        value={fullName}
+                        disabled={readOnly}
+                        onChange={(e) => {
+                          setFullName(e.target.value);
+                          setDirty(true);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Должность
+                      <input
+                        value={position}
+                        disabled={readOnly}
+                        onChange={(e) => {
+                          setPosition(e.target.value);
+                          setDirty(true);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Дата приёма
+                      <input
+                        type="date"
+                        value={hireDate}
+                        disabled={readOnly}
+                        onChange={(e) => {
+                          setHireDate(e.target.value);
+                          setDirty(true);
+                        }}
+                      />
+                    </label>
+                    {!readOnly ? (
+                      <button type="button" className="btn primary" disabled={saving} onClick={() => void saveEmployee()}>
+                        {saving ? "Сохранение…" : "Сохранить"}
+                      </button>
+                    ) : (
+                      <span className="chip neutral">Месяц закрыт — только просмотр</span>
+                    )}
+                  </div>
+
+                  <div className="timesheetTableCard">
+                    <ResponsiveTableShell className="timesheetTableWrap">
+                      <table className="timesheetTable timesheetTable--single">
+                        <thead>
+                          <tr>
+                            {days.map((iso) => (
+                              <th
+                                key={iso}
+                                className={isWeekend(iso) ? "timesheetDayCol--weekend" : ""}
+                                title={iso}
+                              >
+                                <span className="timesheetDayNum">{formatDayLabel(iso)}</span>
+                                <span className="timesheetDayWd">{weekdayShort(iso)}</span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            {days.map((iso) => (
+                              <td key={iso} className={isWeekend(iso) ? "timesheetDayCol--weekend" : ""}>
+                                <input
+                                  className="timesheetMarkInput"
+                                  value={marks[iso] ?? defaultWorkMark(iso)}
+                                  disabled={readOnly}
+                                  onChange={(e) => {
+                                    setMarks((prev) => ({ ...prev, [iso]: e.target.value }));
+                                    setDirty(true);
+                                  }}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </ResponsiveTableShell>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

@@ -34,7 +34,7 @@ const baseWarehouseOps = [
 ] as const;
 
 const productivityPerms = ["productivity.read", "productivity.write"] as const;
-const timesheetPerms = ["timesheet.read"] as const;
+const timesheetPerms = ["timesheet.read", "timesheet.write"] as const;
 
 const warehouseDeskExtras = [
   "feedback.manage",
@@ -81,7 +81,8 @@ const defaultRoles = [
       "materialReport.write",
       "productivity.read",
       "productivity.write",
-      "timesheet.read"
+      "timesheet.read",
+      "timesheet.write"
     ]
   },
   {
@@ -96,6 +97,7 @@ const defaultRoles = [
       "productivity.read",
       "productivity.write",
       "timesheet.read",
+      "timesheet.write",
       "issues.read",
       "issues.write",
       "documents.read",
@@ -123,6 +125,7 @@ const defaultRoles = [
       "productivity.read",
       "productivity.write",
       "timesheet.read",
+      "timesheet.write",
       "notifications.read",
       "notifications.write"
     ]

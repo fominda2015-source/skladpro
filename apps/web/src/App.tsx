@@ -61,7 +61,7 @@ import { LimitImportHistoryButton, LimitImportHistoryModal } from "./widgets/lim
 import { AdminIssueEditModal } from "./widgets/issues/AdminIssueEditModal";
 import { AdminMaintenancePanel } from "./widgets/admin/AdminMaintenancePanel";
 import { MaterialReportTab } from "./widgets/materialReport/MaterialReportTab";
-import { ProductivityTab } from "./widgets/productivity/ProductivityTab";
+import { ProductivityWorkspace } from "./widgets/productivity/ProductivityWorkspace";
 import { TimesheetTab } from "./widgets/timesheet/TimesheetTab";
 import { IssueLimitSubsectionModal } from "./widgets/issues/IssueLimitSubsectionModal";
 import { IssueLimitBatchModal, type IssueLimitBatchRow } from "./widgets/issues/IssueLimitBatchModal";
@@ -10938,7 +10938,7 @@ function App() {
             if (file) void uploadProductivityTemplate(file);
           }}
         >
-          <ProductivityTab
+          <ProductivityWorkspace
             key={productivityReloadKey}
             token={token}
             apiUrl={API_URL}

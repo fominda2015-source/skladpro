@@ -205,6 +205,11 @@ model User {
   materialWriteoffsActed  MaterialHolderWriteoff[] @relation("MaterialWriteoffActor")
   responsibleWarehouses   Warehouse[]          @relation("WarehouseResponsible")
   productivitySheetsCreated ProductivitySheet[] @relation("ProductivitySheetCreator")
+  workOrdersCreated       WorkOrderSheet[]         @relation("WorkOrderCreator")
+  workOrdersUpdated       WorkOrderSheet[]         @relation("WorkOrderUpdater")
+  dailyAttendanceCreated  DailyAttendanceSheet[]   @relation("DailyAttendanceCreator")
+  timesheetDraftsSaved    TimesheetEmployeeDraft[] @relation("TimesheetDraftSaver")
+  timesheetMonthsClosed   TimesheetMonthArchive[]  @relation("TimesheetMonthCloser")
   dataJobRuns             DataJobRun[]             @relation("DataJobRunTriggeredBy")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
@@ -290,6 +295,10 @@ model Warehouse {
   materialHolderWriteoffs MaterialHolderWriteoff[]
   toolConsumableIssues ToolConsumableIssue[]
   productivitySheets ProductivitySheet[]
+  workOrderSheets WorkOrderSheet[]
+  dailyAttendanceSheets DailyAttendanceSheet[]
+  timesheetEmployeeDrafts TimesheetEmployeeDraft[]
+  timesheetMonthArchives TimesheetMonthArchive[]
   auditLogs   AuditLog[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -1223,4 +1232,83 @@ model ProductivitySheet {
 
   @@unique([warehouseId, section])
   @@index([warehouseId, section, updatedAt])
+}
+
+/// Наряд-задание на объект по дню (СС/ЭОМ).
+model WorkOrderSheet {
+  id                 String        @id @default(cuid())
+  warehouseId        String
+  section            ObjectSection
+  workDate           DateTime      @db.Date
+  objectTitle        String
+  foremanName        String        @default("")
+  responsibleItrName String        @default("")
+  composedByItrName  String        @default("")
+  rows               Json          @default("[]")
+  completedWorksNote String        @default("")
+  createdById        String?
+  updatedById        String?
+  warehouse          Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy          User?         @relation("WorkOrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy          User?         @relation("WorkOrderUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([warehouseId, section, workDate])
+  @@index([warehouseId, section, workDate])
+}
+
+/// Дневной табель учёта (расстановка) по объекту.
+model DailyAttendanceSheet {
+  id          String        @id @default(cuid())
+  warehouseId String
+  section     ObjectSection
+  workDate    DateTime      @db.Date
+  objectTitle String
+  blocks      Json          @default("[]")
+  createdById String?
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy   User?         @relation("DailyAttendanceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([warehouseId, section, workDate])
+  @@index([warehouseId, section, workDate])
+}
+
+/// Черновик месячного табеля по одному сотруднику.
+model TimesheetEmployeeDraft {
+  id          String        @id @default(cuid())
+  warehouseId String
+  section     ObjectSection
+  month       String
+  staffUserId String
+  fullName    String
+  position    String        @default("")
+  hireDate    String?
+  marks       Json          @default("{}")
+  savedById   String?
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  savedBy     User?         @relation("TimesheetDraftSaver", fields: [savedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([warehouseId, section, month, staffUserId])
+  @@index([warehouseId, section, month])
+}
+
+/// Закрытый месяц табеля (архив).
+model TimesheetMonthArchive {
+  id          String        @id @default(cuid())
+  warehouseId String
+  section     ObjectSection
+  month       String
+  payload     Json
+  closedById  String?
+  closedAt    DateTime      @default(now())
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  closedBy    User?         @relation("TimesheetMonthCloser", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@unique([warehouseId, section, month])
+  @@index([warehouseId, section, closedAt])
 }

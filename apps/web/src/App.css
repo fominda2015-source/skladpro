@@ -10502,5 +10502,240 @@ button.whMenuItem:hover,
   .timesheetFormGrid {
     grid-template-columns: 1fr;
   }
+
+  .timesheetEmployeeLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.productivitySubTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.productivitySubTabs button {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.productivitySubTabs button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  font-weight: 600;
+}
+
+.fieldDocTab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fieldDocToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.fieldDocAutoChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.fieldDocActions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fieldDocPanel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.fieldDocPanelTitle,
+.fieldDocPanelHead h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.fieldDocPanelHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fieldDocWide {
+  display: block;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.fieldDocWide textarea,
+.fieldDocPanel input,
+.fieldDocPanel textarea,
+.fieldDocTable input {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.fieldDocBlockTitle {
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+}
+
+.fieldDocTableWrap {
+  overflow: auto;
+}
+
+.fieldDocTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.fieldDocTable th,
+.fieldDocTable td {
+  border: 1px solid var(--border);
+  padding: 6px;
+  vertical-align: top;
+}
+
+.fieldDocTable th {
+  background: color-mix(in srgb, var(--border) 35%, var(--card));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fieldDocHistoryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.fieldDocHistoryTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.fieldDocHistoryTable th,
+.fieldDocHistoryTable td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 6px;
+  text-align: left;
+}
+
+.linkishBtn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.timesheetEmployeeLayout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.timesheetEmployeeList {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.timesheetEmployeeList h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.timesheetEmployeeList ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timesheetEmployeeList button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timesheetEmployeeList button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+.timesheetEmployeeName {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.timesheetDraftBadge {
+  font-size: 11px;
+}
+
+.timesheetDraftBadge.saved {
+  color: var(--ok, #16a34a);
+}
+
+.timesheetDraftBadge.pending {
+  color: var(--warn, #d97706);
+}
+
+.timesheetEmployeeEditor {
+  min-width: 0;
+}
+
+.timesheetEmployeeHeader {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.timesheetTable--single .timesheetMarkInput {
+  min-width: 36px;
 }
 
