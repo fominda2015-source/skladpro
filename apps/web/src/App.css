@@ -10629,6 +10629,62 @@ button.whMenuItem:hover,
   white-space: nowrap;
 }
 
+.fieldDocTableWrap--attendance {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.fieldDocTable--attendance {
+  table-layout: fixed;
+}
+
+.fieldDocTable--attendance .fieldDocColNum {
+  width: 40px;
+  text-align: center;
+}
+
+.fieldDocTable--attendance .fieldDocColPos {
+  width: 22%;
+}
+
+.fieldDocTable--attendance .fieldDocColQty {
+  width: 72px;
+  text-align: center;
+}
+
+.fieldDocTable--attendance .fieldDocColQty input {
+  text-align: center;
+}
+
+.fieldDocTable--attendance .fieldDocColName {
+  width: auto;
+}
+
+.fieldDocTable--attendance td {
+  padding: 4px;
+}
+
+.fieldDocTable--attendance input {
+  margin-top: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  padding: 6px 8px;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.fieldDocTable--attendance input:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.fieldDocTable--attendance input:focus {
+  border-color: var(--accent);
+  background: var(--card);
+  outline: none;
+}
+
 .fieldDocHistoryFilters {
   display: flex;
   flex-wrap: wrap;

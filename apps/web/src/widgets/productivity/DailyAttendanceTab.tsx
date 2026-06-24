@@ -1,21 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ALL_OBJECTS_ID } from "../../app/constants";
 import { EmptyState, LoadingState, ResultBanner } from "../../shared/ui/StateViews";
 import { PageHero } from "../ui/PageHero";
 import { downloadApiExcel, formatRuDate, formatRuDateTime } from "./fieldDocUtils";
-
-export type DailyAttendanceRow = {
-  position: string;
-  normQty: number;
-  presentQty: number;
-  nameReason: string;
-};
-
-export type DailyAttendanceBlock = {
-  title: string;
-  organization: string;
-  rows: DailyAttendanceRow[];
-};
+import {
+  defaultDailyAttendanceBlocks,
+  normalizeDailyAttendanceBlocks,
+  type DailyAttendanceBlock,
+  type DailyAttendanceRow
+} from "./dailyAttendanceDefaults";
 
 type HistoryItem = {
   id: string;
@@ -24,18 +17,6 @@ type HistoryItem = {
   updatedAt: string;
   createdByName: string | null;
 };
-
-const ROW_LIMITS: Record<"SS" | "EOM", number[]> = {
-  EOM: [3, 9],
-  SS: [3, 4]
-};
-
-const EMPTY_ROW = (): DailyAttendanceRow => ({
-  position: "",
-  normQty: 1,
-  presentQty: 0,
-  nameReason: ""
-});
 
 type Props = {
   token: string | null;
@@ -59,7 +40,6 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
 
-  const limits = useMemo(() => ROW_LIMITS[section], [section]);
   const scopeQuery = `warehouseId=${encodeURIComponent(warehouseId)}&section=${encodeURIComponent(section)}`;
 
   const loadHistory = useCallback(async () => {
@@ -87,8 +67,13 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setObjectTitle(data.objectTitle || "");
-      const nextBlocks = (data.blocks as DailyAttendanceBlock[]) || [];
-      setBlocks(nextBlocks.length ? nextBlocks : []);
+      const nextBlocks = normalizeDailyAttendanceBlocks(
+        section,
+        (data.blocks as DailyAttendanceBlock[])?.length
+          ? (data.blocks as DailyAttendanceBlock[])
+          : defaultDailyAttendanceBlocks(section)
+      );
+      setBlocks(nextBlocks);
     } catch (e) {
       setMessage(`Не удалось загрузить табель: ${String(e)}`);
       setMessageTone("err");
@@ -116,13 +101,6 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
           ? { ...b, rows: b.rows.map((r, j) => (j === rowIdx ? { ...r, ...patch } : r)) }
           : b
       )
-    );
-  }
-
-  function addRow(blockIdx: number) {
-    const max = limits[blockIdx] ?? 10;
-    setBlocks((prev) =>
-      prev.map((b, i) => (i === blockIdx && b.rows.length < max ? { ...b, rows: [...b.rows, EMPTY_ROW()] } : b))
     );
   }
 
@@ -220,16 +198,9 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
               disabled={!canWrite}
               onChange={(e) => updateBlock(blockIdx, { title: e.target.value })}
             />
-            {canWrite ? (
-              <button
-                type="button"
-                className="btn ghost small"
-                disabled={block.rows.length >= (limits[blockIdx] ?? 10)}
-                onClick={() => addRow(blockIdx)}
-              >
-                + строка
-              </button>
-            ) : null}
+            <span className="muted" style={{ fontSize: 12 }}>
+              {block.rows.length} строк · как в Excel
+            </span>
           </div>
           <label>
             Организация
@@ -239,28 +210,29 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
               onChange={(e) => updateBlock(blockIdx, { organization: e.target.value })}
             />
           </label>
-          <div className="fieldDocTableWrap" style={{ marginTop: 8 }}>
-            <table className="fieldDocTable">
+          <div className="fieldDocTableWrap fieldDocTableWrap--attendance" style={{ marginTop: 8 }}>
+            <table className="fieldDocTable fieldDocTable--attendance">
               <thead>
                 <tr>
-                  <th>Должность</th>
-                  <th>Норма</th>
-                  <th>Присутствие</th>
-                  <th>ФИО / причины / меры</th>
-                  <th />
+                  <th className="fieldDocColNum">№</th>
+                  <th className="fieldDocColPos">Должность</th>
+                  <th className="fieldDocColQty">Норма</th>
+                  <th className="fieldDocColQty">Присутствие</th>
+                  <th className="fieldDocColName">ФИО / причины / меры</th>
                 </tr>
               </thead>
               <tbody>
                 {block.rows.map((row, rowIdx) => (
                   <tr key={`da-${blockIdx}-${rowIdx}`}>
-                    <td>
+                    <td className="fieldDocColNum muted">{rowIdx + 1}</td>
+                    <td className="fieldDocColPos">
                       <input
                         value={row.position}
                         disabled={!canWrite}
                         onChange={(e) => updateRow(blockIdx, rowIdx, { position: e.target.value })}
                       />
                     </td>
-                    <td>
+                    <td className="fieldDocColQty">
                       <input
                         type="number"
                         min={0}
@@ -269,7 +241,7 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
                         onChange={(e) => updateRow(blockIdx, rowIdx, { normQty: Number(e.target.value) || 0 })}
                       />
                     </td>
-                    <td>
+                    <td className="fieldDocColQty">
                       <input
                         type="number"
                         min={0}
@@ -278,25 +250,12 @@ export function DailyAttendanceTab({ token, apiUrl, fetchWithSession, warehouseI
                         onChange={(e) => updateRow(blockIdx, rowIdx, { presentQty: Number(e.target.value) || 0 })}
                       />
                     </td>
-                    <td>
+                    <td className="fieldDocColName">
                       <input
                         value={row.nameReason}
                         disabled={!canWrite}
                         onChange={(e) => updateRow(blockIdx, rowIdx, { nameReason: e.target.value })}
                       />
-                    </td>
-                    <td>
-                      {canWrite && block.rows.length > 0 ? (
-                        <button
-                          type="button"
-                          className="btn ghost small"
-                          onClick={() =>
-                            updateBlock(blockIdx, { rows: block.rows.filter((_, j) => j !== rowIdx) })
-                          }
-                        >
-                          ×
-                        </button>
-                      ) : null}
                     </td>
                   </tr>
                 ))}

@@ -5,6 +5,7 @@ import {
   buildDailyAttendanceObjectTitle,
   defaultDailyAttendanceBlocks,
   loadFieldDocWarehouse,
+  normalizeDailyAttendanceBlocks,
   parseDailyAttendanceBlocks,
   parseIsoDate,
   type DailyAttendanceBlock
@@ -155,6 +156,7 @@ dailyAttendanceRouter.get("/:date/export", async (req: AuthedRequest, res) => {
       warehouseName: warehouse.name,
       blocks: parseDailyAttendanceBlocks(row.blocks) as DailyAttendanceBlock[]
     };
+    input.blocks = normalizeDailyAttendanceBlocks(q.data.section, input.blocks);
     const buf = await buildDailyAttendanceWorkbook(input);
     const fileName = buildDailyAttendanceFileName(input);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -197,7 +199,10 @@ dailyAttendanceRouter.get("/:date", async (req: AuthedRequest, res) => {
       id: row.id,
       workDate: dateParsed.data,
       objectTitle: row.objectTitle,
-      blocks: parseDailyAttendanceBlocks(row.blocks),
+      blocks: normalizeDailyAttendanceBlocks(
+        q.data.section,
+        parseDailyAttendanceBlocks(row.blocks)
+      ),
       updatedAt: row.updatedAt.toISOString(),
       createdByName: row.createdBy?.fullName ?? null
     });

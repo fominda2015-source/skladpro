@@ -63,17 +63,46 @@ export function buildDailyAttendanceObjectTitle(
   return `${sec} Расстановка по объекту: ${suffix}`;
 }
 
+export function emptyDailyAttendanceRow(): DailyAttendanceRow {
+  return { position: "", normQty: 1, presentQty: 0, nameReason: "" };
+}
+
 export function defaultDailyAttendanceBlocks(section: ObjectSection): DailyAttendanceBlock[] {
-  if (section === "EOM") {
-    return [
-      { title: "ИТР", organization: "", rows: [] },
-      { title: "ПНР", organization: "", rows: [] }
-    ];
-  }
-  return [
-    { title: "ИТР", organization: "", rows: [] },
-    { title: "Почасовая оплата", organization: "", rows: [] }
-  ];
+  const limits = dailyAttendanceRowLimits(section);
+  const titles =
+    section === "EOM"
+      ? [
+          { title: "ИТР", organization: "" },
+          { title: "ПНР", organization: "" }
+        ]
+      : [
+          { title: "ИТР", organization: "" },
+          { title: "Почасовая оплата", organization: "" }
+        ];
+  return titles.map((block, i) => ({
+    ...block,
+    rows: Array.from({ length: limits[i] ?? 3 }, () => emptyDailyAttendanceRow())
+  }));
+}
+
+/** Дополняет блоки до числа строк шаблона (отдельная ячейка на каждую позицию). */
+export function normalizeDailyAttendanceBlocks(
+  section: ObjectSection,
+  blocks: DailyAttendanceBlock[]
+): DailyAttendanceBlock[] {
+  const defaults = defaultDailyAttendanceBlocks(section);
+  const limits = dailyAttendanceRowLimits(section);
+  return defaults.map((def, i) => {
+    const src = blocks[i];
+    const limit = limits[i] ?? def.rows.length;
+    const rows = [...(src?.rows ?? [])];
+    while (rows.length < limit) rows.push(emptyDailyAttendanceRow());
+    return {
+      title: src?.title?.trim() || def.title,
+      organization: src?.organization ?? "",
+      rows: rows.slice(0, limit)
+    };
+  });
 }
 
 export function dailyAttendanceRowLimits(section: ObjectSection): number[] {
