@@ -1669,6 +1669,16 @@ function App() {
     return rows;
   }, [stocks, activeObjectId]);
 
+  const warehouseDuplicateArticleGroups = useMemo(() => {
+    const byArticle = new Map<string, number>();
+    for (const row of warehouseStockRows) {
+      const m = row.materialName.match(/\b\d{4,}\b/);
+      if (!m) continue;
+      byArticle.set(m[0]!, (byArticle.get(m[0]!) || 0) + 1);
+    }
+    return [...byArticle.values()].filter((n) => n > 1).length;
+  }, [warehouseStockRows]);
+
   const receiptAcceptedWithMaterialCount = useMemo(
     () =>
       receiptRequests.reduce((n, r) => {
@@ -2276,7 +2286,7 @@ function App() {
     if (!token || !isAdmin) return false;
     if (
       !window.confirm(
-        "Восстановить остатки на складе по уже принятым позициям заявок?\n\nБудут созданы недостающие приходы и остатки (если приёмка прошла без склада или заявка была закрыта вручную)."
+        "Объединить дубликаты карточек (один артикул — одна строка) и восстановить недостающие остатки по приёмкам?\n\nОстанется название из узла лимита (колонка O), остатки суммируются."
       )
     ) {
       return false;
@@ -2310,17 +2320,31 @@ function App() {
       const data = (await res.json()) as {
         quantityAdded?: number;
         details?: Array<{ materialName: string; addedQty: number }>;
+        merged?: {
+          materialsMerged?: number;
+          quantityMoved?: number;
+          details?: Array<{ keptName: string; quantityMoved: number; mergedIds: string[] }>;
+        };
       };
       const added = Number(data.quantityAdded ?? 0);
+      const mergedCount = Number(data.merged?.materialsMerged ?? 0);
+      const moved = Number(data.merged?.quantityMoved ?? 0);
+      const mergeHint =
+        mergedCount > 0
+          ? `Объединено карточек: ${mergedCount}, перенесено ${moved.toLocaleString("ru-RU")}`
+          : "";
       const names = (data.details ?? [])
         .filter((d) => d.addedQty > 0)
         .slice(0, 3)
         .map((d) => `${d.materialName} (+${d.addedQty})`)
         .join("; ");
+      const parts = [mergeHint, added > 0 ? `Восстановлено: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}` : ""].filter(
+        Boolean
+      );
       setOpsMessage(
-        added > 0
-          ? `Восстановлено на склад: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}`
-          : "Недостающих остатков не найдено — проверьте карточки материалов и повторите обычную приёмку"
+        parts.length
+          ? parts.join(" · ")
+          : "Дубликатов и недостающих остатков не найдено"
       );
       await loadStocks(q, objectSectionFilter, undefined, wh || undefined);
       return true;
@@ -8083,6 +8107,12 @@ function App() {
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">
+          {isAdmin && !loadingStocks && warehouseDuplicateArticleGroups > 0 ? (
+            <ResultBanner
+              text={`На складе ${warehouseDuplicateArticleGroups} групп(ы) с одинаковым артикулом и разными названиями — из‑за замены в лимите (O) и старого имени заявки (N). Нажмите кнопку ниже, чтобы объединить в одну карточку с именем из лимита.`}
+              tone="conflict"
+            />
+          ) : null}
           {isAdmin &&
           !loadingStocks &&
           warehouseStockRows.length === 0 &&
@@ -8094,8 +8124,8 @@ function App() {
           ) : null}
           {isAdmin &&
           !loadingStocks &&
-          warehouseStockRows.length === 0 &&
-          receiptAcceptedWithMaterialCount > 0 ? (
+          (warehouseDuplicateArticleGroups > 0 ||
+            (warehouseStockRows.length === 0 && receiptAcceptedWithMaterialCount > 0)) ? (
             <div style={{ marginBottom: 12 }}>
               <button
                 type="button"
@@ -8103,7 +8133,11 @@ function App() {
                 disabled={reconcileStockLoading}
                 onClick={() => void reconcileWarehouseStockFromReceipts()}
               >
-                {reconcileStockLoading ? "Восстановление…" : "Восстановить остатки из приёмок"}
+                {reconcileStockLoading
+                  ? "Обработка…"
+                  : warehouseDuplicateArticleGroups > 0
+                    ? "Объединить дубликаты и выровнять склад"
+                    : "Восстановить остатки из приёмок"}
               </button>
             </div>
           ) : null}

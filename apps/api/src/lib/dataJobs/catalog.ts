@@ -2,6 +2,7 @@ import { backfillIssueResponsibleNames } from "../issueResponsibleBackfill.js";
 import { rebuildAllPricing } from "../pricingRebuild.js";
 import { repairOrphanedSectionScopes } from "../objectAccess.js";
 import { reconcileReceiptWarehouseStock } from "../receiptStockReconcile.js";
+import { mergeDuplicateWarehouseMaterialsByArticle } from "../receiptWarehouseMaterial.js";
 import type { DataRebuildJob } from "./types.js";
 
 export const DATA_JOB_CATEGORY_LABELS: Record<DataRebuildJob["category"], string> = {
@@ -48,10 +49,14 @@ export const DATA_REBUILD_JOBS: DataRebuildJob[] = [
     id: "reconcile.receipt-stock",
     title: "Восстановить остатки по принятым заявкам",
     description:
-      "Создаёт недостающие остатки на складе по позициям с acceptedQty > 0, если приход на склад не был оформлен. Безопасно повторять.",
+      "Сливает дубликаты карточек по артикулу и создаёт недостающие остатки по acceptedQty. Безопасно повторять.",
     category: "receipts",
-    deployVersion: "20260602_receipt_stock_v1",
-    run: async () => reconcileReceiptWarehouseStock()
+    deployVersion: "20260602_receipt_stock_v2",
+    run: async () => {
+      const merged = await mergeDuplicateWarehouseMaterialsByArticle();
+      const stock = await reconcileReceiptWarehouseStock();
+      return { merged, stock };
+    }
   }
 ];
 

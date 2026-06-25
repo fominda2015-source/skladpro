@@ -71,6 +71,7 @@ import {
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 import { reconcileReceiptWarehouseStock } from "../lib/receiptStockReconcile.js";
+import { consolidateReceiptWarehouseMaterial, mergeDuplicateWarehouseMaterialsByArticle } from "../lib/receiptWarehouseMaterial.js";
 
 async function persistReceiptAcceptScans(
   files: Express.Multer.File[],
@@ -1625,6 +1626,13 @@ receiptRequestsRouter.post(
           if (!materialId) {
             throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
           }
+          materialId = await consolidateReceiptWarehouseMaterial(tx, {
+            materialId,
+            item: it,
+            limitNodeId: m.limitNodeId ?? it.limitNodeId ?? null,
+            warehouseId: row.warehouseId,
+            section: row.section
+          });
         }
         resolved.push({
           item: it,
@@ -2634,22 +2642,28 @@ receiptRequestsRouter.post(
       }
     }
     try {
+      const merged = await mergeDuplicateWarehouseMaterialsByArticle({
+        warehouseId: parsed.data.warehouseId,
+        section: parsed.data.section,
+        dryRun: parsed.data.dryRun === true
+      });
       const result = await reconcileReceiptWarehouseStock({
         warehouseId: parsed.data.warehouseId,
         section: parsed.data.section,
         dryRun: parsed.data.dryRun === true
       });
+      const payload = { merged, ...result };
       if (!parsed.data.dryRun) {
         await recordAudit({
           userId: req.user!.userId,
           action: "RECEIPT_STOCK_RECONCILE",
           entityType: "Stock",
           entityId: parsed.data.warehouseId ?? "all",
-          summary: `Восстановление остатков по приёмкам: +${result.quantityAdded}, материалов ${result.details.length}`,
-          after: result
+          summary: `Склад: слито дубликатов ${merged.materialsMerged}, восстановлено +${result.quantityAdded}`,
+          after: payload
         });
       }
-      return res.json(result);
+      return res.json(payload);
     } catch (error) {
       const mapped = handlePrismaError(error);
       return res.status(mapped.status).json(mapped.body);
