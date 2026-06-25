@@ -634,9 +634,11 @@ receiptRequestsRouter.post(
       });
     }
 
+    const sourceFileName = decodeUploadedOriginalName(req.file.originalname);
+
     let parsedSheet;
     try {
-      parsedSheet = parseOrderSheet(req.file.buffer);
+      parsedSheet = parseOrderSheet(req.file.buffer, sourceFileName);
     } catch (e) {
       console.error("parseOrderSheet failed:", e);
       return res.status(400).json({
@@ -654,7 +656,14 @@ receiptRequestsRouter.post(
       });
     }
 
-    const sourceFileName = decodeUploadedOriginalName(req.file.originalname);
+    if (!orderNumber?.trim()) {
+      return res.status(400).json({
+        error: "ORDER_NUMBER_REQUIRED",
+        message:
+          "В файле не найден номер заявки (поле «Номер заявки» в Excel или число в имени файла, например order-150423.xlsx)."
+      });
+    }
+
     const objectWhere = { warehouseId: parsed.data.warehouseId };
 
     let receiptNumber: string;
@@ -663,7 +672,14 @@ receiptRequestsRouter.post(
       const allocated = await allocateReceiptRequestNumber(parsed.data.warehouseId, orderNumber);
       receiptNumber = allocated.number;
       externalOrderNumber = allocated.externalOrderNumber;
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.message === "ORDER_NUMBER_REQUIRED") {
+        return res.status(400).json({
+          error: "ORDER_NUMBER_REQUIRED",
+          message:
+            "В файле не найден номер заявки (поле «Номер заявки» в Excel или число в имени файла, например order-150423.xlsx)."
+        });
+      }
       return res.status(500).json({ error: "Не удалось выделить номер заявки" });
     }
 

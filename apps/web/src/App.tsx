@@ -4026,7 +4026,7 @@ function App() {
       detectedOrderNumber?: string | null;
     };
     const orderHint =
-      created.externalOrderNumber && created.externalOrderNumber !== created.number.replace(/^ORD-/, "").split("-")[0]
+      created.externalOrderNumber && created.externalOrderNumber !== created.number
         ? ` · номер в файле: ${created.externalOrderNumber}`
         : created.detectedOrderNumber && !created.externalOrderNumber
           ? ` · номер в файле: ${created.detectedOrderNumber}`
@@ -8761,7 +8761,7 @@ function App() {
                   </td>
                   <td>
                     <strong>{row.number}</strong>
-                    {row.externalOrderNumber && row.number !== `ORD-${row.externalOrderNumber}` ? (
+                    {row.externalOrderNumber && row.externalOrderNumber !== row.number ? (
                       <div className="muted" style={{ fontSize: 11 }}>
                         № в файле: {row.externalOrderNumber}
                       </div>

@@ -1,12 +1,5 @@
 import { prisma } from "./prisma.js";
 
-function parseOrdSeq(number: string): number | null {
-  const m = number.match(/^ORD-0*(\d+)(?:-\d+)?$/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
-}
-
 async function receiptNumberTaken(warehouseId: string, number: string): Promise<boolean> {
   const row = await prisma.receiptRequest.findFirst({
     where: { warehouseId, number },
@@ -16,45 +9,26 @@ async function receiptNumberTaken(warehouseId: string, number: string): Promise<
 }
 
 /**
- * Уникальный номер заявки на объекте. Номер из Excel — в externalOrderNumber (может повторяться).
+ * Номер заявки на объекте — из Excel (поле «Номер заявки») или имени файла.
+ * При коллизии: 150423-2, 150423-3 …
  */
 export async function allocateReceiptRequestNumber(
   warehouseId: string,
   orderNumberFromSheet?: string | null
 ): Promise<{ number: string; externalOrderNumber: string | null }> {
   const ext = orderNumberFromSheet?.trim() || null;
-
-  if (ext) {
-    const base = `ORD-${ext}`;
-    if (!(await receiptNumberTaken(warehouseId, base))) {
-      return { number: base, externalOrderNumber: ext };
-    }
-    for (let suffix = 2; suffix < 10_000; suffix += 1) {
-      const candidate = `${base}-${suffix}`;
-      if (!(await receiptNumberTaken(warehouseId, candidate))) {
-        return { number: candidate, externalOrderNumber: ext };
-      }
-    }
-    throw new Error("Не удалось выделить уникальный номер заявки");
+  if (!ext) {
+    throw new Error("ORDER_NUMBER_REQUIRED");
   }
 
-  const rows = await prisma.receiptRequest.findMany({
-    where: { warehouseId },
-    select: { number: true }
-  });
-  let maxSeq = 0;
-  for (const r of rows) {
-    const seq = parseOrdSeq(r.number);
-    if (seq != null) maxSeq = Math.max(maxSeq, seq);
+  if (!(await receiptNumberTaken(warehouseId, ext))) {
+    return { number: ext, externalOrderNumber: ext };
   }
-
-  for (let seq = maxSeq + 1; seq < maxSeq + 10_000; seq += 1) {
-    for (const candidate of [`ORD-${String(seq).padStart(5, "0")}`, `ORD-${seq}`]) {
-      if (!(await receiptNumberTaken(warehouseId, candidate))) {
-        return { number: candidate, externalOrderNumber: null };
-      }
+  for (let suffix = 2; suffix < 10_000; suffix += 1) {
+    const candidate = `${ext}-${suffix}`;
+    if (!(await receiptNumberTaken(warehouseId, candidate))) {
+      return { number: candidate, externalOrderNumber: ext };
     }
   }
-
   throw new Error("Не удалось выделить уникальный номер заявки");
 }

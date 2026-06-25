@@ -41,6 +41,73 @@ export type ParsedOrderSheet = {
   projectTitle?: string;
 };
 
+/** Номер из имени файла: order-150423.xlsx → 150423 */
+export function parseOrderNumberFromFileName(fileName: string): string | undefined {
+  const base = String(fileName || "").replace(/\.[^.]+$/i, "").trim();
+  if (!base) return undefined;
+  const explicit = base.match(/order[-_]?(\d{3,})/i);
+  if (explicit?.[1]) return explicit[1];
+  const tail = base.match(/(\d{4,})$/);
+  return tail?.[1];
+}
+
+function isOrderNumberBelowLabel(v: string): boolean {
+  return /^\d{3,}$/.test(normCell(v));
+}
+
+function isOrderNumberBesideLabel(v: string): boolean {
+  return /^\d{4,}$/.test(normCell(v));
+}
+
+/** Ищет «Номер заявки» в шапке: сначала ячейка снизу, затем справа. */
+export function scanOrderNumberFromSheet(
+  getCell: (r: number, c: number) => string,
+  maxRow: number,
+  maxCol: number
+): string | undefined {
+  for (let r = 0; r <= Math.min(maxRow, 60); r += 1) {
+    for (let c = 0; c <= Math.min(maxCol, 20); c += 1) {
+      const label = getCell(r, c).toLowerCase();
+      if (!label.includes("номер заявки")) continue;
+
+      const below = getCell(r + 1, c);
+      if (isOrderNumberBelowLabel(below)) return normCell(below);
+
+      for (let rr = r; rr <= Math.min(r + 1, maxRow); rr += 1) {
+        for (let cc = c + 1; cc <= Math.min(maxCol, c + 12); cc += 1) {
+          const v = getCell(rr, cc);
+          if (isOrderNumberBesideLabel(v)) return normCell(v);
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function scanProjectTitle(
+  getCell: (r: number, c: number) => string,
+  maxRow: number,
+  maxCol: number
+): string | undefined {
+  let projectTitle: string | undefined;
+  for (let r = 0; r <= Math.min(maxRow, 60); r += 1) {
+    for (let c = 0; c <= Math.min(maxCol, 12); c += 1) {
+      if (projectTitle) break;
+      const label = getCell(r, c).toLowerCase();
+      if (label === "проект") {
+        for (let rr = r; rr <= Math.min(r + 1, maxRow); rr += 1) {
+          const v = getCell(rr, c) || getCell(rr, c + 1) || getCell(rr + 1, c) || getCell(rr + 1, c + 1);
+          if (v && v.toLowerCase() !== "проект") {
+            projectTitle = v;
+            break;
+          }
+        }
+      }
+    }
+  }
+  return projectTitle;
+}
+
 function mapProductCategory(raw: string): ReceiptItemCategory | null {
   const s = normNameKey(raw);
   if (!s) return null;
@@ -130,34 +197,8 @@ function parseOrderV2(ws: xlsx.WorkSheet): ParsedOrderSheet | null {
   const range = xlsx.utils.decode_range(ws["!ref"]);
   const getCell = (r: number, c: number) => normCell(ws[xlsx.utils.encode_cell({ r, c })]?.v);
 
-  let orderNumber: string | undefined;
-  let projectTitle: string | undefined;
-  for (let r = 0; r <= Math.min(range.e.r, 60); r += 1) {
-    for (let c = 0; c <= Math.min(range.e.c, 12); c += 1) {
-      const label = getCell(r, c).toLowerCase();
-      if (!orderNumber && label.includes("номер заявки")) {
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          for (let cc = c + 1; cc <= Math.min(range.e.c, c + 8); cc += 1) {
-            const v = getCell(rr, cc);
-            if (/^\d{2,}$/.test(v)) {
-              orderNumber = v;
-              break;
-            }
-          }
-          if (orderNumber) break;
-        }
-      }
-      if (!projectTitle && label === "проект") {
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          const v = getCell(rr, c) || getCell(rr, c + 1) || getCell(rr + 1, c) || getCell(rr + 1, c + 1);
-          if (v && v.toLowerCase() !== "проект") {
-            projectTitle = v;
-            break;
-          }
-        }
-      }
-    }
-  }
+  const orderNumber = scanOrderNumberFromSheet(getCell, range.e.r, range.e.c);
+  const projectTitle = scanProjectTitle(getCell, range.e.r, range.e.c);
 
   let headerRow = -1;
   for (let r = 0; r <= range.e.r; r += 1) {
@@ -216,34 +257,8 @@ function parseLegacy(ws: xlsx.WorkSheet): ParsedOrderSheet {
   const range = xlsx.utils.decode_range(ws["!ref"]!);
   const getCell = (r: number, c: number) => normCell(ws[xlsx.utils.encode_cell({ r, c })]?.v);
 
-  let orderNumber: string | undefined;
-  let projectTitle: string | undefined;
-  for (let r = 0; r <= Math.min(range.e.r, 60); r += 1) {
-    for (let c = 0; c <= Math.min(range.e.c, 12); c += 1) {
-      const label = getCell(r, c).toLowerCase();
-      if (!orderNumber && label.includes("номер заявки")) {
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          for (let cc = c + 1; cc <= Math.min(range.e.c, c + 8); cc += 1) {
-            const v = getCell(rr, cc);
-            if (/^\d{2,}$/.test(v)) {
-              orderNumber = v;
-              break;
-            }
-          }
-          if (orderNumber) break;
-        }
-      }
-      if (!projectTitle && label === "проект") {
-        for (let rr = r; rr <= Math.min(r + 1, range.e.r); rr += 1) {
-          const v = getCell(rr, c) || getCell(rr, c + 1) || getCell(rr + 1, c) || getCell(rr + 1, c + 1);
-          if (v && v.toLowerCase() !== "проект") {
-            projectTitle = v;
-            break;
-          }
-        }
-      }
-    }
-  }
+  const orderNumber = scanOrderNumberFromSheet(getCell, range.e.r, range.e.c);
+  const projectTitle = scanProjectTitle(getCell, range.e.r, range.e.c);
 
   let headerRow = -1;
   let colName = -1;
@@ -308,11 +323,15 @@ function parseLegacy(ws: xlsx.WorkSheet): ParsedOrderSheet {
   return { format: "legacy", items, orderNumber, projectTitle };
 }
 
-export function parseOrderSheet(file: Buffer): ParsedOrderSheet {
+export function parseOrderSheet(file: Buffer, fileName?: string): ParsedOrderSheet {
   const wb = xlsx.read(file, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return { format: "legacy", items: [] };
   const v2 = parseOrderV2(ws);
-  if (v2) return v2;
-  return parseLegacy(ws);
+  const parsed = v2 ?? parseLegacy(ws);
+  if (!parsed.orderNumber && fileName) {
+    const fromName = parseOrderNumberFromFileName(fileName);
+    if (fromName) parsed.orderNumber = fromName;
+  }
+  return parsed;
 }
