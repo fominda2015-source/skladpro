@@ -226,13 +226,11 @@ async function syncReceiptItemsToLimitTemplate(
       nameAlertNote: meta.nameAlertNote
     });
     if (sync.limitNodeId) {
-      const mappedMaterialId = await resolveMaterialIdForLimitNode(tx, sync.limitNodeId);
       await tx.receiptRequestItem.update({
         where: { id: item.id },
         data: {
           limitNodeId: sync.limitNodeId,
-          limitNameRenamed: sync.limitNameRenamed,
-          ...(mappedMaterialId ? { mappedMaterialId } : {})
+          limitNameRenamed: sync.limitNameRenamed
         }
       });
       synced += 1;
@@ -369,17 +367,29 @@ async function resolveReceiptTargetMaterialId(
     return materialId;
   };
 
+  // Карточка склада — по названию из строки заявки, не по чужому materialId узла лимита.
+  if (mapping.materialId) return applyCatalogFields(mapping.materialId);
+
+  const cardName = item.sourceName.trim();
+  if (cardName) {
+    const fromName = await findOrCreateMaterial(
+      tx,
+      cardName,
+      item.sourceUnit || "шт",
+      itemCategory,
+      unitPrice
+    );
+    if (fromName) return applyCatalogFields(fromName);
+  }
+
+  if (item.mappedMaterialId) return applyCatalogFields(item.mappedMaterialId);
+
   const bindLimitNodeId = mapping.limitNodeId ?? item.limitNodeId ?? null;
   if (bindLimitNodeId) {
     const fromNode = await resolveMaterialIdForLimitNode(tx, bindLimitNodeId);
     if (fromNode) return applyCatalogFields(fromNode);
   }
-  if (mapping.materialId) return applyCatalogFields(mapping.materialId);
-  if (item.mappedMaterialId) return applyCatalogFields(item.mappedMaterialId);
-  const cardName = item.sourceName.trim();
-  if (cardName) {
-    return findOrCreateMaterial(tx, cardName, item.sourceUnit || "шт", itemCategory, unitPrice);
-  }
+
   const legacyName = mapping.newMaterialName?.trim();
   if (legacyName) {
     return findOrCreateMaterial(tx, legacyName, item.sourceUnit || "шт", itemCategory, unitPrice);

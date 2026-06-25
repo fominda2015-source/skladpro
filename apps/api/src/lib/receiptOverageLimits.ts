@@ -1,6 +1,5 @@
 import type { ObjectSection } from "@prisma/client";
 import { analyzeCatalogNames } from "./parseOrderSheet.js";
-import { materialNamesEquivalent } from "./receiptMaterialResolve.js";
 import { syncReceiptItemToLimitTemplate } from "./receiptLimitSync.js";
 import { appendBindingLimitPicks } from "./materialLimitBindings.js";
 import { prisma } from "./prisma.js";
@@ -241,56 +240,19 @@ export async function resolveMaterialIdForLimitNode(tx: Tx, limitNodeId: string)
     select: { materialId: true, materialName: true, title: true, unit: true, nodeType: true }
   });
   if (!node || node.nodeType !== "MATERIAL") return null;
-
-  const nodeName = String(node.materialName || node.title || "").trim();
+  if (node.materialId) return node.materialId;
+  const name = String(node.materialName || node.title || "").trim();
+  if (!name) return null;
   const unit = String(node.unit || "шт").trim() || "шт";
-
-  if (node.materialId) {
-    const mat = await tx.material.findUnique({
-      where: { id: node.materialId },
-      select: { id: true, name: true, unit: true }
-    });
-    if (mat && nodeName && !materialNamesEquivalent(mat.name, nodeName)) {
-      const byNodeName = await tx.material.findFirst({
-        where: {
-          name: { equals: nodeName, mode: "insensitive" },
-          unit: { equals: mat.unit || unit, mode: "insensitive" }
-        },
-        select: { id: true }
-      });
-      if (byNodeName && byNodeName.id !== mat.id) {
-        await tx.objectLimitNode.update({
-          where: { id: limitNodeId },
-          data: { materialId: byNodeName.id }
-        });
-        return byNodeName.id;
-      }
-      const conflict = await tx.material.findFirst({
-        where: {
-          name: { equals: nodeName, mode: "insensitive" },
-          id: { not: mat.id }
-        },
-        select: { id: true }
-      });
-      if (!conflict) {
-        await tx.material.update({
-          where: { id: mat.id },
-          data: { name: nodeName }
-        });
-      }
-    }
-    return node.materialId;
-  }
-
-  if (!nodeName) return null;
   const existing = await tx.material.findFirst({
     where: {
-      name: { equals: nodeName, mode: "insensitive" },
+      name: { equals: name, mode: "insensitive" },
       unit: { equals: unit, mode: "insensitive" }
-    }
+    },
+    select: { id: true }
   });
   if (existing) return existing.id;
-  const created = await tx.material.create({ data: { name: nodeName, unit } });
+  const created = await tx.material.create({ data: { name, unit } });
   return created.id;
 }
 
