@@ -182,6 +182,13 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
           <h2 className="whTitle">Склад</h2>
           <p className="whSubtitle">
             {sectionLabel} · показано {rows.length} из {totalVisible}
+            {totalVisible > rows.length ? (
+              <span className="warnText">
+                {" "}
+                · скрыто фильтрами: {totalVisible - rows.length} (вкладка «{warehouseStockKindTabLabel(kindTab)}», поиск
+                или «Фильтры»)
+              </span>
+            ) : null}
             {lowCount > 0 ? (
               <>
                 {" "}

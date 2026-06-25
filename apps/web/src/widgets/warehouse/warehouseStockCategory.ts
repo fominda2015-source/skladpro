@@ -34,5 +34,6 @@ export function warehouseStockRowMatchesTab(
   if ((row.materialKind ?? "MATERIAL") !== "MATERIAL") return false;
   const cat = String(row.materialCategory ?? "").toUpperCase();
   if (tab === "CABLE") return cat === "CABLE";
-  return cat !== "CABLE";
+  if (tab === "EQUIPMENT") return cat === "EQUIPMENT" || cat === "";
+  return true;
 }
