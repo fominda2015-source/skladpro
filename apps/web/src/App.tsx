@@ -6919,6 +6919,7 @@ function App() {
     visibleTabs.add("password");
     visibleTabs.add("settings");
     visibleTabs.add("profile");
+    visibleTabs.add("help");
     if (!visibleTabs.has(activeTab)) {
       setActiveTab("stocks");
     }
