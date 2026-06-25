@@ -9,6 +9,8 @@ import { receiptCategoryToCampCategory } from "./campCatalog.js";
 import { prisma } from "./prisma.js";
 import { receiptAcceptedQty } from "./receiptQty.js";
 import { resolveReceiptStockQty } from "./receiptUnits.js";
+import { canonicalReceiptMaterialName, catalogArticleToken } from "./receiptMaterialResolve.js";
+import { resolveMaterialIdForLimitNode } from "./receiptOverageLimits.js";
 import {
   isToolCatalogMaterialReceiptCategory,
   isToolInventoryReceiptCategory
@@ -22,6 +24,9 @@ export type ReceiptStockReconcileResult = {
   stockLinesUpdated: number;
   quantityAdded: number;
   operationsCreated: number;
+  acceptedItemsSeen: number;
+  unresolvedItems: number;
+  warnings: string[];
   details: Array<{
     warehouseId: string;
     section: "SS" | "EOM";
@@ -66,6 +71,132 @@ function itemStockQtyFromAccepted(item: {
   }
 }
 
+type ReconcileItemRow = {
+  id: string;
+  acceptedQty: unknown;
+  sourceName: string;
+  sourceUnit: string;
+  factUnit?: string | null;
+  category: ReceiptItemCategory | null;
+  mappedMaterialId: string | null;
+  limitNodeId: string | null;
+  limitCatalogNameN: string | null;
+  limitCatalogNameO: string | null;
+  namePartD: string | null;
+  namePartE: string | null;
+  externalComment: string | null;
+  receiptRequest: {
+    id: string;
+    number: string;
+    warehouseId: string;
+    section: "SS" | "EOM";
+  };
+};
+
+async function resolveMaterialForReconcileItem(
+  tx: ReconcileTx,
+  item: ReconcileItemRow
+): Promise<string | null> {
+  if (item.mappedMaterialId) return item.mappedMaterialId;
+
+  if (item.limitNodeId) {
+    const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
+    if (fromNode) {
+      await tx.receiptRequestItem.update({
+        where: { id: item.id },
+        data: { mappedMaterialId: fromNode }
+      });
+      return fromNode;
+    }
+  }
+
+  const { warehouseId, section } = item.receiptRequest;
+  const unit = (item.sourceUnit || "шт").trim() || "шт";
+  const canon = canonicalReceiptMaterialName(item);
+
+  const mapping = await tx.materialMappingLibrary.findFirst({
+    where: {
+      warehouseId,
+      section,
+      OR: [
+        { sourceName: { equals: canon, mode: "insensitive" } },
+        { sourceName: { equals: item.sourceName.trim(), mode: "insensitive" } }
+      ]
+    },
+    select: { targetMaterialId: true },
+    orderBy: { updatedAt: "desc" }
+  });
+  if (mapping?.targetMaterialId) {
+    await tx.receiptRequestItem.update({
+      where: { id: item.id },
+      data: { mappedMaterialId: mapping.targetMaterialId }
+    });
+    return mapping.targetMaterialId;
+  }
+
+  for (const name of [canon, item.sourceName.trim(), (item.limitCatalogNameO || "").trim()].filter(Boolean)) {
+    const mat = await tx.material.findFirst({
+      where: {
+        name: { equals: name, mode: "insensitive" },
+        unit: { equals: unit, mode: "insensitive" }
+      },
+      select: { id: true }
+    });
+    if (mat) {
+      await tx.receiptRequestItem.update({
+        where: { id: item.id },
+        data: { mappedMaterialId: mat.id }
+      });
+      return mat.id;
+    }
+  }
+
+  const article = catalogArticleToken(canon) || catalogArticleToken(item.sourceName);
+  if (article) {
+    const stocks = await tx.stock.findMany({
+      where: {
+        warehouseId,
+        section,
+        material: { unit: { equals: unit, mode: "insensitive" } }
+      },
+      include: { material: { select: { id: true, name: true } } },
+      take: 200
+    });
+    for (const row of stocks) {
+      if (catalogArticleToken(row.material.name) !== article) continue;
+      await tx.receiptRequestItem.update({
+        where: { id: item.id },
+        data: { mappedMaterialId: row.material.id }
+      });
+      return row.material.id;
+    }
+    const mats = await tx.material.findMany({
+      where: { unit: { equals: unit, mode: "insensitive" } },
+      select: { id: true, name: true },
+      take: 300
+    });
+    for (const mat of mats) {
+      if (catalogArticleToken(mat.name) !== article) continue;
+      await tx.receiptRequestItem.update({
+        where: { id: item.id },
+        data: { mappedMaterialId: mat.id }
+      });
+      return mat.id;
+    }
+  }
+
+  if (!canon) return null;
+
+  const created = await tx.material.create({
+    data: { name: canon, unit }
+  });
+  await tx.receiptRequestItem.update({
+    where: { id: item.id },
+    data: { mappedMaterialId: created.id }
+  });
+  return created.id;
+}
+
 /**
  * Восстанавливает остатки по принятым позициям заявок, если приёмка обновила acceptedQty,
  * но складской приход не был создан (закрытие заявки, «без склада», правка без карточки и т.п.).
@@ -87,12 +218,19 @@ export async function reconcileReceiptWarehouseStock(opts?: {
         }
       },
       select: {
+        id: true,
         acceptedQty: true,
         sourceName: true,
         sourceUnit: true,
         factUnit: true,
         category: true,
         mappedMaterialId: true,
+        limitNodeId: true,
+        limitCatalogNameN: true,
+        limitCatalogNameO: true,
+        namePartD: true,
+        namePartE: true,
+        externalComment: true,
         receiptRequest: {
           select: {
             id: true,
@@ -104,36 +242,27 @@ export async function reconcileReceiptWarehouseStock(opts?: {
       }
     });
 
+    const result: ReceiptStockReconcileResult = {
+      materialsChecked: 0,
+      stockLinesCreated: 0,
+      stockLinesUpdated: 0,
+      quantityAdded: 0,
+      operationsCreated: 0,
+      acceptedItemsSeen: items.length,
+      unresolvedItems: 0,
+      warnings: [],
+      details: []
+    };
+
     const receiptBacked = new Map<MaterialKey, number>();
     const receiptNumbersByWh = new Map<string, Set<string>>();
 
     for (const item of items) {
       if (!isWarehouseReceiptCategory(item.category)) continue;
-      let materialId = item.mappedMaterialId;
+      const materialId = await resolveMaterialForReconcileItem(tx, item);
       if (!materialId) {
-        const sourceName = item.sourceName.trim();
-        if (!sourceName) continue;
-        const mapping = await tx.materialMappingLibrary.findFirst({
-          where: {
-            warehouseId: item.receiptRequest.warehouseId,
-            section: item.receiptRequest.section,
-            sourceName: { equals: sourceName, mode: "insensitive" }
-          },
-          select: { targetMaterialId: true },
-          orderBy: { updatedAt: "desc" }
-        });
-        materialId = mapping?.targetMaterialId ?? null;
-        if (!materialId) {
-          const mat = await tx.material.findFirst({
-            where: {
-              name: { equals: sourceName, mode: "insensitive" },
-              unit: { equals: (item.sourceUnit || "шт").trim() || "шт", mode: "insensitive" }
-            },
-            select: { id: true }
-          });
-          materialId = mat?.id ?? null;
-        }
-        if (!materialId) continue;
+        result.unresolvedItems += 1;
+        continue;
       }
       const stockQty = itemStockQtyFromAccepted(item);
       if (stockQty <= 0) continue;
@@ -146,16 +275,22 @@ export async function reconcileReceiptWarehouseStock(opts?: {
       receiptNumbersByWh.set(whKey, nums);
     }
 
-    const result: ReceiptStockReconcileResult = {
-      materialsChecked: receiptBacked.size,
-      stockLinesCreated: 0,
-      stockLinesUpdated: 0,
-      quantityAdded: 0,
-      operationsCreated: 0,
-      details: []
-    };
+    if (result.unresolvedItems > 0) {
+      result.warnings.push(
+        `Не удалось сопоставить ${result.unresolvedItems} принятых позиций с карточкой материала`
+      );
+    }
 
-    if (!receiptBacked.size) return result;
+    result.materialsChecked = receiptBacked.size;
+
+    if (!receiptBacked.size) {
+      if (result.acceptedItemsSeen > 0 && result.unresolvedItems === 0) {
+        result.warnings.push(
+          "Принятые позиции найдены, но остатки уже соответствуют приходам — изменений не требуется"
+        );
+      }
+      return result;
+    }
 
     const materialIds = [...new Set([...receiptBacked.keys()].map((k) => k.split(":")[2]!))];
     const materials = await tx.material.findMany({

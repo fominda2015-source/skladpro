@@ -850,6 +850,10 @@ function App() {
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
   const [reconcileStockLoading, setReconcileStockLoading] = useState(false);
+  const [warehouseReconcileBanner, setWarehouseReconcileBanner] = useState<{
+    text: string;
+    tone: "neutral" | "success" | "error" | "conflict";
+  } | null>(null);
   const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
@@ -2293,6 +2297,7 @@ function App() {
     }
     setReconcileStockLoading(true);
     setStocksError("");
+    setWarehouseReconcileBanner(null);
     try {
       const wh = activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : stockFilterWarehouseId || "";
       const res = await fetchWithSession(`${API_URL}/api/receipt-requests/reconcile-stock`, {
@@ -2314,11 +2319,18 @@ function App() {
         } catch {
           // ignore
         }
+        if (res.status === 404) {
+          msg =
+            "На сервере нет эндпоинта восстановления остатков — обновите API до последней версии и повторите.";
+        }
+        setWarehouseReconcileBanner({ text: msg, tone: "error" });
         setStocksError(msg);
         return false;
       }
       const data = (await res.json()) as {
         quantityAdded?: number;
+        unresolvedItems?: number;
+        warnings?: string[];
         details?: Array<{ materialName: string; addedQty: number }>;
         merged?: {
           materialsMerged?: number;
@@ -2329,6 +2341,7 @@ function App() {
       const added = Number(data.quantityAdded ?? 0);
       const mergedCount = Number(data.merged?.materialsMerged ?? 0);
       const moved = Number(data.merged?.quantityMoved ?? 0);
+      const unresolved = Number(data.unresolvedItems ?? 0);
       const mergeHint =
         mergedCount > 0
           ? `Объединено карточек: ${mergedCount}, перенесено ${moved.toLocaleString("ru-RU")}`
@@ -2338,18 +2351,28 @@ function App() {
         .slice(0, 3)
         .map((d) => `${d.materialName} (+${d.addedQty})`)
         .join("; ");
-      const parts = [mergeHint, added > 0 ? `Восстановлено: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}` : ""].filter(
-        Boolean
-      );
-      setOpsMessage(
-        parts.length
+      const restoreHint =
+        added > 0
+          ? `Восстановлено: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}`
+          : "";
+      const warningHints = (data.warnings ?? []).slice(0, 2);
+      const parts = [mergeHint, restoreHint, ...warningHints].filter(Boolean);
+      const summary =
+        parts.length > 0
           ? parts.join(" · ")
-          : "Дубликатов и недостающих остатков не найдено"
-      );
+          : unresolved > 0
+            ? `Не удалось сопоставить ${unresolved} принятых позиций с карточкой материала`
+            : "Дубликатов и недостающих остатков не найдено — остатки уже соответствуют приходам или приёмка была без склада";
+      const tone: "neutral" | "success" | "error" | "conflict" =
+        added > 0 || mergedCount > 0 ? "success" : unresolved > 0 ? "conflict" : "neutral";
+      setWarehouseReconcileBanner({ text: summary, tone });
+      setOpsMessage(summary);
       await loadStocks(q, objectSectionFilter, undefined, wh || undefined);
       return true;
     } catch (e) {
-      setStocksError(`Не удалось восстановить остатки: ${String(e)}`);
+      const msg = `Не удалось восстановить остатки: ${String(e)}`;
+      setWarehouseReconcileBanner({ text: msg, tone: "error" });
+      setStocksError(msg);
       return false;
     } finally {
       setReconcileStockLoading(false);
@@ -8121,6 +8144,9 @@ function App() {
               text={`Склад пуст, но в приходах есть ${receiptAcceptedWithMaterialCount} принятых позиций. Возможно, приёмка прошла без остатка (закрытие заявки, «без склада» или старая версия).`}
               tone="conflict"
             />
+          ) : null}
+          {warehouseReconcileBanner ? (
+            <ResultBanner text={warehouseReconcileBanner.text} tone={warehouseReconcileBanner.tone} />
           ) : null}
           {isAdmin &&
           !loadingStocks &&
