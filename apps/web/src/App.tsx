@@ -709,6 +709,8 @@ type ReceiptRequestItem = {
   limitCatalogNameO?: string | null;
   externalComment?: string | null;
   limitNameRenamed?: boolean;
+  limitDisplayName?: string | null;
+  renameLimitToO?: boolean;
   factLabel?: string | null;
   factUnit?: string | null;
   mappedMaterial?: { id: string; name: string; unit: string } | null;
@@ -729,6 +731,12 @@ type ReceiptRequestRow = {
   detectedOrderNumber?: string | null;
   detectedProjectTitle?: string | null;
 };
+function receiptItemCanonName(it: ReceiptRequestItem): string {
+  const fromLimit = (it.limitDisplayName || "").trim();
+  if (fromLimit) return fromLimit;
+  return (it.mappedMaterial?.name || it.sourceName).trim();
+}
+
 function isReceiptItemOpen(it: ReceiptRequestItem): boolean {
   return receiptItemRemainingQty(it) > 0;
 }
@@ -4244,7 +4252,7 @@ function App() {
       if (qty <= 0) continue;
       const explicitName = (draft?.newName ?? "").trim();
       const explicitUnit = (draft?.newUnit ?? "").trim();
-      const canonName = (it.mappedMaterial?.name || it.sourceName).trim();
+      const canonName = receiptItemCanonName(it);
       const unit = explicitUnit || it.mappedMaterial?.unit || it.sourceUnit || "шт";
       const factLabel =
         explicitName && explicitName !== canonName ? explicitName : undefined;
@@ -4259,7 +4267,6 @@ function App() {
             : null;
       const mapping: (typeof mappings)[number] = {
         itemId: it.id,
-        materialId: it.mappedMaterialId || undefined,
         factLabel,
         factLabelUnit: factLabel ? unit : undefined,
         newMaterialUnit: unit,

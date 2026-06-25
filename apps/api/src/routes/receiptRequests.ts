@@ -47,7 +47,13 @@ import {
   resolveReceiptStockQty
 } from "../lib/receiptUnits.js";
 import { requireAuth, requirePermission, type AuthedRequest } from "../middleware/auth.js";
-import { analyzeCatalogNames, parseOrderSheet } from "../lib/parseOrderSheet.js";
+import { analyzeCatalogNames, normNameKey, parseOrderSheet } from "../lib/parseOrderSheet.js";
+import {
+  canonicalReceiptMaterialName,
+  mappedMaterialMatchesCatalog,
+  materialNamesEquivalent,
+  receiptCatalogMeta
+} from "../lib/receiptMaterialResolve.js";
 import { ensureStockLimitBinding } from "../lib/materialLimitBindings.js";
 import { findReceiptInvoiceDoc, getActiveLimitTemplateId, syncReceiptItemToLimitTemplate, tryBindItemToOutOfBudgetSection } from "../lib/receiptLimitSync.js";
 import {
@@ -207,24 +213,6 @@ type ReceiptLimitItemRow = {
   externalComment: string | null;
   limitSectionPath: string | null;
 };
-
-function receiptCatalogMeta(item: {
-  sourceName: string;
-  namePartD?: string | null;
-  namePartE?: string | null;
-  limitCatalogNameN?: string | null;
-  limitCatalogNameO?: string | null;
-  externalComment?: string | null;
-}) {
-  return analyzeCatalogNames(
-    item.sourceName,
-    item.namePartD || "",
-    item.namePartE || "",
-    item.limitCatalogNameN || "",
-    item.limitCatalogNameO || "",
-    item.externalComment || ""
-  );
-}
 
 async function syncReceiptItemsToLimitTemplate(
   tx: Prisma.TransactionClient,
@@ -424,6 +412,44 @@ async function lookupStockedMaterialByName(
   return row?.materialId ?? null;
 }
 
+async function lookupMaterialByEquivalentName(
+  tx: ReceiptAcceptTx,
+  opts: { warehouseId: string; section: "SS" | "EOM"; name: string; unit?: string | null }
+): Promise<string | null> {
+  const name = opts.name.trim();
+  if (!name) return null;
+  const unit = (opts.unit || "шт").trim() || "шт";
+
+  const stockedId = await lookupStockedMaterialByName(tx, {
+    warehouseId: opts.warehouseId,
+    section: opts.section,
+    name,
+    unit
+  });
+  if (stockedId) return stockedId;
+
+  const exact = await tx.material.findFirst({
+    where: {
+      name: { equals: name, mode: "insensitive" },
+      unit: { equals: unit, mode: "insensitive" }
+    },
+    select: { id: true }
+  });
+  if (exact) return exact.id;
+
+  const stocks = await tx.stock.findMany({
+    where: { warehouseId: opts.warehouseId, section: opts.section, quantity: { gt: 0 } },
+    include: { material: { select: { id: true, name: true, unit: true } } },
+    take: 500
+  });
+  for (const row of stocks) {
+    const matUnit = (row.material.unit || "шт").trim();
+    if (normNameKey(matUnit) !== normNameKey(unit)) continue;
+    if (materialNamesEquivalent(row.material.name, name)) return row.material.id;
+  }
+  return null;
+}
+
 async function resolveReceiptTargetMaterialId(
   tx: ReceiptAcceptTx,
   item: {
@@ -468,22 +494,47 @@ async function resolveReceiptTargetMaterialId(
   };
 
   const meta = receiptCatalogMeta(item);
-  const unifiedCardName = meta.limitDisplayName.trim() || item.sourceName.trim();
+  const canonicalName = canonicalReceiptMaterialName(item);
   const factLabel = (mapping.factLabel ?? "").trim();
   const factUnit = mapping.factLabelUnit?.trim() || item.sourceUnit || "шт";
   const bindLimitNodeId = mapping.limitNodeId ?? item.limitNodeId ?? null;
 
-  const fromExplicitMapping = mapping.materialId
-    ? await applyCatalogFields(mapping.materialId)
-    : undefined;
-  if (fromExplicitMapping) return fromExplicitMapping;
-
-  if (item.mappedMaterialId) {
-    const id = await applyCatalogFields(item.mappedMaterialId);
-    if (id) return id;
+  if (mapping.materialId) {
+    const explicit = await tx.material.findUnique({
+      where: { id: mapping.materialId },
+      select: { name: true }
+    });
+    if (explicit && mappedMaterialMatchesCatalog(explicit.name, item)) {
+      return applyCatalogFields(mapping.materialId);
+    }
   }
 
-  if (factLabel) {
+  if (bindLimitNodeId) {
+    const fromNode = await resolveMaterialIdForLimitNode(tx, bindLimitNodeId);
+    if (fromNode) return applyCatalogFields(fromNode);
+  }
+
+  if (canonicalName) {
+    const fromCanon = await lookupMaterialByEquivalentName(tx, {
+      warehouseId: ctx.warehouseId,
+      section: ctx.section,
+      name: canonicalName,
+      unit: item.sourceUnit
+    });
+    if (fromCanon) return applyCatalogFields(fromCanon);
+  }
+
+  if (item.mappedMaterialId) {
+    const mapped = await tx.material.findUnique({
+      where: { id: item.mappedMaterialId },
+      select: { name: true }
+    });
+    if (mapped && mappedMaterialMatchesCatalog(mapped.name, item)) {
+      return applyCatalogFields(item.mappedMaterialId);
+    }
+  }
+
+  if (factLabel && !materialNamesEquivalent(factLabel, canonicalName)) {
     const fromFactMap = await lookupWarehouseMaterialMapping(tx, {
       warehouseId: ctx.warehouseId,
       section: ctx.section,
@@ -491,8 +542,13 @@ async function resolveReceiptTargetMaterialId(
       sourceUnit: factUnit
     });
     if (fromFactMap) {
-      const id = await applyCatalogFields(fromFactMap);
-      if (id) return id;
+      const mapped = await tx.material.findUnique({
+        where: { id: fromFactMap },
+        select: { name: true }
+      });
+      if (mapped && materialNamesEquivalent(mapped.name, canonicalName)) {
+        return applyCatalogFields(fromFactMap);
+      }
     }
     const fromPriorFact = await lookupPriorReceiptMaterialByFactLabel(tx, {
       warehouseId: ctx.warehouseId,
@@ -501,55 +557,43 @@ async function resolveReceiptTargetMaterialId(
       excludeItemId: item.id
     });
     if (fromPriorFact) {
-      const id = await applyCatalogFields(fromPriorFact);
-      if (id) return id;
+      const mapped = await tx.material.findUnique({
+        where: { id: fromPriorFact },
+        select: { name: true }
+      });
+      if (mapped && materialNamesEquivalent(mapped.name, canonicalName)) {
+        return applyCatalogFields(fromPriorFact);
+      }
     }
   }
 
-  const fromSourceMap = await lookupWarehouseMaterialMapping(tx, {
-    warehouseId: ctx.warehouseId,
-    section: ctx.section,
-    sourceName: item.sourceName,
-    sourceUnit: item.sourceUnit
-  });
-  if (fromSourceMap) {
-    const id = await applyCatalogFields(fromSourceMap);
-    if (id) return id;
-  }
-
-  if (meta.renameLimitToO && unifiedCardName) {
-    return findOrCreateMaterial(tx, unifiedCardName, item.sourceUnit || "шт", itemCategory, unitPrice).then((id) =>
-      id ? applyCatalogFields(id) : undefined
-    );
-  }
-
-  if (unifiedCardName) {
-    const stockedId = await lookupStockedMaterialByName(tx, {
+  if (!meta.renameLimitToO) {
+    const fromSourceMap = await lookupWarehouseMaterialMapping(tx, {
       warehouseId: ctx.warehouseId,
       section: ctx.section,
-      name: unifiedCardName,
-      unit: item.sourceUnit
+      sourceName: item.sourceName,
+      sourceUnit: item.sourceUnit
     });
-    if (stockedId) {
-      const id = await applyCatalogFields(stockedId);
-      if (id) return id;
+    if (fromSourceMap) {
+      const mapped = await tx.material.findUnique({
+        where: { id: fromSourceMap },
+        select: { name: true }
+      });
+      if (mapped && materialNamesEquivalent(mapped.name, canonicalName)) {
+        return applyCatalogFields(fromSourceMap);
+      }
     }
-    const unifiedId = await findOrCreateMaterial(
+  }
+
+  if (canonicalName) {
+    const createdId = await findOrCreateMaterial(
       tx,
-      unifiedCardName,
+      canonicalName,
       item.sourceUnit || "шт",
       itemCategory,
       unitPrice
     );
-    if (unifiedId) {
-      const id = await applyCatalogFields(unifiedId);
-      if (id) return id;
-    }
-  }
-
-  if (bindLimitNodeId) {
-    const fromNode = await resolveMaterialIdForLimitNode(tx, bindLimitNodeId);
-    if (fromNode) return applyCatalogFields(fromNode);
+    if (createdId) return applyCatalogFields(createdId);
   }
 
   const legacyName = mapping.newMaterialName?.trim();
@@ -671,12 +715,17 @@ const receiptRequestInclude = {
 type ReceiptRequestWithRelations = Prisma.ReceiptRequestGetPayload<{ include: typeof receiptRequestInclude }>;
 
 function serializeReceiptRequest(row: ReceiptRequestWithRelations) {
-  const items = row.items.map((it) => ({
-    ...it,
-    quantity: receiptPlannedQty(it.quantity),
-    acceptedQty: receiptAcceptedQty(it.acceptedQty),
-    unitPrice: toQtyNumber(it.unitPrice)
-  }));
+  const items = row.items.map((it) => {
+    const meta = receiptCatalogMeta(it);
+    return {
+      ...it,
+      quantity: receiptPlannedQty(it.quantity),
+      acceptedQty: receiptAcceptedQty(it.acceptedQty),
+      unitPrice: toQtyNumber(it.unitPrice),
+      limitDisplayName: meta.limitDisplayName,
+      renameLimitToO: meta.renameLimitToO
+    };
+  });
   if (row.status === "CANCELLED") {
     return { ...row, status: row.status, items };
   }
