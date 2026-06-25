@@ -31,16 +31,19 @@ function materialFieldsFromReceiptItem(
   unitPrice: number | null | undefined
 ) {
   const fields: {
-    toolCatalogSection?: ToolCatalogSection;
+    toolCatalogSection?: ToolCatalogSection | null;
     kind?: MaterialKind;
     unitPrice?: number;
     category?: string;
   } = {};
-  if (toolSection) fields.toolCatalogSection = toolSection;
   const kind = receiptCategoryToMaterialKind(itemCategory);
   if (kind) fields.kind = kind;
   if (itemCategory === "EQUIPMENT" || itemCategory === "CABLE") {
     fields.category = itemCategory;
+    // Складская категория — не раздел каталога инструментов (иначе строка пропадает со вкладки «Склад»).
+    fields.toolCatalogSection = null;
+  } else if (toolSection) {
+    fields.toolCatalogSection = toolSection;
   }
   if (unitPrice != null && Number.isFinite(unitPrice) && unitPrice >= 0) {
     fields.unitPrice = unitPrice;

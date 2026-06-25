@@ -25,6 +25,19 @@ export function warehouseStockRowLabel(row: {
   return "Оборудование";
 }
 
+/** Строка остатка для вкладки «Склад» (не только каталог инструментов). */
+export function isWarehouseShelfStockRow(row: {
+  materialToolCatalogSection?: string | null;
+  materialCategory?: string | null;
+  quantity?: number;
+  available?: number;
+}): boolean {
+  if (!row.materialToolCatalogSection) return true;
+  const cat = String(row.materialCategory ?? "").toUpperCase();
+  if (cat === "CABLE" || cat === "EQUIPMENT") return true;
+  return Number(row.quantity) > 0 || Number(row.available) > 0;
+}
+
 export function warehouseStockRowMatchesTab(
   row: { materialKind?: string; materialCategory?: string | null },
   tab: WarehouseStockKindTab

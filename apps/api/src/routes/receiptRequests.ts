@@ -741,15 +741,11 @@ receiptRequestsRouter.post(
             if (!src) continue;
             const sync = await syncReceiptItemToLimitTemplate(tx, attachedTemplateId, src);
             if (sync.limitNodeId || sync.limitNameRenamed) {
-              const mappedMaterialId = sync.limitNodeId
-                ? await resolveMaterialIdForLimitNode(tx, sync.limitNodeId)
-                : null;
               await tx.receiptRequestItem.update({
                 where: { id: item.id },
                 data: {
                   limitNodeId: sync.limitNodeId,
-                  limitNameRenamed: sync.limitNameRenamed,
-                  ...(mappedMaterialId ? { mappedMaterialId } : {})
+                  limitNameRenamed: sync.limitNameRenamed
                 }
               });
             }

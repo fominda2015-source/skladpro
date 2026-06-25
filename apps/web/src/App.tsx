@@ -139,6 +139,7 @@ import {
   slugToCatalogMaterialSection
 } from "./widgets/tools/toolCatalog";
 import {
+  isWarehouseShelfStockRow,
   warehouseStockRowMatchesTab,
   type WarehouseStockKindTab
 } from "./widgets/warehouse/warehouseStockCategory";
@@ -1662,7 +1663,7 @@ function App() {
   const limitFilterEnabled = limitTemplates.length > 0 && (limitMaterialIdSet.size > 0 || limitMaterialNameSet.size > 0);
 
   const warehouseStockRows = useMemo(() => {
-    let rows = stocks.filter((row) => !row.materialToolCatalogSection);
+    let rows = stocks.filter(isWarehouseShelfStockRow);
     if (activeObjectId && activeObjectId !== ALL_OBJECTS_ID) {
       rows = rows.filter((r) => r.warehouseId === activeObjectId);
     }
@@ -8026,7 +8027,7 @@ function App() {
               materialName: safeName(row.materialName),
               warehouseName: safeName(row.warehouseName)
             }))}
-            totalVisible={warehouseCollapsedRows.length}
+            totalVisible={warehouseVisibleRows.length}
             limitHiddenCount={
               !showAttachedMaterials && limitFilterEnabled && warehouseDisplayRows.length === 0
                 ? warehouseStockRows.length
