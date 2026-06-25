@@ -71,7 +71,7 @@ import {
 import { decodeUploadedOriginalName } from "../lib/uploadFileName.js";
 import { allocateReceiptRequestNumber } from "../lib/allocateReceiptNumber.js";
 import { reconcileReceiptWarehouseStock } from "../lib/receiptStockReconcile.js";
-import { consolidateReceiptWarehouseMaterial, mergeDuplicateWarehouseMaterialsByArticle } from "../lib/receiptWarehouseMaterial.js";
+import { mergeDuplicateWarehouseMaterialsByArticle } from "../lib/receiptWarehouseMaterial.js";
 
 async function persistReceiptAcceptScans(
   files: Express.Multer.File[],
@@ -1634,13 +1634,6 @@ receiptRequestsRouter.post(
           if (!materialId) {
             throw new Error(`Не удалось определить материал для позиции ${it.sourceName}`);
           }
-          materialId = await consolidateReceiptWarehouseMaterial(tx, {
-            materialId,
-            item: it,
-            limitNodeId: m.limitNodeId ?? it.limitNodeId ?? null,
-            warehouseId: row.warehouseId,
-            section: row.section
-          });
         }
         resolved.push({
           item: it,

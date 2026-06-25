@@ -148,6 +148,7 @@ import { WarehouseZonesTable } from "./widgets/warehouse/WarehouseZonesTable";
 import { ReportsRiskPanel } from "./widgets/reports/ReportsRiskPanel";
 import { fileToChatAttachmentPayload } from "./widgets/chat/chatFiles";
 import { isUpdFactName } from "./shared/materialFactNames";
+import { collapseWarehouseStockRowsByName } from "./shared/collapseWarehouseStockRows";
 import { formatMaterialQty, MATERIAL_QTY_MIN, MATERIAL_QTY_STEP, parseMaterialQty } from "./shared/quantity";
 import { MobileBottomNav } from "./widgets/layout/MobileBottomNav";
 import { SidebarNav } from "./widgets/layout/SidebarNav";
@@ -858,7 +859,7 @@ function App() {
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
   const [expandedStockRowId, setExpandedStockRowId] = useState("");
-  const [showAttachedMaterials, setShowAttachedMaterials] = useState(false);
+  const [showAttachedMaterials, setShowAttachedMaterials] = useState(true);
   const [stockFilterWarehouseId, setStockFilterWarehouseId] = useState("");
   const [stockOnlyAvailable, setStockOnlyAvailable] = useState(false);
   const [stockOnlyLow, setStockOnlyLow] = useState(false);
@@ -1883,8 +1884,13 @@ function App() {
     );
   }, [stocks, activeObjectId, issueIssuesDomain, acceptedBySourceByTargetId, factLabelGroups]);
 
+  const warehouseCollapsedRows = useMemo(
+    () => collapseWarehouseStockRowsByName(warehouseVisibleRows),
+    [warehouseVisibleRows]
+  );
+
   const warehouseDisplayRows = useMemo(() => {
-    let rows = warehouseVisibleRows;
+    let rows = warehouseCollapsedRows;
     if (stockShelfKindTab !== "ALL") {
       rows = rows.filter((r) => warehouseStockRowMatchesTab(r, stockShelfKindTab));
     }
@@ -1902,7 +1908,7 @@ function App() {
     }
     return rows;
   }, [
-    warehouseVisibleRows,
+    warehouseCollapsedRows,
     stockShelfKindTab,
     stockFilterWarehouseId,
     stockOnlyAvailable,
@@ -8178,7 +8184,7 @@ function App() {
               materialName: safeName(row.materialName),
               warehouseName: safeName(row.warehouseName)
             }))}
-            totalVisible={warehouseStockRows.length}
+            totalVisible={warehouseCollapsedRows.length}
             limitHiddenCount={
               !showAttachedMaterials && limitFilterEnabled && warehouseDisplayRows.length === 0
                 ? warehouseStockRows.length
@@ -8189,8 +8195,8 @@ function App() {
             error={stocksError}
             limitHint={
               limitFilterEnabled
-                ? "Показаны материалы лимита и все позиции с ненулевым остатком. Нулевые строки лимита скрыты, если не включены «Все позиции»."
-                : undefined
+                ? "Строки с одинаковым названием и единицей измерения схлопываются, остатки суммируются (узлы лимита могут отличаться). При выдаче подраздел уточняется отдельно."
+                : "Строки с одинаковым названием и единицей измерения схлопываются, остатки суммируются."
             }
             manualMessage={manualStockMessage && !manualStockModalOpen ? manualStockMessage : undefined}
             search={q}

@@ -28,6 +28,9 @@ export type WarehouseStockRow = {
   storageCell?: string | null;
   available: number;
   isLow: boolean;
+  /** Несколько карточек материала с одним названием (схлопнуто на складе). */
+  collapsedMaterialIds?: string[];
+  collapsedStockIds?: string[];
 };
 
 type UpdFactEntry = { sourceName: string; sourceUnit: string; quantity: number };
@@ -403,6 +406,9 @@ export function WarehouseStockView(props: WarehouseStockViewProps) {
                             ) : null}
                             {updFactsCount > 0 ? (
                               <span className="muted"> · УПД: {updFactsCount}</span>
+                            ) : null}
+                            {(row.collapsedMaterialIds?.length ?? 0) > 1 ? (
+                              <span className="muted"> · {row.collapsedMaterialIds!.length} карточки</span>
                             ) : null}
                             <span className="muted whHideMd">
                               {" "}
