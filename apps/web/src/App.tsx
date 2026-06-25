@@ -51,6 +51,7 @@ import {
 import { HomeAnnouncementsBell } from "./widgets/home/HomeAnnouncementsBell";
 import { HomeDrillContent } from "./widgets/home/HomeDrillContent";
 import { CampTab } from "./widgets/camp/CampTab";
+import { HelpGuideTab } from "./widgets/help/HelpGuideTab";
 import { LimitStructureBars } from "./widgets/limits/LimitStructureBars";
 import {
   computeLimitImportDiffView,
@@ -897,6 +898,7 @@ function App() {
     | "timesheet"
     | "reports"
     | "acts"
+    | "help"
   >("stocks");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -2038,6 +2040,7 @@ function App() {
     notifications: "Уведомления",
     chat: "Личные сообщения",
     feedback: "Обратная связь",
+    help: "Инструкция",
     reports: "Сводка по объекту",
     profile: "Мой профиль",
     settings: "Настройки интерфейса",
@@ -2052,7 +2055,8 @@ function App() {
       activeTab !== "profile" &&
       activeTab !== "settings" &&
       activeTab !== "password" &&
-      activeTab !== "materialReport"
+      activeTab !== "materialReport" &&
+      activeTab !== "help"
   );
   const canWriteCatalog = hasObjectAccess;
   const canOpenMaterialCards = hasObjectAccess;
@@ -13040,6 +13044,8 @@ function App() {
         />
       )}
 
+      {activeTab === "help" && <HelpGuideTab />}
+
       {activeTab === "feedback" && (
         <div>
           <PageHero
@@ -14202,6 +14208,7 @@ function App() {
                 {(canReadIntegrations || canReadNotifications) && (
                   <option value="integrations">{canReadIntegrations ? "Интеграции" : "Уведомления"}</option>
                 )}
+                <option value="help">Инструкция</option>
               </select>
             </label>
           </div>

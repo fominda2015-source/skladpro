@@ -126,6 +126,7 @@ export function SidebarNav(props: Props) {
       ) : null}
 
       <p className="navSectionTitle">Прочее</p>
+      <SidebarNavItem tab="help" activeTab={activeTab} icon="📖" label="Инструкция" onSelect={onSelectTab} />
       {canReadNotifications ? (
         <SidebarNavItem
           tab="notifications"
