@@ -157,9 +157,7 @@ import { ViewportRoot } from "./widgets/layout/ViewportRoot";
 import { FilterStrip, PageHero } from "./widgets/ui/PageHero";
 import {
   buildLimitReceiptMetricsFromReceipts,
-  limitNodeArrivedQty,
-  mergeBindingStockIntoArrivedMetrics,
-  mergeSupplyStockIntoArrivedMetrics
+  limitNodeArrivedQty
 } from "./widgets/limits/limitReceiptMetrics";
 import { WarehouseStockView } from "./widgets/warehouse/WarehouseStockView";
 import { ManualBatchAddModal, type WarehouseBatchLine } from "./widgets/warehouse/ManualBatchAddModal";
@@ -2091,40 +2089,8 @@ function App() {
     if (!limitWh) {
       return { arrivedByLimitNodeId: {} as Record<string, number>, onOrderByLimitNodeId: {} as Record<string, number> };
     }
-    const limitMaterialNodes = limitTemplates.flatMap((tpl) =>
-      tpl.warehouseId === limitWh && tpl.section === objectSectionFilter
-        ? tpl.nodes
-            .filter((n) => n.nodeType === "MATERIAL")
-            .map((n) => ({ id: n.id, materialId: n.materialId ?? null }))
-        : []
-    );
-    const base = buildLimitReceiptMetricsFromReceipts(
-      receiptRequests,
-      stocks,
-      limitMaterialNodes,
-      limitWh,
-      objectSectionFilter
-    );
-    const arrivedByLimitNodeId = mergeBindingStockIntoArrivedMetrics(
-      mergeSupplyStockIntoArrivedMetrics(
-        base.arrivedByLimitNodeId,
-        limitMaterialNodes,
-        limitSupplyByMaterialId
-      ),
-      stockLimitBindings,
-      limitSupplyByMaterialId
-    );
-    return { arrivedByLimitNodeId, onOrderByLimitNodeId: base.onOrderByLimitNodeId };
-  }, [
-    receiptRequests,
-    stocks,
-    limitTemplates,
-    activeObjectId,
-    limitsWarehouseId,
-    objectSectionFilter,
-    limitSupplyByMaterialId,
-    stockLimitBindings
-  ]);
+    return buildLimitReceiptMetricsFromReceipts(receiptRequests, limitWh, objectSectionFilter);
+  }, [receiptRequests, activeObjectId, limitsWarehouseId, objectSectionFilter]);
 
   const canWriteOperations = hasObjectAccess;
   const canWriteLimits = hasObjectAccess;
@@ -10546,9 +10512,7 @@ function App() {
                       const plan = Number(node.plannedQty || 0);
                       const arrived = limitNodeArrivedQty(
                         nodeId,
-                        node.materialId,
-                        limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
-                        node.materialId ? limitSupplyByMaterialId[node.materialId] : null
+                        limitReceiptMetricsByNodeId.arrivedByLimitNodeId
                       );
                       const issued = Number(node.issuedQty || 0);
                       const a: NodeAgg = { plan, arrived, issued };
@@ -10640,9 +10604,7 @@ function App() {
                       const issued = Number(node.issuedQty || 0);
                     const arrived = limitNodeArrivedQty(
                       node.id,
-                      node.materialId,
-                      limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
-                      node.materialId ? limitSupplyByMaterialId[node.materialId] : null
+                      limitReceiptMetricsByNodeId.arrivedByLimitNodeId
                     );
                     const isOver = planned > 0 && issued > planned;
                     const nodeTitle = String(node.materialName || node.title || "");
@@ -11103,9 +11065,7 @@ function App() {
                                   const supply = m.materialId ? limitSupplyByMaterialId[m.materialId] : undefined;
                                   const arrived = limitNodeArrivedQty(
                                     m.id,
-                                    m.materialId,
-                                    limitReceiptMetricsByNodeId.arrivedByLimitNodeId,
-                                    supply
+                                    limitReceiptMetricsByNodeId.arrivedByLimitNodeId
                                   );
                                   const iss = Number(m.issuedQty || 0);
                                   const onOrd = limitReceiptMetricsByNodeId.onOrderByLimitNodeId[m.id] ?? 0;

@@ -3,7 +3,7 @@ import { API_URL } from "../../app/constants";
 import { formatMaterialQty } from "../../shared/quantity";
 import { LoadingState } from "../../shared/ui/StateViews";
 import { LimitStructureBars } from "./LimitStructureBars";
-import { limitNodeArrivedQty } from "./limitReceiptMetrics";
+import { buildLimitReceiptMetricsFromReceipts, limitNodeArrivedQty } from "./limitReceiptMetrics";
 
 const metricFmt = (n: number) => formatMaterialQty(n);
 
@@ -69,6 +69,7 @@ export function LimitTreeExplorer({
   const [supplyByMaterial, setSupplyByMaterial] = useState<
     Record<string, { arrivedQty: number; issuedQty: number; onOrderQty: number; stockQty: number }>
   >({});
+  const [arrivedByLimitNodeId, setArrivedByLimitNodeId] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -81,7 +82,7 @@ export function LimitTreeExplorer({
     setError("");
     const params = new URLSearchParams({ warehouseId, section });
     try {
-      const [templatesRes, issuedRes, supplyRes] = await Promise.all([
+      const [templatesRes, issuedRes, supplyRes, receiptsRes] = await Promise.all([
         fetchWithSession(`${API_URL}/api/limit-imports?${params}`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -89,6 +90,9 @@ export function LimitTreeExplorer({
           headers: { Authorization: `Bearer ${token}` }
         }),
         fetchWithSession(`${API_URL}/api/stock-movements/supply-metrics?${params}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetchWithSession(`${API_URL}/api/receipt-requests?${params}`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -119,9 +123,27 @@ export function LimitTreeExplorer({
       } else {
         setSupplyByMaterial({});
       }
+      if (receiptsRes.ok) {
+        const receipts = (await receiptsRes.json()) as Array<{
+          warehouseId: string;
+          section: LimitSection;
+          status: string;
+          items: Array<{
+            limitNodeId?: string | null;
+            quantity: string | number;
+            acceptedQty?: string | number | null;
+          }>;
+        }>;
+        setArrivedByLimitNodeId(
+          buildLimitReceiptMetricsFromReceipts(receipts, warehouseId, section).arrivedByLimitNodeId
+        );
+      } else {
+        setArrivedByLimitNodeId({});
+      }
     } catch (e) {
       setError(`Не удалось загрузить лимиты: ${String(e)}`);
       setTemplates([]);
+      setArrivedByLimitNodeId({});
     } finally {
       setLoading(false);
     }
@@ -178,7 +200,7 @@ export function LimitTreeExplorer({
       const roots = (childrenByParent.get("__root__") || []).sort((a, b) => a.orderNo - b.orderNo);
 
       const materialArrived = (node: LimitImportNode) =>
-        limitNodeArrivedQty(node.id, node.materialId, {}, node.materialId ? supplyByMaterial[node.materialId] : null);
+        limitNodeArrivedQty(node.id, arrivedByLimitNodeId);
 
       const materialIssued = (node: LimitImportNode) => {
         const fromNode = Number(node.issuedQty || 0);
@@ -378,6 +400,7 @@ export function LimitTreeExplorer({
     expanded,
     issuedByMaterial,
     supplyByMaterial,
+    arrivedByLimitNodeId,
     safeName,
     section,
     pickMode,
