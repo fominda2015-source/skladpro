@@ -99,6 +99,9 @@ export function CampTab({
   const [transferNote, setTransferNote] = useState("");
   const [transferFiles, setTransferFiles] = useState<File[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [transferFeedback, setTransferFeedback] = useState<{ tone: "error" | "success" | "neutral"; text: string } | null>(
+    null
+  );
   const [moveWarehouseId, setMoveWarehouseId] = useState("");
   const [moveNote, setMoveNote] = useState("");
   const [moveFiles, setMoveFiles] = useState<File[]>([]);
@@ -162,6 +165,20 @@ export function CampTab({
     void loadItems();
     void loadSummary();
   }, [loadItems, loadSummary]);
+
+  useEffect(() => {
+    if (!selected) {
+      setTransferSection("");
+      setTransferNote("");
+      setTransferFiles([]);
+      setTransferFeedback(null);
+      return;
+    }
+    setTransferSection(selected.section === "SS" ? "EOM" : "SS");
+    setTransferNote("");
+    setTransferFiles([]);
+    setTransferFeedback(null);
+  }, [selected?.id, selected?.section]);
 
   const hubStats = useMemo(() => {
     if (!summary) return undefined;
@@ -294,12 +311,24 @@ export function CampTab({
   }
 
   async function submitSectionTransfer(item: CampItemRow) {
-    if (!token || !canWrite || !transferSection) return;
+    if (!token || !canWrite) {
+      setTransferFeedback({ tone: "error", text: "Нет прав на передачу позиций городка" });
+      return;
+    }
+    if (!transferSection) {
+      setTransferFeedback({ tone: "error", text: "Выберите подразделение, куда передать позицию" });
+      return;
+    }
+    if (transferSection === item.section) {
+      setTransferFeedback({ tone: "error", text: "Позиция уже в этом подразделении" });
+      return;
+    }
     if (!transferFiles.length) {
-      setMessage("Приложите документ передачи между СС и ЭОМ");
+      setTransferFeedback({ tone: "error", text: "Приложите документ передачи (PDF или фото)" });
       return;
     }
     setTransferBusy(true);
+    setTransferFeedback(null);
     try {
       const form = new FormData();
       form.append("payload", JSON.stringify({ targetSection: transferSection, note: transferNote.trim() || null }));
@@ -311,15 +340,27 @@ export function CampTab({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setMessage(typeof err.error === "string" ? err.error : "Не удалось передать");
+        setTransferFeedback({
+          tone: "error",
+          text: typeof err.error === "string" ? err.error : `Не удалось передать (HTTP ${res.status})`
+        });
         return;
       }
-      setMessage(`Передано в ${transferSection === "SS" ? "СС" : "ЭОМ"}`);
+      const targetLabel = transferSection === "SS" ? "СС" : "ЭОМ";
+      setMessage(
+        `«${item.name}» передано в ${targetLabel}. Переключите раздел ${targetLabel} в шапке, чтобы увидеть позицию.`
+      );
+      setSelected(null);
       setTransferSection("");
       setTransferNote("");
       setTransferFiles([]);
       await loadItems();
       await loadSummary();
+    } catch (err) {
+      setTransferFeedback({
+        tone: "error",
+        text: `Сеть: ${(err as Error).message || "ошибка при передаче"}`
+      });
     } finally {
       setTransferBusy(false);
     }
@@ -615,6 +656,7 @@ export function CampTab({
           transferNote={transferNote}
           transferFiles={transferFiles}
           transferBusy={transferBusy}
+          transferFeedback={transferFeedback}
           moveWarehouseId={moveWarehouseId}
           moveNote={moveNote}
           moveFiles={moveFiles}
@@ -650,6 +692,7 @@ type DrawerProps = {
   transferNote: string;
   transferFiles: File[];
   transferBusy: boolean;
+  transferFeedback: { tone: "error" | "success" | "neutral"; text: string } | null;
   moveWarehouseId: string;
   moveNote: string;
   moveFiles: File[];
@@ -681,6 +724,7 @@ function CampItemDrawer({
   transferNote,
   transferFiles,
   transferBusy,
+  transferFeedback,
   moveWarehouseId,
   moveNote,
   moveFiles,
@@ -831,6 +875,7 @@ function CampItemDrawer({
               Сейчас: {sel.section === "SS" ? "СС" : "ЭОМ"}. Передача в {otherSection === "SS" ? "СС" : "ЭОМ"} — с
               приложением документа.
             </p>
+            {transferFeedback ? <ResultBanner text={transferFeedback.text} tone={transferFeedback.tone} /> : null}
             <div className="form docCenterForm">
               <label>
                 Куда передать
@@ -838,7 +883,6 @@ function CampItemDrawer({
                   value={transferSection}
                   onChange={(e) => onTransferSectionChange(e.target.value as "SS" | "EOM" | "")}
                 >
-                  <option value="">—</option>
                   <option value={otherSection}>{otherSection === "SS" ? "СС" : "ЭОМ"}</option>
                 </select>
               </label>
@@ -858,10 +902,20 @@ function CampItemDrawer({
                   }}
                 />
               </label>
+              {transferFiles.length > 0 ? (
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Выбрано файлов: {transferFiles.length} ({transferFiles.map((f) => f.name).join(", ")})
+                </p>
+              ) : (
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Документ не выбран — без него передача недоступна
+                </p>
+              )}
             </div>
             <button
               type="button"
-              disabled={transferBusy || !transferSection || !transferFiles.length}
+              className="primaryBtn"
+              disabled={transferBusy}
               onClick={onSubmitTransfer}
             >
               {transferBusy ? "Передаём…" : "Передать между подразделениями"}
