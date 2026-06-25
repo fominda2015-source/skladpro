@@ -850,11 +850,6 @@ function App() {
   const [objectSectionFilter, setObjectSectionFilter] = useState<"SS" | "EOM">("SS");
   const [loadingStocks, setLoadingStocks] = useState(false);
   const [stocksError, setStocksError] = useState("");
-  const [reconcileStockLoading, setReconcileStockLoading] = useState(false);
-  const [warehouseReconcileBanner, setWarehouseReconcileBanner] = useState<{
-    text: string;
-    tone: "neutral" | "success" | "error" | "conflict";
-  } | null>(null);
   const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
   const [stockMovementsLoading, setStockMovementsLoading] = useState(false);
   const [stockMovementsError, setStockMovementsError] = useState("");
@@ -1674,29 +1669,6 @@ function App() {
     return rows;
   }, [stocks, activeObjectId]);
 
-  const warehouseDuplicateArticleGroups = useMemo(() => {
-    const byArticle = new Map<string, number>();
-    for (const row of warehouseStockRows) {
-      const m = row.materialName.match(/\b\d{4,}\b/);
-      if (!m) continue;
-      byArticle.set(m[0]!, (byArticle.get(m[0]!) || 0) + 1);
-    }
-    return [...byArticle.values()].filter((n) => n > 1).length;
-  }, [warehouseStockRows]);
-
-  const receiptAcceptedWithMaterialCount = useMemo(
-    () =>
-      receiptRequests.reduce((n, r) => {
-        if (activeObjectId !== ALL_OBJECTS_ID && r.warehouseId !== activeObjectId) return n;
-        if (r.section !== objectSectionFilter) return n;
-        for (const it of r.items) {
-          if (parseMaterialQty(it.acceptedQty) > 0) n += 1;
-        }
-        return n;
-      }, 0),
-    [receiptRequests, activeObjectId, objectSectionFilter]
-  );
-
   const warehouseVisibleRows = useMemo(() => {
     if (!limitFilterEnabled) return warehouseStockRows;
 
@@ -2293,99 +2265,6 @@ function App() {
       }
     } finally {
       setLoadingStocks(false);
-    }
-  }
-
-  async function reconcileWarehouseStockFromReceipts(): Promise<boolean> {
-    if (!token || !isAdmin) return false;
-    if (
-      !window.confirm(
-        "Объединить дубликаты карточек (один артикул — одна строка) и восстановить недостающие остатки по приёмкам?\n\nОстанется название из узла лимита (колонка O), остатки суммируются."
-      )
-    ) {
-      return false;
-    }
-    setReconcileStockLoading(true);
-    setStocksError("");
-    setWarehouseReconcileBanner(null);
-    try {
-      const wh = activeObjectId !== ALL_OBJECTS_ID ? activeObjectId : stockFilterWarehouseId || "";
-      const res = await fetchWithSession(`${API_URL}/api/receipt-requests/reconcile-stock`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          warehouseId: wh || undefined,
-          section: objectSectionFilter
-        })
-      });
-      if (!res.ok) {
-        let msg = "Не удалось восстановить остатки";
-        try {
-          const body = (await res.json()) as { error?: string; message?: string };
-          msg = body.message || body.error || msg;
-        } catch {
-          // ignore
-        }
-        if (res.status === 404) {
-          msg =
-            "На сервере нет эндпоинта восстановления остатков — обновите API до последней версии и повторите.";
-        }
-        setWarehouseReconcileBanner({ text: msg, tone: "error" });
-        setStocksError(msg);
-        return false;
-      }
-      const data = (await res.json()) as {
-        quantityAdded?: number;
-        unresolvedItems?: number;
-        warnings?: string[];
-        details?: Array<{ materialName: string; addedQty: number }>;
-        merged?: {
-          materialsMerged?: number;
-          quantityMoved?: number;
-          details?: Array<{ keptName: string; quantityMoved: number; mergedIds: string[] }>;
-        };
-      };
-      const added = Number(data.quantityAdded ?? 0);
-      const mergedCount = Number(data.merged?.materialsMerged ?? 0);
-      const moved = Number(data.merged?.quantityMoved ?? 0);
-      const unresolved = Number(data.unresolvedItems ?? 0);
-      const mergeHint =
-        mergedCount > 0
-          ? `Объединено карточек: ${mergedCount}, перенесено ${moved.toLocaleString("ru-RU")}`
-          : "";
-      const names = (data.details ?? [])
-        .filter((d) => d.addedQty > 0)
-        .slice(0, 3)
-        .map((d) => `${d.materialName} (+${d.addedQty})`)
-        .join("; ");
-      const restoreHint =
-        added > 0
-          ? `Восстановлено: ${added.toLocaleString("ru-RU")}${names ? ` · ${names}` : ""}`
-          : "";
-      const warningHints = (data.warnings ?? []).slice(0, 2);
-      const parts = [mergeHint, restoreHint, ...warningHints].filter(Boolean);
-      const summary =
-        parts.length > 0
-          ? parts.join(" · ")
-          : unresolved > 0
-            ? `Не удалось сопоставить ${unresolved} принятых позиций с карточкой материала`
-            : "Дубликатов и недостающих остатков не найдено — остатки уже соответствуют приходам или приёмка была без склада";
-      const tone: "neutral" | "success" | "error" | "conflict" =
-        added > 0 || mergedCount > 0 ? "success" : unresolved > 0 ? "conflict" : "neutral";
-      setWarehouseReconcileBanner({ text: summary, tone });
-      setOpsMessage(summary);
-      await loadStocks(q, objectSectionFilter, undefined, wh || undefined);
-      return true;
-    } catch (e) {
-      const msg = `Не удалось восстановить остатки: ${String(e)}`;
-      setWarehouseReconcileBanner({ text: msg, tone: "error" });
-      setStocksError(msg);
-      return false;
-    } finally {
-      setReconcileStockLoading(false);
     }
   }
 
@@ -8140,43 +8019,6 @@ function App() {
         )}
       {activeTab === "warehouse" && (
         <div className="stockPanel">
-          {isAdmin && !loadingStocks && warehouseDuplicateArticleGroups > 0 ? (
-            <ResultBanner
-              text={`На складе ${warehouseDuplicateArticleGroups} групп(ы) с одинаковым артикулом и разными названиями — из‑за замены в лимите (O) и старого имени заявки (N). Нажмите кнопку ниже, чтобы объединить в одну карточку с именем из лимита.`}
-              tone="conflict"
-            />
-          ) : null}
-          {isAdmin &&
-          !loadingStocks &&
-          warehouseStockRows.length === 0 &&
-          receiptAcceptedWithMaterialCount > 0 ? (
-            <ResultBanner
-              text={`Склад пуст, но в приходах есть ${receiptAcceptedWithMaterialCount} принятых позиций. Возможно, приёмка прошла без остатка (закрытие заявки, «без склада» или старая версия).`}
-              tone="conflict"
-            />
-          ) : null}
-          {warehouseReconcileBanner ? (
-            <ResultBanner text={warehouseReconcileBanner.text} tone={warehouseReconcileBanner.tone} />
-          ) : null}
-          {isAdmin &&
-          !loadingStocks &&
-          (warehouseDuplicateArticleGroups > 0 ||
-            (warehouseStockRows.length === 0 && receiptAcceptedWithMaterialCount > 0)) ? (
-            <div style={{ marginBottom: 12 }}>
-              <button
-                type="button"
-                className="primaryBtn"
-                disabled={reconcileStockLoading}
-                onClick={() => void reconcileWarehouseStockFromReceipts()}
-              >
-                {reconcileStockLoading
-                  ? "Обработка…"
-                  : warehouseDuplicateArticleGroups > 0
-                    ? "Объединить дубликаты и выровнять склад"
-                    : "Восстановить остатки из приёмок"}
-              </button>
-            </div>
-          ) : null}
           <WarehouseStockView
             sectionLabel={`Раздел ${objectSectionFilter === "SS" ? "СС" : "ЭОМ"}`}
             rows={warehouseDisplayRows.map((row) => ({
@@ -8193,11 +8035,7 @@ function App() {
             lowCount={warehouseVisibleRows.filter((r) => r.isLow).length}
             loading={loadingStocks}
             error={stocksError}
-            limitHint={
-              limitFilterEnabled
-                ? "Строки с одинаковым названием и единицей измерения схлопываются, остатки суммируются (узлы лимита могут отличаться). При выдаче подраздел уточняется отдельно."
-                : "Строки с одинаковым названием и единицей измерения схлопываются, остатки суммируются."
-            }
+            limitHint="Строки с одинаковым названием и единицей измерения схлопываются, остатки суммируются. При выдаче подраздел лимита уточняется отдельно."
             manualMessage={manualStockMessage && !manualStockModalOpen ? manualStockMessage : undefined}
             search={q}
             onSearchChange={(v) => {
