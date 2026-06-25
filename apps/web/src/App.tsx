@@ -1686,12 +1686,14 @@ function App() {
   const receiptAcceptedWithMaterialCount = useMemo(
     () =>
       receiptRequests.reduce((n, r) => {
+        if (activeObjectId !== ALL_OBJECTS_ID && r.warehouseId !== activeObjectId) return n;
+        if (r.section !== objectSectionFilter) return n;
         for (const it of r.items) {
           if (parseMaterialQty(it.acceptedQty) > 0) n += 1;
         }
         return n;
       }, 0),
-    [receiptRequests]
+    [receiptRequests, activeObjectId, objectSectionFilter]
   );
 
   const warehouseVisibleRows = useMemo(() => {
@@ -1795,6 +1797,7 @@ function App() {
     const out: IssuePickCartLine[] = [];
     if (!activeObjectId) return out;
     const usedFactKeys = new Set<string>();
+    const usedMaterialIdsFromFact = new Set<string>();
 
     for (const g of factLabelGroups.values()) {
       const materialIds = [...g.materialIds];
@@ -1810,6 +1813,7 @@ function App() {
 
       const factKey = `${g.factLabel.trim().toLowerCase()}|${g.unit.trim().toLowerCase()}`;
       usedFactKeys.add(factKey);
+      for (const mid of materialIds) usedMaterialIdsFromFact.add(mid);
       const available = stockRows.reduce((acc, s) => acc + Number(s.available), 0);
       const activeSlots = g.slots.filter((s) => s.remainingQty > 0 || s.acceptedQty > 0);
       out.push({
@@ -1860,7 +1864,7 @@ function App() {
             acceptedQty: v.quantity
           });
         }
-      } else {
+      } else if (!usedMaterialIdsFromFact.has(mid)) {
         out.push({
           pickKey: `${mid}::card`,
           materialId: mid,

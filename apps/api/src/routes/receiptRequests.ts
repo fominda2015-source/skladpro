@@ -512,7 +512,15 @@ async function resolveReceiptTargetMaterialId(
 
   if (bindLimitNodeId) {
     const fromNode = await resolveMaterialIdForLimitNode(tx, bindLimitNodeId);
-    if (fromNode) return applyCatalogFields(fromNode);
+    if (fromNode) {
+      const mapped = await tx.material.findUnique({
+        where: { id: fromNode },
+        select: { name: true }
+      });
+      if (mapped && mappedMaterialMatchesCatalog(mapped.name, item)) {
+        return applyCatalogFields(fromNode);
+      }
+    }
   }
 
   if (canonicalName) {

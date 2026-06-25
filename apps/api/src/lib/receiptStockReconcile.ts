@@ -9,7 +9,11 @@ import { receiptCategoryToCampCategory } from "./campCatalog.js";
 import { prisma } from "./prisma.js";
 import { receiptAcceptedQty } from "./receiptQty.js";
 import { resolveReceiptStockQty } from "./receiptUnits.js";
-import { canonicalReceiptMaterialName, catalogArticleToken } from "./receiptMaterialResolve.js";
+import {
+  canonicalReceiptMaterialName,
+  catalogArticleToken,
+  mappedMaterialMatchesCatalog
+} from "./receiptMaterialResolve.js";
 import { resolveMaterialIdForLimitNode } from "./receiptOverageLimits.js";
 import {
   isToolCatalogMaterialReceiptCategory,
@@ -97,16 +101,34 @@ async function resolveMaterialForReconcileItem(
   tx: ReconcileTx,
   item: ReconcileItemRow
 ): Promise<string | null> {
-  if (item.mappedMaterialId) return item.mappedMaterialId;
+  const commit = async (materialId: string) => {
+    await tx.receiptRequestItem.update({
+      where: { id: item.id },
+      data: { mappedMaterialId: materialId }
+    });
+    return materialId;
+  };
+
+  if (item.mappedMaterialId) {
+    const mapped = await tx.material.findUnique({
+      where: { id: item.mappedMaterialId },
+      select: { name: true }
+    });
+    if (mapped && mappedMaterialMatchesCatalog(mapped.name, item)) {
+      return item.mappedMaterialId;
+    }
+  }
 
   if (item.limitNodeId) {
     const fromNode = await resolveMaterialIdForLimitNode(tx, item.limitNodeId);
     if (fromNode) {
-      await tx.receiptRequestItem.update({
-        where: { id: item.id },
-        data: { mappedMaterialId: fromNode }
+      const mapped = await tx.material.findUnique({
+        where: { id: fromNode },
+        select: { name: true }
       });
-      return fromNode;
+      if (mapped && mappedMaterialMatchesCatalog(mapped.name, item)) {
+        return commit(fromNode);
+      }
     }
   }
 
@@ -127,11 +149,13 @@ async function resolveMaterialForReconcileItem(
     orderBy: { updatedAt: "desc" }
   });
   if (mapping?.targetMaterialId) {
-    await tx.receiptRequestItem.update({
-      where: { id: item.id },
-      data: { mappedMaterialId: mapping.targetMaterialId }
+    const mapped = await tx.material.findUnique({
+      where: { id: mapping.targetMaterialId },
+      select: { name: true }
     });
-    return mapping.targetMaterialId;
+    if (mapped && mappedMaterialMatchesCatalog(mapped.name, item)) {
+      return commit(mapping.targetMaterialId);
+    }
   }
 
   for (const name of [canon, item.sourceName.trim(), (item.limitCatalogNameO || "").trim()].filter(Boolean)) {
@@ -143,11 +167,7 @@ async function resolveMaterialForReconcileItem(
       select: { id: true }
     });
     if (mat) {
-      await tx.receiptRequestItem.update({
-        where: { id: item.id },
-        data: { mappedMaterialId: mat.id }
-      });
-      return mat.id;
+      return commit(mat.id);
     }
   }
 
@@ -164,11 +184,8 @@ async function resolveMaterialForReconcileItem(
     });
     for (const row of stocks) {
       if (catalogArticleToken(row.material.name) !== article) continue;
-      await tx.receiptRequestItem.update({
-        where: { id: item.id },
-        data: { mappedMaterialId: row.material.id }
-      });
-      return row.material.id;
+      if (!mappedMaterialMatchesCatalog(row.material.name, item)) continue;
+      return commit(row.material.id);
     }
     const mats = await tx.material.findMany({
       where: { unit: { equals: unit, mode: "insensitive" } },
@@ -177,11 +194,8 @@ async function resolveMaterialForReconcileItem(
     });
     for (const mat of mats) {
       if (catalogArticleToken(mat.name) !== article) continue;
-      await tx.receiptRequestItem.update({
-        where: { id: item.id },
-        data: { mappedMaterialId: mat.id }
-      });
-      return mat.id;
+      if (!mappedMaterialMatchesCatalog(mat.name, item)) continue;
+      return commit(mat.id);
     }
   }
 
@@ -190,11 +204,7 @@ async function resolveMaterialForReconcileItem(
   const created = await tx.material.create({
     data: { name: canon, unit }
   });
-  await tx.receiptRequestItem.update({
-    where: { id: item.id },
-    data: { mappedMaterialId: created.id }
-  });
-  return created.id;
+  return commit(created.id);
 }
 
 /**
@@ -333,8 +343,8 @@ export async function reconcileReceiptWarehouseStock(opts?: {
         }
       });
       const stockBefore = stockRow ? Number(stockRow.quantity) : 0;
-      const targetQty = Math.max(receiptBackedQty, operationBackedQty);
-      const addedQty = Math.max(0, targetQty - stockBefore);
+      // Ориентир — принятое количество и фактический остаток; операция могла создаться без stock (старый баг).
+      const addedQty = Math.max(0, receiptBackedQty - stockBefore);
       if (addedQty <= 1e-6) continue;
 
       const materialName = materialNameById.get(materialId) ?? materialId;
