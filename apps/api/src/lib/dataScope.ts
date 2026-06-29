@@ -3,6 +3,7 @@ import { prisma } from "./prisma.js";
 import type { AuthedRequest } from "../middleware/auth.js";
 import { hasGlobalWarehouseAccess } from "./openAccess.js";
 import { resolveAllowedSectionPairs, type ObjectSection } from "./objectAccess.js";
+import { isResponsibleForWarehouse } from "./warehouseResponsibility.js";
 
 const scopeCache = new WeakMap<AuthedRequest, Promise<DataScope>>();
 
@@ -449,6 +450,25 @@ export function assertWarehouseInScope(scope: DataScope, warehouseId: string) {
     err.status = 403;
     throw err;
   }
+}
+
+/**
+ * Проверка доступа к объекту при операции над конкретной сущностью (приёмка, выдача и т.д.).
+ * Не сужается до activeWarehouse в шапке — только реальное членство / ответственность / ADMIN.
+ */
+export async function assertEntityWarehouseAccess(req: AuthedRequest, warehouseId: string) {
+  const { userId, role, permissions } = req.user!;
+  if (hasGlobalWarehouseAccess(role, permissions)) {
+    return;
+  }
+  const member = await prisma.userWarehouseScope.findFirst({
+    where: { userId, warehouseId }
+  });
+  if (member) return;
+  if (await isResponsibleForWarehouse(userId, warehouseId)) return;
+  const err = new Error("FORBIDDEN_WAREHOUSE") as Error & { status: number };
+  err.status = 403;
+  throw err;
 }
 
 export function assertObjectSectionInScope(scope: DataScope, warehouseId: string, section: "SS" | "EOM") {

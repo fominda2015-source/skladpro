@@ -10,7 +10,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { isAdminEquivalent } from "../lib/openAccess.js";
 import { recordAudit } from "../lib/audit.js";
-import { assertWarehouseInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
+import { assertEntityWarehouseAccess, assertWarehouseInScope, getRequestDataScope, resolveReadScope } from "../lib/dataScope.js";
 import { handlePrismaError } from "../lib/errors.js";
 import { dispatchCriticalNotification, dispatchNotification, notifyUser } from "../lib/notifications.js";
 import {
@@ -882,9 +882,8 @@ receiptRequestsRouter.post(
     if (!req.file?.buffer) return res.status(400).json({ error: "file is required" });
     const row = await prisma.receiptRequest.findUnique({ where: { id } });
     if (!row) return res.status(404).json({ error: "Receipt request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -907,9 +906,8 @@ receiptRequestsRouter.get("/:id/invoice", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
   const row = await prisma.receiptRequest.findUnique({ where: { id } });
   if (!row) return res.status(404).json({ error: "Receipt request not found" });
-  const scope = await getRequestDataScope(req);
   try {
-    assertWarehouseInScope(scope, row.warehouseId);
+    await assertEntityWarehouseAccess(req, row.warehouseId);
   } catch (e) {
     const err = e as Error & { status?: number };
     if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -930,9 +928,8 @@ receiptRequestsRouter.patch(
     const id = String(req.params.id);
     const row = await prisma.receiptRequest.findUnique({ where: { id } });
     if (!row) return res.status(404).json({ error: "Request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -984,9 +981,8 @@ receiptRequestsRouter.get("/:id/limit-suggestions", async (req: AuthedRequest, r
     }
   });
   if (!row) return res.status(404).json({ error: "Request not found" });
-  const scope = await getRequestDataScope(req);
   try {
-    assertWarehouseInScope(scope, row.warehouseId);
+    await assertEntityWarehouseAccess(req, row.warehouseId);
   } catch (e) {
     const err = e as Error & { status?: number };
     if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -1073,9 +1069,8 @@ receiptRequestsRouter.get("/:id/overage-limit-options", async (req: AuthedReques
     include: { items: true }
   });
   if (!row) return res.status(404).json({ error: "Request not found" });
-  const scope = await getRequestDataScope(req);
   try {
-    assertWarehouseInScope(scope, row.warehouseId);
+    await assertEntityWarehouseAccess(req, row.warehouseId);
   } catch (e) {
     const err = e as Error & { status?: number };
     if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -1188,9 +1183,8 @@ receiptRequestsRouter.post(
     const id = String(req.params.id);
     const row = await prisma.receiptRequest.findUnique({ where: { id }, include: { items: true } });
     if (!row) return res.status(404).json({ error: "Request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -2000,9 +1994,8 @@ receiptRequestsRouter.patch(
       include: { items: true }
     });
     if (!row) return res.status(404).json({ error: "Receipt request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -2085,9 +2078,8 @@ receiptRequestsRouter.patch(
     if (row.status === "CANCELLED") {
       return res.status(409).json({ error: "Заявка отменена" });
     }
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -2126,9 +2118,8 @@ receiptRequestsRouter.patch(
     if (row.status === "CANCELLED") {
       return res.status(409).json({ error: "Заявка отменена" });
     }
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -2282,9 +2273,8 @@ receiptRequestsRouter.patch(
     const reason = parsed.data.reason.trim();
     const row = await prisma.receiptRequest.findUnique({ where: { id } });
     if (!row) return res.status(404).json({ error: "Receipt request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });
@@ -2353,9 +2343,8 @@ receiptRequestsRouter.delete(
       include: { items: true }
     });
     if (!row) return res.status(404).json({ error: "Receipt request not found" });
-    const scope = await getRequestDataScope(req);
     try {
-      assertWarehouseInScope(scope, row.warehouseId);
+      await assertEntityWarehouseAccess(req, row.warehouseId);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) return res.status(403).json({ error: err.message });

@@ -4351,9 +4351,7 @@ function App() {
           }
         }
         return fail(
-          serverMsg ||
-            (typeof body.message === "string" ? body.message : "") ||
-            `Не удалось провести приёмку (ошибка ${res.status})`
+          readApiErrorMessage(body, serverMsg || `Не удалось провести приёмку (ошибка ${res.status})`)
         );
       }
 
