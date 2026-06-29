@@ -29,6 +29,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+/** Ручные документы приходов — общие для всех объектов (не привязаны к одному складу). */
+export const INBOUND_SHARED_ENTITY_ID = "shared";
+
 const createLinkSchema = z.object({
   entityType: z.string().min(1),
   entityId: z.string().min(1)
@@ -50,7 +53,11 @@ function canWriteEntityDocument(permissions: string[], entityType: string) {
     return true;
   }
   if (entityType === "inbound") return hasPermission(permissions, "documents.read");
-  return entityType === "material" && hasPermission(permissions, "materials.write");
+  if (entityType === "material" && hasPermission(permissions, "materials.write")) return true;
+  if (entityType === "issue" && hasPermission(permissions, "issues.write")) return true;
+  if (entityType === "receipt" && hasPermission(permissions, "operations.write")) return true;
+  if (entityType === "transferrequest" && hasPermission(permissions, "waybills.write")) return true;
+  return false;
 }
 
 const inboundMetaSchema = z.object({
@@ -282,6 +289,7 @@ documentsRouter.get("/inbound", async (req: AuthedRequest, res) => {
 
   const entityOr: Prisma.DocumentFileWhereInput[] = [];
   const linkOr: Prisma.DocumentLinkWhereInput[] = [];
+  entityOr.push({ entityType: "inbound", entityId: INBOUND_SHARED_ENTITY_ID });
   for (const whId of warehouseIds) {
     entityOr.push({ entityType: "inbound", entityId: whId });
   }
@@ -321,7 +329,8 @@ documentsRouter.get("/inbound", async (req: AuthedRequest, res) => {
       sourceLabel = num ? `Приход ${num}` : `Приход ${row.entityId.slice(0, 8)}`;
     } else if (row.entityType === "inbound") {
       sourceKind = "manual";
-      sourceLabel = "Вручную";
+      sourceLabel =
+        row.entityId === INBOUND_SHARED_ENTITY_ID ? "Вручную (все объекты)" : "Вручную";
     }
     return { ...row, sourceKind, sourceLabel };
   });
@@ -371,7 +380,7 @@ documentsRouter.post("/inbound/upload", upload.array("file", 20), async (req: Au
         groupId,
         version: 1,
         entityType: "inbound",
-        entityId: warehouseId,
+        entityId: INBOUND_SHARED_ENTITY_ID,
         type: "inbound-manual",
         title,
         comment: comment || null,
@@ -438,7 +447,7 @@ documentsRouter.post("/manual-batch/upload", upload.array("file", 20), async (re
         groupId: batchId,
         version: 1,
         entityType: "inbound",
-        entityId: warehouseId,
+        entityId: INBOUND_SHARED_ENTITY_ID,
         type: "inbound-manual",
         title,
         comment: comment ? `${comment} · batch:${batchId}` : `batch:${batchId}`,
@@ -475,7 +484,9 @@ documentsRouter.patch("/:id/meta", async (req: AuthedRequest, res) => {
   }
   try {
     const scope = await getRequestDataScope(req);
-    assertWarehouseInScope(scope, row.entityId);
+    if (row.entityId !== INBOUND_SHARED_ENTITY_ID) {
+      assertWarehouseInScope(scope, row.entityId);
+    }
   } catch (e) {
     const err = e as Error & { status?: number };
     if (err.status === 403) return res.status(403).json({ error: err.message });

@@ -405,7 +405,7 @@ type IssueRequest = {
   flowType?: "REQUEST" | "DIRECT_ISSUE";
   warehouseId: string;
   section?: "SS" | "EOM";
-  /** @deprecated кросс-корпусная выдача; не используется в UI */
+  /** Секция склада-получателя при передаче между подразделениями СС ↔ ЭОМ */
   stockSection?: "SS" | "EOM" | null;
   projectId?: string | null;
   requestedById: string;
@@ -976,6 +976,7 @@ function App() {
   const [issueSearch, setIssueSearch] = useState("");
   const [issueBasisFilter] = useState<"" | IssueBasisType>("");
   const [issueNote, setIssueNote] = useState("");
+  const [issueSectionTransfer, setIssueSectionTransfer] = useState(false);
   const [selectedIssueId, setSelectedIssueId] = useState("");
   const [issueWarehouseId, setIssueWarehouseId] = useState("");
   const [issueMaterialId, setIssueMaterialId] = useState("");
@@ -1158,7 +1159,6 @@ function App() {
     null | { materialId: string; warehouseId: string }
   >(null);
   const [docTypeFilter, setDocTypeFilter] = useState("");
-  const [docPreviewUrl, setDocPreviewUrl] = useState("");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [showStockSku, setShowStockSku] = useState(() => {
     const saved = localStorage.getItem(STOCK_VIEW_KEY);
@@ -4072,6 +4072,38 @@ function App() {
     openUploadedDocument(doc.filePath, doc.fileName);
   }
 
+  const receiptInvoiceAttachRef = useRef<HTMLInputElement>(null);
+  const [receiptInvoiceAttachId, setReceiptInvoiceAttachId] = useState("");
+  const issueAttachRef = useRef<HTMLInputElement>(null);
+  const [issueAttachId, setIssueAttachId] = useState("");
+
+  function promptReceiptInvoiceAttach(receiptId: string) {
+    setReceiptInvoiceAttachId(receiptId);
+    receiptInvoiceAttachRef.current?.click();
+  }
+
+  function promptIssueAttachment(issueId: string) {
+    setIssueAttachId(issueId);
+    issueAttachRef.current?.click();
+  }
+
+  async function uploadIssueAttachment(issueId: string, file: File): Promise<boolean> {
+    if (!token) return false;
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetchWithSession(`${API_URL}/api/issues/${encodeURIComponent(issueId)}/attachments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+    if (!res.ok) {
+      setOpsMessage("Не удалось прикрепить документ к выдаче");
+      return false;
+    }
+    setOpsMessage("Документ прикреплён к выдаче");
+    return true;
+  }
+
   async function attachReceiptRequestToLimit(requestId: string, templateId: string | null): Promise<boolean> {
     if (!token) return false;
     const res = await fetchWithSession(`${API_URL}/api/receipt-requests/${requestId}/limit`, {
@@ -5036,7 +5068,7 @@ function App() {
     }
     for (const row of issuePickCart) {
       const qty = parseMaterialQty(issuePickQtyByKey[row.pickKey] ?? 1);
-      if (row.limitNodeId) {
+      if (!issueSectionTransfer && row.limitNodeId) {
         const slot = factIssueSlots.find(
           (s) =>
             s.materialId === row.materialId &&
@@ -5072,16 +5104,21 @@ function App() {
     setIssueSubmitting(true);
     setIssuesMessage("");
     try {
+      const targetSection = objectSectionFilter === "SS" ? "EOM" : "SS";
+      const transferNote = issueSectionTransfer
+        ? `Передача между подразделениями → ${targetSection === "SS" ? "СС" : "ЭОМ"}`
+        : "";
       const createRes = await fetchWithSession(`${API_URL}/api/issues`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           warehouseId: activeObjectId,
           section: objectSectionFilter,
-          note: issueNote.trim() || undefined,
+          ...(issueSectionTransfer ? { stockSection: targetSection } : {}),
+          note: [issueNote.trim(), transferNote].filter(Boolean).join(" · ") || undefined,
           responsibleName,
           flowType: "DIRECT_ISSUE",
-          basisType: "OTHER",
+          basisType: issueSectionTransfer ? "INTERNAL_NEED" : "OTHER",
           domain: issueIssuesDomain === "TOOLS" ? undefined : issueIssuesDomain,
           items: lines
         })
@@ -5133,12 +5170,17 @@ function App() {
       if (opts?.openDocument && issuePayload.document?.filePath) {
         openUploadedDocument(issuePayload.document.filePath, issuePayload.document.fileName);
       }
-      setIssuesMessage(`Выдача ${created.number} проведена. Акт сформирован автоматически.`);
+      setIssuesMessage(
+        issueSectionTransfer
+          ? `Передача ${created.number} проведена: материал на складе ${targetSection === "SS" ? "СС" : "ЭОМ"}.`
+          : `Выдача ${created.number} проведена. Акт сформирован автоматически.`
+      );
       setIssuesTone("success");
       setIssuePickCart([]);
       setIssuePickQtyByKey({});
       setIssueMaterialSearch("");
       setIssueNote("");
+      setIssueSectionTransfer(false);
       setDirectIssueSignedFiles([]);
       await loadIssues();
       await loadFactIssueSlots();
@@ -6500,7 +6542,6 @@ function App() {
     setInboundDocuments(data);
     if (data.length && docSectionTab === "inbound" && !selectedDocumentId) {
       setSelectedDocumentId(data[0].id);
-      setDocPreviewUrl(`${API_URL}/${data[0].filePath}`);
     }
   }
 
@@ -6558,7 +6599,6 @@ function App() {
     setDocuments(data);
     if (data.length && !selectedDocumentId) {
       setSelectedDocumentId(data[0].id);
-      setDocPreviewUrl(`${API_URL}/${data[0].filePath}`);
     }
   }
 
@@ -6582,7 +6622,6 @@ function App() {
     }
     if (ids.includes(selectedDocumentId)) {
       setSelectedDocumentId("");
-      setDocPreviewUrl("");
     }
     await loadDocuments();
     if (docSectionTab === "inbound") {
@@ -6595,7 +6634,6 @@ function App() {
     setDocEntityId(entityId);
     setDocWarehouseFilter("");
     setSelectedDocumentId("");
-    setDocPreviewUrl("");
     setActiveTab("documents");
   }
 
@@ -8795,6 +8833,16 @@ function App() {
                       <button type="button" className="ghostBtn" onClick={() => openDocumentsForEntity("receipt", row.id)}>
                         Док.
                       </button>
+                      {canWriteOperations ? (
+                        <button
+                          type="button"
+                          className="ghostBtn"
+                          title="Прикрепить счёт поставщика"
+                          onClick={() => promptReceiptInvoiceAttach(row.id)}
+                        >
+                          Счёт
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="ghostBtn"
@@ -10016,6 +10064,29 @@ function App() {
               </label>
             )}
 
+            {issueIssuesDomain === "MATERIALS" ? (
+              <label
+                className="card adminInsetCard"
+                style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, padding: 12 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={issueSectionTransfer}
+                  disabled={issueSubmitting}
+                  onChange={(e) => setIssueSectionTransfer(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>Выдача между подразделениями (СС ↔ ЭОМ)</strong>
+                  <span className="muted" style={{ display: "block", fontSize: 12, marginTop: 4 }}>
+                    Материал спишется со склада раздела {objectSectionFilter === "SS" ? "СС" : "ЭОМ"} и поступит на
+                    склад {objectSectionFilter === "SS" ? "ЭОМ" : "СС"} этого же объекта. В лимитах источника выдача
+                    отобразится красным до обратной передачи материала с тем же названием.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
             <div className="issueActionBar">
               <button
                 type="button"
@@ -10033,7 +10104,9 @@ function App() {
               >
                 {issueSubmitting
                   ? "Выдача..."
-                  : issueIssuesDomain === "WORKWEAR"
+                  : issueSectionTransfer
+                    ? "Передать между подразделениями"
+                    : issueIssuesDomain === "WORKWEAR"
                     ? "Выдать спецодежду"
                     : issueIssuesDomain === "CONSUMABLES"
                       ? "Выдать расходники"
@@ -10308,6 +10381,16 @@ function App() {
                             >
                               Документы
                             </button>
+                            {canWriteIssues ? (
+                              <button
+                                type="button"
+                                className="ghostBtn"
+                                title="Прикрепить документ к выдаче"
+                                onClick={() => promptIssueAttachment(i.id)}
+                              >
+                                Файл
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -10333,6 +10416,9 @@ function App() {
                         <button type="button" onClick={() => openRequestMaterialsTable({ kind: "issue", row: i })}>Открыть</button>
                         <button type="button" onClick={() => { setSelectedIssueId(i.id); setDrawerMode("issue"); }}>Детали</button>
                         <button type="button" onClick={() => openDocumentsForEntity("issue", i.id)}>Документы</button>
+                        {canWriteIssues ? (
+                          <button type="button" onClick={() => promptIssueAttachment(i.id)}>Файл</button>
+                        ) : null}
                       </div>
                     </article>
                   ))}
@@ -11601,7 +11687,6 @@ function App() {
               onChange={(e) => {
                 setDocEntityId(e.target.value);
                 setSelectedDocumentId("");
-                setDocPreviewUrl("");
               }}
               aria-label="Заявка на выдачу"
             >
@@ -11618,7 +11703,6 @@ function App() {
               onChange={(e) => {
                 setDocEntityId(e.target.value);
                 setSelectedDocumentId("");
-                setDocPreviewUrl("");
               }}
               aria-label="Операция"
             >
@@ -11635,7 +11719,6 @@ function App() {
               onChange={(e) => {
                 setDocEntityId(e.target.value);
                 setSelectedDocumentId("");
-                setDocPreviewUrl("");
               }}
               aria-label="Приходная заявка"
             >
@@ -11658,7 +11741,6 @@ function App() {
             onDocumentsSectionChange={(id) => {
               setDocSectionTab(id);
               setSelectedDocumentId("");
-              setDocPreviewUrl("");
               if (id === "inbound") {
                 void loadInboundDocuments();
               } else {
@@ -11675,7 +11757,6 @@ function App() {
                 visibleDocs={inboundVisible}
                 selectedDocumentId={selectedDocumentId}
                 selectedDocument={selectedDocument}
-                docPreviewUrl={docPreviewUrl}
                 apiUrl={API_URL}
                 warehouseReady={inboundWarehouseReady}
                 docSearchQuery={docSearchQuery}
@@ -11684,14 +11765,12 @@ function App() {
                 onResetFilters={() => {
                   setDocSearchQuery("");
                   setSelectedDocumentId("");
-                  setDocPreviewUrl("");
                 }}
                 onRefresh={() => void loadInboundDocuments()}
                 documentsMessage={documentsMessage}
                 canWriteDocuments={canWriteDocuments}
                 onSelectPreview={(d) => {
                   setSelectedDocumentId(d.id);
-                  setDocPreviewUrl(`${API_URL}/${d.filePath}`);
                 }}
                 onDelete={(id, shownName, relatedIds) => void deleteDocument(id, shownName, relatedIds)}
                 uploadTitle={inboundUploadTitle}
@@ -11710,28 +11789,24 @@ function App() {
             visibleDocs={visibleDocs}
             selectedDocumentId={selectedDocumentId}
             selectedDocument={selectedDocument}
-            docPreviewUrl={docPreviewUrl}
             apiUrl={API_URL}
             docTypeTabs={docTypeTabs}
             docTypeFilter={docTypeFilter}
             onDocTypeChange={(id) => {
               setDocTypeFilter(id);
               setSelectedDocumentId("");
-              setDocPreviewUrl("");
             }}
             docWarehouseFilter={docWarehouseFilter}
             warehouses={warehouses}
             onWarehouseChange={(id) => {
               setDocWarehouseFilter(id);
               setSelectedDocumentId("");
-              setDocPreviewUrl("");
             }}
             docEntityType={docEntityType}
             onEntityTypeChange={(t) => {
               setDocEntityType(t);
               setDocEntityId("");
               setSelectedDocumentId("");
-              setDocPreviewUrl("");
             }}
             docEntityId={docEntityId}
             entitySelect={entitySelect}
@@ -11745,7 +11820,6 @@ function App() {
               setDocWarehouseFilter("");
               setDocSearchQuery("");
               setSelectedDocumentId("");
-              setDocPreviewUrl("");
             }}
             onRefresh={() => {
               if (docSectionTab === "inbound") {
@@ -11758,7 +11832,6 @@ function App() {
             canWriteDocuments={canWriteDocuments}
             onSelectPreview={(d) => {
               setSelectedDocumentId(d.id);
-              setDocPreviewUrl(`${API_URL}/${d.filePath}`);
             }}
             onDelete={(id, shownName) => void deleteDocument(id, shownName)}
             safeName={safeName}
@@ -14756,6 +14829,32 @@ function App() {
           />
         )
       ) : null}
+      <input
+        ref={receiptInvoiceAttachRef}
+        type="file"
+        accept=".pdf,image/*,application/pdf"
+        className="srOnly"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          const id = receiptInvoiceAttachId;
+          e.target.value = "";
+          setReceiptInvoiceAttachId("");
+          if (f && id) void uploadReceiptInvoice(id, f);
+        }}
+      />
+      <input
+        ref={issueAttachRef}
+        type="file"
+        accept=".pdf,image/*,.doc,.docx"
+        className="srOnly"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          const id = issueAttachId;
+          e.target.value = "";
+          setIssueAttachId("");
+          if (f && id) void uploadIssueAttachment(id, f);
+        }}
+      />
       </section>
     </main>
     </ViewportRoot>

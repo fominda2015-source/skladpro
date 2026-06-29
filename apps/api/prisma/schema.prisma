@@ -687,6 +687,7 @@ model Tool {
   events          ToolEvent[]
   issueLines      IssueRequestToolItem[]
   consumableIssues ToolConsumableIssue[]
+  transferLines   TransferRequestToolLine[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -873,6 +874,8 @@ model TransferRequest {
   toWarehouse     Warehouse @relation("TransferToWh", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   requestedBy     User      @relation(fields: [requestedById], references: [id], onDelete: Restrict)
   lines           TransferRequestLine[]
+  toolLines       TransferRequestToolLine[]
+  campLines       TransferRequestCampLine[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -890,6 +893,28 @@ model TransferRequestLine {
   material          Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
   limitNode         ObjectLimitNode? @relation(fields: [limitNodeId], references: [id], onDelete: SetNull)
 
+  @@index([transferRequestId])
+}
+
+model TransferRequestToolLine {
+  id                String          @id @default(cuid())
+  transferRequestId String
+  toolId            String
+  transferRequest   TransferRequest @relation(fields: [transferRequestId], references: [id], onDelete: Cascade)
+  tool              Tool            @relation(fields: [toolId], references: [id], onDelete: Restrict)
+
+  @@unique([transferRequestId, toolId])
+  @@index([transferRequestId])
+}
+
+model TransferRequestCampLine {
+  id                String          @id @default(cuid())
+  transferRequestId String
+  campItemId        String
+  transferRequest   TransferRequest @relation(fields: [transferRequestId], references: [id], onDelete: Cascade)
+  campItem          CampItem        @relation(fields: [campItemId], references: [id], onDelete: Restrict)
+
+  @@unique([transferRequestId, campItemId])
   @@index([transferRequestId])
 }
 
@@ -1204,6 +1229,7 @@ model CampItem {
   createdById     String?
   warehouse       Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   createdBy       User?             @relation("CampItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  transferLines   TransferRequestCampLine[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 

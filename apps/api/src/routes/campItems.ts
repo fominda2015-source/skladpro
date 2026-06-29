@@ -424,9 +424,6 @@ campItemsRouter.post(
       return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
     }
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
-    if (!files.length) {
-      return res.status(400).json({ error: "Приложите документ передачи между подразделениями" });
-    }
     const scope = await getRequestDataScope(req);
     const found = await prisma.campItem.findFirst({
       where: { id, ...campItemWhereFromScope(scope) }

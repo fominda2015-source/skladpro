@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReceiptInvoiceAttachBar } from "../receipts/ReceiptInvoiceAttachBar";
 import { IssueItemReturnModal } from "../issues/IssueItemReturnModal";
 import { displayDocumentFileName, docTypeLabel } from "../../shared/fileName";
@@ -147,6 +147,9 @@ export function RequestMaterialsModal(props: Props) {
   const [actionMessage, setActionMessage] = useState("");
   const [regenerating, setRegenerating] = useState(false);
   const [materialSearch, setMaterialSearch] = useState("");
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docDeletingId, setDocDeletingId] = useState("");
 
   const entityType = props.kind === "issue" ? "issue" : "receipt";
   const entityId = props.row.id;
@@ -275,6 +278,72 @@ export function RequestMaterialsModal(props: Props) {
     () => docsSorted.find((d) => d.type === "receipt-invoice") ?? null,
     [docsSorted]
   );
+
+  async function uploadRequestDocument(file: File) {
+    if (!token || !canWrite || docUploading) return;
+    setDocUploading(true);
+    setActionMessage("");
+    try {
+      if (props.kind === "issue") {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetchWithSession(`${apiUrl}/api/issues/${encodeURIComponent(entityId)}/attachments`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form
+        });
+        if (!res.ok) {
+          setActionMessage("Не удалось прикрепить документ");
+          return;
+        }
+      } else {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("entityType", "receipt");
+        form.append("entityId", entityId);
+        form.append("type", "other");
+        const res = await fetchWithSession(`${apiUrl}/api/documents/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form
+        });
+        if (!res.ok) {
+          setActionMessage("Не удалось прикрепить документ");
+          return;
+        }
+      }
+      setDocsRefresh((v) => v + 1);
+      setActionMessage("Документ прикреплён");
+    } catch {
+      setActionMessage("Ошибка сети при загрузке");
+    } finally {
+      setDocUploading(false);
+    }
+  }
+
+  async function deleteRequestDocument(doc: RequestDoc) {
+    if (!token || !canWrite || docDeletingId) return;
+    const title = displayDocumentTitle(doc);
+    if (!window.confirm(`Удалить документ «${title}»?`)) return;
+    setDocDeletingId(doc.id);
+    setActionMessage("");
+    try {
+      const res = await fetchWithSession(`${apiUrl}/api/documents/${encodeURIComponent(doc.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        setActionMessage("Не удалось удалить документ");
+        return;
+      }
+      setDocsRefresh((v) => v + 1);
+      setActionMessage("Документ удалён");
+    } catch {
+      setActionMessage("Ошибка сети при удалении");
+    } finally {
+      setDocDeletingId("");
+    }
+  }
 
   function copyAsTsv() {
     const headerCells =
@@ -555,6 +624,32 @@ export function RequestMaterialsModal(props: Props) {
               <span className="muted" style={{ fontSize: 12 }}>
                 {docsLoading ? "Загрузка…" : `${docsSorted.length} файл(ов) · по времени`}
               </span>
+              {canWrite ? (
+                <>
+                  <input
+                    ref={docInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,image/*,.doc,.docx,.xls,.xlsx"
+                    className="srOnly"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      e.target.value = "";
+                      void (async () => {
+                        for (const f of files) await uploadRequestDocument(f);
+                      })();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    disabled={docUploading}
+                    onClick={() => docInputRef.current?.click()}
+                  >
+                    {docUploading ? "Загрузка…" : "+ Прикрепить"}
+                  </button>
+                </>
+              ) : null}
             </div>
             {docsError ? <p className="error" style={{ margin: "6px 0" }}>{docsError}</p> : null}
             {!docsLoading && !docsSorted.length && !docsError ? (
@@ -583,6 +678,17 @@ export function RequestMaterialsModal(props: Props) {
                     <span className="muted requestMaterialsDocDate">
                       {new Date(d.createdAt).toLocaleString("ru-RU")}
                     </span>
+                    {canWrite ? (
+                      <button
+                        type="button"
+                        className="ghostBtn"
+                        style={{ marginLeft: 8 }}
+                        disabled={docDeletingId === d.id}
+                        onClick={() => void deleteRequestDocument(d)}
+                      >
+                        {docDeletingId === d.id ? "…" : "Удалить"}
+                      </button>
+                    ) : null}
                   </li>
                   );
                 })}

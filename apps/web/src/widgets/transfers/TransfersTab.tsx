@@ -20,12 +20,29 @@ type PeerStockRow = {
   limitNodeId: string | null;
 };
 
+type PeerToolRow = {
+  toolId: string;
+  name: string;
+  inventoryNumber: string;
+  categoryName?: string | null;
+};
+
+type PeerCampRow = {
+  campItemId: string;
+  name: string;
+  inventoryNumber?: string | null;
+  category?: string | null;
+  location?: string | null;
+};
+
 type PeerWarehouse = {
   warehouseId: string;
   warehouseName: string;
   stocks: PeerStockRow[];
   tools: { total: number; inStock: number; issued: number; inRepair: number };
   campItems: number;
+  toolList: PeerToolRow[];
+  campList: PeerCampRow[];
 };
 
 type TransferLine = {
@@ -34,6 +51,18 @@ type TransferLine = {
   limitNodeId: string | null;
   materialName: string;
   unit: string;
+};
+
+type TransferToolLine = {
+  toolId: string;
+  name: string;
+  inventoryNumber: string;
+};
+
+type TransferCampLine = {
+  campItemId: string;
+  name: string;
+  inventoryNumber?: string | null;
 };
 
 type TransferRow = {
@@ -51,6 +80,8 @@ type TransferRow = {
   documentCount: number;
   createdAt: string;
   lines: TransferLine[];
+  tools?: TransferToolLine[];
+  campItems?: TransferCampLine[];
 };
 
 type DocFile = {
@@ -118,6 +149,8 @@ export function TransfersTab({
   const [filterKind, setFilterKind] = useState<MaterialKindFilter>("");
   const [onlyAvailable, setOnlyAvailable] = useState(true);
   const [selected, setSelected] = useState<Record<string, { qty: number; limitNodeId: string | null }>>({});
+  const [selectedTools, setSelectedTools] = useState<Record<string, true>>({});
+  const [selectedCamp, setSelectedCamp] = useState<Record<string, true>>({});
   const [fromWarehouseId, setFromWarehouseId] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -130,12 +163,16 @@ export function TransfersTab({
   const [uploading, setUploading] = useState(false);
 
   const [ownStocks, setOwnStocks] = useState<PeerStockRow[]>([]);
+  const [ownTools, setOwnTools] = useState<PeerToolRow[]>([]);
+  const [ownCampItems, setOwnCampItems] = useState<PeerCampRow[]>([]);
   const [ownLoading, setOwnLoading] = useState(false);
   const [ownError, setOwnError] = useState("");
   const [sendSearch, setSendSearch] = useState("");
   const [sendKind, setSendKind] = useState<MaterialKindFilter>("");
   const [sendOnlyAvailable, setSendOnlyAvailable] = useState(true);
   const [sendSelected, setSendSelected] = useState<Record<string, { qty: number; limitNodeId: string | null }>>({});
+  const [sendSelectedTools, setSendSelectedTools] = useState<Record<string, true>>({});
+  const [sendSelectedCamp, setSendSelectedCamp] = useState<Record<string, true>>({});
   const [sendNote, setSendNote] = useState("");
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [sendDestinationId, setSendDestinationId] = useState("");
@@ -195,8 +232,14 @@ export function TransfersTab({
         setOwnStocks([]);
         return;
       }
-      const body = (await res.json()) as { stocks: PeerStockRow[] };
+      const body = (await res.json()) as {
+        stocks: PeerStockRow[];
+        tools?: PeerToolRow[];
+        campItems?: PeerCampRow[];
+      };
       setOwnStocks(body.stocks ?? []);
+      setOwnTools(body.tools ?? []);
+      setOwnCampItems(body.campItems ?? []);
     } catch {
       setOwnError("Ошибка сети");
     } finally {
@@ -261,6 +304,7 @@ export function TransfersTab({
       })
       .filter((wh) => {
         if (wh.stocks.length > 0) return true;
+        if ((wh.toolList?.length ?? 0) > 0 || (wh.campList?.length ?? 0) > 0) return true;
         if (sourceId && wh.warehouseId === sourceId) return true;
         return !hasStockFilters;
       });
@@ -292,6 +336,29 @@ export function TransfersTab({
     return lines;
   }, [sendSelected, ownStocks]);
 
+  const sendSelectedToolLines = useMemo(() => {
+    return Object.keys(sendSelectedTools)
+      .map((toolId) => {
+        const row = ownTools.find((t) => t.toolId === toolId);
+        if (!row) return null;
+        return { toolId, label: `${row.name} (инв. ${row.inventoryNumber})` };
+      })
+      .filter(Boolean) as Array<{ toolId: string; label: string }>;
+  }, [sendSelectedTools, ownTools]);
+
+  const sendSelectedCampLines = useMemo(() => {
+    return Object.keys(sendSelectedCamp)
+      .map((campItemId) => {
+        const row = ownCampItems.find((c) => c.campItemId === campItemId);
+        if (!row) return null;
+        return { campItemId, label: row.name };
+      })
+      .filter(Boolean) as Array<{ campItemId: string; label: string }>;
+  }, [sendSelectedCamp, ownCampItems]);
+
+  const hasSendSelection =
+    sendSelectedLines.length > 0 || sendSelectedToolLines.length > 0 || sendSelectedCampLines.length > 0;
+
   const filteredStockCount = useMemo(
     () => filteredPeerData.reduce((n, wh) => n + wh.stocks.length, 0),
     [filteredPeerData]
@@ -319,6 +386,33 @@ export function TransfersTab({
     }
     return lines;
   }, [selected, peerData]);
+
+  const selectedToolLines = useMemo(() => {
+    return Object.entries(selectedTools)
+      .map(([key]) => {
+        const [whId, toolId] = key.split(":");
+        const wh = peerData.find((w) => w.warehouseId === whId);
+        const row = wh?.toolList.find((t) => t.toolId === toolId);
+        if (!row) return null;
+        return { toolId, label: `${row.name} (инв. ${row.inventoryNumber})` };
+      })
+      .filter(Boolean) as Array<{ toolId: string; label: string }>;
+  }, [selectedTools, peerData]);
+
+  const selectedCampLines = useMemo(() => {
+    return Object.entries(selectedCamp)
+      .map(([key]) => {
+        const [whId, campItemId] = key.split(":");
+        const wh = peerData.find((w) => w.warehouseId === whId);
+        const row = wh?.campList.find((c) => c.campItemId === campItemId);
+        if (!row) return null;
+        return { campItemId, label: row.name };
+      })
+      .filter(Boolean) as Array<{ campItemId: string; label: string }>;
+  }, [selectedCamp, peerData]);
+
+  const hasRequestSelection =
+    selectedLines.length > 0 || selectedToolLines.length > 0 || selectedCampLines.length > 0;
 
   const toggleRow = (whId: string, row: PeerStockRow, checked: boolean) => {
     const key = `${whId}:${row.materialId}`;
@@ -362,8 +456,10 @@ export function TransfersTab({
       quantity: l.quantity,
       limitNodeId: l.limitNodeId ?? undefined
     }));
-    if (!lines.length) {
-      setMessage("Отметьте позиции и укажите количество");
+    const toolIds = selectedToolLines.map((t) => t.toolId);
+    const campItemIds = selectedCampLines.map((c) => c.campItemId);
+    if (!lines.length && !toolIds.length && !campItemIds.length) {
+      setMessage("Отметьте позиции: материалы, инструменты или элементы городка");
       return;
     }
     setSubmitting(true);
@@ -377,7 +473,9 @@ export function TransfersTab({
           toWarehouseId,
           section,
           note: note.trim() || undefined,
-          lines
+          lines,
+          toolIds,
+          campItemIds
         })
       });
       if (!res.ok) {
@@ -387,6 +485,8 @@ export function TransfersTab({
       }
       setMessage("Заявка отправлена. Ответственные на объекте-отправителе получат уведомление и сообщение в чат «Помощник».");
       setSelected({});
+      setSelectedTools({});
+      setSelectedCamp({});
       setNote("");
       await loadTransfers();
       await loadPeer();
@@ -406,7 +506,9 @@ export function TransfersTab({
       quantity: l.quantity,
       limitNodeId: l.limitNodeId ?? undefined
     }));
-    if (!lines.length) {
+    const toolIds = sendSelectedToolLines.map((t) => t.toolId);
+    const campItemIds = sendSelectedCampLines.map((c) => c.campItemId);
+    if (!lines.length && !toolIds.length && !campItemIds.length) {
       setMessage("Отметьте позиции для отправки");
       return;
     }
@@ -421,7 +523,9 @@ export function TransfersTab({
           toWarehouseId: sendDestinationId,
           section,
           note: sendNote.trim() || undefined,
-          lines
+          lines,
+          toolIds,
+          campItemIds
         })
       });
       if (!res.ok) {
@@ -431,6 +535,8 @@ export function TransfersTab({
       }
       setMessage("Перемещение создано. Согласуйте на вкладке «Согласование» или дождитесь приёмки на объекте-получателе.");
       setSendSelected({});
+      setSendSelectedTools({});
+      setSendSelectedCamp({});
       setSendNote("");
       setSendModalOpen(false);
       setSendDestinationId("");
@@ -595,6 +701,8 @@ export function TransfersTab({
                           const id = e.target.value;
                           setFilterWarehouseId(id);
                           setSelected({});
+                          setSelectedTools({});
+                          setSelectedCamp({});
                           setExpandedWh(id || null);
                         }}
                         aria-label="Объект-отправитель"
@@ -752,6 +860,92 @@ export function TransfersTab({
                                 </table>
                               </div>
                             )}
+                            {wh.toolList.length > 0 ? (
+                              <>
+                                <h4 style={{ margin: "12px 0 6px", fontSize: 14 }}>Инструменты / СИЗ</h4>
+                                <div className="erpTableWrap">
+                                  <table className="erpTable desktopTable transfersPickTable">
+                                    <thead>
+                                      <tr>
+                                        <th style={{ width: 36 }} />
+                                        <th>Наименование</th>
+                                        <th>Инв. №</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {wh.toolList.map((row) => {
+                                        const key = `${wh.warehouseId}:${row.toolId}`;
+                                        return (
+                                          <tr key={key}>
+                                            <td>
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(selectedTools[key])}
+                                                disabled={!canWrite}
+                                                onChange={(e) => {
+                                                  setSelectedTools((prev) => {
+                                                    const next = { ...prev };
+                                                    if (e.target.checked) next[key] = true;
+                                                    else delete next[key];
+                                                    return next;
+                                                  });
+                                                  if (e.target.checked && !fromWarehouseId) setFromWarehouseId(wh.warehouseId);
+                                                }}
+                                              />
+                                            </td>
+                                            <td>{row.name}</td>
+                                            <td className="muted">{row.inventoryNumber}</td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
+                            ) : null}
+                            {wh.campList.length > 0 ? (
+                              <>
+                                <h4 style={{ margin: "12px 0 6px", fontSize: 14 }}>Городок</h4>
+                                <div className="erpTableWrap">
+                                  <table className="erpTable desktopTable transfersPickTable">
+                                    <thead>
+                                      <tr>
+                                        <th style={{ width: 36 }} />
+                                        <th>Элемент</th>
+                                        <th>Инв. №</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {wh.campList.map((row) => {
+                                        const key = `${wh.warehouseId}:${row.campItemId}`;
+                                        return (
+                                          <tr key={key}>
+                                            <td>
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(selectedCamp[key])}
+                                                disabled={!canWrite}
+                                                onChange={(e) => {
+                                                  setSelectedCamp((prev) => {
+                                                    const next = { ...prev };
+                                                    if (e.target.checked) next[key] = true;
+                                                    else delete next[key];
+                                                    return next;
+                                                  });
+                                                  if (e.target.checked && !fromWarehouseId) setFromWarehouseId(wh.warehouseId);
+                                                }}
+                                              />
+                                            </td>
+                                            <td>{row.name}</td>
+                                            <td className="muted">{row.inventoryNumber || "—"}</td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
+                            ) : null}
                           </div>
                         ) : null}
                       </section>
@@ -760,7 +954,7 @@ export function TransfersTab({
                 </div>
               ) : null}
 
-              {canWrite && selectedLines.length > 0 ? (
+              {canWrite && hasRequestSelection ? (
                 <footer className="transfersRequestBar card">
                   <label>
                     Комментарий
@@ -769,11 +963,19 @@ export function TransfersTab({
                   <div className="transfersRequestSummary">
                     <span className="muted">
                       С {safeName(peerData.find((w) => w.warehouseId === filterWarehouseId)?.warehouseName ?? "")} ·
-                      позиций: {selectedLines.length}
+                      ТМЦ: {selectedLines.length}
+                      {selectedToolLines.length ? ` · инструменты: ${selectedToolLines.length}` : ""}
+                      {selectedCampLines.length ? ` · городок: ${selectedCampLines.length}` : ""}
                     </span>
                     <ul>
                       {selectedLines.map((l) => (
                         <li key={l.materialId}>{l.label}</li>
+                      ))}
+                      {selectedToolLines.map((l) => (
+                        <li key={l.toolId}>{l.label}</li>
+                      ))}
+                      {selectedCampLines.map((l) => (
+                        <li key={l.campItemId}>{l.label}</li>
                       ))}
                     </ul>
                   </div>
@@ -845,9 +1047,11 @@ export function TransfersTab({
               {ownError ? <ErrorState text={ownError} /> : null}
               {!ownLoading && !ownError ? (
                 <div className="card transfersPeerCardBody" style={{ marginTop: 8 }}>
-                  {filteredSendStocks.length === 0 ? (
+                  {filteredSendStocks.length === 0 && ownTools.length === 0 && ownCampItems.length === 0 ? (
                     <p className="muted">Нет позиций по фильтрам.</p>
                   ) : (
+                    <>
+                  {filteredSendStocks.length > 0 ? (
                     <div className="erpTableWrap">
                       <table className="erpTable desktopTable transfersPickTable">
                         <thead>
@@ -909,16 +1113,106 @@ export function TransfersTab({
                         </tbody>
                       </table>
                     </div>
+                  ) : null}
+                  {ownTools.length > 0 ? (
+                    <>
+                      <h4 style={{ margin: "12px 0 6px", fontSize: 14 }}>Инструменты / СИЗ</h4>
+                      <div className="erpTableWrap">
+                        <table className="erpTable desktopTable transfersPickTable">
+                          <thead>
+                            <tr>
+                              <th style={{ width: 36 }} />
+                              <th>Наименование</th>
+                              <th>Инв. №</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ownTools.map((row) => (
+                              <tr key={row.toolId}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(sendSelectedTools[row.toolId])}
+                                    disabled={!canWrite}
+                                    onChange={(e) => {
+                                      setSendSelectedTools((prev) => {
+                                        const next = { ...prev };
+                                        if (e.target.checked) next[row.toolId] = true;
+                                        else delete next[row.toolId];
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                </td>
+                                <td>{row.name}</td>
+                                <td className="muted">{row.inventoryNumber}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : null}
+                  {ownCampItems.length > 0 ? (
+                    <>
+                      <h4 style={{ margin: "12px 0 6px", fontSize: 14 }}>Городок</h4>
+                      <div className="erpTableWrap">
+                        <table className="erpTable desktopTable transfersPickTable">
+                          <thead>
+                            <tr>
+                              <th style={{ width: 36 }} />
+                              <th>Элемент</th>
+                              <th>Инв. №</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ownCampItems.map((row) => (
+                              <tr key={row.campItemId}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(sendSelectedCamp[row.campItemId])}
+                                    disabled={!canWrite}
+                                    onChange={(e) => {
+                                      setSendSelectedCamp((prev) => {
+                                        const next = { ...prev };
+                                        if (e.target.checked) next[row.campItemId] = true;
+                                        else delete next[row.campItemId];
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                </td>
+                                <td>{row.name}</td>
+                                <td className="muted">{row.inventoryNumber || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : null}
+                    </>
                   )}
                 </div>
               ) : null}
-              {canWrite && sendSelectedLines.length > 0 ? (
+              {canWrite && hasSendSelection ? (
                 <footer className="transfersRequestBar card">
                   <div className="transfersRequestSummary">
-                    <span className="muted">К отправке: {sendSelectedLines.length} поз.</span>
+                    <span className="muted">
+                      К отправке: ТМЦ {sendSelectedLines.length}
+                      {sendSelectedToolLines.length ? ` · инструменты ${sendSelectedToolLines.length}` : ""}
+                      {sendSelectedCampLines.length ? ` · городок ${sendSelectedCampLines.length}` : ""}
+                    </span>
                     <ul>
                       {sendSelectedLines.map((l) => (
                         <li key={l.materialId}>{l.label}</li>
+                      ))}
+                      {sendSelectedToolLines.map((l) => (
+                        <li key={l.toolId}>{l.label}</li>
+                      ))}
+                      {sendSelectedCampLines.map((l) => (
+                        <li key={l.campItemId}>{l.label}</li>
                       ))}
                     </ul>
                   </div>
@@ -1142,6 +1436,14 @@ function TransferTable({
                     {ln.materialName} · {ln.quantity} {ln.unit}
                   </div>
                 ))}
+                {(tr.tools ?? []).map((ln) => (
+                  <div key={`${tr.id}-tool-${ln.toolId}`}>
+                    {ln.name} (инв. {ln.inventoryNumber})
+                  </div>
+                ))}
+                {(tr.campItems ?? []).map((ln) => (
+                  <div key={`${tr.id}-camp-${ln.campItemId}`}>{ln.name}</div>
+                ))}
               </td>
               {mode !== "history" ? (
                 <td>
@@ -1189,6 +1491,14 @@ function TransferTable({
               <div key={`${tr.id}-${ln.materialId}`}>
                 {ln.materialName} · {ln.quantity} {ln.unit}
               </div>
+            ))}
+            {(tr.tools ?? []).map((ln) => (
+              <div key={`${tr.id}-tool-${ln.toolId}`}>
+                {ln.name} (инв. {ln.inventoryNumber})
+              </div>
+            ))}
+            {(tr.campItems ?? []).map((ln) => (
+              <div key={`${tr.id}-camp-${ln.campItemId}`}>{ln.name}</div>
             ))}
           </MobileCardField>
           {mode !== "history" ? (

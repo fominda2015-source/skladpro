@@ -22,6 +22,11 @@ import { isAdminEquivalent } from "../lib/openAccess.js";
 import { recordAudit } from "../lib/audit.js";
 import { resolveLimitConsumptionQty } from "../lib/materialLimitBindings.js";
 import {
+  applySectionTransferStockAndLimits,
+  sourceStockSection,
+  stockSectionForIssue
+} from "../lib/sectionTransferIssue.js";
+import {
   assertObjectSectionInScope,
   assertProjectInScope,
   assertWarehouseInScope,
@@ -53,7 +58,7 @@ const createIssueSchema = z
   .object({
     warehouseId: z.string().min(1),
     section: z.enum(["SS", "EOM"]).default("SS"),
-    /** Секция склада для списания; если не задана — совпадает с section */
+    /** Подразделение-получатель: материал поступает на склад этого раздела (СС ↔ ЭОМ). */
     stockSection: z.enum(["SS", "EOM"]).optional(),
     projectId: z.string().optional(),
     note: z.string().optional(),
@@ -1314,7 +1319,7 @@ issueRequestsRouter.patch(
     }
 
   for (const item of issueRow.items) {
-    if (!item.limitNodeId) continue;
+    if (!item.limitNodeId || stockSectionForIssue(issueRow)) continue;
     const capErr = await assertFactSlotIssueCapacity({
       warehouseId: issueRow.warehouseId,
       section: issueRow.section,
@@ -1333,13 +1338,14 @@ issueRequestsRouter.patch(
   try {
     const prevStatus = issueRow.status;
     const result = await prisma.$transaction(async (tx) => {
+      const deductSection = sourceStockSection(issueRow);
       for (const item of issueRow.items) {
         const stock = await tx.stock.findUnique({
           where: {
             warehouseId_materialId_section_condition: {
               warehouseId: issueRow.warehouseId,
               materialId: item.materialId,
-              section: issueRow.section,
+              section: deductSection,
               condition: StockCondition.NEW
             }
           }
@@ -1351,6 +1357,7 @@ issueRequestsRouter.patch(
       }
 
       if (
+        !stockSectionForIssue(issueRow) &&
         issueRow.projectId &&
         issueRow.domain !== IssueRequestDomain.WORKWEAR &&
         issueRow.domain !== IssueRequestDomain.TOOLS
@@ -1394,6 +1401,17 @@ issueRequestsRouter.patch(
       });
 
       for (const item of issueRow.items) {
+        if (stockSectionForIssue(issueRow)) {
+          await applySectionTransferStockAndLimits(
+            tx,
+            issueRow,
+            item,
+            operation.id,
+            req.user!.userId
+          );
+          continue;
+        }
+
         await tx.stock.update({
           where: {
             warehouseId_materialId_section_condition: {
@@ -1829,6 +1847,48 @@ issueRequestsRouter.post(
       }
       console.error("Failed to regenerate issue act", e);
       return res.status(500).json({ error: "Failed to regenerate act" });
+    }
+  }
+);
+
+issueRequestsRouter.post(
+  "/:id/attachments",
+  requirePermission("issues.write"),
+  issueUpload.array("file", 20),
+  async (req: AuthedRequest, res) => {
+    const issueId = String(req.params.id ?? "");
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!files.length) {
+      return res.status(400).json({ error: "file is required" });
+    }
+
+    try {
+      const scope = await getRequestDataScope(req);
+      const issue = await prisma.issueRequest.findUnique({
+        where: { id: issueId },
+        select: { id: true, warehouseId: true, section: true, status: true }
+      });
+      if (!issue) return res.status(404).json({ error: "Issue request not found" });
+      assertWarehouseInScope(scope, issue.warehouseId);
+      assertObjectSectionInScope(scope, issue.warehouseId, issue.section);
+
+      const operation = await prisma.operation.findFirst({
+        where: { issueRequestId: issue.id },
+        select: { id: true }
+      });
+
+      const attached = await attachSignedIssueUploads({
+        issueId: issue.id,
+        operationId: operation?.id ?? null,
+        userId: req.user!.userId,
+        files
+      });
+      return res.status(201).json({ attachments: attached });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) return res.status(403).json({ error: err.message });
+      console.error("Failed to attach issue document", e);
+      return res.status(500).json({ error: "Failed to attach document" });
     }
   }
 );

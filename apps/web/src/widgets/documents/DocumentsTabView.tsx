@@ -5,6 +5,8 @@ import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { FilterStrip, PageHero } from "../ui/PageHero";
 import { TabShell } from "../layout/TabShell";
 import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
+import { DocumentFilePreview } from "./DocumentFilePreview";
+import { documentFileUrl } from "../../shared/documentPreview";
 
 export type DocumentRow = {
   id: string;
@@ -13,8 +15,10 @@ export type DocumentRow = {
   type: string;
   version: number;
   size?: number | null;
+  mimeType?: string | null;
   entityType: string;
   entityId: string;
+  groupId?: string | null;
   createdAt: string;
 };
 
@@ -32,7 +36,6 @@ type Props = {
   visibleDocs: DocumentRow[];
   selectedDocumentId: string;
   selectedDocument: DocumentRow | null;
-  docPreviewUrl: string;
   apiUrl: string;
   docTypeTabs: DocTypeTab[];
   docTypeFilter: string;
@@ -66,7 +69,6 @@ export function DocumentsTabView({
   visibleDocs,
   selectedDocumentId,
   selectedDocument,
-  docPreviewUrl,
   apiUrl,
   docTypeTabs,
   docTypeFilter,
@@ -229,12 +231,12 @@ export function DocumentsTabView({
                         <div className="erpCellActions">
                           <a
                             className="ghostBtn"
-                            href={`${apiUrl}/${d.filePath}`}
+                            href={documentFileUrl(apiUrl, d.filePath)}
                             target="_blank"
                             rel="noreferrer"
                             download={shownName}
                           >
-                            Открыть
+                            Скачать
                           </a>
                           {canWriteDocuments ? (
                             <button type="button" className="ghostBtn" onClick={() => onDelete(d.id, shownName)}>
@@ -267,13 +269,13 @@ export function DocumentsTabView({
                     <MobileCardActions>
                       <a
                         className="ghostBtn"
-                        href={`${apiUrl}/${d.filePath}`}
+                        href={documentFileUrl(apiUrl, d.filePath)}
                         target="_blank"
                         rel="noreferrer"
                         download={shownName}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        Открыть
+                        Скачать
                       </a>
                       {canWriteDocuments ? (
                         <button
@@ -306,15 +308,11 @@ export function DocumentsTabView({
                 })}{" "}
                 · v{selectedDocument.version}
               </p>
-              <iframe
-                src={docPreviewUrl || `${apiUrl}/${selectedDocument.filePath}`}
-                title="document-preview"
-                style={{
-                  width: "100%",
-                  minHeight: 420,
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 10
-                }}
+              <DocumentFilePreview
+                file={selectedDocument}
+                apiUrl={apiUrl}
+                allFiles={documents}
+                onSelectFile={onSelectPreview}
               />
             </>
           ) : (

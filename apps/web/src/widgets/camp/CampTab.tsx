@@ -323,10 +323,6 @@ export function CampTab({
       setTransferFeedback({ tone: "error", text: "Позиция уже в этом подразделении" });
       return;
     }
-    if (!transferFiles.length) {
-      setTransferFeedback({ tone: "error", text: "Приложите документ передачи (PDF или фото)" });
-      return;
-    }
     setTransferBusy(true);
     setTransferFeedback(null);
     try {
@@ -872,8 +868,8 @@ function CampItemDrawer({
           <>
             <h4>Передача между подразделениями (СС ↔ ЭОМ)</h4>
             <p className="muted" style={{ fontSize: 13 }}>
-              Сейчас: {sel.section === "SS" ? "СС" : "ЭОМ"}. Передача в {otherSection === "SS" ? "СС" : "ЭОМ"} — с
-              приложением документа.
+              Сейчас: {sel.section === "SS" ? "СС" : "ЭОМ"}. Передача в {otherSection === "SS" ? "СС" : "ЭОМ"} без
+              долга по лимитам — документ можно приложить по желанию.
             </p>
             {transferFeedback ? <ResultBanner text={transferFeedback.text} tone={transferFeedback.tone} /> : null}
             <div className="form docCenterForm">
@@ -891,7 +887,7 @@ function CampItemDrawer({
                 <input value={transferNote} onChange={(e) => onTransferNoteChange(e.target.value)} />
               </label>
               <label>
-                Документ*
+                Документ (необязательно)
                 <input
                   type="file"
                   multiple
@@ -908,7 +904,7 @@ function CampItemDrawer({
                 </p>
               ) : (
                 <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Документ не выбран — без него передача недоступна
+                  Документ не выбран — передача возможна без бумаги
                 </p>
               )}
             </div>

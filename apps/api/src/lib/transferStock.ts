@@ -209,3 +209,103 @@ export async function completeTransfer(
     });
   }
 }
+
+export async function assertToolsTransferable(
+  fromWarehouseId: string,
+  section: "SS" | "EOM",
+  toolIds: string[]
+) {
+  if (!toolIds.length) return;
+  const tools = await prisma.tool.findMany({
+    where: { id: { in: toolIds } },
+    select: { id: true, name: true, warehouseId: true, section: true, status: true }
+  });
+  if (tools.length !== toolIds.length) throw new Error("UNKNOWN_TOOL");
+  for (const t of tools) {
+    if (t.warehouseId !== fromWarehouseId || t.section !== section) {
+      throw new Error(`TOOL_WRONG_PLACE:${t.id}`);
+    }
+    if (t.status !== "IN_STOCK") {
+      throw new Error(`TOOL_NOT_AVAILABLE:${t.id}`);
+    }
+  }
+}
+
+export async function assertCampItemsTransferable(
+  fromWarehouseId: string,
+  section: "SS" | "EOM",
+  campItemIds: string[]
+) {
+  if (!campItemIds.length) return;
+  const items = await prisma.campItem.findMany({
+    where: { id: { in: campItemIds } },
+    select: { id: true, name: true, warehouseId: true, section: true, status: true }
+  });
+  if (items.length !== campItemIds.length) throw new Error("UNKNOWN_CAMP_ITEM");
+  for (const c of items) {
+    if (c.warehouseId !== fromWarehouseId || c.section !== section) {
+      throw new Error(`CAMP_WRONG_PLACE:${c.id}`);
+    }
+    if (c.status === "WRITTEN_OFF") {
+      throw new Error(`CAMP_NOT_AVAILABLE:${c.id}`);
+    }
+  }
+}
+
+export async function completeToolTransfer(
+  tx: Prisma.TransactionClient,
+  transfer: Pick<TransferCtx, "id" | "fromWarehouseId" | "toWarehouseId" | "section">,
+  toolIds: string[],
+  actorUserId: string
+) {
+  for (const toolId of toolIds) {
+    const tool = await tx.tool.findUnique({ where: { id: toolId } });
+    if (!tool || tool.warehouseId !== transfer.fromWarehouseId || tool.section !== transfer.section) {
+      throw new Error(`TOOL_WRONG_PLACE:${toolId}`);
+    }
+    if (tool.status !== "IN_STOCK") throw new Error(`TOOL_NOT_AVAILABLE:${toolId}`);
+    await tx.tool.update({
+      where: { id: toolId },
+      data: { warehouseId: transfer.toWarehouseId }
+    });
+    await tx.toolEvent.create({
+      data: {
+        toolId,
+        action: "TRANSFER_WAREHOUSE",
+        status: tool.status,
+        comment: `Перемещение ${transfer.fromWarehouseId} → ${transfer.toWarehouseId} (${transfer.section})`,
+        actorId: actorUserId
+      }
+    });
+  }
+}
+
+export async function completeCampTransfer(
+  tx: Prisma.TransactionClient,
+  transfer: Pick<TransferCtx, "id" | "fromWarehouseId" | "toWarehouseId" | "section">,
+  campItemIds: string[],
+  actorUserId: string
+) {
+  for (const campItemId of campItemIds) {
+    const item = await tx.campItem.findUnique({ where: { id: campItemId } });
+    if (!item || item.warehouseId !== transfer.fromWarehouseId || item.section !== transfer.section) {
+      throw new Error(`CAMP_WRONG_PLACE:${campItemId}`);
+    }
+    if (item.status === "WRITTEN_OFF") throw new Error(`CAMP_NOT_AVAILABLE:${campItemId}`);
+    await tx.campItem.update({
+      where: { id: campItemId },
+      data: { warehouseId: transfer.toWarehouseId }
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: actorUserId,
+        action: "CAMP_ITEM_UPDATE",
+        entityType: "CampItem",
+        entityId: campItemId,
+        summary: `Перемещение городка: ${item.name} → объект ${transfer.toWarehouseId}`,
+        beforeData: item as unknown as Prisma.InputJsonValue,
+        afterData: { ...item, warehouseId: transfer.toWarehouseId } as unknown as Prisma.InputJsonValue
+      }
+    });
+  }
+}

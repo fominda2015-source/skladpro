@@ -70,6 +70,7 @@ async function persistReceiptAcceptScans(
   files: Express.Multer.File[],
   opts: { receiptId: string; operationId: string | null; userId: string }
 ) {
+  const batchGroupId = crypto.randomUUID();
   for (const f of files) {
     if (!f.buffer || !f.size) continue;
     const displayName = decodeUploadedOriginalName(f.originalname);
@@ -79,7 +80,7 @@ async function persistReceiptAcceptScans(
     const checksum = crypto.createHash("sha256").update(f.buffer).digest("hex");
     const filePath = `${config.uploadsDir}/${storedFileName}`.replace(/\\/g, "/");
     const base = {
-      groupId: crypto.randomUUID(),
+      groupId: batchGroupId,
       version: 1,
       type: "upd-scan",
       fileName: displayName,
@@ -94,7 +95,7 @@ async function persistReceiptAcceptScans(
     });
     if (opts.operationId) {
       await prisma.documentFile.create({
-        data: { ...base, groupId: crypto.randomUUID(), entityType: "operation", entityId: opts.operationId }
+        data: { ...base, entityType: "operation", entityId: opts.operationId }
       });
     }
   }

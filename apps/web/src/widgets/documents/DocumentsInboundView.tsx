@@ -1,10 +1,12 @@
 import type { FormEvent, ReactNode } from "react";
 import { displayDocumentFileName, docTypeLabel, formatDocMoment } from "../../shared/fileName";
+import { documentFileUrl } from "../../shared/documentPreview";
 import { PendingFilesPicker } from "../../shared/PendingFilesPicker";
 import { EmptyState } from "../../shared/ui/StateViews";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { FilterStrip } from "../ui/PageHero";
 import { MobileCard, MobileCardActions, MobileCardField, ResponsiveTableShell } from "../layout/MobileCardParts";
+import { DocumentFilePreview } from "./DocumentFilePreview";
 import type { DocumentRow } from "./DocumentsTabView";
 
 export type InboundDocumentRow = DocumentRow & {
@@ -26,7 +28,6 @@ type Props = {
   visibleDocs: InboundDocumentEntry[];
   selectedDocumentId: string;
   selectedDocument: InboundDocumentRow | null;
-  docPreviewUrl: string;
   apiUrl: string;
   warehouseReady: boolean;
   docSearchQuery: string;
@@ -154,7 +155,6 @@ export function DocumentsInboundView({
   visibleDocs,
   selectedDocumentId,
   selectedDocument,
-  docPreviewUrl,
   apiUrl,
   warehouseReady,
   docSearchQuery,
@@ -181,15 +181,6 @@ export function DocumentsInboundView({
     e.preventDefault();
     onUpload();
   }
-
-  const previewSiblings =
-    selectedDocument?.groupId && selectedDocument.type === "inbound-manual"
-      ? documents
-          .filter((d) => d.groupId === selectedDocument.groupId && d.type === "inbound-manual")
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      : selectedDocument
-        ? [selectedDocument]
-        : [];
 
   function renderEntryRow(entry: InboundDocumentEntry, mobile: boolean) {
     const primary = entryPrimaryDoc(entry);
@@ -222,16 +213,32 @@ export function DocumentsInboundView({
             </p>
           ) : null}
           <MobileCardActions>
-            <a
-              className="ghostBtn"
-              href={`${apiUrl}/${primary.filePath}`}
-              target="_blank"
-              rel="noreferrer"
-              download={title}
-              onClick={(e) => e.stopPropagation()}
-            >
-              Открыть
-            </a>
+            {entry.kind === "group"
+              ? entry.docs.map((d) => (
+                  <a
+                    key={d.id}
+                    className="ghostBtn"
+                    href={documentFileUrl(apiUrl, d.filePath)}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={d.fileName}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ↓ {d.fileName}
+                  </a>
+                ))
+              : (
+                  <a
+                    className="ghostBtn"
+                    href={documentFileUrl(apiUrl, primary.filePath)}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={title}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Скачать
+                  </a>
+                )}
             {canWriteDocuments && primary.sourceKind === "manual" ? (
               <button
                 type="button"
@@ -280,16 +287,33 @@ export function DocumentsInboundView({
         </td>
         <td className="muted">{totalSize ? `${Math.max(1, Math.ceil(totalSize / 1024))} КБ` : "—"}</td>
         <td onClick={(e) => e.stopPropagation()}>
-          <div className="erpCellActions">
-            <a
-              className="ghostBtn"
-              href={`${apiUrl}/${primary.filePath}`}
-              target="_blank"
-              rel="noreferrer"
-              download={title}
-            >
-              Открыть
-            </a>
+          <div className="erpCellActions" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+            {entry.kind === "group"
+              ? entry.docs.map((d) => (
+                  <a
+                    key={d.id}
+                    className="ghostBtn"
+                    href={documentFileUrl(apiUrl, d.filePath)}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={d.fileName}
+                    title={d.fileName}
+                    style={{ fontSize: 11, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }}
+                  >
+                    ↓ {d.fileName}
+                  </a>
+                ))
+              : (
+                  <a
+                    className="ghostBtn"
+                    href={documentFileUrl(apiUrl, primary.filePath)}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={title}
+                  >
+                    Скачать
+                  </a>
+                )}
             {canWriteDocuments && primary.sourceKind === "manual" ? (
               <button type="button" className="ghostBtn" onClick={() => onDelete(primary.id, title, relatedIds)}>
                 Удалить
@@ -326,6 +350,9 @@ export function DocumentsInboundView({
       {canWriteDocuments ? (
         <div className="card adminInsetCard" style={{ marginBottom: 12 }}>
           <h4 style={{ marginTop: 0 }}>Добавить документ вручную</h4>
+          <p className="muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
+            Документ будет доступен на всех объектах, к которым у вас есть доступ.
+          </p>
           <form className="form" onSubmit={onSubmitUpload}>
             <div className="grid2">
               <label>
@@ -429,34 +456,11 @@ export function DocumentsInboundView({
                   {selectedDocument.comment}
                 </p>
               ) : null}
-              {previewSiblings.length > 1 ? (
-                <div className="toolbar" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                  {previewSiblings.map((d) => {
-                    const label = d.fileName;
-                    const active = d.id === selectedDocumentId;
-                    return (
-                      <button
-                        key={d.id}
-                        type="button"
-                        className={active ? "primaryBtn" : "ghostBtn"}
-                        style={{ fontSize: 12 }}
-                        onClick={() => onSelectPreview(d)}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <iframe
-                src={docPreviewUrl || `${apiUrl}/${selectedDocument.filePath}`}
-                title="document-preview"
-                style={{
-                  width: "100%",
-                  minHeight: 420,
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 10
-                }}
+              <DocumentFilePreview
+                file={selectedDocument}
+                apiUrl={apiUrl}
+                allFiles={documents}
+                onSelectFile={onSelectPreview}
               />
             </>
           ) : (
